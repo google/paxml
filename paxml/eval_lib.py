@@ -56,6 +56,7 @@ Metrics = base_model.Metrics
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
+PRNGKey = pytypes.PRNGKey
 TrainState = train_states.TrainState
 SummaryWriter = tf.summary.SummaryWriter
 instantiate = base_hyperparams.instantiate
@@ -264,10 +265,121 @@ def evaluate(
     evaluate_pmap_model(task_p, eval_input_p, job_log_dir, early_stopping_fn)
 
 
+class _PmapEvalRunner:
+  """A runner class that runs evaluate with pmap."""
+
+  def __init__(self, task_p: base_task.BaseTask.HParams,
+               eval_input_p: Sequence[base_input.BaseInput.HParams]):
+    self._eval_input_p = eval_input_p
+    if not self._eval_input_p:
+      return
+    self._jax_task = instantiate(task_p)
+    self._eval_input_pipelines = [
+        instantiate(input_p) for input_p in eval_input_p
+    ]
+    trainer_lib.check_unique_names(self._eval_input_pipelines)
+    self._eval_num_steps = [
+        -1 if p.reset_for_eval else p.eval_loop_num_batches
+        for p in eval_input_p
+    ]
+    self._task_p = task_p
+
+  def get_model_states(
+      self, prng_key: PRNGKey, checkpoint_dir: str,
+      checkpoint_step: Optional[int]
+  ) -> Tuple[train_states.TrainState, train_states.TrainState, PRNGKey]:
+    """Returns the (replicated) model states."""
+    prng_key, init_key = jax.random.split(prng_key)
+
+    # Restore flax checkpoints still required bak variables in TrainState
+    # TODO(pax): add is_eval=True to initialize_model_state
+    vars_weight_params = self._jax_task.model.abstract_init_with_metadata(
+        init_key)
+    use_ema = has_ema(self._task_p)
+    # Note: `discard_opt_states` is not supported when restoring pmap
+    # checkpoints. We must restore the entire checkpoint and then trim the
+    # unrelevant states.
+    global_shapes = self._jax_task.create_train_state_unpadded_shapes(
+        vars_weight_params)
+    # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
+    model_states = checkpoints.restore_checkpoint(
+        global_shapes, checkpoint_dir, step=checkpoint_step)
+    if model_states is None:
+      model_states = trainer_lib.initialize_model_state(
+          self._jax_task, init_key, discard_opt_states=not use_ema)
+    elif not use_ema:
+      model_states = trim_opt_states(model_states)
+    if use_ema:
+      model_states = extract_ema(model_states)
+    replicated_model_states = trainer_lib.replicate_model_state(model_states)
+    del model_states  # Unused at that point.
+    logging.info('replicated_model_states: %s',
+                 jax.tree_map(lambda x: x.shape, replicated_model_states))
+    # From now on, different replicas should use different random seeds.
+    # Here, each process will have its unique prng_key.
+    # prng_key will be further split so that each core on a host will get
+    # different prng_key.
+    prng_key = jax.random.fold_in(prng_key, jax.process_index())
+    logging.info('root prng_key: %s', prng_key)
+    return replicated_model_states, global_shapes, prng_key
+
+  def run_pmap(self, prng_key: PRNGKey):
+    """Calls pmap on the eval one step function."""
+    if not self._eval_input_p:
+      return
+
+    def eval_step(mdl_states, prng_key, inputs, model_name):
+      return trainer_lib.eval_step_single_learner(
+          self._jax_task,
+          mdl_states,
+          prng_key,
+          inputs,
+          fprop_dtype=self._jax_task.model.fprop_dtype,
+          model_name=model_name)
+
+    num_devices = jax.local_device_count()
+    prng_key, eval_key = jax.random.split(prng_key)
+    self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
+    logging.info('eval prng_seed: %s', self._eval_prng_seed)
+
+    self._pmap_eval_step = jax.pmap(
+        eval_step,
+        axis_name=PMAP_PARALLEL_AXIS_NAME,
+        static_broadcasted_argnums=(3,))
+
+  def run_one_step(
+      self,
+      replicated_model_states: train_states.TrainState,
+      eval_summary_writers: List[SummaryWriter],
+  ):
+    """Runs evaluate for one step for all test splits."""
+    if not self._eval_input_p:
+      return []
+    step_i = int(
+        py_utils.maybe_unreplicate_for_fully_replicated(
+            replicated_model_states.step))
+
+    def eval_step_fn(inputs):
+      model_name = self._jax_task.get_model_name_for_step(step_i)
+      # TODO(pax): shall we eval all sub-models during eval?
+      return self._pmap_eval_step(replicated_model_states, self._eval_prng_seed,
+                                  inputs, model_name)
+
+    # Run the eval loop.
+    metrics_list = run_eval_loop_over_test_splits(
+        self._eval_num_steps,
+        eval_step_fn,
+        eval_summary_writers,
+        step_i,
+        self._eval_input_pipelines,
+        reshard_inputs=True)
+    return metrics_list
+
+
 def evaluate_pmap_model(
     task_p: base_task.BaseTask.HParams,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: Optional[str],
+    job_log_dir: str,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs the evaluation loop on the entire test dataset for PMAP model.
 
@@ -281,62 +393,15 @@ def evaluate_pmap_model(
         is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
-  jax_task = instantiate(task_p)
-  eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
-  trainer_lib.check_unique_names(eval_input_pipelines)
-  # TODO(shafey): Retrieve the seeds from the model definition instead.
-  prng_key = jax.random.PRNGKey(1234)
-  prng_key, init_key = jax.random.split(prng_key)
-
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
-  # Restore flax checkpoints still required bak variables in TrainState
-  # TODO(pax): add is_eval=True to initialize_model_state
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
   use_ema = has_ema(task_p)
-  # Note: `discard_opt_states` is not supported when restoring pmap checkpoints.
-  # We must restore the entire checkpoint and then trim the unrelevant states.
-  train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
-      vars_weight_params)
-  # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
-  model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                checkpoint_dir)
-  if model_states is None:
-    model_states = trainer_lib.initialize_model_state(
-        jax_task, init_key, discard_opt_states=not use_ema)
-  elif not use_ema:
-    model_states = trim_opt_states(model_states)
-  if use_ema:
-    model_states = extract_ema(model_states)
-  replicated_model_states = trainer_lib.replicate_model_state(model_states)
-  del model_states  # Unused at that point.
-  logging.info('replicated_model_states: %s',
-               jax.tree_map(lambda x: x.shape, replicated_model_states))
-  # From now on, different replicas should use different random seeds.
-  # Here, each process will have its unique prng_key.
-  # prng_key will be further split so that each core on a host will get
-  # different prng_key.
-  prng_key = jax.random.fold_in(prng_key, jax.process_index())
-  logging.info('root prng_key: %s', prng_key)
+  runner = _PmapEvalRunner(task_p, eval_input_p)
 
-  def eval_step(mdl_states, prng_key, inputs, model_name):
-    return trainer_lib.eval_step_single_learner(
-        jax_task,
-        mdl_states,
-        prng_key,
-        inputs,
-        fprop_dtype=jax_task.model.fprop_dtype,
-        model_name=model_name)
-
-  num_devices = jax.local_device_count()
-  prng_key, eval_key = jax.random.split(prng_key)
-  eval_prng_seed = jax.random.split(eval_key, num=num_devices)
-  logging.info('eval prng_seed: %s', eval_prng_seed)
-
-  p_eval_step = jax.pmap(
-      eval_step,
-      axis_name=PMAP_PARALLEL_AXIS_NAME,
-      static_broadcasted_argnums=(3,))
-
+  prng_key = jax.random.PRNGKey(1234)
+  (replicated_model_states, train_state_global_shapes,
+   prng_key) = runner.get_model_states(
+       prng_key, checkpoint_dir, checkpoint_step=None)
+  runner.run_pmap(prng_key)
   logging.info('Evaluation loop starting...')
   summary_base_dir = os.path.join(job_log_dir, 'summaries')
   summary_eval_dirs = [
@@ -344,9 +409,6 @@ def evaluate_pmap_model(
       for p in eval_input_p
   ]
 
-  num_steps = [
-      -1 if p.reset_for_eval else p.eval_loop_num_batches for p in eval_input_p
-  ]
   last_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
   with contextlib.ExitStack() as exit_stack:
     eval_summary_writers = [
@@ -355,25 +417,8 @@ def evaluate_pmap_model(
     ]
 
     while True:
-      step_i = int(
-          py_utils.maybe_unreplicate_for_fully_replicated(
-              replicated_model_states.step))
-
-      def eval_step_fn(inputs):
-        model_name = jax_task.get_model_name_for_step(step_i)
-        # TODO(pax): shall we eval all sub-models during eval?
-        return p_eval_step(replicated_model_states, eval_prng_seed, inputs,
-                           model_name)
-
-      # Run the eval loop.
-      metrics_list = run_eval_loop_over_test_splits(
-          num_steps,
-          eval_step_fn,
-          eval_summary_writers,
-          step_i,
-          eval_input_pipelines,
-          reshard_inputs=True)
-
+      metrics_list = runner.run_one_step(replicated_model_states,
+                                         eval_summary_writers)
       # If the last check point evaluated matches max train steps, exit.
       if last_checkpoint is not None:
         last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
@@ -563,6 +608,7 @@ def decode(
     restore_checkpoint_dir: Optional[str],
     restore_checkpoint_step: Optional[int],
     continuous_decode: bool,
+    run_eval: Optional[bool] = False,
 ) -> None:
   """Runs decoding on the decoder datasets.
 
@@ -576,6 +622,8 @@ def decode(
     restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
       try to restore from the latest checkpoint if any.
     continuous_decode: whether to continuously decode on the latest ckpt.
+    run_eval: whether to run evaluate() (i.e. to obtain scoring based metrics)
+      as well.
   """
   if continuous_decode and restore_checkpoint_dir:
     raise ValueError('restore_checkpoint_{dir,step} only supported with '
@@ -590,10 +638,14 @@ def decode(
   task_p = experiment_config.task()
   model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
   decoder_inputs = experiment_config.decoder_datasets()
-  if not decoder_inputs:
+  eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
+  if not run_eval:
+    eval_inputs = []
+  if not (decoder_inputs + eval_inputs):
+    logging.info('No input datasets defined.')
     return
 
-  for inp in decoder_inputs:
+  for inp in (decoder_inputs + eval_inputs):
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
@@ -601,11 +653,11 @@ def decode(
   if model_p.mesh_shape is not None:
     checkpoint_type = checkpoints.retrieve_checkpoint_type(
         maybe_use_persistence_checkpointing, task_p)
-    decode_spmd_model(task_p, decoder_inputs, job_log_dir, checkpoint_type,
-                      restore_checkpoint_dir, restore_checkpoint_step,
-                      continuous_decode)
+    decode_spmd_model(task_p, decoder_inputs, eval_inputs, job_log_dir,
+                      checkpoint_type, restore_checkpoint_dir,
+                      restore_checkpoint_step, continuous_decode)
   else:
-    decode_pmap_model(task_p, decoder_inputs, job_log_dir,
+    decode_pmap_model(task_p, decoder_inputs, eval_inputs, job_log_dir,
                       restore_checkpoint_dir, restore_checkpoint_step,
                       continuous_decode)
 
@@ -638,6 +690,7 @@ def _can_load_decode_outs(basedir: str, pname: str, step: int) -> bool:
 def decode_pmap_model(
     task_p: base_task.BaseTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
     restore_checkpoint_dir: Optional[str],
     restore_checkpoint_step: Optional[int],
@@ -648,6 +701,7 @@ def decode_pmap_model(
   Args:
     task_p: Params of the task encapsulating a the data parallel model.
     input_p: List of input params to be decoded.
+    eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
     restore_checkpoint_dir: The directory from which to restore checkpoint. If
       None, uses job_log_dir.
@@ -660,7 +714,10 @@ def decode_pmap_model(
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
-  prng_key, init_key = jax.random.split(prng_key)
+  prng_key, init_key, eval_key = jax.random.split(prng_key, 3)
+
+  eval_runner = _PmapEvalRunner(task_p, eval_input_p)
+  eval_runner.run_pmap(eval_key)
 
   # From now on, different replicas should use different random seeds.
   # Here, each process will have its unique prng_key.
@@ -668,8 +725,8 @@ def decode_pmap_model(
   # different prng_key.
   prng_key = jax.random.fold_in(prng_key, jax.process_index())
   logging.info('root prng_key: %s', prng_key)
-  prng_key, eval_key = jax.random.split(prng_key)
-  prng_seed = jax.random.split(eval_key, num=jax.local_device_count())
+  prng_key, decode_key = jax.random.split(prng_key)
+  prng_seed = jax.random.split(decode_key, num=jax.local_device_count())
   logging.info('decoder prng_seed: %s', prng_seed)
 
   inputs = [instantiate(p) for p in input_p]
@@ -678,10 +735,18 @@ def decode_pmap_model(
   summary_decode_dirs = [
       os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
   ]
+  summary_eval_dirs = [
+      os.path.join(summary_base_dir, f'eval_test_{p.name}')
+      for p in eval_input_p
+  ]
   with contextlib.ExitStack() as exit_stack:
     summary_writers = [
         exit_stack.enter_context(summary_utils.get_summary_writer(d))
         for d in summary_decode_dirs
+    ]
+    eval_summary_writers = [
+        exit_stack.enter_context(summary_utils.get_summary_writer(d))
+        for d in summary_eval_dirs
     ]
 
     jax_task = instantiate(task_p)
@@ -714,6 +779,7 @@ def decode_pmap_model(
       decode_once_pmap_model(jax_task, task_p, inputs, input_p, prng_seed,
                              job_log_dir, replicated_model_states,
                              summary_writers)
+      eval_runner.run_one_step(replicated_model_states, eval_summary_writers)
       if not continuous_decode:
         break
       if last_checkpoint is not None:
@@ -761,6 +827,8 @@ def decode_once_pmap_model(
     replicated_model_states: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
   """
+  if not input_p:
+    return
   work_unit = platform.work_unit()
   model = jax_task.model
   model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
@@ -919,6 +987,7 @@ def decode_once_pmap_model(
 def decode_spmd_model(
     task_p: base_task.BaseTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
     checkpoint_type: CheckpointType,
     restore_checkpoint_dir: str,
@@ -930,6 +999,7 @@ def decode_spmd_model(
   Args:
     task_p: Params for the task that encapsulates an SPMD model.
     input_p: List of input params to be decoded.
+    eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
     restore_checkpoint_dir: The directory from which to restore checkpoint.
@@ -937,6 +1007,8 @@ def decode_spmd_model(
       try to restore from the latest checkpoint if any.
     continuous_decode: whether to continuously decode on the latest ckpt.
   """
+  # TODO(b/233283613): support run_eval in spmd models.
+  del eval_input_p
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
