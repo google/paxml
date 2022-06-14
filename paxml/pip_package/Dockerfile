@@ -61,9 +61,8 @@ RUN mkdir /bazel && \
     cd / && \
     rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
 
-# TODO: Replace these with `git pull`
-COPY paxml/ /paxml/
-COPY praxis/ /praxis/
+RUN git clone https://github.com/google/paxml.git
+RUN git clone https://github.com/google/praxis.git
 
 RUN mv praxis/praxis /paxml/
 
