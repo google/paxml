@@ -78,7 +78,8 @@ RUN cd paxml && bazel build paxml/tasks/lm/params:main
 RUN pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 RUN pip3 install fiddle-config tensorstore
 RUN pip3 uninstall -y seqio seqio-nightly
-RUN pip3 install -U seqio-nightly
+# Need tensor2tensor explicitly because seqio implicitly dep on tensor2tensor.
+RUN pip3 install -U seqio-nightly tensor2tensor
 
 WORKDIR "/paxml"
 
