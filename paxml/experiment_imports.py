@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Global import for all supported Lingvo Jax model hyper-parameters."""
+"""Global import for all supported Pax model hyper-parameters."""
 
 from typing import Any
 
