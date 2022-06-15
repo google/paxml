@@ -412,8 +412,7 @@ def _train_step_single_learner_with_model(
       pass
 
     # Add a summary for learning rate
-    learning_rate = learner.optimizer.get_learning_rate(states.step)
-    base_layer.add_global_summary('learning_rate', learning_rate)
+    learner.plot_learning_rate(states.step)
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()
