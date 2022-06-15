@@ -455,6 +455,115 @@ def evaluate_pmap_model(
       last_checkpoint = new_checkpoint
 
 
+class _SpmdEvalRunner:
+  """A runner class that runs evaluate with spmd."""
+
+  def __init__(self, task_p: base_task.BaseTask.HParams,
+               eval_input_p: Sequence[base_input.BaseInput.HParams]):
+    self._eval_input_p = eval_input_p
+    if not self._eval_input_p:
+      return
+    self._jax_task = instantiate(task_p)
+    self._eval_input_pipelines = [
+        instantiate(input_p) for input_p in eval_input_p
+    ]
+    trainer_lib.check_unique_names(self._eval_input_pipelines)
+    self._eval_num_steps = [
+        -1 if p.reset_for_eval else p.eval_loop_num_batches
+        for p in eval_input_p
+    ]
+    self._task_p = task_p
+
+    # setup input_shape and global_mesh.
+    sample_model_inputs = instantiate(self._eval_input_p[0]).get_next()
+    self._inputs_shape = tf.nest.map_structure(
+        py_utils.get_global_input_shape_dtype, sample_model_inputs)
+    model_p = self._task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+    device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
+                                              model_p.dcn_mesh_shape)
+    self.global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+
+    # Will be populated by self.run_pjit() below.
+    self._eval_step = None
+    self._inputs_partition_specs = None
+
+  def get_model_states(
+      self, init_key: PRNGKey, checkpoint_dir: str,
+      checkpoint_type: CheckpointType
+  ) -> Tuple[Optional[train_states.TrainState],
+             Optional[train_states.TrainState]]:
+    """Gets a partitioned model states and their specs from checkpoint_dir."""
+    if not self._eval_input_p:
+      return None, None
+    with self.global_mesh:
+      vars_weight_params = self._jax_task.model.abstract_init_with_metadata(
+          init_key)
+      # Restore flax checkpoints still required backward variables in TrainState
+      discard_opt_states = jax.config.jax_parallel_functions_output_gda
+      train_state_global_shapes = (
+          self._jax_task.create_train_state_padded_shapes(
+              vars_weight_params, discard_opt_states=discard_opt_states))
+      partitioned_specs = self._jax_task.create_train_state_partition_specs(
+          vars_weight_params, discard_opt_states=discard_opt_states)
+      partitioned_train_state = checkpoints.restore_checkpoint(
+          train_state_global_shapes,
+          checkpoint_dir,
+          global_mesh=self.global_mesh,
+          checkpoint_type=checkpoint_type,
+          state_specs=partitioned_specs)
+
+      if partitioned_train_state is None:
+        _, partitioned_train_state = (
+            trainer_lib.initialize_partitioned_model_states(
+                self._jax_task, init_key,
+                discard_opt_states=discard_opt_states))
+    return partitioned_train_state, partitioned_specs
+
+  def run_pjit(self, init_key: PRNGKey,
+               partitioned_specs: train_states.TrainState) -> None:
+    """Run pjit on the single step evaluation function."""
+    if not self._eval_input_p:
+      return
+    with self.global_mesh:
+      eval_step, inputs_partition_specs = (
+          trainer_lib.get_partitioned_spmd_model_step_fn(
+              self._jax_task,
+              init_key,
+              trainer_lib.train_state_for_eval_step(partitioned_specs),
+              self._inputs_shape,
+              is_eval=True))
+      self._eval_step = eval_step
+      self._inputs_partition_specs = inputs_partition_specs
+
+  def run_one_step(self, partitioned_train_state: train_states.TrainState,
+                   eval_summary_writers: List[SummaryWriter], eval_key: PRNGKey,
+                   use_gda: bool):
+    """Runs evaluate for one step. Requires calling run_pjit() prior."""
+    if not self._eval_input_p:
+      return []
+    step_i = int(
+        py_utils.maybe_unreplicate_for_fully_replicated(
+            partitioned_train_state.step))
+    eval_step_fn = functools.partial(
+        self._eval_step,
+        trainer_lib.train_state_for_eval_step(partitioned_train_state),
+        eval_key)
+    # Run the eval loop.
+    with self.global_mesh:
+      metrics_list = run_eval_loop_over_test_splits(
+          self._eval_num_steps,
+          eval_step_fn,
+          eval_summary_writers,
+          step_i,
+          self._eval_input_pipelines,
+          self._inputs_partition_specs,
+          self._inputs_shape,
+          self.global_mesh,
+          reshard_inputs=False,
+          create_gda_for_inputs=use_gda)
+    return metrics_list
+
+
 def evaluate_spmd_model(
     task_p: base_task.BaseTask.HParams,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
@@ -474,131 +583,76 @@ def evaluate_spmd_model(
       (metrics_by_dataset, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using SPMD sharding for model parallelism.')
-  eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
-  trainer_lib.check_unique_names(eval_input_pipelines)
+  checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+  runner = _SpmdEvalRunner(task_p, eval_input_p)
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
+  # We do not fold in jax.process_index in contrast to the pmap version and
+  # use a single global key instead to rely on pjit to split for different
+  # replicas.
+  logging.info('root prng_key: %s', prng_key)
+  _, eval_key = jax.random.split(prng_key)
+  logging.info('eval prng_key: %s', eval_key)
 
-  checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+  partitioned_train_state, partitioned_specs = runner.get_model_states(
+      init_key, checkpoint_dir, checkpoint_type)
+  logging.info('partitioned_train_state: %s',
+               jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
-  # Do not ues eval_input_pipelines[0] directly.
-  sample_model_inputs = instantiate(eval_input_p[0]).get_next()
-  inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                       sample_model_inputs)
+  runner.run_pjit(init_key, partitioned_specs)
+  py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
+  logging.info('Evaluation loop starting...')
+  summary_base_dir = os.path.join(job_log_dir, 'summaries')
+  summary_eval_dirs = [
+      os.path.join(summary_base_dir, f'eval_test_{p.name}')
+      for p in eval_input_p
+  ]
+  last_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
 
-  jax_task = instantiate(task_p)
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
-  device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
-                                            model_p.dcn_mesh_shape)
-  global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
-  with global_mesh:
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
-    # Restore flax checkpoints still required backward variables in TrainState
-    discard_opt_states = jax.config.jax_parallel_functions_output_gda
-    train_state_global_shapes = (
-        jax_task.create_train_state_padded_shapes(
-            vars_weight_params, discard_opt_states=discard_opt_states))
-    partitioned_specs = jax_task.create_train_state_partition_specs(
-        vars_weight_params, discard_opt_states=discard_opt_states)
-    partitioned_train_state = checkpoints.restore_checkpoint(
-        train_state_global_shapes,
-        checkpoint_dir,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type,
-        state_specs=partitioned_specs)
-
-    if partitioned_train_state is None:
-      _, partitioned_train_state = (
-          trainer_lib.initialize_partitioned_model_states(
-              jax_task, init_key, discard_opt_states=discard_opt_states))
-    eval_step, inputs_partition_specs = (
-        trainer_lib.get_partitioned_spmd_model_step_fn(
-            jax_task,
-            init_key,
-            trainer_lib.train_state_for_eval_step(partitioned_specs),
-            inputs_shape,
-            is_eval=True))
-
-    logging.info('partitioned_train_state: %s',
-                 jax.tree_map(lambda x: x.shape, partitioned_train_state))
-    py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
-
-    # We do not fold in jax.process_index in contrast to the pmap version and
-    # use a single global key instead to rely on pjit to split for different
-    # replicas.
-    logging.info('root prng_key: %s', prng_key)
-    prng_key, eval_key = jax.random.split(prng_key)
-    logging.info('eval prng_key: %s', eval_key)
-
-    logging.info('Evaluation loop starting...')
-    summary_base_dir = os.path.join(job_log_dir, 'summaries')
-    summary_eval_dirs = [
-        os.path.join(summary_base_dir, f'eval_test_{p.name}')
-        for p in eval_input_p
+  create_gda_for_inputs = (
+      jax.config.jax_parallel_functions_output_gda and
+      checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
+  with contextlib.ExitStack() as exit_stack:
+    eval_summary_writers = [
+        exit_stack.enter_context(summary_utils.get_summary_writer(d))
+        for d in summary_eval_dirs
     ]
-
-    num_steps = [-1 if p.reset_for_eval else 1 for p in eval_input_p]
-    last_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
-    with contextlib.ExitStack() as exit_stack:
-      eval_summary_writers = [
-          exit_stack.enter_context(summary_utils.get_summary_writer(d))
-          for d in summary_eval_dirs
-      ]
-      create_gda_for_inputs = (
-          jax.config.jax_parallel_functions_output_gda and
-          checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
-      while True:
-        step_i = int(
-            py_utils.maybe_unreplicate_for_fully_replicated(
-                partitioned_train_state.step))
-        eval_step_fn = functools.partial(
-            eval_step,
-            trainer_lib.train_state_for_eval_step(partitioned_train_state),
-            eval_key)
-        # Run the eval loop.
-        metrics_list = run_eval_loop_over_test_splits(
-            num_steps,
-            eval_step_fn,
-            eval_summary_writers,
-            step_i,
-            eval_input_pipelines,
-            inputs_partition_specs,
-            inputs_shape,
-            global_mesh,
-            reshard_inputs=False,
-            create_gda_for_inputs=create_gda_for_inputs)
-        # If the last check point evaluated matches max train steps, exit.
-        if last_checkpoint is not None:
-          last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
-              last_checkpoint)
-          exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
-          is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps  # pytype: disable=attribute-error  # enable-nested-classes
-          if early_stopping_fn is not None:
-            metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
-            if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
-              logging.info(
-                  'Evaluation is early stopped at checkpoint step %d by the'
-                  'tuner, while the num_train_steps is %d', last_ckpt_step,
-                  task_p.train.num_train_steps)  # pytype: disable=attribute-error  # enable-nested-classes
-              break
-          if is_last_ckpt:
+    while True:
+      metrics_list = runner.run_one_step(partitioned_train_state,
+                                         eval_summary_writers, eval_key,
+                                         create_gda_for_inputs)
+      # If the last check point evaluated matches max train steps, exit.
+      if last_checkpoint is not None:
+        last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
+            last_checkpoint)
+        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
+        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps  # pytype: disable=attribute-error  # enable-nested-classes
+        if early_stopping_fn is not None:
+          metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
+          if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
+            logging.info(
+                'Evaluation is early stopped at checkpoint step %d by the'
+                'tuner, while the num_train_steps is %d', last_ckpt_step,
+                task_p.train.num_train_steps)  # pytype: disable=attribute-error  # enable-nested-classes
             break
+        if is_last_ckpt:
+          break
+      new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
+      while new_checkpoint == last_checkpoint:
+        logging.info('Sleep before checking for new latest checkpoint.')
+        time.sleep(60)
         new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
-        while new_checkpoint == last_checkpoint:
-          logging.info('Sleep before checking for new latest checkpoint.')
-          time.sleep(60)
-          new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
-        # There must be a new checkpoint here.
-        logging.info('Found new checkpoint: %s', new_checkpoint)
-        partitioned_train_state = checkpoints.restore_checkpoint(
-            train_state_global_shapes,
-            checkpoint_dir,
-            global_mesh=global_mesh,
-            checkpoint_type=checkpoint_type,
-            state_specs=partitioned_specs)
-        py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
-        last_checkpoint = new_checkpoint
+      # There must be a new checkpoint here.
+      logging.info('Found new checkpoint: %s', new_checkpoint)
+      partitioned_train_state = checkpoints.restore_checkpoint(
+          runner.train_state_global_shapes,
+          checkpoint_dir,
+          global_mesh=runner.global_mesh,
+          checkpoint_type=checkpoint_type,
+          state_specs=runner.partitioned_specs)
+      py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
+      last_checkpoint = new_checkpoint
 
 
 def decode(
@@ -1007,18 +1061,18 @@ def decode_spmd_model(
       try to restore from the latest checkpoint if any.
     continuous_decode: whether to continuously decode on the latest ckpt.
   """
-  # TODO(b/233283613): support run_eval in spmd models.
-  del eval_input_p
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
-  prng_key, init_key = jax.random.split(prng_key)
+  prng_key, init_key, eval_key = jax.random.split(prng_key, 3)
   # TODO(zhouwk): support ema.
 
+  eval_runner = _SpmdEvalRunner(task_p, eval_input_p)
   restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
       job_log_dir, 'checkpoints')
   restore_checkpoint_parent_dir = restore_checkpoint_dir
 
-  sample_inputs = instantiate(input_p[0]).get_next()
+  sample_input_p = input_p[0] if input_p else eval_input_p[0]
+  sample_inputs = instantiate(sample_input_p).get_next()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                        sample_inputs)
   inputs = [instantiate(p) for p in input_p]
@@ -1057,10 +1111,15 @@ def decode_spmd_model(
     decode_step_fn, inputs_partition_spec = (
         trainer_lib.get_partitioned_spmd_model_decode_fn(
             jax_task, init_key, partitioned_specs, inputs_shape))
+    eval_runner.run_pjit(init_key, partitioned_specs)
 
     summary_base_dir = os.path.join(job_log_dir, 'summaries')
     summary_decode_dirs = [
         os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
+    ]
+    summary_eval_dirs = [
+        os.path.join(summary_base_dir, f'eval_test_{p.name}')
+        for p in eval_input_p
     ]
     partitioned_train_state = trim_opt_states(partitioned_train_state)
     last_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
@@ -1072,11 +1131,17 @@ def decode_spmd_model(
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
       ]
+      eval_summary_writers = [
+          exit_stack.enter_context(summary_utils.get_summary_writer(d))
+          for d in summary_eval_dirs
+      ]
       while True:
         decode_once_spmd_model(jax_task, task_p, inputs, input_p, job_log_dir,
                                partitioned_train_state, summary_writers,
                                prng_key, global_mesh, decode_step_fn, use_gda,
                                inputs_shape, inputs_partition_spec)
+        eval_runner.run_one_step(partitioned_train_state, eval_summary_writers,
+                                 eval_key, use_gda)
         if not continuous_decode:
           break
         if last_checkpoint is not None:
