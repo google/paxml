@@ -359,6 +359,15 @@ def write_total_num_params(train_summary_writer: SummaryWriter,
   train_summary_writer.flush()
 
 
+def write_global_batch_size(train_summary_writer: SummaryWriter,
+                            global_batch_size: int):
+  """Writes the global batch size to TB."""
+  with train_summary_writer.as_default():
+    batch_size_str = '{:,}'.format(global_batch_size).replace(',', ' ')
+    tf_summary.text('Global batch size', batch_size_str, step=0)
+  train_summary_writer.flush()
+
+
 def write_summary_every_n_steps(train_summary_writer: SummaryWriter,
                                 step_i: int, summary_every_n_steps: int,
                                 loss: JTensor, metrics: NestedJTensor,

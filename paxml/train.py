@@ -520,6 +520,11 @@ def train_and_evaluate_pmap(
     summary_utils.write_model_structure(
         train_summary_writer, replicated_model_states, is_vars_replicated=True)
     summary_utils.write_total_num_params(train_summary_writer, total_num_params)
+    train_global_batch_size = (
+        train_input_p.cls.get_batch_size(train_input_p) *
+        train_input_p.num_infeed_hosts)
+    summary_utils.write_global_batch_size(train_summary_writer,
+                                          train_global_batch_size)
 
     summary_last_time = time.time()
     summary_last_step = None
@@ -1039,6 +1044,8 @@ def train_and_evaluate_spmd_model(
           is_vars_replicated=False)
       summary_utils.write_total_num_params(train_summary_writer,
                                            total_num_params)
+      summary_utils.write_global_batch_size(train_summary_writer,
+                                            train_unpadded_global_batch_size)
 
       summary_last_time = time.time()
       summary_last_step = None
