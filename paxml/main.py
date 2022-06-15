@@ -73,6 +73,10 @@ flags.DEFINE_bool(
     'includes running decode over decoder_datasets(). This can be set to True '
     'if we do not want an additional job to run continuous decode.')
 flags.DEFINE_bool(
+    'eval_during_decode', False, 'If True, then the decoder run will '
+    'include running eval over the non-training data in datasets(). This is '
+    'ignored if --mode is not decode or decode_once.')
+flags.DEFINE_bool(
     'maybe_use_persistence_checkpointing', False,
     'If suitable, will try to rely on persistence-based checkpointing rather '
     'than Flax-based checkpointing for SPMD models.')
@@ -205,6 +209,7 @@ def run_experiment(
         restore_checkpoint_dir=None,
         restore_checkpoint_step=None,
         continuous_decode=True,
+        run_eval=FLAGS.eval_during_decode,
     )
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
@@ -217,6 +222,7 @@ def run_experiment(
         restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
         restore_checkpoint_step=FLAGS.restore_checkpoint_step,
         continuous_decode=False,
+        run_eval=FLAGS.eval_during_decode,
     )
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a
