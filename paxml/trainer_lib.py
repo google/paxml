@@ -305,7 +305,7 @@ def _train_step_single_learner_with_model(
     model: An instance of base_model that is used for forward/back prop
     states: An instance of model.TrainState.
     prng_key: A PRNGKey, of shape [2], of type np.uint32.
-    inputs: Inputs to the model.fprop() function.
+    inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
 
   Returns:
@@ -358,7 +358,7 @@ def _train_step_single_learner_with_model(
           mdl_vars,
           inputs,
           mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE] + NON_PAX_VAR_COLLECTION,
-          method=model.fprop,
+          method=model.__call__,
           rngs=apply_rng_keys)
 
       # Fetch all the summary tensors.
@@ -494,7 +494,7 @@ def _eval_step_single_learner_with_model(
     model: An instance of base_model.BaseModel, that is used for training
     states: An instance of model.TrainState.
     prng_key: A prng seed, of shape [2], of type np.uint32.
-    inputs: Inputs to the model.fprop() function.
+    inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
 
   Returns:
@@ -528,7 +528,7 @@ def _eval_step_single_learner_with_model(
         mdl_vars,
         inputs,
         mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE],
-        method=model.fprop,
+        method=model.__call__,
         rngs=apply_rng_keys)
 
     summary_tensors = updated_vars.get(SUMMARIES, {})
