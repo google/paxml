@@ -127,7 +127,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         repeat=True if is_training else False,
         feature_converter=seqio_input.LanguageModelFeatures(
             pack=True if is_training else False,
-            use_custom_packing_ops=True if is_training else False),
+            use_custom_packing_ops=False),
         is_training=is_training,
         input_random_seed=(None if is_training else 4321),
         # eval_loop_num_batches=(1 if is_training else 5),
