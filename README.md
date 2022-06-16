@@ -12,13 +12,13 @@ corp machine.
 
 ```bash
 $ TPU_NAME=pax-8
-$ gcloud alpha compute tpus tpu-vm create ${TPU_NAME} --zone us-central2-b --accelerator-type v4-8 --version v2-nightly-tpuv4 --project tpu-prod-env-one-vm
+$ gcloud alpha compute tpus tpu-vm create ${TPU_NAME} --zone us-central2-b --accelerator-type v4-8 --version v2-alpha-tpuv4 --project ${PROJECT}
 ```
 
 The corresponding VM instance can then be accessed via ssh.
 
 ```bash
-gcloud alpha compute tpus tpu-vm ssh ${TPU_NAME} --zone us-central2-b --project tpu-prod-env-one-vm
+gcloud alpha compute tpus tpu-vm ssh ${TPU_NAME} --zone us-central2-b --project ${PROJECT}
 ```
 
 ## Installing Pax
