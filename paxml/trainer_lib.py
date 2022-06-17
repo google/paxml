@@ -619,13 +619,12 @@ def decode_step(
         rngs=apply_rng_keys,
         mutable=[
             DECODE_CACHE,
+            SUMMARIES,
         ])
     # DECODE_CACHE are not read by caller. But they can be large. Tell XLA DCE
     # to remove it from output. Note MLP decoder don't have DECODE_CACHE.
     if DECODE_CACHE in updated_vars:
       del updated_vars[DECODE_CACHE]
-    # TODO(b/234861202): summaries are temporarily disabled.
-    updated_vars[SUMMARIES] = {}
     return outputs, updated_vars
 
 
