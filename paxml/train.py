@@ -52,7 +52,6 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PARAMS = base_layer.PARAMS
 
-
 _N_STEPS_WARMUP_LOGGING = 5
 
 
@@ -72,7 +71,8 @@ def _write_hparams_file(model_config: base_experiment.BaseExperiment,
       hparams_file.write(model_config.task().to_text())
 
 
-def _write_post_init_model_hparams_file(model, job_log_dir: str) -> None:
+def _write_post_init_model_hparams_file(model, vars_weight_params,
+                                        job_log_dir: str) -> None:
   """Writes a post-init params file into the root `job_log_dir`.
 
   This file is the source of truth of how model is constructed. It contains two
@@ -82,6 +82,7 @@ def _write_post_init_model_hparams_file(model, job_log_dir: str) -> None:
 
   Args:
     model: A BaseModel
+    vars_weight_params: A pytree of WeightHParams
     job_log_dir: The root dir for the training job.
   """
   if jax.process_index() == 0:
@@ -110,10 +111,8 @@ def _write_post_init_model_hparams_file(model, job_log_dir: str) -> None:
       params_file.write(hyper_params_dump)
       params_file.write('\n\n')
 
-      prng_key, k1, k2 = jax.random.split(prng_key, 3)
-      init_key = {PARAMS: k1, NON_PAX_RNG_KEY: k2}
-      params_inits = model.abstract_init_with_metadata(init_key)
-      params_inits_text = base_hyperparams.nested_struct_to_text(params_inits)
+      params_inits_text = base_hyperparams.nested_struct_to_text(
+          vars_weight_params)
       params_file.write(params_inits_text)
 
 
@@ -220,8 +219,8 @@ def train_and_evaluate(
   """Runs the training and evaluation loop.
 
   Args:
-    experiment_config: an instance of BaseExperiment for the experiment
-      to train and evaluate.
+    experiment_config: an instance of BaseExperiment for the experiment to train
+      and evaluate.
     job_log_dir: The directory for the job logs.
     maybe_use_persistence_checkpointing: If set, it will try to use
       persistence-based checkpointing if suitable.
@@ -354,8 +353,6 @@ def train_and_evaluate_pmap(
   if jax.config.jax_parallel_functions_output_gda:
     logging.warning('--jax_use_gda is set to True but ignored for pmap.')
   jax_task = instantiate(task_p)
-  # Dump out model meta info for debugging.
-  _write_post_init_model_hparams_file(jax_task.model, job_log_dir)
 
   if eval_input_p:
     eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
@@ -373,6 +370,10 @@ def train_and_evaluate_pmap(
 
   checkpoint_dir = _checkpoint_dir(job_log_dir)
   vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
+  # Dump out model meta info for debugging.
+  _write_post_init_model_hparams_file(jax_task.model, vars_weight_params,
+                                      job_log_dir)
+
   train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
       vars_weight_params)
 
@@ -888,9 +889,10 @@ def train_and_evaluate_spmd_model(
 
   with global_mesh:
     jax_task = instantiate(task_p)
-    # Dump out model meta info for debugging.
-    _write_post_init_model_hparams_file(jax_task.model, job_log_dir)
     vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
+    # Dump out model meta info for debugging.
+    _write_post_init_model_hparams_file(jax_task.model, vars_weight_params,
+                                        job_log_dir)
     train_state_global_shapes = jax_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = jax_task.create_train_state_partition_specs(
