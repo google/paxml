@@ -43,6 +43,7 @@ def setup_jax(globally_use_hardware_rng: bool,
   logging.info('Using JAX GDA for pjit and checkpointing')
 
   if jax_enable_checks:
+    jax.config.update('jax_enable_checks', True)
     logging.info('jax_enable_checks has been enabled.')
 
   if jax_backend_target:
