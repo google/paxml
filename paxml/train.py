@@ -924,8 +924,13 @@ def train_and_evaluate_spmd_model(
           model_state_partition_specs=None,
           inputs_shape=inputs_shape,
           is_eval=False)
-      abstract_train_state = jax_task.create_abstract_train_state(
-          vars_weight_params)
+      # NOTE(pax-dev): The following is currently incompatible with variable
+      # uneven-sharding padding. When enable_auto_sharding is False,
+      # train_state_pspecs correspond to padded train_states.
+      abstract_train_state = jax_task.create_train_state_unpadded_shapes(
+          vars_weight_params,
+          # TODO(pax-dev): set discard_opt_states according to is_eval.
+          discard_opt_states=False)
       train_step, input_shardings = compile_for_auto_sharding(
           train_step, abstract_train_state, train_key, inputs_shape)
       train_state_pspecs = input_shardings[0]
@@ -962,7 +967,9 @@ def train_and_evaluate_spmd_model(
               state_specs=train_state_pspecs))
 
     total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
-
+    # TODO(pax): Support auto-sharding for eval step. In this case, we would
+    # have to fix the sharding of the input to be the same as what's derived
+    # from the train_step.
     eval_step, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
         jax_task,
         init_key,
@@ -974,6 +981,7 @@ def train_and_evaluate_spmd_model(
       decode_sample_inputs = instantiate(decode_input_p[0]).get_next()
       decode_inputs_shape = tf.nest.map_structure(
           py_utils.get_global_input_shape_dtype, decode_sample_inputs)
+      # TODO(pax-dev): Support auto-sharding for decoder step.
       decode_step_fn, decode_inputs_partition_spec = (
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task, init_key,

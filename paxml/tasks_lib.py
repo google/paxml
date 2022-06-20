@@ -338,44 +338,6 @@ class SingleTask(base_task.BaseTask):
         mdl_vars=mdl_vars,
         opt_states=opt_states)
 
-  def create_abstract_train_state(self, var_weight_hparams):
-    """Creates dummy train state for compiling train_step ahead of time.
-
-    This train state does not contain data. It just contains the abstract
-    values.
-
-    Args:
-      var_weight_hparams: a nested map of variable params for all the forward
-        variables.
-
-    Returns:
-      A TrainState contains abstract values for all the forward and
-      backward variables.
-    """
-
-    def _update_shape_with_repeated_prefix(v: base_layer.WeightHParams):
-      shape = v.shape
-      if v.repeat_prefix:
-        shape = tuple(v.repeat_prefix) + tuple(v.shape)
-      return base_layer.WeightHParams(
-          shape=shape, init=v.init, dtype=v.dtype, collections=v.collections)
-
-    grad_txs = [x.get_grad_tx(var_weight_hparams) for x in self.learners]
-    opt_var_weight_hparams = []
-    for grad_tx in grad_txs:
-      assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
-      opt_var_weight_hparams.append(
-          grad_tx.init_partition_spec(var_weight_hparams))
-
-    var_weight_hparams = jax.tree_util.tree_map(
-        _update_shape_with_repeated_prefix, var_weight_hparams)
-    opt_var_weight_hparams = jax.tree_util.tree_map(
-        _update_shape_with_repeated_prefix, opt_var_weight_hparams)
-    return train_states.TrainState(
-        step=jax.ShapedArray((), jnp.uint32),
-        mdl_vars=var_weight_hparams,
-        opt_states=opt_var_weight_hparams)
-
   def create_train_state_padded_shapes(self,
                                        var_weight_hparams,
                                        discard_opt_states=False) -> TrainState:

@@ -942,6 +942,8 @@ def get_partitioned_spmd_model_step_fn(
 
 
 # TODO(pax): merge with get_partitioned_spmd_model_decode_fn
+# Q(pax-dev): how does the function below interact with padding/unpadding of
+# variables along certain variable/mesh axis?
 def get_partitioned_spmd_model_step_fn_auto_shard(
     jax_task: tasks_lib.SingleTask, init_key: Optional[PRNGKey],
     model_state_partition_specs: Optional[TrainState],
@@ -975,6 +977,9 @@ def get_partitioned_spmd_model_step_fn_auto_shard(
 
   def _step_fn(state, prng_key, inputs):
     # Reshard inputs.
+    # TODO(pax): Since we rely on xla auto-sharding for automatically figure
+    # out the proper sharding of intermediate notes, we can get rid of this
+    # manual sharding now?
     inputs = jax.tree_map(reshard_inputs_fn, inputs)
 
     # When auto sharding is enabled, uneven sharding is not supported. This is
