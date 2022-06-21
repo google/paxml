@@ -300,6 +300,7 @@ pytype_strict_library(
         ":base_task",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
+        "//third_party/py/optax",
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_layer",

@@ -886,7 +886,6 @@ def train_and_evaluate_spmd_model(
   model_inputs_for_shape = train_input_for_shape.get_next_padded()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                        model_inputs_for_shape)
-
   with global_mesh:
     jax_task = instantiate(task_p)
     vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
@@ -945,7 +944,7 @@ def train_and_evaluate_spmd_model(
               is_eval=False,
               unpadded_global_batch_size=train_unpadded_global_batch_size))
 
-    # Try restore from checkponts
+    # Try to restore from checkpoint.
     partitioned_train_state = checkpoints.restore_checkpoint(
         train_state_global_shapes,
         checkpoint_dir,

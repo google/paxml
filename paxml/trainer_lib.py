@@ -675,6 +675,8 @@ def initialize_partitioned_model_states(
   assert train_state_partition_specs is not None
 
   def _maybe_pad(x, pspec, shape):
+    if py_utils.is_optax_masked_node(x):
+      return x
     return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
                                               model.hparams.mesh_shape,
                                               model.hparams.mesh_axis_names)
@@ -683,7 +685,8 @@ def initialize_partitioned_model_states(
     outs = initialize_model_state(
         jax_task, prng_key, discard_opt_states, do_init_checkpoint_rules=False)
     return jax.tree_map(_maybe_pad, outs, train_state_partition_specs,
-                        train_state_unpadded_shapes)
+                        train_state_unpadded_shapes,
+                        is_leaf=py_utils.is_optax_masked_node)
 
   logging.info('unpadded_out_shape: %s', train_state_unpadded_shapes)
   logging.info('train_state_partition_specs: %s', train_state_partition_specs)
@@ -697,7 +700,6 @@ def initialize_partitioned_model_states(
 
   assert py_utils.global_mesh_defined(), 'must be inside maps.mesh scope'
   partitioned_vars = init_fn(prng_key)
-
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
   if jax_task.hparams.train.init_from_checkpoint_rules:
     # TODO(b/230132535): Note that this application after constructing the
@@ -834,6 +836,8 @@ def get_partitioned_spmd_model_step_fn(
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
   def _maybe_pad(x, pspec, shape):
+    if py_utils.is_optax_masked_node(x):
+      return x
     return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
                                               model_p.mesh_shape,
                                               model_p.mesh_axis_names)
@@ -844,7 +848,8 @@ def get_partitioned_spmd_model_step_fn(
     # after the step computation to make user code independent of paddings.
     # Internal uneven sharding in the step computation is supported by XLA.
     state = jax.tree_map(py_utils.maybe_slice_uneven_sharding, state,
-                         model_state_partition_specs, state_unpadded_shapes)
+                         model_state_partition_specs, state_unpadded_shapes,
+                         is_leaf=py_utils.is_optax_masked_node)
     if unpadded_global_batch_size is not None:
       # At the beginning input is fully sharded on the batch dim which has
       # paddings. If we just slice out the padding, there won't be any overhead;
@@ -902,7 +907,8 @@ def get_partitioned_spmd_model_step_fn(
 
     new_states = jax.tree_map(_maybe_pad, fn_out[0],
                               model_state_partition_specs,
-                              state_unpadded_shapes)
+                              state_unpadded_shapes,
+                              is_leaf=py_utils.is_optax_masked_node)
     return (new_states,) + fn_out[1:]
 
   def init_model_from_seed(init_key):
@@ -912,7 +918,8 @@ def get_partitioned_spmd_model_step_fn(
         discard_opt_states=is_eval,
         do_init_checkpoint_rules=False)
     return jax.tree_map(_maybe_pad, outs, model_state_partition_specs,
-                        state_unpadded_shapes)
+                        state_unpadded_shapes,
+                        is_leaf=py_utils.is_optax_masked_node)
 
   var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key)
 
@@ -1043,6 +1050,8 @@ def get_partitioned_spmd_model_decode_fn(jax_task, init_key,
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
   def _maybe_pad(x, pspec, shape):
+    if py_utils.is_optax_masked_node(x):
+      return pspec
     return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
                                               model_p.mesh_shape,
                                               model_p.mesh_axis_names)
@@ -1070,7 +1079,8 @@ def get_partitioned_spmd_model_decode_fn(jax_task, init_key,
         discard_opt_states=True,
         do_init_checkpoint_rules=False)
     return jax.tree_map(_maybe_pad, outs, model_state_partition_specs,
-                        model_state_unpadded_shapes)
+                        model_state_unpadded_shapes,
+                        is_leaf=py_utils.is_optax_masked_node)
 
   var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key)
 

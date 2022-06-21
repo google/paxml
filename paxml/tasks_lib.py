@@ -31,6 +31,7 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import pjit
+import optax
 from paxml import base_metrics
 from paxml import base_task
 from praxis import base_hyperparams
@@ -367,6 +368,8 @@ class SingleTask(base_task.BaseTask):
                                     unpadded_shapes)
 
       def _maybe_pad(shape_dtype, pspec):
+        if py_utils.is_optax_masked_node(shape_dtype):
+          return pspec
         unpadded_shape = shape_dtype.shape
         paddings = py_utils.get_uneven_sharding_paddings(
             pspec, unpadded_shape, mesh_shape, mesh_axis_names)
@@ -374,7 +377,8 @@ class SingleTask(base_task.BaseTask):
         return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
 
       padded_shapes = jax.tree_map(_maybe_pad, unpadded_shapes,
-                                   model_state_partition_specs)
+                                   model_state_partition_specs,
+                                   is_leaf=py_utils.is_optax_masked_node)
     return padded_shapes
 
   def create_train_state_unpadded_shapes(self,
@@ -439,11 +443,22 @@ class SingleTask(base_task.BaseTask):
         assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
         opt_var_weight_hparams.append(
             grad_tx.init_partition_spec(var_weight_hparams))
-
       opt_var_partition_specs = base_layer.var_partition_specs(
           opt_var_weight_hparams,
           mesh_shape=mesh_shape,
           device_axis_names=p.model.mesh_axis_names)
+      # If we have a double nesting within the partition specs, then it implies
+      # that there is a sharded_chain using MultiOptimizer, in this case optax
+      # expects the inner tuple to be encapsulated within a MaskedState, in
+      # order for us to use jax.tree_map of the partition specs with the
+      # optimizer states.
+      if isinstance(opt_var_partition_specs[0], tuple):
+        if isinstance(opt_var_partition_specs[0][0], tuple):
+          opt_states = []
+          for opt in opt_var_partition_specs[0]:
+            opt_states.append(optax.MaskedState(inner_state=opt))
+          opt_states = tuple(opt_states)
+          opt_var_partition_specs[0] = opt_states
     return TrainState(
         step=step_partition_spec,
         mdl_vars=var_partition_specs,
