@@ -251,6 +251,9 @@ def evaluate(
   task_p = experiment_config.task()
   model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
+  if not eval_input_p:
+    logging.info('No eval datasets defined. Returning early.')
+    return
   for inp in eval_input_p:
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()
@@ -271,6 +274,7 @@ class _PmapEvalRunner:
   def __init__(self, task_p: base_task.BaseTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams]):
     self._eval_input_p = eval_input_p
+    self._task_p = task_p
     if not self._eval_input_p:
       return
     self._jax_task = instantiate(task_p)
@@ -282,13 +286,14 @@ class _PmapEvalRunner:
         -1 if p.reset_for_eval else p.eval_loop_num_batches
         for p in eval_input_p
     ]
-    self._task_p = task_p
 
   def get_model_states(
       self, prng_key: PRNGKey, checkpoint_dir: str,
       checkpoint_step: Optional[int]
   ) -> Tuple[train_states.TrainState, train_states.TrainState, PRNGKey]:
     """Returns the (replicated) model states."""
+    if not hasattr(self, '_jax_task'):
+      self._jax_task = instantiate(self._task_p)
     prng_key, init_key = jax.random.split(prng_key)
 
     # Restore flax checkpoints still required bak variables in TrainState
