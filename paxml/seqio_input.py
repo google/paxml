@@ -366,6 +366,8 @@ class SeqIOInput(base_input.BaseInput):
     for k in targets:
       ans = answers[k]
       answer = ans['decoded_substr']
+      # this line mutates 'decoder_outputs' which is written to disk afterwards
+      ans['seqio_targets'] = targets[k]
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
         prediction = task.postprocess_fn(answer, example=e, is_target=False)
