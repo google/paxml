@@ -307,6 +307,8 @@ class SeqIOInput(base_input.BaseInput):
       verbose_entries: Optional[int] = 0) -> Sequence[Mapping[str, float]]:
     """Computes metrics from the given decoder outputs using predict_metric_fns.
 
+    For tasks with score_metric_fns, use compute_metrics_eval() below.
+
     Args:
       decoder_outputs: A list of the entire decoder output on this dataset. This
         is typically obtained by reading them from disk from
@@ -319,12 +321,10 @@ class SeqIOInput(base_input.BaseInput):
       Typically a list of metrics, each element being a mapping from a string
       metric name to a float.
     """
-    # TODO(zhouwk): make this method more general and remove the following
-    # known limitations.
-    # Limitations: currently assumes LanguageModel decoder output format,
+    # TODO(b/236078932): integrate with seqio evaluator.
+    # Current known limitations: assumes LanguageModel decoder output format,
     # specifically the prediction string has key='decoded_substr'.
     # Also assumes inputs and targets field names are 'inputs' and 'targets'.
-    # Also ignores score_metric_fns.
     p = self.hparams
     inputs_length = p.task_feature_lengths['inputs']
     targets_length = p.eval_metrics_targets_length
@@ -406,6 +406,8 @@ class SeqIOInput(base_input.BaseInput):
   ) -> Sequence[Mapping[str, float]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
 
+    For tasks with predict_metric_fns, use compute_metrics() above.
+
     Args:
       eval_outputs: A list of per_example_outputs. Each element is a nested map
         from string to JTensor, and is expected to have keys `labels` and
@@ -418,7 +420,6 @@ class SeqIOInput(base_input.BaseInput):
       Typically a list of metrics, each element being a mapping from a string
       metric name to a float.
     """
-    # TODO(zhouwk,mishragaurav): directly use seqio evaluator instead.
     p = self.hparams
     task = self._mixture_or_task
     if not isinstance(task, seqio.Task):
