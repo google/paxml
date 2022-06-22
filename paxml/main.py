@@ -47,6 +47,7 @@ from praxis import py_utils
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
 from paxml import experiment_imports  # mapped to internal
+persistence_gda_serialization = gda_serialization  # mapped to internal
 
 
 # Required import to setup work units when running through XManager.
@@ -184,9 +185,12 @@ def run_experiment(
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
-    if (FLAGS.jax_fully_async_checkpoint and
-        not FLAGS.maybe_use_persistence_checkpointing):
-      async_ckpt_manager = gda_serialization.GlobalAsyncCheckpointManager()
+    if FLAGS.jax_fully_async_checkpoint:
+      async_ckpt_manager_cls = gda_serialization.GlobalAsyncCheckpointManager
+      if FLAGS.maybe_use_persistence_checkpointing:
+        async_ckpt_manager_cls = (
+            persistence_gda_serialization.GlobalAsyncCheckpointManager)
+      async_ckpt_manager = async_ckpt_manager_cls()
     else:
       async_ckpt_manager = None
 

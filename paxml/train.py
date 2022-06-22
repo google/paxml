@@ -213,7 +213,7 @@ def train_and_evaluate(
     checkpoint_todelete_subdir: Optional[str] = None,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManager] = None,
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     run_decode: bool = False,
     enable_auto_sharding: bool = False) -> None:
   """Runs the training and evaluation loop.
@@ -328,7 +328,7 @@ def train_and_evaluate_pmap(
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManager] = None
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
 ) -> None:
   """Runs the training and evaluation loop.
 
@@ -799,7 +799,7 @@ def train_and_evaluate_spmd_model(
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManager] = None,
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     enable_auto_sharding: bool = False,
 ) -> None:
   """Runs the training and evaluation loop.

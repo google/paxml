@@ -113,7 +113,7 @@ def save_checkpoint(
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
     state_specs: Optional[train_states.TrainState] = None,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManager] = None,
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
 ) -> None:
   """Saves a checkpoint into the provided base directory.
 
@@ -353,7 +353,7 @@ def _save_checkpoint_gda(
     overwrite: bool,
     step: int,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManager] = None,
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
 ) -> None:
   """Saves a checkpoint using JAX GDA serialization mechanism.
 
