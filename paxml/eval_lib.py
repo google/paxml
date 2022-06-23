@@ -200,7 +200,11 @@ def run_eval_loop_over_test_splits(
       with summary_writers[split].as_default():
         for m_dict in seqio_metrics:
           for k in m_dict:
-            v = float(m_dict[k])
+            # TODO(zhouwk): support seqio.metrics.Text.
+            if isinstance(m_dict[k], seqio.metrics.Scalar):
+              v = float(m_dict[k].value)
+            else:
+              v = float(m_dict[k])
             metric_name = f'scoring_eval/{k}'
             logging.info('Writing summary of %s with value %.4f.', metric_name,
                          v)
