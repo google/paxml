@@ -209,7 +209,7 @@ def run_eval_loop_over_test_splits(
 
     loss = np.array(loss)
     for k in summary_tensors:
-      summary_tensors[k] = np.array(summary_tensors[k])
+      summary_tensors[k] = np.array([t.to_py() for t in summary_tensors[k]])
     for k in metrics:
       value = np.stack([metric[0] for metric in metrics[k]])
       weight = np.stack([metric[1] for metric in metrics[k]])
