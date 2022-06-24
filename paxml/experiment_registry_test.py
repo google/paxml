@@ -23,11 +23,6 @@ from praxis import layers
 
 @experiment_registry.register
 class DummyExperiment(base_experiment.BaseExperiment):
-  """A docstring.
-
-  @platform: pf_4x4x8
-  @foo_tag: foo_value
-  """
 
   def datasets(self):
     return []
@@ -35,6 +30,15 @@ class DummyExperiment(base_experiment.BaseExperiment):
   def task(self):
     act_p = layers.Activation.HParams()
     return act_p
+
+
+@experiment_registry.register
+class DocstringExp(DummyExperiment):
+  """A docstring.
+
+  @platform: pf_4x4x8
+  @foo_tag: foo_value
+  """
 
 
 @experiment_registry.register()
@@ -62,7 +66,7 @@ class ExperimentRegistryTest(absltest.TestCase):
     self.assertIsNone(experiment_registry.get('DummyExperimentNotDefined'))
 
   def test_get_docstring_tags(self):
-    tags = experiment_registry.get_docstring_tags('DummyExperiment')
+    tags = experiment_registry.get_docstring_tags('DocstringExp')
     self.assertEqual(tags, {'foo_tag': 'foo_value', 'platform': 'pf_4x4x8'})
 
   def test_secondary_keys(self):
