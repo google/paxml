@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import collections
 import enum
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from jax.experimental import multihost_utils
@@ -304,7 +304,8 @@ class SeqIOInput(base_input.BaseInput):
   def compute_metrics(
       self,
       decoder_outputs: Sequence[Tuple[str, NestedMap]],
-      verbose_entries: Optional[int] = 0) -> Sequence[Mapping[str, float]]:
+      verbose_entries: Optional[int] = 0
+  ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given decoder outputs using predict_metric_fns.
 
     For tasks with score_metric_fns, use compute_metrics_eval() below.
@@ -403,7 +404,7 @@ class SeqIOInput(base_input.BaseInput):
 
   def compute_metrics_eval(
       self, eval_outputs: Sequence[Dict[str, py_utils.JTensor]]
-  ) -> Sequence[Mapping[str, float]]:
+  ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
 
     For tasks with predict_metric_fns, use compute_metrics() above.

@@ -21,7 +21,7 @@ import functools
 import os
 import sys
 import time
-from typing import Any, Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -46,7 +46,9 @@ from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
 from praxis import train_states
+import seqio
 import tensorflow.compat.v2 as tf
+from tensorflow.compat.v2 import summary as tf_summary
 
 from paxml import checkpoints  # mapped to internal
 from paxml import io_utils  # mapped to internal
@@ -106,6 +108,28 @@ def run_eval_one_step(eval_inputs: NestedJTensor,
       eval_inputs)
   return loss, mean_metrics, per_example_output, summary_tensors
 
+
+def _summary_seqio_metrics(seqio_metrics: Sequence[Mapping[str, Union[
+    seqio.metrics.MetricValue, float]]], metric_name_prefix: str,
+                           step: int) -> None:
+  for m_dict in seqio_metrics:
+    for k, v in m_dict.items():
+      metric_name = f'{metric_name_prefix}/{k}'
+      if isinstance(v, seqio.metrics.Text):
+        metric_str = (
+            v.textdata.decode()
+            if isinstance(v.textdata, bytes) else v.textdata)
+        logging.info('Writing summary of %s with string value %s.', metric_name,
+                     metric_str)
+        tf_summary.text(metric_name, metric_str, step=step)
+        continue
+      if isinstance(v, seqio.metrics.Scalar):
+        v = float(v.value)
+      else:
+        v = float(v)
+      logging.info('Writing summary of %s with value %.4f.', metric_name, v)
+      summary_utils.write_summary_tensor(step, metric_name, v,
+                                         summary_utils.SummaryType.SCALAR)
 
 def run_eval_loop_over_test_splits(
     num_steps: List[int],
@@ -198,18 +222,7 @@ def run_eval_loop_over_test_splits(
           per_example_scores)
       logging.info('Eval metrics from seqio: %s.', seqio_metrics)
       with summary_writers[split].as_default():
-        for m_dict in seqio_metrics:
-          for k in m_dict:
-            # TODO(zhouwk): support seqio.metrics.Text.
-            if isinstance(m_dict[k], seqio.metrics.Scalar):
-              v = float(m_dict[k].value)
-            else:
-              v = float(m_dict[k])
-            metric_name = f'scoring_eval/{k}'
-            logging.info('Writing summary of %s with value %.4f.', metric_name,
-                         v)
-            summary_utils.write_summary_tensor(step, metric_name, v,
-                                               summary_utils.SummaryType.SCALAR)
+        _summary_seqio_metrics(seqio_metrics, 'scoring_eval', step)
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -1000,17 +1013,10 @@ def decode_once_pmap_model(
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')
-      eval_m = inputs[split].compute_metrics(
+      seqio_metrics = inputs[split].compute_metrics(
           processed_decodes, verbose_entries=1)
       with summary_writers[split].as_default():
-        for m_dict in eval_m:
-          for k in m_dict:
-            v = float(m_dict[k])
-            metric_name = f'decoder/{k}'
-            logging.info('Writing summary of %s with value %.4f.', metric_name,
-                         v)
-            summary_utils.write_summary_tensor(step_i, metric_name, v,
-                                               summary_utils.SummaryType.SCALAR)
+        _summary_seqio_metrics(seqio_metrics, 'decoder', step)
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
@@ -1292,17 +1298,10 @@ def decode_once_spmd_model(
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')
-      eval_m = inputs[split].compute_metrics(
+      seqio_metrics = inputs[split].compute_metrics(
           processed_decodes, verbose_entries=1)
       with summary_writers[split].as_default():
-        for m_dict in eval_m:
-          for k in m_dict:
-            v = float(m_dict[k])
-            metric_name = f'decoder/{k}'
-            logging.info('Writing summary of %s with value %.4f.', metric_name,
-                         v)
-            summary_utils.write_summary_tensor(step_i, metric_name, v,
-                                               summary_utils.SummaryType.SCALAR)
+        _summary_seqio_metrics(seqio_metrics, 'decoder', step)
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')

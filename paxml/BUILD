@@ -165,6 +165,7 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:train_states",
+        # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
