@@ -213,7 +213,7 @@ class SeqIOInput(base_input.BaseInput):
   def reset(self) -> None:
     self._iter = self._dataset.as_numpy_iterator()
 
-  def ids_to_strings(self,
+  def ids_to_strings(self,  # pytype: disable=signature-mismatch
                      ids: pytypes.NpTensor,
                      lengths: pytypes.NpTensor,
                      key: Optional[str] = None) -> Sequence[str]:
