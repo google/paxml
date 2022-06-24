@@ -17,7 +17,7 @@
 from absl.testing import absltest
 from paxml import base_experiment
 from paxml import experiment_registry
-from paxml.tasks.test.params import synthetic  # pylint: disable=unused-import
+from paxml.tasks.test import synthetic  # pylint: disable=unused-import
 from praxis import layers
 
 
@@ -72,13 +72,13 @@ class ExperimentRegistryTest(absltest.TestCase):
   def test_secondary_keys(self):
     classes = set()
     classes.add(
-        experiment_registry.get('test.params.synthetic.SyntheticClassifier'))
+        experiment_registry.get('test.synthetic.SyntheticClassifier'))
     classes.add(
         experiment_registry.get(
-            'tasks.test.params.synthetic.SyntheticClassifier'))
+            'tasks.test.synthetic.SyntheticClassifier'))
     classes.add(
         experiment_registry.get(
-            'paxml.tasks.test.params.synthetic.SyntheticClassifier'))
+            'paxml.tasks.test.synthetic.SyntheticClassifier'))
     classes.add(experiment_registry.get('synthetic.SyntheticClassifier'))
     classes.add(experiment_registry.get('SyntheticClassifier'))
     # custom secondary keys

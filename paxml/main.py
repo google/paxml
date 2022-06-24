@@ -16,9 +16,9 @@
 r"""Main file for running a PAX training and evaluation loop.
 
 Example usage:
-$ bazel run -c opt --define=pax_task=lm \
-    third_party/py/paxml:main -- \
-    --exp=lm.decoder.ptb.PTBCharTransformerSmallSgd \
+$ bazel run -c opt \
+    third_party/py/paxml/tasks/lm/params:main -- \
+    --exp=bert.BertAdamL4H128 \
     --job_log_dir=/tmp/jax_log_dir/exp01 --alsologtostderr
 """
 
@@ -46,7 +46,6 @@ from paxml import trainer_lib
 from praxis import py_utils
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
-from paxml import experiment_imports  # mapped to internal
 persistence_gda_serialization = gda_serialization  # mapped to internal
 
 
@@ -141,11 +140,6 @@ flags.DEFINE_integer(
 
 def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   """Retrieves an experiment config from the global registry."""
-  try:
-    # TODO(b/232851252): remove this after pax_task is deprecated.
-    experiment_imports.import_params(experiment_name)
-  except:  # pylint: disable=bare-except
-    pass
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
     return experiment_class

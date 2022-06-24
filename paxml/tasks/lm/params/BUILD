@@ -31,7 +31,6 @@ pytype_library(
         "c4.py",
         "lm_cloud.py",
         "optimal_scaling.py",
-        "params.py",
     ],
     srcs_version = "PY3",
     tags = ["keep_dep"],

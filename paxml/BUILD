@@ -171,25 +171,6 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
-    name = "experiment_imports",
-    srcs = ["experiment_imports.py"],
-    srcs_version = "PY3",
-    deps = [
-        # Implicit lingvo.model_imports_no_params dependency.
-        "//paxml/tasks:all_params",
-    ],
-)
-
-pytype_strict_library(
-    name = "experiment_imports_no_params",
-    srcs = ["experiment_imports.py"],
-    srcs_version = "PY3",
-    deps = [
-        # Implicit lingvo.model_imports_no_params dependency.
-    ],
-)
-
-pytype_strict_library(
     name = "experiment_imports_test_helper",
     testonly = True,
     srcs = ["experiment_imports_test_helper.py"],
@@ -256,7 +237,6 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
-        "//paxml:experiment_imports_no_params",
         "//praxis:py_utils",
         # Implicit internal pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.
@@ -415,17 +395,6 @@ py_strict_test(
 )
 
 py_strict_test(
-    name = "experiment_imports_test",
-    srcs = ["experiment_imports_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
-    deps = [
-        ":experiment_imports",
-        # Implicit absl.testing.absltest.absltest dependency.
-    ],
-)
-
-py_strict_test(
     name = "experiment_registry_test",
     srcs = ["experiment_registry_test.py"],
     python_version = "PY3",
@@ -434,7 +403,7 @@ py_strict_test(
         ":base_experiment",
         ":experiment_registry",
         # Implicit absl.testing.absltest.absltest dependency.
-        "//paxml/tasks/test/params",
+        "//paxml/tasks/test:synthetic",
         "//praxis/layers",
     ],
 )

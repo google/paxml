@@ -13,4 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Description:
+#   Test model configurations.
 
+load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
+
+package(default_visibility = JAX_VISIBILITY)
+
+licenses(["notice"])
+
+py_library(
+    name = "synthetic",
+    srcs = [
+        "synthetic.py",
+    ],
+    srcs_version = "PY3",
+    tags = ["keep_dep"],
+    deps = [
+        "//paxml:base_experiment",
+        "//paxml:experiment_registry",
+        "//praxis/layers",
+    ],
+)
