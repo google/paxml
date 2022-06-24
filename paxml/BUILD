@@ -211,22 +211,22 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "io_utils",
+    srcs = ["io_utils.py"],
+    srcs_version = "PY3",
+)
+
 pytype_binary(
     name = "main",
     srcs = ["main.py"],
     python_version = "PY3",
     srcs_version = "PY3",
     deps = [
-        ":linker_opts",
+        # Please add additional dependencies to the target "main_lib" below.
+        # so that they are also included in the BUILD macro pax_targets().
         ":main_lib",
-        "//paxml:experiment_imports",
     ],
-)
-
-pytype_strict_library(
-    name = "io_utils",
-    srcs = ["io_utils.py"],
-    srcs_version = "PY3",
 )
 
 pytype_strict_library(
@@ -238,6 +238,7 @@ pytype_strict_library(
         ":base_experiment",
         ":eval_lib",
         ":experiment_registry",
+        ":linker_opts",
         ":setup_jax",
         ":train",
         ":trainer_lib",
