@@ -1016,7 +1016,7 @@ def decode_once_pmap_model(
       seqio_metrics = inputs[split].compute_metrics(
           processed_decodes, verbose_entries=1)
       with summary_writers[split].as_default():
-        _summary_seqio_metrics(seqio_metrics, 'decoder', step)
+        _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
@@ -1301,7 +1301,7 @@ def decode_once_spmd_model(
       seqio_metrics = inputs[split].compute_metrics(
           processed_decodes, verbose_entries=1)
       with summary_writers[split].as_default():
-        _summary_seqio_metrics(seqio_metrics, 'decoder', step)
+        _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
