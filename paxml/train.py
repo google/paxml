@@ -63,11 +63,13 @@ def _write_hparams_file(model_config: base_experiment.BaseExperiment,
     if not tf.io.gfile.exists(job_log_dir):
       tf.io.gfile.makedirs(job_log_dir)
     with tf.io.gfile.GFile(params_fpath, 'w') as hparams_file:
-      datasets = model_config.datasets()
-      for dataset in datasets:
+      for dataset in model_config.datasets():
         hparams_file.write(dataset.to_text())
         hparams_file.write('\n\n')
-
+      for decoder_dataset in model_config.decoder_datasets():
+        hparams_file.write('decoder dataset hparams\n')
+        hparams_file.write(decoder_dataset.to_text())
+        hparams_file.write('\n\n')
       hparams_file.write(model_config.task().to_text())
 
 
