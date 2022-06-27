@@ -286,7 +286,21 @@ def evaluate(
 
 
 class _PmapEvalRunner:
-  """A runner class that runs evaluate with pmap."""
+  """A runner class that runs evaluate with pmap.
+
+  Example usage:
+
+    runner = _PmapEvalRunner(task_p, eval_input_params)
+    # Optionally can read model states from a checkpoint_dir.
+    (replicated_model_states, train_state_global_shapes,
+     prng_key) = runner.get_model_states(prng_key, checkpoint_dir)
+    # Must call run_pmap() first.
+    runner.run_pmap(prng_key)
+
+    # Now ready to run eval for one step for all inputs.
+    metrics_list = runner.run_one_step(replicated_model_states,
+                                           eval_summary_writers)
+  """
 
   def __init__(self, task_p: base_task.BaseTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams]):
@@ -478,7 +492,22 @@ def evaluate_pmap_model(
 
 
 class _SpmdEvalRunner:
-  """A runner class that runs evaluate with spmd."""
+  """A runner class that runs evaluate with spmd.
+
+  Example usage:
+
+    runner = _SpmdEvalRunner(task_p, eval_input_params)
+    # Optionally can read model_states from a checkpoint_dir.
+    partitioned_train_state, partitioned_specs = runner.get_model_states(
+        init_key, checkpoint_dir, checkpoint_type)
+    # Must call run_pjit() first.
+    runner.run_pjit(init_key, partitioned_specs)
+
+    # Now ready to run eval for one step over all eval inputs.
+    metrics_list = runner.run_one_step(partitioned_train_state,
+                                       eval_summary_writers, eval_key,
+                                       create_gda_for_inputs)
+  """
 
   def __init__(self, task_p: base_task.BaseTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams]):
@@ -672,7 +701,7 @@ def evaluate_spmd_model(
           checkpoint_dir,
           global_mesh=runner.global_mesh,
           checkpoint_type=checkpoint_type,
-          state_specs=runner.partitioned_specs)
+          state_specs=partitioned_specs)
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
       last_checkpoint = new_checkpoint
 
