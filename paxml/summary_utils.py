@@ -52,6 +52,7 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 # Maximum number of images written to a single summary entry.
 MAX_IMAGES_PER_SUMMARY = 64
+MAX_TEXTS_PER_SUMMARY = 64
 
 
 # Copied from flax.core.FrozenDict and customized for lists.
@@ -283,6 +284,9 @@ def write_summary_tensor(step_i: int, key: str, tensor: JTensor,
     # Create a separate key for each image to avoid RPC oversize issues.
     for i in range(min(tensor.shape[0], MAX_IMAGES_PER_SUMMARY)):
       tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
+  elif base_layer.get_summary_base_type(summary_type) == SummaryType.TEXT:
+    for i in range(min(tensor.shape[0], MAX_TEXTS_PER_SUMMARY)):
+      tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
   else:
     assert False, 'Unsupported summary type: ' + str(summary_type)
 
