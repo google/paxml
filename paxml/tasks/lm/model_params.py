@@ -638,6 +638,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         num_heads = int(self.MODEL_DIMS / self.DIMS_PER_HEAD)
       else:
         assert self.MODEL_DIMS == self.NUM_HEADS * self.DIMS_PER_HEAD
+        num_heads = self.NUM_HEADS
     else:
       assert self.NUM_HEADS is not None
       num_heads = self.NUM_HEADS
