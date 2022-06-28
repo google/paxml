@@ -21,7 +21,7 @@ import functools
 import os
 import re
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from absl import logging
 import jax
@@ -51,6 +51,7 @@ instantiate = base_hyperparams.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PARAMS = base_layer.PARAMS
+SummaryWriter = tf.summary.SummaryWriter
 
 _N_STEPS_WARMUP_LOGGING = 5
 
@@ -321,6 +322,66 @@ class _PeekableInput:
     return self._peek
 
 
+class _SummaryContextManager(contextlib.ExitStack):
+  """Manage summary writers."""
+
+  _exit_callbacks = []
+
+  def __init__(self, job_log_dir: str, train_p: base_input.BaseInput,
+               eval_input_p: Sequence[base_input.BaseInput.HParams],
+               decode_input_p: Sequence[base_input.BaseInput.HParams]):
+    """Initialize context manager.
+
+    Args:
+      job_log_dir: Directory for the job logs.
+      train_p: Params for the train data pipeline.
+      eval_input_p: Optional list of params for the eval input pipelines.
+      decode_input_p: Optional list of hparams for the decode input pipelines.
+    """
+    super().__init__()
+    self.summary_base_dir = os.path.join(job_log_dir, 'summaries')
+    self.summary_train_dir = os.path.join(self.summary_base_dir, 'train')
+    self.summary_eval_dir = os.path.join(self.summary_base_dir, 'eval_train')
+    self.summary_writer = summary_utils.get_summary_writer
+    if eval_input_p:
+      self.summary_eval_test_dirs = [
+          os.path.join(self.summary_base_dir, f'eval_test_{p.name}')
+          for p in eval_input_p
+      ]
+    else:
+      self.summary_eval_test_dirs = []
+    if decode_input_p:
+      self.summary_decode_dirs = [
+          os.path.join(self.summary_base_dir, f'decode_test_{p.name}')
+          for p in decode_input_p
+      ]
+    else:
+      self.summary_decode_dirs = []
+    self.eval_skip_train = False
+    if train_p.eval_skip_train: # pytype: disable=attribute-error  # enable-nested-classes
+      self.eval_skip_train = True
+
+  def __enter__(
+      self
+  ) -> Tuple[SummaryWriter, SummaryWriter, SummaryWriter, SummaryWriter]:
+    self.train_summary_writer = self.enter_context(
+        self.summary_writer(self.summary_train_dir))
+    self.eval_summary_writer = None
+    if not self.eval_skip_train:
+      self.eval_summary_writer = self.enter_context(
+          self.summary_writer(self.summary_eval_dir))
+    self.eval_test_summary_writers = [
+        self.enter_context(self.summary_writer(d))
+        for d in self.summary_eval_test_dirs
+    ]
+    self.decode_summary_writers = [
+        self.enter_context(self.summary_writer(d))
+        for d in self.summary_decode_dirs
+    ]
+    return (self.train_summary_writer, self.eval_summary_writer,
+            self.eval_test_summary_writers, self.decode_summary_writers)
+
+
 def train_and_evaluate_pmap(
     task_p: base_task.BaseTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
@@ -478,15 +539,7 @@ def train_and_evaluate_pmap(
       static_broadcasted_argnums=(3,))
 
   logging.info('Training loop starting...')
-  summary_base_dir = os.path.join(job_log_dir, 'summaries')
-  summary_train_dir = os.path.join(summary_base_dir, 'train')
-  summary_eval_dir = os.path.join(summary_base_dir, 'eval_train')
-  summary_writer = summary_utils.get_summary_writer
   if eval_input_p:
-    summary_test_split_dirs = [
-        os.path.join(summary_base_dir, f'eval_test_{p.name}')
-        for p in eval_input_p
-    ]
     # We either run p.eval_loop_num_batches steps or one epoch (when supported
     # by a resettable input) per eval loop during training. When
     # p.reset_for_eval is set to True, we run the eval loop until
@@ -497,29 +550,12 @@ def train_and_evaluate_pmap(
         -1 if p.reset_for_eval else p.eval_loop_num_batches
         for p in eval_input_p
     ]
-  else:
-    summary_test_split_dirs = []
 
-  with contextlib.ExitStack() as exit_stack:
-    train_summary_writer = exit_stack.enter_context(
-        summary_writer(summary_train_dir))
-    eval_summary_writer = (
-        exit_stack.enter_context(summary_writer(summary_eval_dir))
-        if not train_p.eval_skip_train else None)
-    eval_test_summary_writers = [
-        exit_stack.enter_context(summary_writer(d))
-        for d in summary_test_split_dirs
-    ]
-    if decode_input_p:
-      summary_decode_dirs = [
-          os.path.join(summary_base_dir, f'decode_test_{p.name}')
-          for p in decode_input_p
-      ]
-      decode_summary_writers = [
-          exit_stack.enter_context(summary_utils.get_summary_writer(d))
-          for d in summary_decode_dirs
-      ]
-
+  with _SummaryContextManager(job_log_dir, train_p, eval_input_p,
+                              decode_input_p) as (train_summary_writer,
+                                                  eval_summary_writer,
+                                                  eval_test_summary_writers,
+                                                  decode_summary_writers):
     summary_utils.write_model_structure(
         train_summary_writer, replicated_model_states, is_vars_replicated=True)
     summary_utils.write_total_num_params(train_summary_writer, total_num_params)
@@ -1006,15 +1042,7 @@ def train_and_evaluate_spmd_model(
     train_input_pipeline = _PeekableInput(instantiate(train_input_p))
 
     logging.info('Training loop starting...')
-    summary_base_dir = os.path.join(job_log_dir, 'summaries')
-    summary_train_dir = os.path.join(summary_base_dir, 'train')
-    summary_eval_dir = os.path.join(summary_base_dir, 'eval_train')
-    summary_writer = summary_utils.get_summary_writer
     if eval_input_p:
-      summary_eval_test_dirs = [
-          os.path.join(summary_base_dir, f'eval_test_{p.name}')
-          for p in eval_input_p
-      ]
       # We either run p.eval_loop_num_batches steps or one epoch (when supported
       # by a resettable input) per eval loop during training. When
       # p.reset_for_eval is set to True, we run the eval loop until
@@ -1025,29 +1053,12 @@ def train_and_evaluate_spmd_model(
           -1 if p.reset_for_eval else p.eval_loop_num_batches
           for p in eval_input_p
       ]
-    else:
-      summary_eval_test_dirs = []
 
-    with contextlib.ExitStack() as exit_stack:
-      train_summary_writer = exit_stack.enter_context(
-          summary_writer(summary_train_dir))
-      eval_summary_writer = (
-          exit_stack.enter_context(summary_writer(summary_eval_dir))
-          if not train_p.eval_skip_train else None)
-      eval_test_summary_writers = [
-          exit_stack.enter_context(summary_writer(d))
-          for d in summary_eval_test_dirs
-      ]
-      if decode_input_p:
-        summary_decode_dirs = [
-            os.path.join(summary_base_dir, f'decode_test_{p.name}')
-            for p in decode_input_p
-        ]
-        decode_summary_writers = [
-            exit_stack.enter_context(summary_utils.get_summary_writer(d))
-            for d in summary_decode_dirs
-        ]
-
+    with _SummaryContextManager(job_log_dir, train_p, eval_input_p,
+                                decode_input_p) as (train_summary_writer,
+                                                    eval_summary_writer,
+                                                    eval_test_summary_writers,
+                                                    decode_summary_writers):
       # This only prints the view from the first host machine.
       summary_utils.write_model_structure(
           train_summary_writer,
