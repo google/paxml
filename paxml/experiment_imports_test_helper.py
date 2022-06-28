@@ -41,7 +41,8 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     task = instantiate(task_p)
     self.assertIsInstance(task, base_task.BaseTask)
 
-    dataset_splits = experiment_params.datasets()
+    dataset_splits = (experiment_params.datasets()
+                      + experiment_params.decoder_datasets())
     # Registered experiment configurations must have at least a dataset split.
     self.assertNotEmpty(dataset_splits)
     for s in dataset_splits:
