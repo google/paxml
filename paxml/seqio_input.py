@@ -114,15 +114,14 @@ class SeqIOInput(base_input.BaseInput):
          expected by the model, e.g. instead of "targets" we have "ids" or
          "labels" or "paddings". This also implements any necessary padding or
          packing on the data.
-       shuffle: Whether to shuffle the data. Note that None means this field is
-         set automatically: True for and only for non-deterministic training
-         data, otherwise False. Users can override this by setting this
+       shuffle: Whether to shuffle the data. Note that None means this feature
+         is decided automatically: True for and only for non-deterministic
+         training data, otherwise False. Users can override this by setting this
          explicitly.
-       repeat: Whether to repeat the data. Note that None means this field is
-         set
-         automatically: True for and only for non-deterministic training data,
-           otherwise False. Users can override this by setting this field
-           explicitly.
+       repeat: Whether to repeat the data. Note that None means this feature is
+         decided automatically: True for and only for non-deterministic training
+         data, otherwise False. Users can override this by setting this field
+         explicitly.
        use_cached: Whether to read from the cached directory, if supported by
          the underlying SeqIO task/mixture. Users can set to False to test out
          data changes before the cache is applied.
@@ -175,10 +174,6 @@ class SeqIOInput(base_input.BaseInput):
       logging.warn(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
-    if p.shuffle is None:
-      p.shuffle = (p.is_training and not p.deterministic_input)
-    if p.repeat is None:
-      p.repeat = (p.is_training and not p.deterministic_input)
     self._mixture_or_task = seqio.get_mixture_or_task(p.mixture_name)
     shard_info = seqio.ShardInfo(
         index=p.infeed_host_index, num_shards=p.num_infeed_hosts)
@@ -186,6 +181,27 @@ class SeqIOInput(base_input.BaseInput):
                  shard_info.index, shard_info.num_shards)
     self._shard_info = shard_info
     self._validate_deterministic()
+
+  @property
+  def is_deterministic(self) -> bool:
+    """Indicates whether this SeqIOInput is deterministic or not."""
+    return False
+
+  @property
+  def shuffle(self) -> bool:
+    """Indicates whether this SeqIOInput shuffles the data or not."""
+    p = self.hparams
+    if p.shuffle is None:
+      return p.is_training and not self.is_deterministic
+    return p.shuffle
+
+  @property
+  def repeat(self) -> bool:
+    """Indicates whether this SeqIOInput repeats the data or not."""
+    p = self.hparams
+    if p.repeat is None:
+      return p.is_training and not self.is_deterministic
+    return p.repeat
 
   def _get_dataset(self):
     p = self.hparams
@@ -196,8 +212,8 @@ class SeqIOInput(base_input.BaseInput):
         mixture_or_task_name=p.mixture_name,
         task_feature_lengths=p.task_feature_lengths,
         dataset_split=p.split_name,
-        shuffle=p.shuffle,
-        num_epochs=-1 if p.repeat else 1,
+        shuffle=self.shuffle,
+        num_epochs=-1 if self.repeat else 1,
         feature_converter=p.feature_converter,
         shard_info=self._shard_info,
         use_cached=p.use_cached,
