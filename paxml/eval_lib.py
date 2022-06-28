@@ -219,7 +219,7 @@ def run_eval_loop_over_test_splits(
         hasattr(model_inputs[split], 'compute_metrics_eval') and
         jax.process_index() == 0):
       seqio_metrics = model_inputs[split].compute_metrics_eval(
-          per_example_scores)
+          per_example_scores, verbose_entries=1)
       logging.info('Eval metrics from seqio: %s.', seqio_metrics)
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'scoring_eval', step)

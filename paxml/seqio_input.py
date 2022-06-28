@@ -403,7 +403,9 @@ class SeqIOInput(base_input.BaseInput):
     return metrics
 
   def compute_metrics_eval(
-      self, eval_outputs: Sequence[Dict[str, py_utils.JTensor]]
+      self,
+      eval_outputs: Sequence[Dict[str, py_utils.JTensor]],
+      verbose_entries: int = 0
   ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
 
@@ -415,6 +417,8 @@ class SeqIOInput(base_input.BaseInput):
         `scores`. `labels` is int32 token ids and should be convertible to shape
         [B, T], and `scores` is float and should be convertible to shape [B],
         where B is batch size and T is sequence length.
+      verbose_entries: int, how many entries to log for inspection and sanity
+        checking.
 
     Returns:
       The results of score_metric_fns computed on the eval outputs.
@@ -458,15 +462,23 @@ class SeqIOInput(base_input.BaseInput):
 
     targets_list = []
     scores_list = []
+    verbose_entries_idx = 0
     for k in targets:
       if k not in answers:
         raise ValueError(f'Example not found in eval output: {targets[k][0]}')
       target = targets[k]
       score = answers[k]
       for e in targets[k]:
-        targets_list.append(
-            task.postprocess_fn(target, example=e, is_target=True))
+        target_post = task.postprocess_fn(target, example=e, is_target=True)
+        targets_list.append(target_post)
         scores_list.append(score)
+        if verbose_entries_idx < verbose_entries:
+          logging.info(
+              'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
+              'is_correct=%s\ntarget=%s\nscore=%s\n\n',
+              e['inputs_pretokenized'], e['targets_pretokenized'],
+              e['is_correct'], target_post, score)
+          verbose_entries_idx += 1
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
