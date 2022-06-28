@@ -461,12 +461,12 @@ class SeqIOInput(base_input.BaseInput):
     for k in targets:
       if k not in answers:
         raise ValueError(f'Example not found in eval output: {targets[k][0]}')
+      target = targets[k]
       score = answers[k]
       for e in targets[k]:
         targets_list.append(
-            task.postprocess_fn(score, example=e, is_target=True))
-        scores_list.append(
-            task.postprocess_fn(score, example=e, is_target=False))
+            task.postprocess_fn(target, example=e, is_target=True))
+        scores_list.append(score)
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
