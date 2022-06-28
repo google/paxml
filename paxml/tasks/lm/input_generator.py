@@ -351,6 +351,7 @@ class TextInput(base_input.BaseInput):
   def __init__(self, hparams: TextInput.HParams) -> None:
     super().__init__(hparams)
     self.tokenizer = hparams.tokenizer.Instantiate()
+    self._num_samples = None
     self._dataset = self._gen_dataset()
     self._iterator = iter(self._dataset)
 
@@ -366,11 +367,14 @@ class TextInput(base_input.BaseInput):
   def num_samples(self):
     """Number of samples contained in the dataset."""
     p = self.hparams
+    if self._num_samples is not None:
+      return self._num_samples
     if p.num_samples > 0:
-      return p.num_samples
-    lines = tf.data.TextLineDataset(p.input_file)
-    p.num_samples = len(list(lines.as_numpy_iterator()))
-    return p.num_samples
+      self._num_samples = p.num_samples
+    else:
+      lines = tf.data.TextLineDataset(p.input_file)
+      self._num_samples = len(list(lines.as_numpy_iterator()))
+    return self._num_samples
 
   def _num_to_truncate(self):
     """Smallest multiple of global batch size that covers the entire data."""
