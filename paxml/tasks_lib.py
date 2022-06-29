@@ -60,6 +60,11 @@ RegexStr = str
 instantiate = base_hyperparams.instantiate
 
 
+# Shorthand for a loading rule that loads everything as is.
+# e.g. load_rules = [LOAD_ALL]
+LOAD_ALL = ('(.*)', '{}')
+
+
 class CheckpointLoadingRules(NamedTuple):
   """Utility class for representing how to read the checkpoint.
 
@@ -109,7 +114,8 @@ class CheckpointLoadingRules(NamedTuple):
       list, if the model to be trained has a variable that matches to the regex
       `pattern`, the initial value of that variable is overwritten by a variable
       with name `source.format(*match_object.groups())` in the external
-      checkpoint.
+      checkpoint. In particular, the constant tuple LOAD_ALL is one rule that
+      load everything as is.
     ignore_rules: If the variable name matches with one of the regexs in the
       list, the checkpoint variables are not used even if the name matches with
       `load_rules`.
