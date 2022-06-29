@@ -233,8 +233,7 @@ class SingleTask(base_task.BaseTask):
     uid = itertools.count()
 
     def _instantiate(p: learners_lib.Learner.HParams) -> learners_lib.Learner:
-      p = copy.deepcopy(p)
-      p.name = 'learner_%d' % next(uid)
+      p = p.clone().set(name='learner_%d' % next(uid))
       return instantiate(p)
 
     self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
