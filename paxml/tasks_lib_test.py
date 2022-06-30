@@ -221,12 +221,14 @@ class BaseTaskTest(test_utils.TestCase):
     shallow_state = replicated_mdl_states.mdl_vars[PARAMS]['var01']
 
     # Train the model for one single step.
-    for _ in range(10):
+    for step in range(10):
       self.assertAllClose(shallow_state,
                           find_ema(replicated_mdl_states)[PARAMS]['var01'])
 
       param = replicated_mdl_states.mdl_vars[PARAMS]['var01']
-      shallow_state = decay * shallow_state + (1. - decay) * param
+
+      decay_rate = min(decay, (1 + step) / (10 + step))
+      shallow_state = decay_rate * shallow_state + (1. - decay_rate) * param
 
       (replicated_mdl_states, _, _, _,
        _) = p_train_step(replicated_mdl_states, train_prng_key, mdl_inputs)
