@@ -20,7 +20,6 @@ the `tasks` Python submodule.
 """
 from __future__ import annotations
 
-import copy
 import dataclasses
 import itertools
 import re
@@ -372,18 +371,18 @@ class SingleTask(base_task.BaseTask):
       tf.nest.assert_same_structure(model_state_partition_specs,
                                     unpadded_shapes)
 
-      def _maybe_pad(shape_dtype, pspec):
-        if py_utils.is_optax_masked_node(shape_dtype):
-          return pspec
-        unpadded_shape = shape_dtype.shape
-        paddings = py_utils.get_uneven_sharding_paddings(
-            pspec, unpadded_shape, mesh_shape, mesh_axis_names)
-        padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
-        return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
+    def _maybe_pad(shape_dtype, pspec):
+      if py_utils.is_optax_masked_node(shape_dtype):
+        return shape_dtype
+      unpadded_shape = shape_dtype.shape
+      paddings = py_utils.get_uneven_sharding_paddings(
+          pspec, unpadded_shape, mesh_shape, mesh_axis_names)
+      padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
+      return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
 
-      padded_shapes = jax.tree_map(_maybe_pad, unpadded_shapes,
-                                   model_state_partition_specs,
-                                   is_leaf=py_utils.is_optax_masked_node)
+    padded_shapes = jax.tree_map(_maybe_pad, unpadded_shapes,
+                                 model_state_partition_specs,
+                                 is_leaf=py_utils.is_optax_masked_node)
     return padded_shapes
 
   def create_train_state_unpadded_shapes(self,
@@ -452,18 +451,21 @@ class SingleTask(base_task.BaseTask):
           opt_var_weight_hparams,
           mesh_shape=mesh_shape,
           device_axis_names=p.model.mesh_axis_names)
-      # If we have a double nesting within the partition specs, then it implies
-      # that there is a sharded_chain using MultiOptimizer, in this case optax
-      # expects the inner tuple to be encapsulated within a MaskedState, in
-      # order for us to use jax.tree_map of the partition specs with the
-      # optimizer states.
-      if isinstance(opt_var_partition_specs[0], tuple):
-        if isinstance(opt_var_partition_specs[0][0], tuple):
-          opt_states = []
-          for opt in opt_var_partition_specs[0]:
-            opt_states.append(optax.MaskedState(inner_state=opt))
-          opt_states = tuple(opt_states)
-          opt_var_partition_specs[0] = opt_states
+
+      # Note that due to the double nesting of sharded chain we need to un-mask
+      # the outer MaskedState() if present. If this is only a single optimizer
+      # the tree_map() will go through with a no-op.
+      def _is_instance_masked_state(x):
+        return isinstance(x, optax.MaskedState)
+
+      def _maybe_unmask_outer_masked_state(x):
+        if _is_instance_masked_state(x):
+          return x.inner_state
+        return x
+
+      opt_var_partition_specs = jax.tree_map(_maybe_unmask_outer_masked_state,
+                                             opt_var_partition_specs,
+                                             is_leaf=_is_instance_masked_state)
     return TrainState(
         step=step_partition_spec,
         mdl_vars=var_partition_specs,
