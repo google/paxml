@@ -963,12 +963,6 @@ def decode_once_pmap_model(
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_tensors)
 
-    def _maybe_to_float32(x):
-      if x.dtype == jnp.bfloat16:
-        return x.astype(jnp.float32)
-      return x
-
-    aggregated_summaries = jax.tree_map(_maybe_to_float32, aggregated_summaries)
     return metrics, out, aggregated_summaries
 
   # As an example, suppose the output leaf from trainer_lib.decoder_step()
@@ -1300,12 +1294,6 @@ def decode_once_spmd_model(
       summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
       del updated_vars  # release GDA memory allocations
 
-      def _maybe_to_float32(x):
-        if x.dtype == jnp.bfloat16:
-          return x.astype(jnp.float32)
-        return x
-
-      summary_tensors = jax.tree_map(_maybe_to_float32, summary_tensors)
       summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
           summary_tensors)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):

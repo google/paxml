@@ -128,8 +128,13 @@ def initialize_replicate_model_state(
 def _maybe_to_bfloat16(x: JTensor) -> JTensor:
   if x.dtype == jnp.float32:
     return x.astype(jnp.bfloat16)
-  else:
-    return x
+  return x
+
+
+def _maybe_to_float32(x: JTensor) -> JTensor:
+  if x.dtype == jnp.bfloat16:
+    return x.astype(jnp.float32)
+  return x
 
 
 # TODO(pax): maybe move to metric_utils.py.
@@ -543,12 +548,6 @@ def _eval_step_single_learner_with_model(
     del metrics
     del summary_tensors
 
-  def _maybe_to_float32(x):
-    if x.dtype == jnp.bfloat16:
-      return x.astype(jnp.float32)
-    else:
-      return x
-
   if fprop_dtype == jnp.bfloat16:
     (mean_loss, mean_metrics,
      per_example_out, aggregated_summaries) = jax.tree_map(
@@ -625,6 +624,12 @@ def decode_step(
     # to remove it from output. Note MLP decoder don't have DECODE_CACHE.
     if DECODE_CACHE in updated_vars:
       del updated_vars[DECODE_CACHE]
+
+    summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+    if summary_tensors:
+      summary_tensors = jax.tree_map(_maybe_to_float32, summary_tensors)
+      updated_vars[base_layer.SUMMARIES] = summary_tensors
+
     return outputs, updated_vars
 
 
