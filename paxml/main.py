@@ -184,7 +184,7 @@ def run_experiment(
       if FLAGS.maybe_use_persistence_checkpointing:
         async_ckpt_manager_cls = (
             persistence_gda_serialization.GlobalAsyncCheckpointManager)
-      async_ckpt_manager = async_ckpt_manager_cls()
+      async_ckpt_manager = async_ckpt_manager_cls(timeout_secs=600)
     else:
       async_ckpt_manager = None
 
