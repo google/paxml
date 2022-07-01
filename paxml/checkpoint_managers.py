@@ -22,6 +22,7 @@ from typing import Optional
 
 from absl import logging
 import jax
+from jax.experimental import multihost_utils
 from paxml import checkpoint_pb2
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
@@ -146,6 +147,11 @@ class CheckpointManager:
 
   def should_save(self, global_step_id: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
+    # Whether to save an on-demand checkpoint due to preemption
+    if (jax.config.jax_coordination_service and
+        multihost_utils.reached_preemption_sync_point(global_step_id)):
+      return True
+    # Whether to save a periodic checkpoint
     return (self._last_saved_checkpoint_step is None or
             global_step_id - self._last_saved_checkpoint_step >=
             self._save_interval_steps)

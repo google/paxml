@@ -22,6 +22,8 @@ from unittest import mock
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
+import jax
+from jax.experimental import multihost_utils
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
 import tensorflow.compat.v2 as tf
@@ -475,6 +477,67 @@ class CheckpointManagerTest(parameterized.TestCase):
     expected_proto = _create_reference_checkpoint_history(
         config_name, root_dir, checkpoint_type, saved_steps_2,
         saved_checkpoint_datetimes_2)
+    self.assertCheckpointsFileProto(checkpoints_filename, expected_proto)
+
+  @parameterized.named_parameters(
+      {
+          'testcase_name': 'flax',
+          'checkpoint_type': CheckpointType.CHECKPOINT_FLAX
+      }, {
+          'testcase_name': 'persistence',
+          'checkpoint_type': CheckpointType.CHECKPOINT_PERSISTENCE
+      }, {
+          'testcase_name': 'gda',
+          'checkpoint_type': CheckpointType.CHECKPOINT_GDA
+      })
+  def test_save_on_preemption(self, checkpoint_type):
+    config_name = 'test.test_module.ConfigName'
+    root_dir = os.path.join(FLAGS.test_tmpdir, 'test7', str(checkpoint_type),
+                            'checkpoints')
+    tf.io.gfile.makedirs(root_dir)
+    current_datetime = datetime.datetime.now()
+    zero_datetime = datetime.datetime.fromtimestamp(0)
+    with mock.patch('datetime.datetime', autospec=True) as dt:
+      dt.utcnow.return_value = current_datetime
+      dt.fromtimestamp.return_value = zero_datetime
+      checkpoint_manager = checkpoint_managers.CheckpointManager(
+          config_name=config_name,
+          root_dir=root_dir,
+          checkpoint_type=checkpoint_type,
+          save_interval_steps=1000,
+          max_to_keep=None)
+
+    checkpoint_datetimes = []
+    save_step = 3
+    jax.config.update('jax_coordination_service', True)
+    multihost_utils.reached_preemption_sync_point = (
+        lambda step_id: step_id == save_step)
+
+    for step in range(save_step + 1):
+      with mock.patch('datetime.datetime', autospec=True) as dt:
+        dt.utcnow.return_value = current_datetime
+        dt.fromtimestamp.return_value = zero_datetime
+        if checkpoint_manager.should_save(step):
+          _create_dummy_checkpoint(root_dir, step, checkpoint_type)
+          checkpoint_manager.save_metadata(step)
+        checkpoint_datetimes.append(current_datetime)
+        current_datetime += datetime.timedelta(hours=1)
+
+    saved_steps = [0, save_step]
+    saved_checkpoint_datetimes = [
+        checkpoint_datetimes[0], checkpoint_datetimes[save_step]
+    ]
+    filenames = [
+        os.path.basename(v) for v in tf.io.gfile.glob(
+            os.path.join(root_dir, f'{CHECKPOINT_PREFIX}*'))
+    ]
+    self.assertSameElements(
+        filenames, _base_checkpoint_filenames(saved_steps, checkpoint_type))
+    checkpoints_filename = os.path.join(root_dir,
+                                        checkpoint_managers.CHECKPOINT_BASENAME)
+    expected_proto = _create_reference_checkpoint_history(
+        config_name, root_dir, checkpoint_type, saved_steps,
+        saved_checkpoint_datetimes)
     self.assertCheckpointsFileProto(checkpoints_filename, expected_proto)
 
 
