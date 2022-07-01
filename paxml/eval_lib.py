@@ -292,7 +292,7 @@ class _PmapEvalRunner:
 
     (replicated_model_states, train_state_global_shapes,
      prng_key) = _PmapEvalRunner.get_model_states(
-        jax_task, prng_key, checkpoint_dir, use_ema)
+        jax_task, prng_key, checkpoint_dir, use_ema, track_metric)
 
     runner = _PmapEvalRunner(task_p, eval_input_params, jax_task, prng_key)
     metrics_list = runner.run_one_step(replicated_model_states,
@@ -320,8 +320,9 @@ class _PmapEvalRunner:
   @classmethod
   def get_model_states(
       self, jax_task: tasks_lib.SingleTask, prng_key: PRNGKey,
-      checkpoint_dir: str, checkpoint_step: Optional[int], use_ema: bool
-  ) -> Tuple[train_states.TrainState, train_states.TrainState, PRNGKey]:
+      checkpoint_dir: str, checkpoint_step: Optional[int], use_ema: bool,
+      track_metric: bool) -> Tuple[
+          train_states.TrainState, train_states.TrainState, PRNGKey]:
     """Returns the (replicated) model states."""
     prng_key, init_key = jax.random.split(prng_key)
 
@@ -339,7 +340,7 @@ class _PmapEvalRunner:
     if model_states is None:
       model_states = trainer_lib.initialize_model_state(
           jax_task, init_key, discard_opt_states=not use_ema)
-    elif not use_ema:
+    elif not use_ema and not track_metric:
       model_states = trim_opt_states(model_states)
     if use_ema:
       model_states = extract_ema(model_states)
@@ -436,7 +437,8 @@ def evaluate_pmap_model(
        prng_key,
        checkpoint_dir,
        checkpoint_step=None,
-       use_ema=use_ema)
+       use_ema=use_ema,
+       track_metric=False)
 
   runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, prng_key)
   logging.info('Evaluation loop starting...')
@@ -823,6 +825,7 @@ def decode_pmap_model(
       job_log_dir, 'checkpoints')
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
+  track_metric = bool(task_p.track_decoder_metric)  # pytype: disable=attribute-error
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
@@ -836,7 +839,8 @@ def decode_pmap_model(
        prng_key,
        restore_checkpoint_dir,
        checkpoint_step=restore_checkpoint_step,
-       use_ema=use_ema)
+       use_ema=use_ema,
+       track_metric=track_metric)
   prng_key, decode_key = jax.random.split(prng_key)
   prng_seed = jax.random.split(decode_key, num=jax.local_device_count())
   logging.info('decoder prng_seed: %s', prng_seed)
@@ -886,7 +890,7 @@ def decode_pmap_model(
                                                     restore_checkpoint_dir)
       if use_ema:
         model_states = extract_ema(model_states)
-      else:
+      elif not track_metric:
         model_states = trim_opt_states(model_states)
       replicated_model_states = trainer_lib.replicate_model_state(model_states)
       last_checkpoint = new_checkpoint
