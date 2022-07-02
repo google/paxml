@@ -37,12 +37,15 @@ pytype_library(
     deps = [
         # Implicit jax dependency.
         "//paxml:base_experiment",
-        "//paxml:base_task",
         "//paxml:experiment_registry",
         "//paxml:seqio_input",
+        "//paxml:tasks_lib",
         "//paxml/tasks/lm:input_generator",
         "//paxml/tasks/lm:model_params",
         "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:optimizers",
+        "//praxis:schedules",
         "//praxis/layers",
         # Implicit seqio dependency.
         # Implicit t5.data dependency.

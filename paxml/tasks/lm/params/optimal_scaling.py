@@ -15,8 +15,8 @@
 
 """Decoder-only language model configurations with Chinchilla-like scaling."""
 
-from paxml import base_task
 from paxml import experiment_registry
+from paxml import tasks_lib
 from paxml.tasks.lm.params.lm_cloud import LmCloudSpmd
 from praxis import layers
 
@@ -30,7 +30,7 @@ class OptimalScaling(LmCloudSpmd):
   PERCORE_BATCH_SIZE = None
   NUM_LAYERS = None
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     # pylint: disable=invalid-name
     self.MODEL_DIMS = self.NUM_LAYERS * 128
     self.HIDDEN_DIMS = self.MODEL_DIMS * 4

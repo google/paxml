@@ -21,6 +21,7 @@ import functools
 import os
 import re
 import time
+import typing
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from absl import logging
@@ -31,11 +32,11 @@ from jax.experimental.gda_serialization import serialization as gda_serializatio
 import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
-from paxml import base_task
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
 from paxml import eval_lib
 from paxml import summary_utils
+from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
@@ -162,12 +163,12 @@ def _parse_duration(
 
 
 def _create_checkpoint_manager(
-    task_p: base_task.BaseTask.HParams, job_log_dir: str,
+    task_p: tasks_lib.SingleTask.HParams, job_log_dir: str,
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str]) -> checkpoint_managers.CheckpointManager:
   """Creates a checkpoint manager."""
   checkpoint_dir = _checkpoint_dir(job_log_dir)
-  train_p = task_p.train  # pytype: disable=attribute-error  # enable-nested-classes
+  train_p = task_p.train
   max_to_keep = train_p.save_max_to_keep
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
@@ -193,12 +194,12 @@ def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
 
 def _should_early_stop_training(
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-    task_p: base_task.BaseTask.HParams, step_i: int,
+    task_p: tasks_lib.SingleTask.HParams, step_i: int,
     metrics: Optional[Dict[str, trainer_lib.MetricDict]]) -> bool:
   """Returns True if current training should be stopped."""
   if early_stopping_fn is None:
     return False
-  train_p = task_p.train  # pytype: disable=attribute-error  # enable-nested-classes
+  train_p = task_p.train
   if metrics is None:
     is_last_ckpt = step_i == train_p.num_train_steps
   else:
@@ -247,6 +248,7 @@ def train_and_evaluate(
   """
   _write_hparams_file(experiment_config, job_log_dir)
   task_p = experiment_config.task()
+  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
 
   input_p = experiment_config.datasets()
   # Note that we modify input params below with runtime information, therefore
@@ -270,8 +272,8 @@ def train_and_evaluate(
   if eval_on_test:
     eval_input_p = [v for v in input_p if not v.is_training]
 
-  if (run_decode and task_p.train.decode_interval_steps is not None and  # pytype: disable=attribute-error  # enable-nested-classes
-      task_p.train.decode_interval_steps > 0):  # pytype: disable=attribute-error  # enable-nested-classes
+  if (run_decode and task_p.train.decode_interval_steps is not None and
+      task_p.train.decode_interval_steps > 0):
     decode_input_p = experiment_config.decoder_datasets()
   else:
     decode_input_p = []
@@ -287,7 +289,7 @@ def train_and_evaluate(
                                                   checkpoint_type,
                                                   checkpoint_todelete_subdir)
 
-  if task_p.model.ici_mesh_shape is not None:  # pytype: disable=attribute-error  # enable-nested-classes
+  if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
                                   checkpoint_manager, checkpoint_type,
                                   eval_input_p, decode_input_p,
@@ -358,7 +360,7 @@ class _SummaryContextManager(contextlib.ExitStack):
     else:
       self.summary_decode_dirs = []
     self.eval_skip_train = False
-    if train_p.eval_skip_train: # pytype: disable=attribute-error  # enable-nested-classes
+    if train_p.eval_skip_train:  # pytype: disable=attribute-error
       self.eval_skip_train = True
 
   def __enter__(
@@ -383,7 +385,7 @@ class _SummaryContextManager(contextlib.ExitStack):
 
 
 def train_and_evaluate_pmap(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: Optional[str],
     checkpoint_manager: checkpoint_managers.CheckpointManager,
@@ -475,7 +477,7 @@ def train_and_evaluate_pmap(
   total_num_params = py_utils.total_num_vars(model_states.mdl_vars)
   replicated_model_states = trainer_lib.replicate_model_state(model_states)
 
-  train_p = task_p.train  # pytype: disable=attribute-error  # enable-nested-classes
+  train_p = task_p.train
   initial_global_step = int(jax.device_get(replicated_model_states.step)[0])
   logging.info('Model initial global_step=%d', initial_global_step)
   _update_latest_model_step(train_input_p, initial_global_step,
@@ -494,7 +496,7 @@ def train_and_evaluate_pmap(
   prng_key = jax.random.fold_in(prng_key, jax.process_index())
   logging.info('root prng_key: %s', prng_key)
 
-  fprop_dtype = task_p.model.fprop_dtype  # pytype: disable=attribute-error  # enable-nested-classes
+  fprop_dtype = task_p.model.fprop_dtype
 
   def train_step(states, prng_key, inputs, model_name):
     """Train model for a single step."""
@@ -828,7 +830,7 @@ def _adjust_input_params_for_small_batch(
 
 
 def train_and_evaluate_spmd_model(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: Optional[str],
     checkpoint_manager: checkpoint_managers.CheckpointManager,
@@ -862,7 +864,7 @@ def train_and_evaluate_spmd_model(
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
   """
   logging.info('Using SPMD sharding for model parallelism.')
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p = task_p.model
   local_device_count = jax.local_device_count()
 
   if eval_input_p:
@@ -1032,7 +1034,7 @@ def train_and_evaluate_spmd_model(
     if multi_host_checkpointing:
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
 
-    train_p = task_p.train  # pytype: disable=attribute-error  # enable-nested-classes
+    train_p = task_p.train
     initial_global_step = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))

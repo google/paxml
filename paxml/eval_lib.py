@@ -21,6 +21,7 @@ import functools
 import os
 import sys
 import time
+import typing
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import flags
@@ -33,7 +34,6 @@ import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
-from paxml import base_task
 from paxml import checkpoint_pb2
 from paxml import metric_tracker_utils as trk_utils
 from paxml import summary_utils
@@ -65,9 +65,9 @@ instantiate = base_hyperparams.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 
-def has_ema(task_p: base_task.BaseTask.HParams) -> bool:
+def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
   """Determines whether ema is used or not."""
-  return task_p.train.learner.optimizer.ema_decay > 0.  # pytype: disable=attribute-error  # enable-nested-classes
+  return task_p.train.learner.optimizer.ema_decay > 0.
 
 
 def extract_ema(
@@ -266,7 +266,8 @@ def evaluate(
       (metrics_by_dataset, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   task_p = experiment_config.task()
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  model_p = task_p.model
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
   if not eval_input_p:
     logging.info('No eval datasets defined. Returning early.')
@@ -299,7 +300,7 @@ class _PmapEvalRunner:
                                        eval_summary_writers)
   """
 
-  def __init__(self, task_p: base_task.BaseTask.HParams,
+  def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
                jax_task: tasks_lib.SingleTask, pmap_prng_key: PRNGKey):
     self._eval_input_p = eval_input_p
@@ -410,7 +411,7 @@ class _PmapEvalRunner:
 
 
 def evaluate_pmap_model(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
@@ -462,15 +463,15 @@ def evaluate_pmap_model(
       if last_checkpoint is not None:
         last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
             last_checkpoint)
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps  # pytype: disable=attribute-error  # enable-nested-classes
+        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if early_stopping_fn is not None:
           metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
           if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
             logging.info(
                 'Evaluation is early stopped at checkpoint step %d by the'
                 'tuner, while the num_train_steps is %d', last_ckpt_step,
-                task_p.train.num_train_steps)  # pytype: disable=attribute-error  # enable-nested-classes
+                task_p.train.num_train_steps)
             break
         if is_last_ckpt:
           break
@@ -510,7 +511,7 @@ class _SpmdEvalRunner:
                                        create_gda_for_inputs)
   """
 
-  def __init__(self, task_p: base_task.BaseTask.HParams,
+  def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
                jax_task: tasks_lib.SingleTask, global_mesh: maps.Mesh,
                init_key: PRNGKey, partitioned_specs: train_states.TrainState):
@@ -616,7 +617,7 @@ class _SpmdEvalRunner:
 
 
 def evaluate_spmd_model(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
     checkpoint_type: CheckpointType,
@@ -636,7 +637,7 @@ def evaluate_spmd_model(
   logging.info('Using SPMD sharding for model parallelism.')
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
 
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
                                             model_p.dcn_mesh_shape)
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
@@ -684,15 +685,15 @@ def evaluate_spmd_model(
       if last_checkpoint is not None:
         last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
             last_checkpoint)
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps  # pytype: disable=attribute-error  # enable-nested-classes
+        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if early_stopping_fn is not None:
           metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
           if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
             logging.info(
                 'Evaluation is early stopped at checkpoint step %d by the'
                 'tuner, while the num_train_steps is %d', last_ckpt_step,
-                task_p.train.num_train_steps)  # pytype: disable=attribute-error  # enable-nested-classes
+                task_p.train.num_train_steps)
             break
         if is_last_ckpt:
           break
@@ -748,7 +749,8 @@ def decode(
                  os.path.join(job_log_dir, 'checkpoints'))
 
   task_p = experiment_config.task()
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  model_p = task_p.model
   decoder_inputs = experiment_config.decoder_datasets()
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
   if not run_eval:
@@ -800,7 +802,7 @@ def _can_load_decode_outs(basedir: str, pname: str, step: int) -> bool:
 
 
 def decode_pmap_model(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
@@ -825,7 +827,7 @@ def decode_pmap_model(
       job_log_dir, 'checkpoints')
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
-  track_metric = bool(task_p.track_decoder_metric)  # pytype: disable=attribute-error
+  track_metric = bool(task_p.track_decoder_metric)
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
@@ -875,8 +877,8 @@ def decode_pmap_model(
         break
       if last_checkpoint is not None:
         last_ckpt_step = int(last_checkpoint.split('_')[-1])
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
-        if exceeded_ckpt > task_p.train.num_train_steps:  # pytype: disable=attribute-error  # enable-nested-classes
+        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+        if exceeded_ckpt > task_p.train.num_train_steps:
           break
       # Release replicated_model_states.
       del replicated_model_states
@@ -898,7 +900,7 @@ def decode_pmap_model(
 
 def decode_once_pmap_model(
     jax_task: tasks_lib.SingleTask,
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
@@ -922,8 +924,8 @@ def decode_once_pmap_model(
     return
   work_unit = platform.work_unit()
   model = jax_task.model
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
-  metrics_p = task_p.metrics  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p = task_p.model
+  metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
   decode_metrics = instantiate(metrics_p)
@@ -1038,7 +1040,7 @@ def decode_once_pmap_model(
                                            summary_type)
 
     # Track metric specified by task_p.track_decoder_metric.
-    track_metric = task_p.track_decoder_metric  # pytype: disable=attribute-error
+    track_metric = task_p.track_decoder_metric
     if track_metric and track_metric in m:
       (m_value, _) = m[track_metric]
       tracker_dir_path = os.path.join(
@@ -1063,7 +1065,7 @@ def decode_once_pmap_model(
 
 
 def decode_spmd_model(
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
@@ -1101,7 +1103,7 @@ def decode_spmd_model(
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
                                             model_p.dcn_mesh_shape)
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
@@ -1150,8 +1152,8 @@ def decode_spmd_model(
         if last_checkpoint is not None:
           last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
               last_checkpoint)
-          exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps  # pytype: disable=attribute-error  # enable-nested-classes
-          if exceeded_ckpt > task_p.train.num_train_steps:  # pytype: disable=attribute-error  # enable-nested-classes
+          exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+          if exceeded_ckpt > task_p.train.num_train_steps:
             break
         new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
         while new_checkpoint == last_checkpoint:
@@ -1171,7 +1173,7 @@ def decode_spmd_model(
 
 def decode_once_spmd_model(
     jax_task: tasks_lib.SingleTask,
-    task_p: base_task.BaseTask.HParams,
+    task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
@@ -1203,7 +1205,7 @@ def decode_once_spmd_model(
     inputs_partition_spec: Partition spec for inputs.
   """
   work_unit = platform.work_unit()
-  metrics_p = task_p.metrics  # pytype: disable=attribute-error  # enable-nested-classes
+  metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
   decode_metrics = instantiate(metrics_p)
@@ -1296,7 +1298,7 @@ def decode_once_spmd_model(
                                            summary_type)
 
     # Track metric specified by task_p.track_decoder_metric.
-    track_metric = task_p.track_decoder_metric  # pytype: disable=attribute-error
+    track_metric = task_p.track_decoder_metric
     if track_metric and track_metric in m:
       logging.warn('Decoder metric tracking is not implemented yet for pjit '
                    'models. Ignoring metric tracking.')

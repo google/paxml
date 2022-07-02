@@ -124,7 +124,7 @@ class CheckpointLoadingRules(NamedTuple):
     load_opt_states: whether to load opt_states (in its entirety) from this
       checkpoint.
   """
-  task_p: base_task.BaseTask.HParams
+  task_p: SingleTask.HParams
   load_rules: Sequence[Tuple[RegexStr, str]]
   ignore_rules: Optional[Sequence[RegexStr]] = None
   step: Optional[int] = None

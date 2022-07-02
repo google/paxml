@@ -92,7 +92,7 @@ def retrieve_checkpoint_type(
     maybe_use_persistence_checkpointing,
     task_p: base_task.BaseTask.HParams) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
-  using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error  # enable-nested-classes
+  using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
   if using_pjit:
     assert jax.config.jax_parallel_functions_output_gda, 'pjit requires GDA'
     if maybe_use_persistence_checkpointing:

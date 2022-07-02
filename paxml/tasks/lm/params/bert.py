@@ -19,8 +19,8 @@ from typing import List
 
 import jax
 from paxml import base_experiment
-from paxml import base_task
 from paxml import experiment_registry
+from paxml import tasks_lib
 from paxml.tasks.lm import input_generator
 from paxml.tasks.lm import model_params
 from praxis import base_input
@@ -65,7 +65,7 @@ class BertDataset(base_experiment.BaseExperiment):
     """Returns a list of dataset parameters."""
     return [self._datasetTrain(), self._datasetTest()]
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     raise NotImplementedError()
 
 
@@ -170,11 +170,11 @@ class BertSpmdL33H12kBiggerBatch(BertSpmd):
   # Save a checkpoint every n steps.
   CHECKPOINT_EVERY_N_STEPS = 1000
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
     # Enable label smoothing.
-    task_p.model.label_smoothing_prob = 0.1  # pytype: disable=attribute-error  # enable-nested-classes
+    task_p.model.label_smoothing_prob = 0.1
     return task_p
 
 

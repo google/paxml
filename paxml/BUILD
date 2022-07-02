@@ -145,7 +145,6 @@ pytype_strict_library(
     deps = [
         ":base_experiment",
         ":base_metrics",
-        ":base_task",
         ":checkpoint_py_pb2",
         ":metric_tracker_utils",
         ":summary_utils",
@@ -311,11 +310,11 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_experiment",
-        ":base_task",
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
         ":eval_lib",
         ":summary_utils",
+        ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.

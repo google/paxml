@@ -46,7 +46,6 @@ pytype_strict_library(
     deps = [
         # Implicit jax dependency.
         "//paxml:base_experiment",
-        "//paxml:base_task",
         "//paxml:tasks_lib",
         "//praxis:asserts",
         "//praxis:base_layer",

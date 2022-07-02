@@ -21,9 +21,9 @@ from typing import List, Optional
 import jax
 from jax import numpy as jnp
 from paxml import base_experiment
-from paxml import base_task
 from paxml import experiment_registry
 from paxml import seqio_input
+from paxml import tasks_lib
 from paxml.tasks.lm import model_params
 from paxml.tasks.lm.params import lm_cloud
 from praxis import base_input
@@ -186,20 +186,20 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   LR_COS_DECAY_START = 4001
   LR_COS_DECAY_END = 300000
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
-    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.packed_input = self.PACKED_INPUT
+    model_p = task_p.model
+    model_p.lm.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error
 
     if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl.block
+      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl.block  # pytype: disable=attribute-error
     else:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl
+      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl  # pytype: disable=attribute-error
     transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
 
-    lp = task_p.train.learner  # pytype: disable=attribute-error  # enable-nested-classes
+    lp = task_p.train.learner
     lp.loss_name = 'total_loss'
     lp.optimizer = optimizers.Adam.HParams(
         beta1=self.ADAM_BETA1,
@@ -230,7 +230,6 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
       raise NotImplementedError(f'Learning rate schedule {self.LR_SCHEDULE} is '
                                 'not supported.')
 
-    # pytype: enable=attribute-error  # enable-nested-classes
     return task_p
 
 
@@ -367,10 +366,10 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
   CHECKPOINT_EVERY_N_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
-    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p = task_p.model
 
     model_p.params_init = WeightInit.Gaussian(0.02)
     if self.USE_REPEATED_LAYER:
@@ -445,11 +444,11 @@ class TransformerLmSpmdPipelineAdam(
   LR_LRED_MIN_RATIO = 0.1
   LR_LRED_MAX = 1.0
 
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
 
-    lp = task_p.train.learner  # pytype: disable=attribute-error  # enable-nested-classes
+    lp = task_p.train.learner
     lp.loss_name = 'total_loss'
     lp.optimizer = optimizers.Adam.HParams(
         beta1=self.ADAM_BETA1,
@@ -467,7 +466,6 @@ class TransformerLmSpmdPipelineAdam(
             decay_end=self.LR_LRED_DECAY_END,
             min_ratio=self.LR_LRED_MIN_RATIO,
             max=self.LR_LRED_MAX))
-    # pytype: enable=attribute-error  # enable-nested-classes
     return task_p
 
 
