@@ -329,16 +329,20 @@ class _SummaryContextManager(contextlib.ExitStack):
 
   _exit_callbacks = []
 
-  def __init__(self, job_log_dir: str, train_p: base_input.BaseInput,
+  def __init__(self,
+               job_log_dir: str,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
-               decode_input_p: Sequence[base_input.BaseInput.HParams]):
+               decode_input_p: Sequence[base_input.BaseInput.HParams],
+               eval_skip_train: bool = False):
     """Initialize context manager.
 
     Args:
       job_log_dir: Directory for the job logs.
-      train_p: Params for the train data pipeline.
       eval_input_p: Optional list of params for the eval input pipelines.
       decode_input_p: Optional list of hparams for the decode input pipelines.
+      eval_skip_train: By default, we also run eval on the training data input
+        (`eval_train`), specifically on a batch not yet used for training. When
+        set to True, this is skipped.
     """
     super().__init__()
     self.summary_base_dir = os.path.join(job_log_dir, 'summaries')
@@ -359,9 +363,7 @@ class _SummaryContextManager(contextlib.ExitStack):
       ]
     else:
       self.summary_decode_dirs = []
-    self.eval_skip_train = False
-    if train_p.eval_skip_train:  # pytype: disable=attribute-error
-      self.eval_skip_train = True
+    self.eval_skip_train = eval_skip_train
 
   def __enter__(
       self
@@ -553,11 +555,11 @@ def train_and_evaluate_pmap(
         for p in eval_input_p
     ]
 
-  with _SummaryContextManager(job_log_dir, train_p, eval_input_p,
-                              decode_input_p) as (train_summary_writer,
-                                                  eval_summary_writer,
-                                                  eval_test_summary_writers,
-                                                  decode_summary_writers):
+  with _SummaryContextManager(
+      job_log_dir, eval_input_p, decode_input_p,
+      train_p.eval_skip_train) as (train_summary_writer, eval_summary_writer,
+                                   eval_test_summary_writers,
+                                   decode_summary_writers):
     summary_utils.write_model_structure(
         train_summary_writer, replicated_model_states, is_vars_replicated=True)
     summary_utils.write_total_num_params(train_summary_writer, total_num_params)
@@ -1056,11 +1058,11 @@ def train_and_evaluate_spmd_model(
           for p in eval_input_p
       ]
 
-    with _SummaryContextManager(job_log_dir, train_p, eval_input_p,
-                                decode_input_p) as (train_summary_writer,
-                                                    eval_summary_writer,
-                                                    eval_test_summary_writers,
-                                                    decode_summary_writers):
+    with _SummaryContextManager(
+        job_log_dir, eval_input_p, decode_input_p,
+        train_p.eval_skip_train) as (train_summary_writer, eval_summary_writer,
+                                     eval_test_summary_writers,
+                                     decode_summary_writers):
       # This only prints the view from the first host machine.
       summary_utils.write_model_structure(
           train_summary_writer,
