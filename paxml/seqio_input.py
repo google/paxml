@@ -153,7 +153,7 @@ class SeqIOInput(base_input.BaseInput):
     # context here, so we need to wrap it in a lambda which will look it up from
     # the global scope later.
     deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
-        sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))  # pytype: disable=name-error
+        sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
 
   def __init__(self, hparams: ParamsT) -> None:
@@ -229,7 +229,7 @@ class SeqIOInput(base_input.BaseInput):
   def reset(self) -> None:
     self._iter = self._dataset.as_numpy_iterator()
 
-  def ids_to_strings(self,  # pytype: disable=signature-mismatch
+  def ids_to_strings(self,
                      ids: pytypes.NpTensor,
                      lengths: pytypes.NpTensor,
                      key: Optional[str] = None) -> Sequence[str]:
@@ -367,7 +367,7 @@ class SeqIOInput(base_input.BaseInput):
       # Note that we intentionally do not use 'inputs_pretokenized' here because
       # it might be very different from the round-trip results below, which
       # wouldn't match with the keys we get from the model inference path.
-      key = self.ids_to_strings(  # pytype: disable=wrong-arg-types  # dynamic-method-lookup
+      key = self.ids_to_strings(
           e['inputs'][None, :],
           lengths=[inputs_length + targets_length],
           key='src')[0]

@@ -70,7 +70,7 @@ class TFRecordBertInput(base_input.BaseInput):
     remask: bool = False
     # Note that this is a TF class with lingvo-style params.
     mlm_augmenter: py_utils.InstantiableParams = dataclasses.field(
-        default_factory=lingvo_layers.MaskedLmDataAugmenter.Params)  # pytype: disable=name-error
+        default_factory=lingvo_layers.MaskedLmDataAugmenter.Params)
     num_samples: int = -1
 
   def __init__(self, hparams: TFRecordBertInput.HParams) -> None:
