@@ -28,6 +28,7 @@ from praxis import layers
 from praxis import optimizers
 from praxis import py_utils
 from praxis import schedules
+from praxis.layers import activations
 from praxis.layers import embedding_softmax
 from praxis.layers import models
 
@@ -167,7 +168,8 @@ def maybe_setup_moe_params(model_p: base_model.BaseModel.HParams) -> None:
   moe_p.input_dims = ff_p.input_dims
   moe_p.hidden_dims = ff_p.hidden_dims
   moe_p.ln_tpl = ff_p.ln_tpl.Copy()
-  moe_p.activation = ff_p.activation
+  moe_p.activation_tpl = ff_p.activation_tpl.clone()
+  moe_p.use_gated_activation = ff_p.use_gated_activation
   moe_p.relu_dropout_tpl = ff_p.relu_dropout_tpl.Copy()
   moe_p.relu_dropout_prob = ff_p.relu_dropout_prob
   moe_p.residual_dropout_tpl = ff_p.residual_dropout_tpl.Copy()
@@ -232,7 +234,8 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
   WEIGHT_DECAY = 1e-3
   USE_REPEATED_LAYER = False
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_WITH_NO_BATCH_DIM
-  ACTIVATION_FUNCTION = 'RELU'
+  ACTIVATION_CLS = activations.ReLU
+  USE_GATED_ACTIVATION = False
   # Save a checkpoint every n steps.
   CHECKPOINT_EVERY_N_STEPS = 5000
   DECAY_END = 300000
@@ -262,7 +265,10 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     transformer_layer_p = (stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = 50.0
     transformer_layer_p.tr_atten_tpl.use_bias = False
-    transformer_layer_p.tr_fflayer_tpl.activation = self.ACTIVATION_FUNCTION
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
+        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
+        self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
       model_p.lm.stacked_transformer_tpl = (
@@ -309,7 +315,8 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
   MASK_TOKEN_ID = 0
   DECAY_END = 100000
 
-  ACTIVATION_FUNCTION = 'RELU'
+  ACTIVATION_CLS = activations.ReLU
+  USE_GATED_ACTIVATION = False
 
   # Sub-class has to specify a mesh.
   MESH_SHAPE = None
@@ -343,7 +350,10 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = 50.0
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = True
-    transformer_layer_p.tr_fflayer_tpl.activation = self.ACTIVATION_FUNCTION
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
+        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
+        self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
       model_p.lm.stacked_transformer_tpl = (
@@ -389,7 +399,8 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   LEARNING_RATE = 1e-3
   WEIGHT_DECAY = 1e-3
   USE_REPEATED_LAYER = False
-  ACTIVATION_FUNCTION = 'RELU'
+  ACTIVATION_CLS = activations.ReLU
+  USE_GATED_ACTIVATION = False
   DECAY_END = 300000
 
   PACKED_INPUT = True
@@ -417,7 +428,10 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     transformer_layer_p = (stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
-    transformer_layer_p.tr_fflayer_tpl.activation = self.ACTIVATION_FUNCTION
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
+        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
+        self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
       model_p.lm.stacked_transformer_tpl = (
@@ -458,7 +472,8 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   NORM_POLICY = 'pre'
   ENABLE_DCONV = False
   COMBINE_QKV = True
-  ACTIVATION = 'RELU'
+  ACTIVATION_CLS = activations.ReLU
+  USE_GATED_ACTIVATION = False
   DECAY_END = 100000
 
   # optimizer related
@@ -526,7 +541,10 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
-    transformer_layer_p.tr_fflayer_tpl.activation = self.ACTIVATION
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
+        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
+        self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
     # pytype: enable=attribute-error  # enable-nested-classes
 
@@ -591,7 +609,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
   NORM_POLICY = 'pre'
   ENABLE_DCONV = False
   COMBINE_QKV = True
-  ACTIVATION = 'RELU'
+  ACTIVATION_CLS = activations.ReLU
+  USE_GATED_ACTIVATION = False
 
   # optimizer related
   DROPOUT_PROB = 0.0
@@ -681,7 +700,10 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
-    transformer_layer_p.tr_fflayer_tpl.activation = self.ACTIVATION
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
+        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
+        self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
     # pytype: enable=attribute-error  # enable-nested-classes
 

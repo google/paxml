@@ -54,6 +54,7 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:schedules",
         "//praxis/layers",
+        "//praxis/layers:activations",
         "//praxis/layers:embedding_softmax",
         "//praxis/layers:models",
     ],

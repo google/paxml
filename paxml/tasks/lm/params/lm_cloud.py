@@ -112,7 +112,8 @@ class LmCloudSpmd(model_params.TransformerLmSpmdAdafactor, SyntheticDataset):
   NUM_LAYERS = 10
   MODEL_DIMS = 2048
   HIDDEN_DIMS = MODEL_DIMS * 4
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
@@ -259,7 +260,8 @@ class LmCloudSpmdPipeline(model_params.TransformerLmSpmdPipelineAdafactor,
   NUM_LAYERS = 10
   MODEL_DIMS = 2048
   HIDDEN_DIMS = MODEL_DIMS * 4
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING

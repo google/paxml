@@ -235,17 +235,15 @@ class FeedForward(base_layer.BaseLayer):
       input_dims: Depth of the input.
       output_dims: Depth of the output.
       has_bias: Adds bias weights or not.
-      linear_tpl: Linear layer params
-      activation: Activation function to use. Options are RELU, RELU6, RELU^2,
-        RELU^3, LEAKY_RELU, SIGMOID, TANH, GELU, NONE.
-      negative_slope: Negative slope of LEAKY_RELU activation.
+      linear_tpl: Linear layer params.
+      activation_tpl: Activation layer params.
     """
     input_dims: int = 0
     output_dims: int = 0
     has_bias: bool = True
     linear_tpl: BaseHParams = sub_config_field(Linear.HParams)
-    activation: str = 'RELU'
-    negative_slope: Optional[float] = None
+    activation_tpl: activations.BaseActivation.HParams = sub_config_field(
+        ReLU.HParams)
 ```
 
 

@@ -240,7 +240,8 @@ class LmCloudSpmdAdam(TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   NUM_LAYERS = 2
   MODEL_DIMS = 2048
   HIDDEN_DIMS = MODEL_DIMS * 4
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
@@ -263,7 +264,8 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   DIMS_PER_HEAD = None
   # Known as NUM_EMBEDDINGS in t5x
   VOCAB_SIZE = 32128
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
 
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_FOR_MLPERF_200B
   CHECKPOINT_EVERY_N_STEPS = 1000
@@ -331,7 +333,8 @@ class C4SpmdGpt3AdamHP(C4SpmdGpt3Adam):
   # FPROP_DTYPE = jnp.bfloat16
 
   # HPs
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
   LR_SCHEDULE = 'linear_rampup_exponential_decay'
   ADAM_CLIP_GRADIENT_NORM_TO_VALUE = 1.0
 
@@ -344,7 +347,8 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
   USE_REPEATED_LAYER = True
 
   # HPs
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
   LEARNING_RATE = 6e-5
   WEIGHT_DECAY = 0.1
 
@@ -427,7 +431,8 @@ class TransformerLmSpmdPipelineAdam(
   HIDDEN_DIMS = MODEL_DIMS * 4
   DIMS_PER_HEAD = MODEL_DIMS // NUM_HEADS
   VOCAB_SIZE = 50257
-  ACTIVATION = 'GELU'
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
   PACKED_INPUT = True
 
   # optimizer related

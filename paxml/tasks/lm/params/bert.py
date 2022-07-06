@@ -85,7 +85,8 @@ class BertAdamL4H128(model_params.TransformerBertPmapAdam, BertDataset):
   WEIGHT_DECAY = 1e-3
   USE_REPEATED_LAYER = False
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_WITH_NO_BATCH_DIM
-  ACTIVATION_FUNCTION = 'RELU'
+  ACTIVATION_CLS = layers.ReLU
+  USE_GATED_ACTIVATION = False
   # Save a checkpoint every n steps.
   CHECKPOINT_EVERY_N_STEPS = 5000
 
@@ -108,7 +109,8 @@ class BertSpmd(model_params.TransformerBertSpmdAdafactor, BertDataset):
   ENABLE_BFLOAT16 = False
   MASK_TOKEN_ID = 0
 
-  ACTIVATION_FUNCTION = 'RELU'
+  ACTIVATION_CLS = layers.ReLU
+  USE_GATED_ACTIVATION = False
 
   # Sub-class has to specify a mesh.
   MESH_SHAPE = None

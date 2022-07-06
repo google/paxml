@@ -28,7 +28,7 @@ class DummyExperiment(base_experiment.BaseExperiment):
     return []
 
   def task(self):
-    act_p = layers.Activation.HParams()
+    act_p = layers.Identity.HParams()
     return act_p
 
 
