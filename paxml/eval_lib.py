@@ -542,8 +542,13 @@ class _SpmdEvalRunner:
 
   @classmethod
   def get_model_states(
-      self, jax_task: tasks_lib.SingleTask, global_mesh: maps.Mesh,
-      init_key: PRNGKey, checkpoint_dir: str, checkpoint_type: CheckpointType
+      self,
+      jax_task: tasks_lib.SingleTask,
+      global_mesh: maps.Mesh,
+      init_key: PRNGKey,
+      checkpoint_dir: str,
+      checkpoint_type: CheckpointType,
+      checkpoint_step: Optional[int] = None,
   ) -> Tuple[train_states.TrainState, Optional[train_states.TrainState],
              train_states.TrainState]:
     """Gets a partitioned model states and their specs from checkpoint_dir."""
@@ -562,6 +567,7 @@ class _SpmdEvalRunner:
           checkpoint_dir,
           global_mesh=global_mesh,
           checkpoint_type=checkpoint_type,
+          step=checkpoint_step,
           state_specs=partitioned_specs)
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
 
@@ -1109,7 +1115,12 @@ def decode_spmd_model(
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
   (partitioned_train_state, partitioned_specs,
    train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
-       jax_task, global_mesh, init_key, restore_checkpoint_dir, checkpoint_type)
+       jax_task,
+       global_mesh,
+       init_key,
+       restore_checkpoint_dir,
+       checkpoint_type,
+       checkpoint_step=restore_checkpoint_step)
   with global_mesh:
     decode_step_fn, inputs_partition_spec = (
         trainer_lib.get_partitioned_spmd_model_decode_fn(
