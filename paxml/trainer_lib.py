@@ -250,6 +250,14 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     updated_var = old_var + delta_mean
     return updated_var
 
+  def _synchronize_vars_using_sum(old_var: JTensor,
+                                  new_var: JTensor) -> JTensor:
+    """Synchronize a variable across replicas by summing."""
+    delta = new_var - old_var
+    delta_total = jax.lax.psum(delta, axis_name=PMAP_PARALLEL_AXIS_NAME)
+    updated_var = old_var + delta_total
+    return updated_var
+
   def _synchronize_non_learnable_var(old_var: JTensor, new_var: JTensor,
                                      var_param: ParamsT) -> JTensor:
     """Update a non-trainable variable, using cross-replica synchronization.
@@ -272,6 +280,8 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
 
     if base_layer.var_requires_mean_sync(var_param):
       return _synchronize_vars_using_mean(old_var, new_var)
+    elif base_layer.var_requires_sum_sync(var_param):
+      return _synchronize_vars_using_sum(old_var, new_var)
     else:
       raise ValueError('Non-trainable variables must have a cross-replica '
                        'synchronization method specified.')
