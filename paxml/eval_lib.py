@@ -659,8 +659,8 @@ def evaluate_spmd_model(
   _, eval_key = jax.random.split(prng_key)
   logging.info('eval prng_key: %s', eval_key)
 
-  (partitioned_train_state, partitioned_specs,
-   _) = _SpmdEvalRunner.get_model_states(jax_task, global_mesh, init_key,
+  (partitioned_train_state, partitioned_specs, train_state_global_shapes
+   ) = _SpmdEvalRunner.get_model_states(jax_task, global_mesh, init_key,
                                          checkpoint_dir, checkpoint_type)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
@@ -711,7 +711,7 @@ def evaluate_spmd_model(
       # There must be a new checkpoint here.
       logging.info('Found new checkpoint: %s', new_checkpoint)
       partitioned_train_state = checkpoints.restore_checkpoint(
-          runner.train_state_global_shapes,
+          train_state_global_shapes,
           checkpoint_dir,
           global_mesh=runner.global_mesh,
           checkpoint_type=checkpoint_type,
