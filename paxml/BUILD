@@ -119,6 +119,20 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "base_inference_runner",
+    srcs = ["base_inference_runner.py"],
+    srcs_version = "PY3",
+    deps = [
+        "//praxis:base_hyperparams",
+        "//praxis:base_model",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:train_states",
+        "//third_party/py/tensorflow_datasets",
+    ],
+)
+
+pytype_strict_library(
     name = "checkpoints",
     srcs = ["checkpoints.py"],
     srcs_version = "PY3",
@@ -378,6 +392,27 @@ py_strict_test(
         "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:test_utils",
+    ],
+)
+
+py_strict_test(
+    name = "base_inference_runner_test",
+    srcs = ["base_inference_runner_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [
+        ":base_inference_runner",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//praxis:base_hyperparams",
+        "//praxis:base_model",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:test_utils",
+        "//praxis:train_states",
+        # Implicit tensorflow_no_contrib dependency.
+        "//third_party/py/tensorflow_datasets",
     ],
 )
 
