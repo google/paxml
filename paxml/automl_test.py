@@ -242,17 +242,11 @@ class TuningExperimentWithOverride(TuningExperiment):
   LEARNING_RATE = 0.1
 
 
-class BadTuningExperiment(RegularExperiment):
-  """Bad tuning experiment without specifying name for `pg.oneof`."""
-  BATCH_SIZE = pg.oneof([8, 16, 32])
-
-
 class ClassLevelHyperPrimitiveTest(absltest.TestCase):
   """Test class-level hyper primitives on experiment specifications."""
 
   def test_regular_experiment(self):
     """Test enable_class_level_hyper_primitives on regular experiment class."""
-    automl.enable_class_level_hyper_primitives(RegularExperiment)
     context = pg.hyper.DynamicEvaluationContext()
     with context.collect():
       _ = RegularExperiment().task()
@@ -260,7 +254,6 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
 
   def test_tuning_experiment(self):
     """Test enable_class_level_hyper_primitives on tuning experiment class."""
-    automl.enable_class_level_hyper_primitives(TuningExperiment)
     context = pg.hyper.DynamicEvaluationContext()
     with context.collect():
       _ = TuningExperiment().task()
@@ -272,7 +265,6 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
 
   def test_tuning_experiment_with_override(self):
     """Test enable_class_level_hyper_primitives on experiment with override."""
-    automl.enable_class_level_hyper_primitives(TuningExperimentWithOverride)
     context = pg.hyper.DynamicEvaluationContext()
     with context.collect():
       _ = TuningExperimentWithOverride().task()
@@ -284,7 +276,10 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
     """Test enable_class_level_hyper_primitives on bad experiment spec."""
     with self.assertRaisesRegex(
         ValueError, 'Missing the \'name\' argument for the value of .*'):
-      automl.enable_class_level_hyper_primitives(BadTuningExperiment)
+
+      class BadTuningExperiment(RegularExperiment):  # pylint: disable=unused-variable
+        """Bad tuning experiment without specifying name for `pg.oneof`."""
+        BATCH_SIZE = pg.oneof([8, 16, 32])
 
 
 if __name__ == '__main__':

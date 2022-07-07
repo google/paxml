@@ -53,3 +53,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the parameters for AutoML search."""
     raise NotImplementedError(
         'Please implement `search` method for your experiment for tuning.')
+
+  def __init_subclass__(cls):
+    """Modifications to the subclasses."""
+    automl.enable_class_level_hyper_primitives(cls)

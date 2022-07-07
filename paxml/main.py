@@ -271,9 +271,7 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
   assert FLAGS.pythia_port is not None
   # Google-internal tuning infra init.
 
-  experiment_cls = _get_experiment(FLAGS.exp)
-  automl.enable_class_level_hyper_primitives(experiment_cls)
-  experiment_config = experiment_cls()
+  experiment_config = _get_experiment(FLAGS.exp)()
   search_hparams = experiment_config.search()
   search_algorithm = search_hparams.search_algorithm.Instantiate()()
   reward_fn = search_hparams.search_reward.Instantiate()

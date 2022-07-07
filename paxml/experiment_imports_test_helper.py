@@ -21,6 +21,8 @@ from absl.testing import absltest
 from paxml import base_task
 from praxis import base_hyperparams
 from praxis import base_input
+import pyglove as pg
+
 
 instantiate = base_hyperparams.instantiate
 
@@ -69,8 +71,12 @@ class ExperimentImportsTestHelper(absltest.TestCase):
       valid_experiments.append(experiment_name)
 
       def _test(self, name=experiment_name):
-        self._test_one_experiment_params(registry, name)  # pylint: disable=protected-access
-
+        # `pg.hyper.trace` provides the default decision choices for tunable
+        # hyperparameters that is placeheld with `pg.oneof`, `pg.floatv`, etc.
+        # For non-AutoML experiments, it's a non-op.
+        def _test_fn():
+          self._test_one_experiment_params(registry, name)  # pylint: disable=protected-access
+        pg.hyper.trace(_test_fn, require_hyper_name=True)
       setattr(cls,
               'test_experiment_params_%s' % experiment_name.replace('.', '_'),
               _test)

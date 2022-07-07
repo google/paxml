@@ -178,6 +178,7 @@ pytype_strict_library(
         # Implicit absl.testing.absltest.absltest dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
+        # Implicit pyglove dependency.
     ],
 )
 
