@@ -237,7 +237,7 @@ pytype_strict_library(
         ":setup_jax",
         ":train",
         ":trainer_lib",
-        # Implicit Jax software support dependency.
+        # Implicit Jax software support dependency.  # BC internal suffix.
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
