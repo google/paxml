@@ -66,7 +66,6 @@ pytype_strict_library(
     srcs = ["automl.py"],
     deps = [
         ":automl_interfaces",
-        "//paxml/google:automl",
         "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
     ],
