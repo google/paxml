@@ -38,7 +38,8 @@ NestedJTensor = pytypes.NestedJTensor
 ParamsT = pytypes.HParamsT
 
 
-def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any]) -> None:
+def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any],
+                 task_name: str) -> None:
   """Insert into answers the keys that only partially match."""
   # We update the dict `answers` in place, but inserting the keys found in
   # `targets` only. Those keys are matched by finding an existing key in answers
@@ -53,8 +54,9 @@ def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any]) -> None:
       # As a sanity check, we require that there is a unique key that partially
       # matches.
       if len(new_keys) != 1:
-        raise ValueError(f'key={k} in targets matches to {len(new_keys)} '
-                         'entries in answers.')
+        raise ValueError(f'key="{k}" in targets matches to {len(new_keys)} '
+                         'entries in answers. This should not happen: please '
+                         f'file a bug: task name "{task_name}".')
       answers[k] = answers[new_keys[0]]
 
 
@@ -369,14 +371,14 @@ class SeqIOInput(base_input.BaseInput):
       # wouldn't match with the keys we get from the model inference path.
       key = self.ids_to_strings(
           e['inputs'][None, :],
-          lengths=[inputs_length + targets_length],
+          lengths=[inputs_length],
           key='src')[0]
       t = _get_targets_str(e, self._mixture_or_task)
       targets[key].append(task.postprocess_fn(t, example=e, is_target=True))
       examples[key].append(e)
 
     answers = dict(decoder_outputs)
-    _update_keys(answers, targets)
+    _update_keys(answers, targets, task.name)
 
     predictions_list = []
     targets_list = []
