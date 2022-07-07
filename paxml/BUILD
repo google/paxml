@@ -66,6 +66,7 @@ pytype_strict_library(
     srcs = ["automl.py"],
     deps = [
         ":automl_interfaces",
+        "//paxml/google:automl",
         "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
     ],
@@ -142,7 +143,6 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit flax.training dependency.
         # Implicit jax dependency.
-        # Implicit internal jax.experimental.gda_serialization dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
         "//praxis:asserts",
@@ -242,13 +242,7 @@ pytype_strict_library(
         ":setup_jax",
         ":train",
         ":trainer_lib",
-        # Implicit internal filesystem #1 dependency.
-        # Implicit internal filesystem #2 dependency.
-        # Implicit Jax TPU support dependency.
-        # Implicit hardware CPU monitoring dependency.
-        # Implicit hardware GPU monitoring dependency.
         # Implicit Jax software support dependency.
-        # Implicit envelope dependency.
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.

@@ -30,9 +30,6 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         # Implicit absl.logging dependency.
-        # Implicit lingvo.core.base_input_generator dependency.
-        # Implicit lingvo.core.layers dependency.
-        # Implicit lingvo.core.ops dependency.
         "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
