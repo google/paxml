@@ -160,6 +160,7 @@ pytype_strict_library(
         ":base_experiment",
         ":base_metrics",
         ":checkpoint_py_pb2",
+        ":io_utils",
         ":metric_tracker_utils",
         ":summary_utils",
         ":tasks_lib",
@@ -170,7 +171,6 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
-        "//paxml:io_utils",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
@@ -210,6 +210,11 @@ pytype_strict_library(
     name = "io_utils",
     srcs = ["io_utils.py"],
     srcs_version = "PY3",
+    deps = [
+        # Implicit absl.logging dependency.
+        "//praxis:py_utils",
+        # Implicit tensorflow_no_contrib dependency.
+    ],
 )
 
 pytype_binary(
@@ -453,6 +458,7 @@ py_strict_test(
         ":io_utils",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 

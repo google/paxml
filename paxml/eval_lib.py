@@ -35,6 +35,7 @@ import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
 from paxml import checkpoint_pb2
+from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -51,7 +52,6 @@ import tensorflow.compat.v2 as tf
 from tensorflow.compat.v2 import summary as tf_summary
 
 from paxml import checkpoints  # mapped to internal
-from paxml import io_utils  # mapped to internal
 
 CheckpointType = checkpoint_pb2.CheckpointType
 Metrics = base_model.Metrics
