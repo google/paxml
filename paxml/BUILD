@@ -112,11 +112,7 @@ pytype_strict_library(
     name = "base_task",
     srcs = ["base_task.py"],
     srcs_version = "PY3",
-    deps = [
-        "//praxis:base_hyperparams",
-        "//praxis:base_layer",
-        "//praxis:py_utils",
-    ],
+    deps = ["//praxis:base_hyperparams"],
 )
 
 pytype_strict_library(
@@ -242,7 +238,7 @@ pytype_strict_library(
         ":setup_jax",
         ":train",
         ":trainer_lib",
-        # Implicit Jax software support dependency.
+        # Implicit Jax software support dependency.  # build_cleaner: keep
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
@@ -462,7 +458,6 @@ py_strict_test(
     python_version = "PY3",
     srcs_version = "PY3",
     deps = [
-        ":base_task",
         ":checkpoints",
         ":tasks_lib",
         ":trainer_lib",
