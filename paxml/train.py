@@ -75,51 +75,6 @@ def _write_hparams_file(model_config: base_experiment.BaseExperiment,
       hparams_file.write(model_config.task().to_text())
 
 
-def _write_post_init_model_hparams_file(model, vars_weight_params,
-                                        job_log_dir: str) -> None:
-  """Writes a post-init params file into the root `job_log_dir`.
-
-  This file is the source of truth of how model is constructed. It contains two
-  parts:
-  1) how each layer is configured during layer construction time.
-  2) variable WeightHParams for each of the model weight.
-
-  Args:
-    model: A BaseModel
-    vars_weight_params: A pytree of WeightHParams
-    job_log_dir: The root dir for the training job.
-  """
-  if jax.process_index() == 0:
-    params_fpath = os.path.join(job_log_dir, 'post_init_model_params.txt')
-    logging.info('post_init_model_params: %s', params_fpath)
-    if not tf.io.gfile.exists(job_log_dir):
-      tf.io.gfile.makedirs(job_log_dir)
-    with tf.io.gfile.GFile(params_fpath, 'w') as params_file:
-      prng_key = jax.random.PRNGKey(seed=123)
-
-      def gen_post_init_hparams(prng_key):
-        return model.apply({},
-                           rngs={base_layer.PARAMS: prng_key},
-                           method=model.post_init_hparams,
-                           mutable=True)[1]
-
-      variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
-      assert base_layer.HYPER_PARAMS in variables_abstract
-
-      hyper_params = jax.tree_map(
-          lambda x: x.meta,
-          variables_abstract[base_layer.HYPER_PARAMS],
-          is_leaf=lambda x: isinstance(x, base_layer.WrappedHParams))
-
-      hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
-      params_file.write(hyper_params_dump)
-      params_file.write('\n\n')
-
-      params_inits_text = base_hyperparams.nested_struct_to_text(
-          vars_weight_params)
-      params_file.write(params_inits_text)
-
-
 def _checkpoint_dir(job_log_dir: str) -> str:
   """Returns the checkpoint directory from the root `job_log_dir`."""
   return os.path.join(job_log_dir, 'checkpoints')
@@ -438,8 +393,8 @@ def train_and_evaluate_pmap(
   checkpoint_dir = _checkpoint_dir(job_log_dir)
   vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
   # Dump out model meta info for debugging.
-  _write_post_init_model_hparams_file(jax_task.model, vars_weight_params,
-                                      job_log_dir)
+  trainer_lib.write_post_init_model_hparams_file(
+      jax_task.model, vars_weight_params, job_log_dir)
 
   train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
       vars_weight_params)
@@ -932,8 +887,8 @@ def train_and_evaluate_spmd_model(
     jax_task = instantiate(task_p)
     vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
     # Dump out model meta info for debugging.
-    _write_post_init_model_hparams_file(jax_task.model, vars_weight_params,
-                                        job_log_dir)
+    trainer_lib.write_post_init_model_hparams_file(
+        jax_task.model, vars_weight_params, job_log_dir)
     train_state_global_shapes = jax_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = jax_task.create_train_state_partition_specs(

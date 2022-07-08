@@ -840,6 +840,10 @@ def decode_pmap_model(
   prng_key, eval_key = jax.random.split(prng_key, 2)
 
   eval_runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, eval_key)
+  trainer_lib.write_post_init_model_hparams_file(
+      jax_task.model,
+      jax_task.model.abstract_init_with_metadata(prng_key),
+      os.path.join(job_log_dir, 'decoder_out'))
 
   (replicated_model_states, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(
@@ -1127,7 +1131,10 @@ def decode_spmd_model(
             jax_task, init_key, partitioned_specs, inputs_shape))
     eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
                                   init_key, partitioned_specs)
-
+    trainer_lib.write_post_init_model_hparams_file(
+        jax_task.model,
+        jax_task.model.abstract_init_with_metadata(init_key),
+        os.path.join(job_log_dir, 'decoder_out'))
     summary_base_dir = os.path.join(job_log_dir, 'summaries')
     summary_decode_dirs = [
         os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p

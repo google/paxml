@@ -16,6 +16,7 @@
 """Shared trainer lib utilities."""
 
 import functools
+import os
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
@@ -66,6 +67,52 @@ NON_PAX_VAR_COLLECTION = base_layer.NON_PAX_VAR_COLLECTION
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 instantiate = base_hyperparams.instantiate
+
+
+def write_post_init_model_hparams_file(model, vars_weight_params,
+                                       job_log_dir: str) -> None:
+  """Writes a post-init params file into the root `job_log_dir`.
+
+  This file is the source of truth of how model is constructed. It contains two
+  parts:
+  1) how each layer is configured during layer construction time.
+  2) variable WeightHParams for each of the model weight.
+
+  Args:
+    model: A BaseModel
+    vars_weight_params: A pytree of WeightHParams
+    job_log_dir: The root dir for the training job.
+  """
+  if jax.process_index() == 0:
+    params_fpath = os.path.join(job_log_dir, 'post_init_model_params.txt')
+    logging.info('post_init_model_params: %s', params_fpath)
+    if not tf.io.gfile.exists(job_log_dir):
+      tf.io.gfile.makedirs(job_log_dir)
+    with tf.io.gfile.GFile(params_fpath, 'w') as params_file:
+      prng_key = jax.random.PRNGKey(seed=123)
+
+      def gen_post_init_hparams(prng_key):
+        return model.apply({},
+                           rngs={base_layer.PARAMS: prng_key},
+                           method=model.post_init_hparams,
+                           mutable=True)[1]
+
+      variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
+      assert base_layer.HYPER_PARAMS in variables_abstract
+
+      hyper_params = jax.tree_map(
+          lambda x: x.meta,
+          variables_abstract[base_layer.HYPER_PARAMS],
+          is_leaf=lambda x: isinstance(x, base_layer.WrappedHParams))
+
+      hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
+      params_file.write(hyper_params_dump)
+      params_file.write('\n\n')
+
+      if vars_weight_params:
+        params_inits_text = base_hyperparams.nested_struct_to_text(
+            vars_weight_params)
+        params_file.write(params_inits_text)
 
 
 def initialize_model_state(jax_task: tasks_lib.SingleTask,
