@@ -40,17 +40,7 @@ bzl_library(
     deps = ["//paxml:paxml.bzl"],
 )
 
-# Linker option to fit main under small code model 2GB limit. Unfortunately,
-# pytype_binary doesn't accept linkopts, so we need to create an empty
-# cc_library just for this.
-cc_library(
-    name = "linker_opts",
-    linkopts = [
-        "-T",
-        "$(location :reorder_sections.lds)",
-    ],
-    deps = ["reorder_sections.lds"],
-)
+# Internal linker rule.
 
 pytype_strict_library(
     name = "automl_interfaces",
@@ -124,7 +114,7 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:train_states",
-        "//third_party/py/tensorflow_datasets",
+        # Implicit tensorflow_datasets dependency.
     ],
 )
 
@@ -175,7 +165,7 @@ pytype_strict_library(
         "//praxis:train_states",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
-        "//third_party/py/tensorflow_datasets",
+        # Implicit tensorflow_datasets dependency.
     ],
 )
 
@@ -234,7 +224,6 @@ pytype_strict_library(
         ":base_experiment",
         ":eval_lib",
         ":experiment_registry",
-        ":linker_opts",
         ":setup_jax",
         ":train",
         ":trainer_lib",
@@ -294,7 +283,7 @@ pytype_strict_library(
         ":io_utils",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
-        "//third_party/py/optax",
+        # Implicit optax dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
@@ -410,7 +399,7 @@ py_strict_test(
         "//praxis:test_utils",
         "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
-        "//third_party/py/tensorflow_datasets",
+        # Implicit tensorflow_datasets dependency.
     ],
 )
 
