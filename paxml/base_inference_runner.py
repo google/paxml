@@ -39,6 +39,10 @@ class BaseInferenceRunner(base_hyperparams.BaseParameterizable, abc.ABC):
   output schema definition. It defines (1) how to run inference to generate
   outputs given a model and some inputs, and (2) the corresponding schema for
   the output.
+
+  TODO(b/238220793): Currently we only write Jax native types since we do all
+  computations in a jit-ed context. We may eventually want to support non jax-
+  native types such as strings.
   """
 
   def __init__(self, hparams: BaseInferenceRunner.HParams,

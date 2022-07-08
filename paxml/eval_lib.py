@@ -50,6 +50,7 @@ from praxis import train_states
 import seqio
 import tensorflow.compat.v2 as tf
 from tensorflow.compat.v2 import summary as tf_summary
+import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
 
@@ -130,6 +131,7 @@ def _summary_seqio_metrics(seqio_metrics: Sequence[Mapping[str, Union[
       logging.info('Writing summary of %s with value %.4f.', metric_name, v)
       summary_utils.write_summary_tensor(step, metric_name, v,
                                          summary_utils.SummaryType.SCALAR)
+
 
 def run_eval_loop_over_test_splits(
     num_steps: List[int],
@@ -320,7 +322,7 @@ class _PmapEvalRunner:
 
   @classmethod
   def get_model_states(
-      self, jax_task: tasks_lib.SingleTask, prng_key: PRNGKey,
+      cls, jax_task: tasks_lib.SingleTask, prng_key: PRNGKey,
       checkpoint_dir: str, checkpoint_step: Optional[int], use_ema: bool,
       track_metric: bool) -> Tuple[
           train_states.TrainState, train_states.TrainState, PRNGKey]:
@@ -542,7 +544,7 @@ class _SpmdEvalRunner:
 
   @classmethod
   def get_model_states(
-      self,
+      cls,
       jax_task: tasks_lib.SingleTask,
       global_mesh: maps.Mesh,
       init_key: PRNGKey,
@@ -1386,3 +1388,123 @@ def maybe_update_min_tracked_metric(
                                                replicated_model_states)
       checkpoints.save_checkpoint(unreplicated_model_states,
                                   tracker_dir_path)
+
+
+def infer_and_write(
+    experiment_config: base_experiment.BaseExperiment,
+    job_log_dir: Optional[str]) -> None:
+  """Generates output from a model and writes it out.
+
+  Args:
+    experiment_config: an instance of BaseExperiment for the experiment
+      with output generators configured.
+    job_log_dir: The base directory for writing the outputs.
+  """
+  task_p = experiment_config.task()
+  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  model_p = task_p.model
+  inputs_p = experiment_config.decoder_datasets()
+
+  for inp in inputs_p:
+    if inp.num_infeed_hosts == 0:
+      inp.num_infeed_hosts = jax.process_count()
+    inp.infeed_host_index = jax.process_index()
+
+  if model_p.mesh_shape is not None:
+    # TODO(b/238416854): add support for SPMD models
+    raise NotImplementedError('SPMD infer_and_write not implemented yet')
+  else:
+    infer_and_write_pmap(task_p, inputs_p, job_log_dir)
+
+
+def infer_and_write_pmap(
+    task_p: tasks_lib.SingleTask.HParams,
+    inputs_p: Sequence[base_input.BaseInput.HParams],
+    job_log_dir: str) -> None:
+  """Runs the infer_and_write for each of the inputs given task in pmap."""
+  task = instantiate(task_p)
+  track_metric = bool(task_p.track_decoder_metric)
+
+  prng_key = jax.random.PRNGKey(0)
+  infer_writer_p = task_p.infer_writer
+
+  (replicated_model_states, _, prng_key) = _PmapEvalRunner.get_model_states(
+      task, prng_key, infer_writer_p.restore_checkpoint_dir,
+      infer_writer_p.restore_checkpoint_step, has_ema(task_p), track_metric)
+
+  @functools.partial(jax.pmap, axis_name=PMAP_PARALLEL_AXIS_NAME, out_axes=None)
+  def infer_pmap_step(mdl_states, prng_seeds, input_batch):
+    outputs = task.inference_runner.infer(mdl_states, prng_seeds, input_batch)
+    # tiled=True folds in first axis into second axis [2,8,5] -> [2*8,5]
+    replicated_outputs = jax.lax.all_gather(
+        outputs, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True)
+
+    return replicated_outputs
+
+  # Instantiate inputs to infer on
+  inputs = [instantiate(p) for p in inputs_p]
+  trainer_lib.check_unique_names(inputs)
+  num_steps = [
+      -1 if p.reset_for_eval else p.eval_loop_num_batches for p in inputs_p
+  ]
+
+  for input_p, input_gen, num_steps in zip(inputs_p, inputs, num_steps):
+    logging.info('Starting output generation on input "%s"', input_p.name)
+
+    # Feed each (device, input) pair a unique seed
+    prng_key, output_seed = jax.random.split(prng_key)
+    output_seeds = jax.random.split(output_seed, jax.local_device_count())
+
+    if num_steps > 0:
+      logging.info('total number of steps: %d', num_steps)
+
+    # Only write from one process
+    dirname = os.path.join(job_log_dir, 'output', input_p.name)
+    # fq_filename = os.path.join(dirname, 'output.tfrecord')
+    fq_filename = os.path.join(dirname, 'output')
+    if jax.process_index() == 0:
+      # Create output dirs if DNE
+      if not tf.io.gfile.exists(dirname):
+        tf.io.gfile.makedirs(dirname)
+
+      # Write example schema, metadata, and serialized example protos
+      logging.info('writing output to %s', fq_filename)
+      features_dict = tfds.features.FeaturesDict(
+          task.inference_runner.output_schema)
+      features_dict.save_config(dirname)
+      tfds.core.MetadataDict(
+          restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
+          restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,
+          input_name=input_p.name,
+          model_name=task_p.model.name,
+      ).save_metadata(dirname)
+
+      writer = io_utils.ShardedParallelWriter(
+          fq_filename, infer_writer_p.output_num_shards,
+          output_format=infer_writer_p.output_format)
+
+    step = 0
+    while num_steps < 0 or step < num_steps:
+      step += 1
+      logging.info('processing input batch %d', step)
+      try:
+        batch = input_gen.get_next()
+      except (tf.errors.OutOfRangeError, StopIteration):
+        input_gen.reset()
+        break
+
+      pmap_batch = jax.tree_map(py_utils.reshard, batch)
+      outputs = infer_pmap_step(
+          replicated_model_states, output_seeds, pmap_batch)
+      # Get first device's output since it's been replicated by all-gather
+      outputs = py_utils.maybe_unreplicate_for_fully_replicated(outputs)
+      outputs_cpu = jax.tree_map(np.asarray, outputs)
+
+      if jax.process_index() == 0:
+        serialized_outputs = task.inference_runner.serialize_outputs(
+            outputs_cpu)
+        # fire-and-forget writing
+        writer.write(serialized_outputs)
+
+    if jax.process_index() == 0:
+      writer.close()

@@ -175,6 +175,7 @@ pytype_strict_library(
         "//praxis:train_states",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
+        "//third_party/py/tensorflow_datasets",
     ],
 )
 
@@ -287,8 +288,10 @@ pytype_strict_library(
     srcs = ["tasks_lib.py"],
     srcs_version = "PY3",
     deps = [
+        ":base_inference_runner",
         ":base_metrics",
         ":base_task",
+        ":io_utils",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         "//third_party/py/optax",

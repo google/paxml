@@ -62,7 +62,8 @@ flags.DEFINE_string(
     required=True)
 flags.DEFINE_string('job_log_dir', None,
                     'Directory where all experiment assets will be stored.')
-flags.DEFINE_enum('mode', 'train', ['train', 'eval', 'decode', 'decode_once'],
+flags.DEFINE_enum('mode', 'train',
+                  ['train', 'eval', 'decode', 'decode_once', 'infer'],
                   'Flag to control which job is called.')
 flags.DEFINE_bool(
     'eval_on_test', False, 'If True, then the training loop '
@@ -234,6 +235,12 @@ def run_experiment(
         continuous_decode=False,
         run_eval=FLAGS.eval_during_decode,
     )
+  elif FLAGS.mode == 'infer':
+    work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
+    eval_lib.infer_and_write(
+        experiment_config=experiment_config,
+        job_log_dir=job_log_dir)
+
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a
   # subset of tasks are restarted. Without all tasks being present, the job

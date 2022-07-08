@@ -639,7 +639,8 @@ def decode_step(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[NestedMap, NestedMap]:
+    fprop_dtype: jnp.dtype = jnp.float32,
+) -> Tuple[NestedMap, NestedMap]:
   """Decodes a model for a single step.
 
   Args:

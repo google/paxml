@@ -31,8 +31,10 @@ from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import pjit
 import optax
+from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
+from paxml import io_utils
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import base_model
@@ -45,6 +47,7 @@ import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
 
+BaseInferenceRunner = base_inference_runner.BaseInferenceRunner
 CheckpointType = checkpoints.CheckpointType
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor
@@ -135,7 +138,26 @@ class CheckpointLoadingRules(NamedTuple):
 class SingleTask(base_task.BaseTask):
   """A JAX task."""
 
-  # @dataclasses.dataclass
+  class InferWriterHParams(base_hyperparams.BaseHyperParams):
+    """Parameters for generating and writing outputs from a model.
+
+    Attributes:
+      restore_checkpoint_dir: The directory from which to restore checkpoint.
+      restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
+        it will try to restore from the latest checkpoint, if any.
+      inference_runner: an instance of BaseInferenceRunner.HParams that defines
+        how to run the model and the schema of the corresponding output.
+      output_format: the io_utils.OutputFormatType which describes the container
+        format to write to.
+      output_num_shards: the number of shards for the output container.
+    """
+    restore_checkpoint_dir: str = ''
+    restore_checkpoint_step: Optional[int] = None
+    inference_runner: Optional[BaseInferenceRunner.HParams] = None
+    output_format: io_utils.OutputFormatType = (
+        io_utils.OutputFormatType.TFRECORD)
+    output_num_shards: int = 32
+
   class VariationalNoiseHParams(base_hyperparams.BaseHyperParams):
     """Parameters for variational noise.
 
@@ -212,6 +234,7 @@ class SingleTask(base_task.BaseTask):
         losses are aggregated (e.g single or MultiLoss)
       vn: HParams to control variational noise.
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
+      infer_writer: specifies how to generate and write some output with a model
     """
     model: Optional[base_model.BaseModel.HParams] = None
 
@@ -225,6 +248,7 @@ class SingleTask(base_task.BaseTask):
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
     track_decoder_metric: Optional[str] = None
+    infer_writer: Optional[SingleTask.InferWriterHParams] = None
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)
@@ -266,6 +290,10 @@ class SingleTask(base_task.BaseTask):
           loss_key=self._learners[0].loss_name)
       self._loss_aggregator = instantiate(loss_p)
 
+    if p.infer_writer:
+      self._inference_runner = p.infer_writer.inference_runner.Instantiate(
+          model=self._model)
+
   @property
   def learners(self) -> Sequence[learners_lib.Learner]:
     return self._learners
@@ -286,6 +314,10 @@ class SingleTask(base_task.BaseTask):
   def has_ema_decay(self):
     return bool(self.learners[0].hparams.optimizer and
                 self.learners[0].hparams.optimizer.ema_decay > 0)
+
+  @property
+  def inference_runner(self) -> BaseInferenceRunner:
+    return self._inference_runner
 
   def get_model_name_for_step(self, step_i):
     del step_i
