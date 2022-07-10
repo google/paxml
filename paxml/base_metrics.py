@@ -452,7 +452,7 @@ class MultiLossAggregator(LossAggregator):
         total_mean_loss += mean_loss
 
     else:
-      for key in self.hparams.loss_keys.items():
+      for key in self.hparams.loss_keys:
         loss, loss_weight = batch_metrics[key]
         loss_weight = jax.lax.stop_gradient(loss_weight)
 
