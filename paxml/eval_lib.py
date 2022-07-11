@@ -55,7 +55,7 @@ import tensorflow_datasets as tfds
 from paxml import checkpoints  # mapped to internal
 
 CheckpointType = checkpoint_pb2.CheckpointType
-Metrics = base_model.Metrics
+WeightedScalars = base_model.WeightedScalars
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
@@ -105,9 +105,9 @@ def run_eval_one_step(eval_inputs: NestedJTensor,
   """
   if reshard_inputs:
     eval_inputs = tf.nest.map_structure(py_utils.reshard, eval_inputs)
-  _, loss, mean_metrics, per_example_output, summary_tensors = eval_step(
+  _, loss, weighted_scalars, per_example_output, summary_tensors = eval_step(
       eval_inputs)
-  return loss, mean_metrics, per_example_output, summary_tensors
+  return loss, weighted_scalars, per_example_output, summary_tensors
 
 
 def _summary_seqio_metrics(seqio_metrics: Sequence[Mapping[str, Union[
@@ -143,7 +143,7 @@ def run_eval_loop_over_test_splits(
     eval_inputs_shape=None,
     global_mesh=None,
     reshard_inputs: Optional[bool] = False,
-    create_gda_for_inputs: bool = False) -> List[Metrics]:
+    create_gda_for_inputs: bool = False) -> List[WeightedScalars]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -194,6 +194,7 @@ def run_eval_loop_over_test_splits(
                                   eval_inputs))
         eval_inputs = py_utils.create_gda(eval_inputs, eval_inputs_shape,
                                           global_mesh, eval_inputs_pspecs)
+      # TODO(bencaine): Rename eval_metrics here weighted scalars?
       (eval_loss, eval_metrics, per_example_output,
        eval_summary_tensors) = run_eval_one_step(
            eval_inputs, eval_step, reshard_inputs=reshard_inputs)

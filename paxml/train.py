@@ -150,18 +150,18 @@ def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
 def _should_early_stop_training(
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     task_p: tasks_lib.SingleTask.HParams, step_i: int,
-    metrics: Optional[Dict[str, trainer_lib.MetricDict]]) -> bool:
+    weighted_scalars: Optional[Dict[str, trainer_lib.WeightedScalars]]) -> bool:
   """Returns True if current training should be stopped."""
   if early_stopping_fn is None:
     return False
   train_p = task_p.train
-  if metrics is None:
+  if weighted_scalars is None:
     is_last_ckpt = step_i == train_p.num_train_steps
   else:
     remaining = train_p.num_train_steps - step_i
     is_last_ckpt = remaining < max(train_p.eval_interval_steps,
                                    train_p.save_interval_steps)
-  return early_stopping_fn(metrics, step_i, is_last_ckpt)
+  return early_stopping_fn(weighted_scalars, step_i, is_last_ckpt)
 
 
 def train_and_evaluate(
@@ -581,7 +581,7 @@ def train_and_evaluate_pmap(
       with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
         model_name = jax_task.get_model_name_for_step(step_i)
 
-        (replicated_model_states, loss, metrics, per_example_out,
+        (replicated_model_states, loss, weighted_scalars, per_example_out,
          summary_tensors) = p_train_step(replicated_model_states,
                                          train_prng_seed, model_inputs,
                                          model_name)
@@ -591,7 +591,7 @@ def train_and_evaluate_pmap(
       step_i += 1
       if summary_utils.write_summary_every_n_steps(
           train_summary_writer, step_i, train_p.summary_interval_steps, loss,
-          metrics, per_example_out, summary_tensors, summary_last_time,
+          weighted_scalars, per_example_out, summary_tensors, summary_last_time,
           summary_last_step):
         summary_last_time = time.time()
         summary_last_step = step_i
@@ -639,23 +639,23 @@ def train_and_evaluate_pmap(
             logging.debug('  Retrieved eval model_inputs.')
             logging.debug('  Performing eval_step() runs on training split.')
 
-            (loss, mean_metrics, _,
+            (loss, weighted_scalars, _,
              summary_tensors) = eval_lib.run_eval_one_step(
                  eval_inputs, eval_step_fn, reshard_inputs=True)
             logging.debug('  Completed eval_step() runs on training split.')
             loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-            mean_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-                mean_metrics)
+            weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+                weighted_scalars)
             summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
                 summary_tensors)
             logging.info('step=`%d`', step_i)
             logging.info('  eval loss: %s', loss)
-            logging.info('  mean_metrics: %s', mean_metrics)
+            logging.info('  weighted_scalars: %s', weighted_scalars)
             logging.info('  summary_tensors: %s', summary_tensors)
             if step_i % train_p.summary_interval_steps == 0:
               logging.debug('  Writing eval summaries.')
               summary_utils.write_summary_entry(eval_summary_writer, step_i,
-                                                loss, mean_metrics,
+                                                loss, weighted_scalars,
                                                 summary_tensors)
               logging.debug('  Wrote eval summaries.')
 
@@ -1093,7 +1093,7 @@ def train_and_evaluate_spmd_model(
 
         logging.debug('  Performing train_step().')
         with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-          (partitioned_train_state, loss, metrics, per_example_out,
+          (partitioned_train_state, loss, weighted_scalars, per_example_out,
            summary_tensors) = train_step(partitioned_train_state, train_key,
                                          model_inputs)
         logging.debug('  Completed train_step().')
@@ -1101,8 +1101,8 @@ def train_and_evaluate_spmd_model(
         logging.debug('  Writing summaries (attempt).')
         if summary_utils.write_summary_every_n_steps(
             train_summary_writer, step_i, train_p.summary_interval_steps, loss,
-            metrics, per_example_out, summary_tensors, summary_last_time,
-            summary_last_step):
+            weighted_scalars, per_example_out, summary_tensors,
+            summary_last_time, summary_last_step):
           summary_last_time = time.time()
           summary_last_step = step_i
           step_i = int(
@@ -1155,24 +1155,24 @@ def train_and_evaluate_spmd_model(
                                                   global_mesh, inputs_pspecs)
               logging.debug('  Retrieved eval model_inputs.')
               logging.debug('  Performing eval_step() runs on training split.')
-              loss, mean_metrics, _, summary_tensors = (
+              loss, weighted_scalars, _, summary_tensors = (
                   eval_lib.run_eval_one_step(
                       eval_inputs, eval_step_fn, reshard_inputs=False))
               logging.debug('  Completed eval_step() runs on training split.')
               loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-              mean_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-                  mean_metrics)
+              weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+                  weighted_scalars)
               summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
                   summary_tensors)
 
               logging.info('step=`%d`', step_i)
               logging.info('  eval loss: %s', loss)
-              logging.info('  mean_metrics: %s', mean_metrics)
+              logging.info('  weighted_scalars: %s', weighted_scalars)
               logging.info('  summary_tensors: %s', summary_tensors)
               if step_i % train_p.summary_interval_steps == 0:
                 logging.debug('  Writing eval summaries.')
                 summary_utils.write_summary_entry(eval_summary_writer, step_i,
-                                                  loss, mean_metrics,
+                                                  loss, weighted_scalars,
                                                   summary_tensors)
                 logging.debug('  Wrote eval summaries.')
 

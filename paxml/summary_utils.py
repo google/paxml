@@ -48,6 +48,7 @@ NestedJTensor = pytypes.NestedJTensor
 TrainState = train_states.TrainState
 SummaryType = base_layer.SummaryType
 SummaryWriter = tf.summary.SummaryWriter
+WeightedScalars = pytypes.WeightedScalars
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 # Maximum number of images written to a single summary entry.
@@ -294,7 +295,7 @@ def write_summary_tensor(step_i: int, key: str, tensor: JTensor,
 def write_summary_entry(summary_writer: SummaryWriter,
                         step_i: int,
                         loss: JTensor,
-                        metrics: Dict[str, JTensor],
+                        weighted_scalars: WeightedScalars,
                         summary_tensors: NestedJTensor,
                         steps_per_sec: Optional[float] = None) -> None:
   """Writes a summary entry into the provided SummaryWriter."""
@@ -302,7 +303,8 @@ def write_summary_entry(summary_writer: SummaryWriter,
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
   # SPMD training may produce GDA.
   loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-  metrics = py_utils.maybe_unreplicate_for_fully_replicated(metrics)
+  weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+      weighted_scalars)
   summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
       summary_tensors)
 
@@ -316,7 +318,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
                            SummaryType.SCALAR)
     logging.info('Metrics values at step %d:', step_i)
     logging.info('  loss=%f', mean_loss)
-    for key, value in metrics.items():
+    for key, value in weighted_scalars.items():
       assert len(value) == 2, (
           'Metric value should be a pair of (value, weight).')
       metric_values = value[0]
@@ -374,7 +376,8 @@ def write_global_batch_size(train_summary_writer: SummaryWriter,
 
 def write_summary_every_n_steps(train_summary_writer: SummaryWriter,
                                 step_i: int, summary_every_n_steps: int,
-                                loss: JTensor, metrics: NestedJTensor,
+                                loss: JTensor,
+                                weighted_scalars: WeightedScalars,
                                 per_example_out: NestedJTensor,
                                 summary_tensors: NestedJTensor,
                                 summary_last_time: Optional[float],
@@ -383,12 +386,13 @@ def write_summary_every_n_steps(train_summary_writer: SummaryWriter,
   if step_i % summary_every_n_steps != 0:
     return False
   loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-  metrics = py_utils.maybe_unreplicate_for_fully_replicated(metrics)
+  weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+      weighted_scalars)
   per_example_out = py_utils.maybe_unreplicate_for_first_shard(per_example_out)
   summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
       summary_tensors)
   logging.info('step_i: %d, training loss: %s', step_i, loss)
-  logging.info('metrics: %s', metrics)
+  logging.info('weighted_scalars: %s', weighted_scalars)
   logging.info('per_example_out: %s', per_example_out)
   logging.info('summary_tensors: %s', summary_tensors)
 
@@ -397,6 +401,6 @@ def write_summary_every_n_steps(train_summary_writer: SummaryWriter,
   steps_per_sec = num_steps / duration_sec
   logging.info('steps/sec: %f', steps_per_sec)
 
-  write_summary_entry(train_summary_writer, step_i, loss, metrics,
+  write_summary_entry(train_summary_writer, step_i, loss, weighted_scalars,
                       summary_tensors, steps_per_sec)
   return True

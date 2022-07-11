@@ -47,13 +47,14 @@ ParamsT = pytypes.HParamsT
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 TrainState = train_states.TrainState
 SummaryDict = pytypes.SummaryDict
-MetricDict = pytypes.Metrics
+WeightedScalars = pytypes.WeightedScalars
 TrainStepFn = Callable[[TrainState, JTensor, NestedJTensor], Tuple[TrainState,
                                                                    ...]]
 EvalStepFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor], Tuple]
 DecodeFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor],
                     NestedJTensor]
-EarlyStoppingFn = Callable[[Optional[Dict[str, MetricDict]], int, bool], bool]
+EarlyStoppingFn = Callable[[Optional[Dict[str, WeightedScalars]], int, bool],
+                           bool]
 CheckpointType = checkpoints.CheckpointType
 
 PARAMS = base_layer.PARAMS
@@ -187,53 +188,54 @@ def _maybe_to_float32(x: JTensor) -> JTensor:
 # TODO(pax): maybe move to metric_utils.py.
 def _maybe_aggregate_metrics_summaries(
     loss_aggregator: base_metrics.LossAggregator,
-    metric_dict: MetricDict,
+    weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: NestedMap,
-) -> Tuple[JTensor, JTensor, MetricDict, SummaryDict, NestedMap]:
+) -> Tuple[JTensor, JTensor, WeightedScalars, SummaryDict, NestedMap]:
   """If in pmap, aggregate metrics and summaries across model replicas.
 
   Args:
     loss_aggregator: An instance of a LossAggregator class to aggregate the
       loss. Defaults to the a single Loss weighted loss calculation.
-    metric_dict: a MetricDict.
+    weighted_scalars: a WeightedScalars.
     summary_dict: a SummaryDict.
-    per_example_out: a NestedMap.
+    per_example_out: a NestedMap of per example values.
 
   Returns:
-    (weighted_loss, mean_loss, aggregated_metrics, aggregated_summaries)
-    weighted_loss - the per-replica loss to back-propagate from. Useful for
+    (weighted_loss, mean_loss, aggregated_metrics, aggregated_summaries,
+     per_example_out)
+    weighted_loss - the per-replica loss to back-propagate from. Used for
       computing gradients only.
     mean_loss - the avg per-replica loss. This often is the psum of
       weighted_loss.
-    aggregated_metrics - the aggregated metrics.
+    aggregated_scalars - the aggregated weighted scalars dict.
     aggregated_summaries - the aggregated summaries.
     per_example_out - the aggregated per_example_out.
   """
   # compute weighted loss and mean across shards
-  weighted_loss, mean_loss = loss_aggregator.aggregate(metric_dict)
+  weighted_loss, mean_loss = loss_aggregator.aggregate(weighted_scalars)
 
   if base_layer.is_running_under_pmap():
-    # aggregate metrics.
-    mean_metrics = type(metric_dict)()
-    for key in metric_dict:
-      value, weight = metric_dict[key]
+    # aggregate data across devices.
+    aggregated_scalars = type(weighted_scalars)()
+    for key in weighted_scalars:
+      value, weight = weighted_scalars[key]
       sum_value = jax.lax.psum(
           value * weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       sum_weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
-      mean_metrics[key] = (sum_value / (sum_weight + 1e-8), sum_weight)
+      aggregated_scalars[key] = (sum_value / (sum_weight + 1e-8), sum_weight)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_dict)
     per_example_out = jax.tree_map(
         lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
         per_example_out)
   else:
-    # No aggregation of metrics is needed.
-    mean_metrics = metric_dict
+    # No aggregation of weighted scalars is needed.
+    aggregated_scalars = weighted_scalars
     # No aggregation of summaries is needed.
     aggregated_summaries = summary_dict
 
-  return (weighted_loss, mean_loss, mean_metrics, aggregated_summaries,
+  return (weighted_loss, mean_loss, aggregated_scalars, aggregated_summaries,
           per_example_out)
 
 
@@ -374,8 +376,8 @@ def _train_step_single_learner_with_model(
     A tuple of the following elements.
     updated_states - updated states.
     loss - loss as computed by model.fprop.
-    mean_metrics - a dict of metrics. Each element of the dict is a pair
-    (metric, weight).
+    weighted_scalars - a dict of (value, weight) pairs representing simple
+      weighted average metrics or losses.
     per_example_out - auxilillary per-example output as computed in model.fprop.
     summary_tensors - A dict or nested map of summary tensors computed in
       forward as well as backward.
@@ -402,8 +404,8 @@ def _train_step_single_learner_with_model(
 
   def _loss_fn(
       mdl_vars: NestedJTensor, inputs: NestedMap, prng_key
-  ) -> Tuple[JTensor, Tuple[JTensor, MetricDict, Dict[str, Any], SummaryDict,
-                            SummaryDict]]:
+  ) -> Tuple[JTensor, Tuple[JTensor, WeightedScalars, Dict[str, Any],
+                            SummaryDict, SummaryDict]]:
     """Computes loss as well as other auxiliary outputs."""
     if fprop_dtype == jnp.float32:
       pass
@@ -416,7 +418,7 @@ def _train_step_single_learner_with_model(
     with base_layer.JaxContext.new_context(hparams=context_p):
       prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
       apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-      (metrics, per_example_output), updated_vars = model.apply(
+      (weighted_scalars, per_example_output), updated_vars = model.apply(
           mdl_vars,
           inputs,
           mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE] + NON_PAX_VAR_COLLECTION,
@@ -428,12 +430,12 @@ def _train_step_single_learner_with_model(
       # TODO(yonghui): Fetch aux losses and add them to summaries.
       summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
 
-      (weighted_loss, mean_loss, mean_metrics, aggregated_summaries,
+      (weighted_loss, mean_loss, aggregated_scalars, aggregated_summaries,
        per_example_output) = _maybe_aggregate_metrics_summaries(
-           jax_task.loss_aggregator, metrics, summary_tensors,
+           jax_task.loss_aggregator, weighted_scalars, summary_tensors,
            per_example_output)
       # metrics and summary_tensors no longer needed.
-      del metrics
+      del weighted_scalars
       del summary_tensors
 
       forward_updated_vars = {}
@@ -442,7 +444,7 @@ def _train_step_single_learner_with_model(
           forward_updated_vars[collection] = updated_vars[collection]
     if fprop_dtype == jnp.bfloat16 and weighted_loss.dtype == fprop_dtype:
       weighted_loss = weighted_loss.astype(jnp.float32)
-    return weighted_loss, (mean_loss, mean_metrics, forward_updated_vars,
+    return weighted_loss, (mean_loss, aggregated_scalars, forward_updated_vars,
                            aggregated_summaries, per_example_output)
 
   # Layers may have integer-valued non-trainable vars. `allow_int=True` is
@@ -455,7 +457,7 @@ def _train_step_single_learner_with_model(
 
   prng_key, subkey = jax.random.split(prng_key)
   (weighted_loss,
-   (mean_loss, mean_metrics, fwd_updated_vars, fwd_summary_tensors,
+   (mean_loss, weighted_scalars, fwd_updated_vars, fwd_summary_tensors,
     per_example_out)), grads = grad_fn(updated_mdl_vars, inputs, subkey)
 
   # weighted_loss is only needed for computing gradients, but otherwise, not
@@ -519,7 +521,8 @@ def _train_step_single_learner_with_model(
       fwd_summary_tensors=fwd_summary_tensors,
       bwd_summary_tensors=bwd_summary_tensors)
 
-  return (new_states, mean_loss, mean_metrics, per_example_out, summary_tensors)
+  return (new_states, mean_loss, weighted_scalars, per_example_out,
+          summary_tensors)
 
 
 def train_step_single_learner(
@@ -562,8 +565,8 @@ def _eval_step_single_learner_with_model(
   Returns:
     A tuple of the following elements.
     loss - loss as computed by model.fprop.
-    mean_metrics - a dict of metrics. Each element of the dict is a pair
-    (metric, weight).
+    weighted_scalars - a dict of (value, weight) scalar pairs representing
+      simple metrics or losses.
     per_example_out - auxilillary per-example output as computed in model.fprop.
     summary_tensors - A nested map or dict of summary tensors computed in
       forward as well as backward pass.
@@ -586,7 +589,7 @@ def _eval_step_single_learner_with_model(
   with base_layer.JaxContext.new_context(hparams=context_p):
     prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-    (metrics, per_example_out), updated_vars = model.apply(
+    (weighted_scalars, per_example_out), updated_vars = model.apply(
         mdl_vars,
         inputs,
         mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE],
@@ -597,24 +600,26 @@ def _eval_step_single_learner_with_model(
     # TODO(yonghui): Add aux-loss to summaries.
     summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
 
-    (_, mean_loss, mean_metrics, aggregated_summaries,
+    (_, mean_loss, aggregated_scalars, aggregated_summaries,
      per_example_out) = _maybe_aggregate_metrics_summaries(
-         jax_task.loss_aggregator, metrics, summary_tensors, per_example_out)
+         jax_task.loss_aggregator, weighted_scalars, summary_tensors,
+         per_example_out)
 
-    # metrics and summary_tensors no longer needed.
-    del metrics
+    # weighted_scalars and summary_tensors no longer needed.
+    del weighted_scalars
     del summary_tensors
 
   if fprop_dtype == jnp.bfloat16:
-    (mean_loss, mean_metrics,
+    (mean_loss, aggregated_scalars,
      per_example_out, aggregated_summaries) = jax.tree_map(
          _maybe_to_float32,
-         (mean_loss, mean_metrics, per_example_out, aggregated_summaries))
+         (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
 
   # Adding the unchanged state to the return list so that both
   # eval_step_single_learner and train_step_single_learner have the same api to
   # facilitate some down-stream code.
-  return states, mean_loss, mean_metrics, per_example_out, aggregated_summaries
+  return (states, mean_loss, aggregated_scalars, per_example_out,
+          aggregated_summaries)
 
 
 def eval_step_single_learner(
@@ -651,7 +656,7 @@ def decode_step(
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
 
   Returns:
-    A tuple of (metrics, results) as computed by model.decode().
+    A tuple of (weighted_scalars, results) as computed by model.decode().
   """
   context_p = base_layer.JaxContext.HParams(do_eval=True)
   # Fold in global_step as part of the random seed key, so that random

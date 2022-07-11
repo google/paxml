@@ -327,8 +327,8 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
                             'search_algorithm')
 
   def extract_metrics(
-      metrics_by_dataset: Dict[str,
-                               trainer_lib.MetricDict]) -> Dict[str, float]:
+      metrics_by_dataset: Dict[str, trainer_lib.WeightedScalars]
+  ) -> Dict[str, float]:
     """Extract a flattened metric dict from a metric dict per dataset."""
     metrics = {}
 
@@ -354,7 +354,7 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
     """Gets early stopping function based on a feedback object."""
 
     def should_stop_early(metrics_by_dataset: Optional[Dict[
-        str, trainer_lib.MetricDict]], global_step: int,
+        str, trainer_lib.WeightedScalars]], global_step: int,
                           is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
       if FLAGS.metrics_from == FLAGS.mode:
