@@ -613,8 +613,10 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
     ret.labels = tf.math.abs(ret.labels)
     return ret
 
-  def __call__(self, ds: tf.data.Dataset,
-               task_feature_lengths: Mapping[str, int]) -> tf.data.Dataset:
+  def __call__(
+      self, ds: tf.data.Dataset,
+      task_feature_lengths: Mapping[str, Union[int, Sequence[int]]]
+  ) -> tf.data.Dataset:
     ds = super().__call__(ds, task_feature_lengths)
     ds = ds.map(self._to_pax)
     return ds
@@ -695,8 +697,10 @@ class PackedSequenceModelFeatures(SequenceModelFeatures):
 class RemoveProvenance(seqio.PassThroughFeatureConverter):
   """Pass through but removes unused fields added by Deterministic tasks."""
 
-  def __call__(self, ds: tf.data.Dataset,
-               task_feature_lengths: Mapping[str, int]) -> tf.data.Dataset:
+  def __call__(
+      self, ds: tf.data.Dataset,
+      task_feature_lengths: Mapping[str, Union[int, Sequence[int]]]
+  ) -> tf.data.Dataset:
     del task_feature_lengths
 
     def filter_prov(b):
