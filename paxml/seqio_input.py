@@ -620,6 +620,27 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
     return ds
 
 
+class PackedLanguageModelFeatures(LanguageModelFeatures):
+  """A feature converter for a sequence model where examples are already packed.
+
+  This would typically be the case for deterministic datasets where we pack
+  examples while writing data to the sstables.
+  Output batch has same features as LanguageModelFeatures.
+  """
+
+  def __init__(self) -> None:
+    super().__init__(pack=False)
+
+  def __call__(
+      self, ds: tf.data.Dataset,
+      task_feature_lengths: Mapping[str, Union[int, Sequence[int]]]
+  ) -> tf.data.Dataset:
+    # don't call super(), we want to bypass all validations & packing operation
+    # in the base class as examples are already packed.
+    ds = ds.map(self._to_pax)
+    return ds
+
+
 class SequenceModelFeatures(seqio.EncDecFeatureConverter):
   """A feature converter for a sequence to sequence model.
 
