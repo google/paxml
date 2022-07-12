@@ -396,12 +396,12 @@ class SingleTask(base_task.BaseTask):
     mesh_shape = self.hparams.model.mesh_shape
     mesh_axis_names = self.hparams.model.mesh_axis_names
     if mesh_shape is None:
-      padded_shapes = unpadded_shapes
-    else:
-      model_state_partition_specs = self.create_train_state_partition_specs(
-          var_weight_hparams, discard_opt_states)
-      tf.nest.assert_same_structure(model_state_partition_specs,
-                                    unpadded_shapes)
+      return unpadded_shapes
+
+    model_state_partition_specs = self.create_train_state_partition_specs(
+        var_weight_hparams, discard_opt_states)
+    tf.nest.assert_same_structure(model_state_partition_specs,
+                                  unpadded_shapes)
 
     def _maybe_pad(shape_dtype, pspec):
       if py_utils.is_optax_masked_node(shape_dtype):
@@ -588,7 +588,7 @@ class SingleTask(base_task.BaseTask):
     # Initialize with a dummy seed
     vars_weight_params = ckpt_task.model.abstract_init_with_metadata(
         jax.random.PRNGKey(0))
-    ckpt_train_state = ckpt_task.create_train_state_unpadded_shapes(
+    ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
         vars_weight_params)
