@@ -179,6 +179,26 @@ def _maybe_to_bfloat16(x: JTensor) -> JTensor:
   return x
 
 
+def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
+  """Helper for bfloat16 conversion of model vars.
+
+  Args:
+    mdl_vars: A nested structure of vars.
+    var_weight_hparams: A nested structure of the variable weight params.
+      var_weight_hparams must have the same structure as mdl_vars.
+  """
+  tf.nest.assert_same_structure(mdl_vars, var_weight_hparams)
+
+  def _maybe_bfloat16_var_fn(var, var_param):
+    if base_layer.var_disallow_bfloat16_conversion(var_param):
+      return var
+    else:
+      return _maybe_to_bfloat16(var)
+
+  return tf.nest.map_structure(_maybe_bfloat16_var_fn, mdl_vars,
+                               var_weight_hparams)
+
+
 def _maybe_to_float32(x: JTensor) -> JTensor:
   if x.dtype == jnp.bfloat16:
     return x.astype(jnp.float32)
@@ -410,7 +430,7 @@ def _train_step_single_learner_with_model(
     if fprop_dtype == jnp.float32:
       pass
     elif fprop_dtype == jnp.bfloat16:
-      mdl_vars = jax.tree_map(_maybe_to_bfloat16, mdl_vars)
+      mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
       inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
     else:
       assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
@@ -578,10 +598,13 @@ def _eval_step_single_learner_with_model(
   mdl_vars = states.mdl_vars
   # assert not states.opt_states
 
+  parent_model = jax_task.model
+  var_weight_hparams = parent_model.abstract_init_with_metadata(prng_key)
+
   if fprop_dtype == jnp.float32:
     pass
   elif fprop_dtype == jnp.bfloat16:
-    mdl_vars = jax.tree_map(_maybe_to_bfloat16, mdl_vars)
+    mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
     inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
   else:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
@@ -663,10 +686,12 @@ def decode_step(
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)
   mdl_vars = states.mdl_vars
+
+  var_weight_hparams = model.abstract_init_with_metadata(prng_key)
   assert not states.opt_states
 
   if fprop_dtype == jnp.bfloat16:
-    mdl_vars = jax.tree_map(_maybe_to_bfloat16, mdl_vars)
+    mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
     inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
   elif fprop_dtype != jnp.float32:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
