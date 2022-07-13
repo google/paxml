@@ -151,7 +151,8 @@ def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   try:
     importlib.import_module(module_name)
   except ModuleNotFoundError as e:
-    raise ValueError(f'Could not find experiment `{experiment_name}`: {e}.')
+    raise ValueError(
+        f'Could not find experiment `{experiment_name}`.') from e
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
     return experiment_class
@@ -358,12 +359,13 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
                           is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
       if FLAGS.metrics_from == FLAGS.mode:
-        if metrics_by_dataset is None:
-          raise ValueError('There is no metrics reported for tuning.')
-        # Computing reward and report back to the tuning service.
-        metrics = extract_metrics(metrics_by_dataset)
-        reward = reward_fn(metrics, global_step)
-        feedback.add_measurement(reward, metrics=metrics, step=global_step)
+        # `metrics_by_dataset` could be None for interleaved train/eval
+        # when evaluation is not performed at current global step.
+        if metrics_by_dataset is not None:
+          # Computing reward and report back to the tuning service.
+          metrics = extract_metrics(metrics_by_dataset)
+          reward = reward_fn(metrics, global_step)
+          feedback.add_measurement(reward, metrics=metrics, step=global_step)
         if is_last_checkpoint:
           feedback.done()
       return feedback.should_stop_early()
