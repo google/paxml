@@ -369,7 +369,7 @@ class SeqIOInput(base_input.BaseInput):
       # Note that we intentionally do not use 'inputs_pretokenized' here because
       # it might be very different from the round-trip results below, which
       # wouldn't match with the keys we get from the model inference path.
-      key = self.ids_to_strings(
+      key = self.ids_to_strings(  # pytype: disable=wrong-arg-types  # dynamic-method-lookup
           e['inputs'][None, :],
           lengths=[inputs_length],
           key='src')[0]
