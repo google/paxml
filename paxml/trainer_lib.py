@@ -667,8 +667,8 @@ def decode_step(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32,
-) -> Tuple[NestedMap, NestedMap]:
+    fprop_dtype: jnp.dtype = jnp.float32
+) -> Tuple[Tuple[Any, Any, Any], NestedMap]:
   """Decodes a model for a single step.
 
   Args:
@@ -679,7 +679,8 @@ def decode_step(
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
 
   Returns:
-    A tuple of (weighted_scalars, results) as computed by model.decode().
+    A tuple of (weighted_scalars, results, eval_metrics) as computed
+      by model.decode() and the updated weights.
   """
   context_p = base_layer.JaxContext.HParams(do_eval=True)
   # Fold in global_step as part of the random seed key, so that random
@@ -712,6 +713,14 @@ def decode_step(
     # to remove it from output. Note MLP decoder don't have DECODE_CACHE.
     if DECODE_CACHE in updated_vars:
       del updated_vars[DECODE_CACHE]
+
+    # If model's decode() function only has two returns, we assume they are
+    # weighted_scalars and per_example_outputs, and the models haven't yet
+    # added an Metrics return (NestedMap of keys -> clu.metrics).
+    # TODO(bencaine): Remove this when all models are updated.
+    if len(outputs) == 2:
+      weighted_scalars, per_example_out = outputs
+      outputs = (weighted_scalars, per_example_out, {})
 
     summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
     if summary_tensors:

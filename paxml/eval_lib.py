@@ -56,6 +56,7 @@ from paxml import checkpoints  # mapped to internal
 
 CheckpointType = checkpoint_pb2.CheckpointType
 WeightedScalars = base_model.WeightedScalars
+Metrics = pytypes.Metrics
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
@@ -662,9 +663,9 @@ def evaluate_spmd_model(
   _, eval_key = jax.random.split(prng_key)
   logging.info('eval prng_key: %s', eval_key)
 
-  (partitioned_train_state, partitioned_specs, train_state_global_shapes
-   ) = _SpmdEvalRunner.get_model_states(jax_task, global_mesh, init_key,
-                                         checkpoint_dir, checkpoint_type)
+  (partitioned_train_state, partitioned_specs,
+   train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
+       jax_task, global_mesh, init_key, checkpoint_dir, checkpoint_type)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
@@ -810,6 +811,55 @@ def _can_load_decode_outs(basedir: str, pname: str, step: int) -> bool:
   return out[0] > 0
 
 
+def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
+  """Merges existing eval metrics with updated metric data."""
+  if metrics:
+    if set(metrics.keys()) != set(updated_metrics.keys()):
+      raise ValueError('metrics and updated_metrics keys don`t match. '
+                       f'metrics keys: {metrics.keys()} '
+                       f'updated_metrics keys: {updated_metrics.keys()}')
+
+    for key in metrics:
+      metrics[key] = metrics[key].merge(updated_metrics[key])
+  else:
+    metrics = updated_metrics
+  return metrics
+
+
+def _write_clu_metric_summaries(metrics: Metrics, step_i: int) -> None:
+  """Given a dict of clu metrics, write them out as tensorboard summaries.
+
+  This is expected to be called under a summary context.
+
+  Args:
+    metrics: A NestedMap of string -> clu_metrics.Metric objects. These metrics
+      are expected to have a compute() function that returns a Dict or scalar.
+    step_i: An int representing the current step of decoding.
+  """
+  logging.info('Summarizing metrics.')
+  for metric_name, metric in metrics.items():
+    logging.info('Computing metric %s' % metric_name)
+    metric_values = metric.compute()
+    # clu.metrics compute() can return arbitrary types. For simple Metrics
+    # this is usually just a float or integer. For more complicated Metrics
+    # we expect users to return a dictionary of floats/integers.
+    # Here we check which it is, and if it's not a dictionary assume it's a
+    # scalar type.
+    if isinstance(metric_values, (dict, NestedMap)):
+      for metric_key, metric_value in metric_values.items():
+        summary_key = f'{metric_name}/{metric_key}'
+        # TODO(bencaine): Support other summary types.
+        logging.info('  %s=%f', summary_key, metric_value)
+        summary_utils.write_summary_tensor(step_i, summary_key, metric_value,
+                                           summary_utils.SummaryType.SCALAR)
+    else:
+      # Otherwise we assume compute() returned a float or integer.
+      summary_key = f'{metric_name}'
+      logging.info('  %s=%f', summary_key, metric_values)
+      summary_utils.write_summary_tensor(step_i, summary_key, metric_values,
+                                         summary_utils.SummaryType.SCALAR)
+
+
 def decode_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
@@ -943,6 +993,7 @@ def decode_once_pmap_model(
     metrics_p = base_metrics.MeanMetrics.HParams()
   decode_metrics = instantiate(metrics_p)
   process_decode_metrics = instantiate(metrics_p)
+  metrics = {}
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
@@ -954,17 +1005,29 @@ def decode_once_pmap_model(
 
   def decode_step(mdl_states, prng_key, inputs):
     mdl_states = trainer_lib.train_state_for_eval_step(mdl_states)
-    (metrics,
-     out), updated_vars = trainer_lib.decode_step(model, mdl_states, prng_key,
-                                                  inputs, model_p.fprop_dtype)
-    metrics = decode_metrics.aggregate(metrics)
-    out = jax.lax.all_gather(out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True)
+    (weighted_scalars, per_example_out,
+     updated_metrics), updated_vars = trainer_lib.decode_step(
+         model, mdl_states, prng_key, inputs, model_p.fprop_dtype)
+
+    weighted_scalars = decode_metrics.aggregate(weighted_scalars)
+    aggregated_per_example_out = jax.lax.all_gather(
+        per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True)
+
     summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
     summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_tensors)
 
-    return metrics, out, aggregated_summaries
+    # We want to aggregate metrics across workers.
+    # In pmap we do an all gather of the metric state across workers, and then
+    # call reduce() on the metric which by default calls merge across workers.
+    aggregated_metrics = {}
+    for metric_name, metric in updated_metrics.items():
+      aggregated_metrics[metric_name] = jax.lax.all_gather(
+          metric, axis_name=PMAP_PARALLEL_AXIS_NAME).reduce()
+
+    return (weighted_scalars, aggregated_per_example_out, aggregated_summaries,
+            aggregated_metrics)
 
   # As an example, suppose the output leaf from trainer_lib.decoder_step()
   # for each core has shape: [per_core_batch_size, decoding_length].
@@ -986,7 +1049,7 @@ def decode_once_pmap_model(
   pmap_decode_step = jax.pmap(
       decode_step,
       axis_name=PMAP_PARALLEL_AXIS_NAME,
-      out_axes=(None, None, None))
+      out_axes=(None, None, None, None))
 
   def decode_step_func(inputs):
     # TODO(pax): shall we eval all sub-models during eval?
@@ -1016,13 +1079,17 @@ def decode_once_pmap_model(
         inputs[split].reset()
         break
       batch = tf.nest.map_structure(py_utils.reshard, batch)
-      batch_metrics, out, summary_tensors = decode_step_func(batch)
+      (batch_metrics, out, summary_tensors,
+       updated_metrics) = decode_step_func(batch)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
       # we store the metric directly as it has already been aggregated in
       # side decode_step_fun
       decode_metrics.store(batch_metrics)
       logging.info('Finished decoding input batch %d', step_num)
+
+      # Merge clu.metrics to update for each minibatch.
+      metrics = _merge_clu_metrics(metrics, updated_metrics)
 
       if jax.process_index() == 0:
         process_metrics, processed = model.process_decode_out(
@@ -1051,6 +1118,7 @@ def decode_once_pmap_model(
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
+      _write_clu_metric_summaries(metrics, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
@@ -1231,6 +1299,7 @@ def decode_once_spmd_model(
     metrics_p = base_metrics.MeanMetrics.HParams()
   decode_metrics = instantiate(metrics_p)
   process_decode_metrics = instantiate(metrics_p)
+  metrics = {}
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
   basedir = os.path.join(job_log_dir, 'decoder_out')
@@ -1271,13 +1340,27 @@ def decode_once_spmd_model(
       if use_gda:
         batch = py_utils.create_gda(batch, inputs_shape, global_mesh,
                                     inputs_partition_spec)
-      (metrics, out), updated_vars = spmd_decode_step_fn(batch)
+      (weighted_scalars, out,
+       updated_metrics), updated_vars = spmd_decode_step_fn(batch)
+
       # Cross host synchronization happens at this point.
       py_utils.sync_global_devices(f'spmd_decode_step_fn{step_num}')
       # Output is fully replicated now, so it's ok to unreplicate it by
       # retrieving from device 0 only.
       out = py_utils.maybe_unreplicate_for_fully_replicated(out)
-      metrics = py_utils.maybe_unreplicate_for_fully_replicated(metrics)
+      weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+          weighted_scalars)
+
+      # Because outputs of the decode step in pjit are annotated to be on the
+      # GDA, they are already fully replicated across shards and we can just
+      # unreplicate.
+      # This also means we don't need to call an all_gather and a reduce()
+      # on each clu.metric like we do in pmap mode.
+      updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
+          updated_metrics)
+
+      # Merge clu.metrics to update for each minibatch.
+      metrics = _merge_clu_metrics(metrics, updated_metrics)
 
       summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
       del updated_vars  # release GDA memory allocations
@@ -1290,12 +1373,14 @@ def decode_once_spmd_model(
       logging.info('Finished decoding input batch %d', step_num)
       if jax.process_index() != 0:
         continue
-      process_metrics, processed = jax_task.model.process_decode_out(
+      decode_metrics.store(weighted_scalars)
+
+      process_weighted_scalars, processed = jax_task.model.process_decode_out(
           inputs[split], out)
-      decode_metrics.store(metrics)
-      process_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-          process_metrics)
-      process_decode_metrics.store(process_metrics)
+      process_weighted_scalars = (
+          py_utils.maybe_unreplicate_for_fully_replicated(
+              process_weighted_scalars))
+      process_decode_metrics.store(process_weighted_scalars)
       processed_decodes.extend(processed)
       logging.info('Finished processing decoded input batch %d', step_num)
 
@@ -1317,6 +1402,7 @@ def decode_once_spmd_model(
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
+      _write_clu_metric_summaries(metrics, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
