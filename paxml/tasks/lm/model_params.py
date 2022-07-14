@@ -167,12 +167,16 @@ def maybe_setup_moe_params(model_p: base_model.BaseModel.HParams) -> None:
   moe_p.name = ff_p.name
   moe_p.input_dims = ff_p.input_dims
   moe_p.hidden_dims = ff_p.hidden_dims
-  moe_p.ln_tpl = ff_p.ln_tpl.Copy()
+  moe_p.ln_tpl = ff_p.ln_tpl.clone()
   moe_p.activation_tpl = ff_p.activation_tpl.clone()
-  moe_p.use_gated_activation = ff_p.use_gated_activation
-  moe_p.relu_dropout_tpl = ff_p.relu_dropout_tpl.Copy()
+  # TransformerFeedForwardMoe does not have use_gated_activation
+  # moe_p.use_gated_activation = ff_p.use_gated_activation
+  #
+  # We never did wi_0 and wi_1 in the MoE layer even when we used GATED_GELU for
+  # FFN.
+  moe_p.relu_dropout_tpl = ff_p.relu_dropout_tpl.clone()
   moe_p.relu_dropout_prob = ff_p.relu_dropout_prob
-  moe_p.residual_dropout_tpl = ff_p.residual_dropout_tpl.Copy()
+  moe_p.residual_dropout_tpl = ff_p.residual_dropout_tpl.clone()
   moe_p.residual_dropout_prob = ff_p.residual_dropout_prob
   moe_p.add_skip_connection = ff_p.add_skip_connection
   moe_p.norm_policy = ff_p.norm_policy
