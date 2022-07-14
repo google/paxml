@@ -578,7 +578,13 @@ class _SpmdEvalRunner:
       if partitioned_train_state is None:
         _, partitioned_train_state = (
             trainer_lib.initialize_partitioned_model_states(
-                jax_task, init_key, discard_opt_states=discard_opt_states))
+                jax_task, init_key, global_mesh=global_mesh,
+                # Note: We currently enforce that the checkpoint to reload via
+                # init_checkpoint_rules are in the same format as the checkpoint
+                # solution used by the experiment.
+                checkpoint_type=checkpoint_type,
+                state_specs=partitioned_specs,
+                discard_opt_states=discard_opt_states))
     return partitioned_train_state, partitioned_specs, train_state_global_shapes
 
   def _run_pjit(self, init_key: PRNGKey,
