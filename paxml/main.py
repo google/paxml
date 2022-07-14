@@ -48,7 +48,6 @@ import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
 persistence_gda_serialization = gda_serialization  # mapped to internal
 
-
 # Required import to setup work units when running through XManager.
 
 FLAGS = flags.FLAGS
@@ -165,6 +164,7 @@ def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
 
 
 def run_experiment(
+    experiment_config: base_experiment.BaseExperimentT,
     work_unit: platform.WorkUnit,
     job_log_dir: str,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -172,12 +172,12 @@ def run_experiment(
   """Run an experiment.
 
   Args:
+    experiment_config: The experiment to run.
     work_unit: Work unit for adding experiment artifact and reporting status.
     job_log_dir: The directory for storing logs and writing checkpoints.
     early_stopping_fn: The early stopping function for training and evaluation.
       If None, the training and evaluation will train to requested steps.
   """
-  experiment_config = _get_experiment(FLAGS.exp)()
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -239,8 +239,7 @@ def run_experiment(
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
-        experiment_config=experiment_config,
-        job_log_dir=job_log_dir)
+        experiment_config=experiment_config, job_log_dir=job_log_dir)
 
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a
@@ -249,7 +248,8 @@ def run_experiment(
   py_utils.sync_global_devices('All tasks finish.')
 
 
-def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
+def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
+                    work_unit: platform.WorkUnit, job_log_dir: str) -> None:
   """Tune an experiment.
 
   An experiment can be tuned by running a tuning loop, with each iteration
@@ -272,6 +272,7 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
      early stopping the trial.
 
   Args:
+    experiment_config: The experiment to run.
     work_unit: Work unit for adding experiment artifact and reporting status.
     job_log_dir: The directory used for storing logs and writing checkpoints.
   """
@@ -279,7 +280,6 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
   assert FLAGS.pythia_port is not None
   # Google-internal tuning infra init.
 
-  experiment_config = _get_experiment(FLAGS.exp)()
   search_hparams = experiment_config.search()
   search_algorithm = search_hparams.search_algorithm.Instantiate()()
   reward_fn = search_hparams.search_reward.Instantiate()
@@ -385,7 +385,8 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
       # Mark trial as infeasible on NaN. PAX user can add more error types here.
       with feedback.skip_on_exceptions((FloatingPointError,)):
         try:
-          run_experiment(work_unit, os.path.join(job_log_dir, str(feedback.id)),
+          run_experiment(experiment_config, work_unit,
+                         os.path.join(job_log_dir, str(feedback.id)),
                          get_early_stopping_fn(feedback))
         except automl.EarlyStoppingError as e:
           if e.skip:
@@ -403,12 +404,17 @@ def tune_experiment(work_unit: platform.WorkUnit, job_log_dir: str) -> None:
   logging.info('Completed with all trials for study %r', FLAGS.study)
 
 
-def main(argv: Sequence[str]) -> None:
-  if len(argv) > 1:
-    raise app.UsageError('Too many command-line arguments.')
+def run(experiment_config: base_experiment.BaseExperimentT):
+  """Run an experiment.
 
-  setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
-                      FLAGS.jax_xla_backend, FLAGS.jax_enable_checks)
+  This function exists to provide a clear injection seam for a given run.
+  Anything that needs to be configured via Fiddle should be injected here
+  and passed down to the runner code. Right now, the only thing to be
+  injected is the experiment_config.
+
+  Args:
+    experiment_config: The experiment to run.
+  """
 
   # Add a note so that we can tell which Borg task is which JAX host.
   # (Borg task 0 is not guaranteed to be host 0)
@@ -430,9 +436,20 @@ def main(argv: Sequence[str]) -> None:
                      'only supported with --mode=decode_once.')
 
   if FLAGS.study is None:
-    run_experiment(work_unit, job_log_dir=FLAGS.job_log_dir)
+    run_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
   else:
-    tune_experiment(work_unit, job_log_dir=FLAGS.job_log_dir)
+    tune_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
+
+
+def main(argv: Sequence[str]) -> None:
+  if len(argv) > 1:
+    raise app.UsageError('Too many command-line arguments.')
+
+  setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
+                      FLAGS.jax_xla_backend, FLAGS.jax_enable_checks)
+
+  experiment_config = _get_experiment(FLAGS.exp)()
+  run(experiment_config)
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
