@@ -144,7 +144,8 @@ def run_eval_loop_over_test_splits(
     eval_inputs_shape=None,
     global_mesh=None,
     reshard_inputs: Optional[bool] = False,
-    create_gda_for_inputs: bool = False) -> List[WeightedScalars]:
+    create_gda_for_inputs: bool = False
+) -> List[summary_utils.WeightedScalarsList]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -171,7 +172,7 @@ def run_eval_loop_over_test_splits(
     # Reset loss and summary tensors for each test split.
     loss = []
     summary_tensors = {}
-    metrics = {}
+    metrics = collections.defaultdict(list)
     step_num = 0
     per_example_scores = []
     # Use num_split_steps < 0 to indicate running all of the input until
@@ -214,10 +215,7 @@ def run_eval_loop_over_test_splits(
         else:
           summary_tensors[k] = [eval_summary_tensors[k]]
       for k in eval_metrics:
-        if k in metrics:
-          metrics[k] += [eval_metrics[k]]
-        else:
-          metrics[k] = [eval_metrics[k]]
+        metrics[k].append(eval_metrics[k])
 
     if (model_inputs[split].hparams.reset_for_eval and
         hasattr(model_inputs[split], 'compute_metrics_eval') and
@@ -231,15 +229,11 @@ def run_eval_loop_over_test_splits(
     loss = np.array(loss)
     for k in summary_tensors:
       summary_tensors[k] = np.array([t.to_py() for t in summary_tensors[k]])
-    for k in metrics:
-      value = np.stack([metric[0] for metric in metrics[k]])
-      weight = np.stack([metric[1] for metric in metrics[k]])
-      metrics[k] = (value, weight)
     loss = np.mean(loss, axis=0)
     logging.info('step_i: %d, eval test split %s loss: %s', step, split, loss)
-    for key, value in metrics.items():
-      metric_values = value[0]
-      metric_weights = value[1]
+    for key, values in metrics.items():
+      metric_values = np.stack([v[0] for v in values])
+      metric_weights = np.stack([v[1] for v in values])
       sum_metric_weights = np.sum(metric_weights)
       weighted_average = np.sum(
           metric_values * metric_weights) / sum_metric_weights

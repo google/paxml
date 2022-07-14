@@ -186,6 +186,13 @@ class SingleTask(base_task.BaseTask):
       save_max_to_keep: The maximum number of recent checkpoints to keep.
       summary_interval_steps: How frequently to generate summaries in terms of
         the number of training steps.
+      log_train_output_interval_steps:  How frequently to log training output
+        to the INFO stream. If set to None, use the same value as for
+        `summary_interval_steps`.
+      summary_accumulate_interval_steps: How frequently to accumulate summary
+        values across steps before writing them to disk. If unset, no
+        accumulation is performed and summaries will be written solely based
+        on the current step's values.
       variable_norm_summary: Whether to compute variable norm summaries.
       eval_interval_steps: How frequently to evaluate the model on the
         evaluation splits in terms of the number of training steps. Set to 0 to
@@ -213,6 +220,8 @@ class SingleTask(base_task.BaseTask):
     save_keep_interval_duration: str = '12h'
     save_max_to_keep: int = 10
     summary_interval_steps: int = 100
+    log_train_output_interval_steps: Optional[int] = None
+    summary_accumulate_interval_steps: Optional[int] = None
     variable_norm_summary: bool = True
     eval_interval_steps: int = 100
     eval_skip_train: bool = False

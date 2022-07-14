@@ -272,6 +272,19 @@ pytype_strict_library(
     ],
 )
 
+py_strict_test(
+    name = "summary_utils_test",
+    srcs = ["summary_utils_test.py"],
+    deps = [
+        ":summary_utils",
+        # Implicit absl.flags dependency.
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
 pytype_strict_library(
     name = "tasks_lib",
     srcs = ["tasks_lib.py"],

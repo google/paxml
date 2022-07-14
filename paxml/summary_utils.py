@@ -15,12 +15,13 @@
 
 """Utils for TF Summaries."""
 
+import collections
 import collections.abc
 import contextlib
 import operator
 import textwrap
-import time
-from typing import Any, Dict, Generator, List, Optional, Tuple
+import typing
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -49,6 +50,7 @@ TrainState = train_states.TrainState
 SummaryType = base_layer.SummaryType
 SummaryWriter = tf.summary.SummaryWriter
 WeightedScalars = pytypes.WeightedScalars
+WeightedScalarsList = Dict[str, Sequence[Tuple[JTensor, JTensor]]]
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 # Maximum number of images written to a single summary entry.
@@ -269,25 +271,45 @@ def flatten_summary_dict(summary_dict: Dict[str, JTensor],
   return outputs
 
 
-def write_summary_tensor(step_i: int, key: str, tensor: JTensor,
+def write_summary_tensor(step_i: int, key: str,
+                         tensor: Union[float, JTensor, Sequence[JTensor]],
                          summary_type: SummaryType) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
     if summary_type == SummaryType.SCALAR or summary_type == SummaryType.IMAGE:
       return
+  if isinstance(tensor, (list, tuple)):
+    tensors = tensor
+  else:
+    tensors = [tensor]
+  tensors = typing.cast(Sequence[JTensor], tensors)
+  # Tensors are often pushed in step ascending order. Iterate over the most
+  # recent ones. Only useful for non-aggregated summaries.
+  tensors_it = reversed(tensors)
   if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
     logging.info('summary tensor at step=%s %s %s', step_i, key, tensor)
-    tensor = np.mean(tensor).item()
+    # Force DeviceArray to NumPy array conversion before taking the mean.
+    tensor = np.mean([np.array(t) for t in tensors_it]).item()
     tf_summary.scalar(key, tensor, step_i)
   elif base_layer.get_summary_base_type(summary_type) == SummaryType.IMAGE:
-    # Some eval codepath adds a leading 'test split' dim.
-    tensor = np.reshape(tensor, [-1] + list(tensor.shape)[-3:])
-    # Create a separate key for each image to avoid RPC oversize issues.
-    for i in range(min(tensor.shape[0], MAX_IMAGES_PER_SUMMARY)):
-      tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
+    remaining_max_images = MAX_IMAGES_PER_SUMMARY
+    for tensor in tensors_it:
+      if remaining_max_images <= 0:
+        break
+      # Some eval codepath adds a leading 'test split' dim.
+      tensor = np.reshape(tensor, [-1] + list(tensor.shape)[-3:])
+      # Create a separate key for each image to avoid RPC oversize issues.
+      for i in range(min(tensor.shape[0], remaining_max_images)):
+        tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
+      remaining_max_images -= tensor.shape[0]
   elif base_layer.get_summary_base_type(summary_type) == SummaryType.TEXT:
-    for i in range(min(tensor.shape[0], MAX_TEXTS_PER_SUMMARY)):
-      tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
+    remaining_max_texts = MAX_TEXTS_PER_SUMMARY
+    for tensor in tensors_it:
+      if remaining_max_texts <= 0:
+        break
+      for i in range(min(tensor.shape[0], remaining_max_texts)):
+        tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
+      remaining_max_texts -= tensor.shape[0]
   else:
     assert False, 'Unsupported summary type: ' + str(summary_type)
 
@@ -295,7 +317,7 @@ def write_summary_tensor(step_i: int, key: str, tensor: JTensor,
 def write_summary_entry(summary_writer: SummaryWriter,
                         step_i: int,
                         loss: JTensor,
-                        weighted_scalars: WeightedScalars,
+                        weighted_scalars_list: WeightedScalarsList,
                         summary_tensors: NestedJTensor,
                         steps_per_sec: Optional[float] = None) -> None:
   """Writes a summary entry into the provided SummaryWriter."""
@@ -303,8 +325,8 @@ def write_summary_entry(summary_writer: SummaryWriter,
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
   # SPMD training may produce GDA.
   loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-  weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-      weighted_scalars)
+  weighted_scalars_list = py_utils.maybe_unreplicate_for_fully_replicated(
+      weighted_scalars_list)
   summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
       summary_tensors)
 
@@ -318,27 +340,30 @@ def write_summary_entry(summary_writer: SummaryWriter,
                            SummaryType.SCALAR)
     logging.info('Metrics values at step %d:', step_i)
     logging.info('  loss=%f', mean_loss)
-    for key, value in weighted_scalars.items():
-      assert len(value) == 2, (
-          'Metric value should be a pair of (value, weight).')
-      metric_values = value[0]
-      metric_weights = value[1]
-      sum_metric_weights = np.sum(metric_weights)
-      weighted_average = np.sum(
-          metric_values * metric_weights) / sum_metric_weights
-      logging.info('  %s=%f (weight=%f)', key, weighted_average.item(),
-                   sum_metric_weights.item())
-      status_msg += f', {key}={weighted_average.item()}'
-      write_summary_tensor(step_i, f'Metrics/{key}', weighted_average.item(),
+    for key, value_lst in weighted_scalars_list.items():
+      sum_metric_weights = 0.
+      weighted_sum_metric_values = 0.
+      for value in value_lst:
+        assert len(value) == 2, (
+            'Metric value should be a pair of (value, weight).')
+        metric_values = value[0]
+        metric_weights = value[1]
+        sum_metric_weights += np.sum(metric_weights)
+        weighted_sum_metric_values += np.sum(metric_values * metric_weights)
+      weighted_average = weighted_sum_metric_values / sum_metric_weights
+      logging.info('  %s=%f (weight=%f)', key, weighted_average,
+                   sum_metric_weights)
+      status_msg += f', {key}={weighted_average}'
+      write_summary_tensor(step_i, f'Metrics/{key}', weighted_average,
                            SummaryType.SCALAR)
-      write_summary_tensor(step_i, f'Metrics/{key}-weight',
-                           sum_metric_weights.item(), SummaryType.SCALAR)
+      write_summary_tensor(step_i, f'Metrics/{key}-weight', sum_metric_weights,
+                           SummaryType.SCALAR)
 
     work_unit.set_task_status(status_msg)
     summaries = flatten_summary_dict(summary_tensors)
-    for key, tensor in summaries:
+    for key, tensors in summaries:
       summary_type = base_layer.get_summary_type_from_key(key)
-      write_summary_tensor(step_i, key, tensor, summary_type)
+      write_summary_tensor(step_i, key, tensors, summary_type)
 
   # Lastly flush summaries.
   summary_writer.flush()
@@ -374,33 +399,126 @@ def write_global_batch_size(train_summary_writer: SummaryWriter,
   train_summary_writer.flush()
 
 
-def write_summary_every_n_steps(train_summary_writer: SummaryWriter,
-                                step_i: int, summary_every_n_steps: int,
-                                loss: JTensor,
-                                weighted_scalars: WeightedScalars,
-                                per_example_out: NestedJTensor,
-                                summary_tensors: NestedJTensor,
-                                summary_last_time: Optional[float],
-                                summary_last_step: Optional[int]) -> bool:
-  """Writes summaries at regular intervals."""
-  if step_i % summary_every_n_steps != 0:
-    return False
-  loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-  weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-      weighted_scalars)
-  per_example_out = py_utils.maybe_unreplicate_for_first_shard(per_example_out)
-  summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-      summary_tensors)
-  logging.info('step_i: %d, training loss: %s', step_i, loss)
-  logging.info('weighted_scalars: %s', weighted_scalars)
-  logging.info('per_example_out: %s', per_example_out)
-  logging.info('summary_tensors: %s', summary_tensors)
+class SummaryHandler:
+  """Handles summary writing to TensorBoard.
 
-  duration_sec = time.time() - summary_last_time
-  num_steps = step_i - summary_last_step
-  steps_per_sec = num_steps / duration_sec
-  logging.info('steps/sec: %f', steps_per_sec)
+  This handler can be used to adjust the frequency of summary generation
+  as well as enabling summary aggregation across several steps.
+  """
 
-  write_summary_entry(train_summary_writer, step_i, loss, weighted_scalars,
-                      summary_tensors, steps_per_sec)
-  return True
+  def __init__(self,
+               summary_writer: SummaryWriter,
+               write_interval_steps: int,
+               accumulate_interval_steps: Optional[int] = None) -> None:
+    """Constructor.
+
+    Args:
+      summary_writer: The SummaryWriter instance to use to write summaries to
+        disk.
+      write_interval_steps: The frequency at which to write summaries to disk.
+      accumulate_interval_steps: The frequency at which to accumulate summaries
+        across steps. If unset, do not accumulate and only use the values at a
+        specific set.
+    """
+    self._summary_writer = summary_writer
+    self._write_interval_steps = write_interval_steps
+    self._accumulate_interval_steps = accumulate_interval_steps
+    self._latest_step = -1
+    self._losses = []
+    self._weighted_scalars_list = collections.defaultdict(list)
+    self._summary_tensors = collections.defaultdict(list)
+    self._steps_per_sec = []
+
+  @property
+  def accumulate_over_steps(self) -> bool:
+    """Indicates whether we should accumulate summaries over steps or not."""
+    return self._accumulate_interval_steps is not None
+
+  def should_accumulate(self, step: int) -> bool:
+    """Indicates whether we should accumulate values for this step or not."""
+    return (self.accumulate_over_steps and
+            step % self._accumulate_interval_steps == 0)
+
+  def should_write(self, step: int) -> bool:
+    """Indicates whether we should write summaries to disk at this step."""
+    return step % self._write_interval_steps == 0
+
+  def process(self,
+              step: int,
+              loss: JTensor,
+              weighted_scalars: WeightedScalars,
+              summary_tensors: NestedJTensor,
+              steps_per_sec: Optional[float] = None) -> bool:
+    """Adds summaries for a given step and indicates if summaries were written.
+
+    Args:
+      step: The step counter corresponding to these input values.
+      loss: The loss tensor.
+      weighted_scalars: The WeightedScalars instance, keyed by strings and
+        valued by 2-tuples (value, weight).
+      summary_tensors: The summary values keyed by summary names.
+      steps_per_sec: The estimate of steps per second to be added to the
+        summary.
+
+    Returns:
+      True if the summaries were written, False otherwise.
+    """
+    if self.should_accumulate(step):
+      self._add(step, loss, weighted_scalars, summary_tensors, steps_per_sec)
+
+    if not self.should_write(step):
+      return False
+
+    # No accumulation. Add at least the latest value.
+    if not self.accumulate_over_steps:
+      self._add(step, loss, weighted_scalars, summary_tensors, steps_per_sec)
+
+    self._write()
+    self._clear()
+    return True
+
+  def _add(self,
+           step: int,
+           loss: JTensor,
+           weighted_scalars: WeightedScalars,
+           summary_tensors: NestedJTensor,
+           steps_per_sec: Optional[float] = None) -> None:
+    """Adds/accumulates the current summary values."""
+    if self._latest_step >= 0 and step <= self._latest_step:
+      logging.warning(
+          'Step `%d` is smaller than the previously recorded one `%d`, while '
+          'accumulating summaries.', step, self._latest_step)
+    self._latest_step = step
+    self._losses.append(loss)
+    for key, value in weighted_scalars.items():
+      assert len(value) == 2, (
+          'Metric value should be a pair of (value, weight).')
+      self._weighted_scalars_list[key].append(value)
+    summaries = flatten_summary_dict(summary_tensors)
+    for key, tensor in summaries:
+      self._summary_tensors[key].append(tensor)
+    if steps_per_sec:
+      self._steps_per_sec.append(steps_per_sec)
+
+  def _clear(self) -> None:
+    """Clears the current summary values."""
+    self._latest_step = -1
+    self._losses = []
+    self._weighted_scalars_list = collections.defaultdict(list)
+    self._summary_tensors = collections.defaultdict(list)
+    self._steps_per_sec = []
+
+  def _write(self) -> None:
+    """Writes summaries, possibly accumulated across steps."""
+    if self._latest_step == -1:
+      raise ValueError('Cannot write an empty summary.')
+    # Force DeviceArray to NumPy array conversion before taking the mean.
+    losses = np.mean([np.array(l) for l in self._losses], axis=0)
+    if self._steps_per_sec:
+      steps_per_sec = np.mean(self._steps_per_sec)
+    else:
+      steps_per_sec = None
+
+    write_summary_entry(self._summary_writer, self._latest_step, losses,
+                        self._weighted_scalars_list, self._summary_tensors,
+                        steps_per_sec)

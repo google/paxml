@@ -164,6 +164,27 @@ def _should_early_stop_training(
   return early_stopping_fn(weighted_scalars, step_i, is_last_ckpt)
 
 
+def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
+  """Computes the number of training steps per second."""
+  # Note: This function doesn't account for the time spent on running
+  # interleaved evaluation (if any) and/or evaluation on the training batch.
+  # It's, hence, merely a raw underestimate.
+  duration_sec = time.time() - summary_last_time
+  num_steps = step_i - summary_last_step
+  steps_per_sec = num_steps / duration_sec
+  logging.info('steps/sec: %f', steps_per_sec)
+  return steps_per_sec
+
+
+def _should_log_train(step: int,
+                      train_p: tasks_lib.SingleTask.TrainHParams) -> bool:
+  """Indicates whether train output must be logged to the INFO stream."""
+  if train_p.log_train_output_interval_steps is not None:
+    return step % train_p.log_train_output_interval_steps == 0
+  else:
+    return step % train_p.summary_interval_steps == 0
+
+
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: Optional[str],
@@ -524,6 +545,15 @@ def train_and_evaluate_pmap(
     summary_utils.write_global_batch_size(train_summary_writer,
                                           train_global_batch_size)
 
+    train_summary_handler = summary_utils.SummaryHandler(
+        train_summary_writer,
+        train_p.summary_interval_steps,
+        accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+    eval_summary_handler = summary_utils.SummaryHandler(
+        eval_summary_writer,
+        train_p.summary_interval_steps,
+        accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+
     summary_last_time = time.time()
     summary_last_step = None
 
@@ -589,12 +619,34 @@ def train_and_evaluate_pmap(
 
       logging.debug('  Writing summaries (attempt).')
       step_i += 1
-      if summary_utils.write_summary_every_n_steps(
-          train_summary_writer, step_i, train_p.summary_interval_steps, loss,
-          weighted_scalars, per_example_out, summary_tensors, summary_last_time,
-          summary_last_step):
+      steps_per_sec = None
+      should_accumulate = train_summary_handler.should_accumulate(step_i)
+      should_write_summary = train_summary_handler.should_write(step_i)
+      should_log = _should_log_train(step_i, train_p)
+      if should_log or should_accumulate or should_write_summary:
+        loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
+        weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+            weighted_scalars)
+        summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
+            summary_tensors)
+      if should_log:
+        logging.info('step_i: %d, training loss: %s', step_i, loss)
+        logging.info('weighted_scalars: %s', weighted_scalars)
+        per_example_out = py_utils.maybe_unreplicate_for_first_shard(
+            per_example_out)
+        logging.info('per_example_out: %s', per_example_out)
+        logging.info('summary_tensors: %s', summary_tensors)
+      if should_write_summary:
+        steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
+                                               summary_last_step)
         summary_last_time = time.time()
         summary_last_step = step_i
+      if train_summary_handler.process(
+          step_i,
+          loss,
+          weighted_scalars,
+          summary_tensors,
+          steps_per_sec=steps_per_sec):
         # Synchronize step_i
         step_i = int(
             py_utils.maybe_unreplicate_for_fully_replicated(
@@ -652,11 +704,8 @@ def train_and_evaluate_pmap(
             logging.info('  eval loss: %s', loss)
             logging.info('  weighted_scalars: %s', weighted_scalars)
             logging.info('  summary_tensors: %s', summary_tensors)
-            if step_i % train_p.summary_interval_steps == 0:
-              logging.debug('  Writing eval summaries.')
-              summary_utils.write_summary_entry(eval_summary_writer, step_i,
-                                                loss, weighted_scalars,
-                                                summary_tensors)
+            if eval_summary_handler.process(step_i, loss, weighted_scalars,
+                                            summary_tensors):
               logging.debug('  Wrote eval summaries.')
 
       if (decode_input_p and train_p.decode_interval_steps and
@@ -1028,6 +1077,11 @@ def train_and_evaluate_spmd_model(
       summary_utils.write_global_batch_size(train_summary_writer,
                                             train_unpadded_global_batch_size)
 
+      train_summary_handler = summary_utils.SummaryHandler(
+          train_summary_writer, train_p.summary_interval_steps)
+      eval_summary_handler = summary_utils.SummaryHandler(
+          eval_summary_writer, train_p.summary_interval_steps)
+
       summary_last_time = time.time()
       summary_last_step = None
 
@@ -1099,12 +1153,34 @@ def train_and_evaluate_spmd_model(
         logging.debug('  Completed train_step().')
 
         logging.debug('  Writing summaries (attempt).')
-        if summary_utils.write_summary_every_n_steps(
-            train_summary_writer, step_i, train_p.summary_interval_steps, loss,
-            weighted_scalars, per_example_out, summary_tensors,
-            summary_last_time, summary_last_step):
+        steps_per_sec = None
+        should_accumulate = train_summary_handler.should_accumulate(step_i)
+        should_write_summary = train_summary_handler.should_write(step_i)
+        should_log = _should_log_train(step_i, train_p)
+        if should_log or should_accumulate or should_write_summary:
+          loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
+          weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+              weighted_scalars)
+          summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
+              summary_tensors)
+        if should_log:
+          logging.info('step_i: %d, training loss: %s', step_i, loss)
+          logging.info('weighted_scalars: %s', weighted_scalars)
+          per_example_out = py_utils.maybe_unreplicate_for_first_shard(
+              per_example_out)
+          logging.info('per_example_out: %s', per_example_out)
+          logging.info('summary_tensors: %s', summary_tensors)
+        if should_write_summary:
+          steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
+                                                 summary_last_step)
           summary_last_time = time.time()
           summary_last_step = step_i
+        if train_summary_handler.process(
+            step_i,
+            loss,
+            weighted_scalars,
+            summary_tensors,
+            steps_per_sec=steps_per_sec):
           step_i = int(
               py_utils.maybe_unreplicate_for_fully_replicated(
                   partitioned_train_state.step))
@@ -1169,11 +1245,8 @@ def train_and_evaluate_spmd_model(
               logging.info('  eval loss: %s', loss)
               logging.info('  weighted_scalars: %s', weighted_scalars)
               logging.info('  summary_tensors: %s', summary_tensors)
-              if step_i % train_p.summary_interval_steps == 0:
-                logging.debug('  Writing eval summaries.')
-                summary_utils.write_summary_entry(eval_summary_writer, step_i,
-                                                  loss, weighted_scalars,
-                                                  summary_tensors)
+              if eval_summary_handler.process(step_i, loss, weighted_scalars,
+                                              summary_tensors):
                 logging.debug('  Wrote eval summaries.')
 
         if (decode_input_p and train_p.decode_interval_steps and
