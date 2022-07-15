@@ -978,8 +978,8 @@ def train_and_evaluate_spmd_model(
           discard_opt_states=False)
       train_step, input_shardings = compile_for_auto_sharding(
           train_step, abstract_train_state, train_key, inputs_shape)
-      train_state_pspecs = input_shardings[0]
-      inputs_pspecs = input_shardings[2]
+      train_state_pspecs = jax.tree_map(lambda x: x.spec, input_shardings[0])
+      inputs_pspecs = jax.tree_map(lambda x: x.spec, input_shardings[2])
     else:
       train_step, inputs_pspecs = (
           trainer_lib.get_partitioned_spmd_model_step_fn(
