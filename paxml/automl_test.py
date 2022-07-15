@@ -215,6 +215,7 @@ class MyTask(base_task.BaseTask):
   class HParams(base_task.BaseTask.HParams):
     learning_rate: Optional[float] = None
     batch_size: Optional[int] = None
+    program_str: Optional[str] = None
 
 
 class RegularExperiment(base_experiment.BaseExperiment):
@@ -222,19 +223,35 @@ class RegularExperiment(base_experiment.BaseExperiment):
 
   LEARNING_RATE = 0.1
   BATCH_SIZE = 8
+  PROGRAM_STR = 'foo'
 
   def task(self):
     return MyTask.HParams(
-        learning_rate=self.LEARNING_RATE, batch_size=self.BATCH_SIZE)
+        learning_rate=self.LEARNING_RATE,
+        batch_size=self.BATCH_SIZE,
+        program_str=self.PROGRAM_STR)
 
   def datasets(self):
     return []
+
+
+@pg.members([
+    ('init_value', pg.typing.Str())
+])
+class VarString(pg.hyper.CustomHyper):
+
+  def custom_decode(self, dna):
+    return dna.value
+
+  def first_dna(self):
+    return pg.DNA(self.init_value)
 
 
 class TuningExperiment(RegularExperiment):
   """Tuning experiment."""
   LEARNING_RATE = pg.floatv(0.0, 1.0, name='learning_rate')
   BATCH_SIZE = pg.oneof([8, 16, 32], name='batch_size')
+  PROGRAM_STR = VarString(init_value='bar', name='program_str')
 
 
 class TuningExperimentWithOverride(TuningExperiment):
@@ -261,6 +278,7 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
         context.hyper_dict, {
             'learning_rate': pg.floatv(0.0, 1.0, name='learning_rate'),
             'batch_size': pg.oneof([8, 16, 32], name='batch_size'),
+            'program_str': VarString(init_value='bar', name='program_str')
         })
 
   def test_tuning_experiment_with_override(self):
@@ -270,6 +288,7 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
       _ = TuningExperimentWithOverride().task()
     self.assertEqual(context.hyper_dict, {
         'batch_size': pg.oneof([8, 16, 32], name='batch_size'),
+        'program_str': VarString(init_value='bar', name='program_str')
     })
 
   def test_bad_tuning_experiment(self):
