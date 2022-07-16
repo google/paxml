@@ -601,6 +601,24 @@ class SingleTask(base_task.BaseTask):
         vars_weight_params)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
         vars_weight_params)
+
+    load_ema_state = (hasattr(rules.task_p, 'train') and
+                      rules.task_p.train.learner.optimizer.ema_decay > 0.0)
+
+    # For GDA checkpoint type, skip loading step / opt states from the
+    # checkpoint if rules are set to False. FLAX checkpoint type doesn't support
+    # loading and assigning partial saved vars.
+    if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+      if not rules.load_step:
+        ckpt_train_state = ckpt_train_state.replace(step={})
+        if train_state_pspecs is not None:
+          train_state_pspecs = train_state_pspecs.replace(step={})
+      if not rules.load_opt_states and not load_ema_state:
+        ckpt_train_state = ckpt_train_state.replace(opt_states={})
+        if train_state_pspecs is not None:
+          train_state_pspecs = train_state_pspecs.replace(opt_states={})
+
+
     loaded_train_state = checkpoints.restore_checkpoint(
         ckpt_train_state,
         ckpt_path,
@@ -616,8 +634,7 @@ class SingleTask(base_task.BaseTask):
         NestedMap.FromNestedDict(loaded_train_state.mdl_vars).FlattenItems())
 
     # Load EMA state if specified
-    if hasattr(rules.task_p,
-               'train') and rules.task_p.train.learner.optimizer.ema_decay > 0.:
+    if load_ema_state:
       for v in loaded_train_state.opt_states[0]:
         if 'ema' in v:
           loaded_vars.update(

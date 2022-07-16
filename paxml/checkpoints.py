@@ -484,6 +484,10 @@ def _restore_checkpoint_gda(
   ]
   tspecs = jax.tree_map(gda_serialization_spec.get_tensorstore_spec, ckpt_paths)
 
+  logging.info('GDA checkpoint restore global_mesh: %s', global_mesh)
+  logging.info('GDA checkpoint restore partition_spec_leaves: %s',
+               partition_spec_leaves)
+  logging.info('GDA checkpoint restore tspecs: %s', tspecs)
   train_state_gda = gda_serialization.run_deserialization(
       [global_mesh] * len(tspecs),
       partition_spec_leaves,
