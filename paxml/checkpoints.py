@@ -281,10 +281,12 @@ def _restore_checkpoint_flax(
   restored_state = restored_target['flattened_state']
   restored_str_pytree_state = restored_target['str_pytree_state']
   if restored_str_pytree_state != str_pytree_state:
-    raise ValueError(
-        'Unable to restore checkpoint. A mismatch between the saved '
+    # Could be spurious due to abbreviation of treedef printing added in
+    # https://github.com/tensorflow/tensorflow/commit/aa21adc148c98c76f54ba5932ce34cf59da538c4
+    logging.warning(
+        'A possible mismatch (could be spurious) between the saved '
         'checkpoint structure and the current one has been detected '
-        f'(`{restored_str_pytree_state}` vs `{str_pytree_state}`).')
+        '(%s vs %s).', restored_str_pytree_state, str_pytree_state)
   return jax.tree_unflatten(pytree_state, restored_state)
 
 
