@@ -17,7 +17,7 @@
 
 import functools
 import os
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -48,13 +48,16 @@ NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 TrainState = train_states.TrainState
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
+WeightedScalarsList = pytypes.WeightedScalarsList
 TrainStepFn = Callable[[TrainState, JTensor, NestedJTensor], Tuple[TrainState,
                                                                    ...]]
 EvalStepFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor], Tuple]
 DecodeFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor],
                     NestedJTensor]
-EarlyStoppingFn = Callable[[Optional[Dict[str, WeightedScalars]], int, bool],
-                           bool]
+EarlyStoppingFn = Callable[[
+    Optional[Dict[str, Union[WeightedScalarsList,
+                             WeightedScalars]]], int, bool
+], bool]
 CheckpointType = checkpoints.CheckpointType
 
 PARAMS = base_layer.PARAMS
@@ -786,9 +789,12 @@ def initialize_partitioned_model_states(
   def init_model_from_seed(prng_key):
     outs = initialize_model_state(
         jax_task, prng_key, discard_opt_states, do_init_checkpoint_rules=False)
-    return jax.tree_map(_maybe_pad, outs, train_state_partition_specs,
-                        train_state_unpadded_shapes,
-                        is_leaf=py_utils.is_optax_masked_node)
+    return jax.tree_map(
+        _maybe_pad,
+        outs,
+        train_state_partition_specs,
+        train_state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
 
   logging.info('unpadded_out_shape: %s', train_state_unpadded_shapes)
   logging.info('train_state_partition_specs: %s', train_state_partition_specs)
@@ -949,9 +955,12 @@ def get_partitioned_spmd_model_step_fn(
     # slice the vars to remove padding before the step computation, and pad them
     # after the step computation to make user code independent of paddings.
     # Internal uneven sharding in the step computation is supported by XLA.
-    state = jax.tree_map(py_utils.maybe_slice_uneven_sharding, state,
-                         model_state_partition_specs, state_unpadded_shapes,
-                         is_leaf=py_utils.is_optax_masked_node)
+    state = jax.tree_map(
+        py_utils.maybe_slice_uneven_sharding,
+        state,
+        model_state_partition_specs,
+        state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
     if unpadded_global_batch_size is not None:
       # At the beginning input is fully sharded on the batch dim which has
       # paddings. If we just slice out the padding, there won't be any overhead;
@@ -1007,10 +1016,12 @@ def get_partitioned_spmd_model_step_fn(
 
     assert len(fn_out) > 1
 
-    new_states = jax.tree_map(_maybe_pad, fn_out[0],
-                              model_state_partition_specs,
-                              state_unpadded_shapes,
-                              is_leaf=py_utils.is_optax_masked_node)
+    new_states = jax.tree_map(
+        _maybe_pad,
+        fn_out[0],
+        model_state_partition_specs,
+        state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
     return (new_states,) + fn_out[1:]
 
   def init_model_from_seed(init_key):
@@ -1019,9 +1030,12 @@ def get_partitioned_spmd_model_step_fn(
         init_key,
         discard_opt_states=is_eval,
         do_init_checkpoint_rules=False)
-    return jax.tree_map(_maybe_pad, outs, model_state_partition_specs,
-                        state_unpadded_shapes,
-                        is_leaf=py_utils.is_optax_masked_node)
+    return jax.tree_map(
+        _maybe_pad,
+        outs,
+        model_state_partition_specs,
+        state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
 
   var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key)
 
@@ -1180,9 +1194,12 @@ def get_partitioned_spmd_model_decode_fn(jax_task, init_key,
         init_key,
         discard_opt_states=True,
         do_init_checkpoint_rules=False)
-    return jax.tree_map(_maybe_pad, outs, model_state_partition_specs,
-                        model_state_unpadded_shapes,
-                        is_leaf=py_utils.is_optax_masked_node)
+    return jax.tree_map(
+        _maybe_pad,
+        outs,
+        model_state_partition_specs,
+        model_state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
 
   var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key)
 

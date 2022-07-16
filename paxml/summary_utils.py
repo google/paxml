@@ -50,7 +50,7 @@ TrainState = train_states.TrainState
 SummaryType = base_layer.SummaryType
 SummaryWriter = tf.summary.SummaryWriter
 WeightedScalars = pytypes.WeightedScalars
-WeightedScalarsList = Dict[str, Sequence[Tuple[JTensor, JTensor]]]
+WeightedScalarsList = pytypes.WeightedScalarsList
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 # Maximum number of images written to a single summary entry.

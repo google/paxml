@@ -27,7 +27,7 @@ import os
 import random
 import re
 import time
-from typing import Dict, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Union
 
 from absl import app
 from absl import flags
@@ -150,8 +150,7 @@ def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   try:
     importlib.import_module(module_name)
   except ModuleNotFoundError as e:
-    raise ValueError(
-        f'Could not find experiment `{experiment_name}`.') from e
+    raise ValueError(f'Could not find experiment `{experiment_name}`.') from e
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
     return experiment_class
@@ -328,25 +327,32 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
                             'search_algorithm')
 
   def extract_metrics(
-      metrics_by_dataset: Dict[str, trainer_lib.WeightedScalars]
+      metrics_by_dataset: Dict[str, Union[trainer_lib.WeightedScalars,
+                                          trainer_lib.WeightedScalarsList]]
   ) -> Dict[str, float]:
     """Extract a flattened metric dict from a metric dict per dataset."""
     metrics = {}
 
-    def add_metric(dataset_name, key, value, weight):
+    def add_metric(dataset_name, key, values):
       if dataset_name is not None:
         key = f'{dataset_name}/{key}'
-      metrics[key] = np.sum(value * weight) / np.sum(weight)
+      if isinstance(values, tuple):
+        values = [values]
+      metric_values = np.stack([v[0] for v in values])
+      metric_weights = np.stack([v[1] for v in values])
+      metrics[key] = np.sum(
+          metric_values * metric_weights) / np.sum(metric_weights)
 
     # When there is only one dataset, we allow the metric key to be directly
     # used in reward_fn without providing the dataset name.
     if len(metrics_by_dataset) == 1:
-      for k, (v, w) in list(metrics_by_dataset.values())[0].items():
-        add_metric(None, k, v, w)
+      the_dataset_metric = list(metrics_by_dataset.values())[0]
+      for k, v in the_dataset_metric.items():
+        add_metric(None, k, v)
 
     for dataset_name, dataset_metrics in metrics_by_dataset.items():
-      for k, (v, w) in dataset_metrics.items():
-        add_metric(dataset_name, k, v, w)
+      for k, v in dataset_metrics.items():
+        add_metric(dataset_name, k, v)
     return metrics
 
   # Helper functions for tuning.
@@ -354,9 +360,9 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
       feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
     """Gets early stopping function based on a feedback object."""
 
-    def should_stop_early(metrics_by_dataset: Optional[Dict[
-        str, trainer_lib.WeightedScalars]], global_step: int,
-                          is_last_checkpoint: bool) -> bool:
+    def should_stop_early(metrics_by_dataset: Optional[Dict[str, Union[
+        trainer_lib.WeightedScalarsList, trainer_lib.WeightedScalars]]],
+                          global_step: int, is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
       if FLAGS.metrics_from == FLAGS.mode:
         # `metrics_by_dataset` could be None for interleaved train/eval
