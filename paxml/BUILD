@@ -215,6 +215,8 @@ pytype_binary(
     ],
 )
 
+# Internal GPU binary rule
+
 pytype_strict_library(
     name = "main_lib",
     srcs = ["main.py"],

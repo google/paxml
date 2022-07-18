@@ -53,6 +53,7 @@ def pax_targets(
         extra_deps = None,
         prefix_name = "",
         name = "",
+        add_main_gpu_target = True,
         smoke_test_kwargs = None):
     """Macro to define a collection of Pax targets with custom dependencies.
 
@@ -74,6 +75,7 @@ def pax_targets(
           An underscore is added, e.g. if prefix_name="test", the defined
           main target is ":test_main".
       name: unused.
+      add_main_gpu_target: Build with jax GPU dependency.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
     """
@@ -98,10 +100,25 @@ def pax_targets(
         py_binary_rule = pytype_binary,
         deps = [
             "//paxml:main_lib",
+            # Implicit tpu dependency.
         ] + extra_deps,
         exp_sources = exp_sources,
         # Implicit py_binary flag
     )
+    if add_main_gpu_target:
+        main_name = "main_gpu"
+        main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
+        _export_binary(
+            name = main_name,
+            main = "//paxml:main.py",
+            py_binary_rule = pytype_binary,
+            deps = [
+                "//paxml:main_lib",
+                # Implicit gpu dependency.
+            ] + extra_deps,
+            exp_sources = exp_sources,
+            # Implicit py_binary flag
+        )
 
     test_name = "all_experiments_smoke_test"
     test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
