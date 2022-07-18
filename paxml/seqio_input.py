@@ -150,6 +150,11 @@ class SeqIOInput(base_input.BaseInput):
     repeat: Optional[bool] = None
     use_cached: bool = False
     eval_auto_pad: bool = True
+    # trim_output_features flag allow passing this arg to seqio.get_datset
+    # the default value is True so this change will not affect any current
+    # behaviour. the main purpose is for prefixlm to not problematically
+    # pack on the inputs.
+    trim_output_features: bool = True
     # Params to adjust the starting example index for deterministic input.
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
@@ -219,7 +224,8 @@ class SeqIOInput(base_input.BaseInput):
         feature_converter=p.feature_converter,
         shard_info=self._shard_info,
         use_cached=p.use_cached,
-        seed=p.input_random_seed)
+        seed=p.input_random_seed,
+        trim_output_features=p.trim_output_features)
     ds = self._pad_to_batch_size(ds)
     ds = ds.batch(
         p.batch_size, drop_remainder=True, num_parallel_calls=tf.data.AUTOTUNE)
@@ -265,7 +271,8 @@ class SeqIOInput(base_input.BaseInput):
         feature_converter=p.feature_converter,
         shard_info=None,  # we get the full dataset
         use_cached=p.use_cached,
-        seed=p.input_random_seed)
+        seed=p.input_random_seed,
+        trim_output_features=p.trim_output_features)
 
   def _get_one_example_ds(self, ds: tf.data.Dataset) -> tf.data.Dataset:
     """Gets a dataset with just one example."""
@@ -362,7 +369,8 @@ class SeqIOInput(base_input.BaseInput):
         shuffle=False,
         num_epochs=1,
         seed=p.input_random_seed,
-        use_cached=p.use_cached)
+        use_cached=p.use_cached,
+        trim_output_features=p.trim_output_features)
     targets = collections.defaultdict(list)
     examples = collections.defaultdict(list)
     for e in targets_ds.as_numpy_iterator():
@@ -456,7 +464,8 @@ class SeqIOInput(base_input.BaseInput):
         shuffle=False,
         num_epochs=1,
         seed=p.input_random_seed,
-        use_cached=p.use_cached)
+        use_cached=p.use_cached,
+        trim_output_features=p.trim_output_features)
     converted_targets_ds = p.feature_converter(targets_ds,
                                                p.task_feature_lengths)
     targets = collections.defaultdict(list)
@@ -553,7 +562,8 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
   def __init__(self,
                pack: bool = False,
                use_custom_packing_ops: bool = False,
-               weights_on_targets_only: Optional[bool] = None) -> None:
+               weights_on_targets_only: Optional[bool] = None,
+               apply_length_check: bool = True) -> None:
     """Args to construct a language model feature converter.
 
     Args:
@@ -567,12 +577,16 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
         1.0. When set to 'True', only tokens with positive integer ids AND are
         from 'targets' have weights of 1.0. When set to 'False', all non-padded
         tokens have weights of 1.0, even those with negative ids.
+      apply_length_check: if True, it checks whether output feature lengths are
+        less than the lengths given by `sequence_length` in the
+        get_dataset function.
     """
     self._weights_on_targets_only = weights_on_targets_only
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
         use_custom_packing_ops=use_custom_packing_ops,
+        apply_length_check=apply_length_check
     )
 
   def _to_pax(self, b) -> NestedMap:
