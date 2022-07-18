@@ -100,8 +100,10 @@ class SeqIOInput(base_input.BaseInput):
     """Hyperparameters for this input class.
 
     Attributes:
-       mixture_name: Required string. The name for a SeqIO task or mixture. User
+       mixture_name: Optional string. The name for a SeqIO task or mixture. User
          must import the module that defines this task/mixture.
+       mixture_or_task: Optional SeqIO task object. The user must specify either
+         the name or the object.
        split_name: Required string. The name for the split of data to get.
          Usually "train" or "validation" or "test".
        deterministic_input: If deterministic input is intended, users should set
@@ -141,6 +143,7 @@ class SeqIOInput(base_input.BaseInput):
     """
     # Required params.
     mixture_name: Optional[str] = None
+    mixture_or_task: Optional[Union[seqio.Task, seqio.Mixture]] = None
     split_name: Optional[str] = None
     deterministic_input: bool = False
     task_feature_lengths: Optional[Mapping[str, int]] = None
@@ -177,15 +180,22 @@ class SeqIOInput(base_input.BaseInput):
 
   def _validate_hparams(self):
     p = self.hparams
+    if not p.mixture_name and not p.mixture_or_task:
+      raise ValueError("One of 'mixture_name' and 'task' must be set.")
+    if p.mixture_name and p.mixture_or_task:
+      raise ValueError(
+          "Only one of 'mixture_name' and 'mixture_or_task' can be set. Got %s and %s."
+          % (p.mixture_name, p.mixture_or_task))
     if p.is_training and p.split_name != 'train':
       logging.warn(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
-    self._mixture_or_task = seqio.get_mixture_or_task(p.mixture_name)
+    self._mixture_or_task = p.mixture_or_task or seqio.get_mixture_or_task(
+        p.mixture_name)
     shard_info = seqio.ShardInfo(
         index=p.infeed_host_index, num_shards=p.num_infeed_hosts)
-    logging.info('ShardInfo: shard_id: %d, num_shards: %d, ',
-                 shard_info.index, shard_info.num_shards)
+    logging.info('ShardInfo: shard_id: %d, num_shards: %d, ', shard_info.index,
+                 shard_info.num_shards)
     self._shard_info = shard_info
     self._validate_deterministic()
 
@@ -214,18 +224,12 @@ class SeqIOInput(base_input.BaseInput):
     p = self.hparams
     logging.info(
         "Initializing dataset for task '%s' with a per host batch size of %d "
-        'and a seed of %s', p.mixture_name, p.batch_size, p.input_random_seed)
-    ds = seqio.get_dataset(
-        mixture_or_task_name=p.mixture_name,
-        task_feature_lengths=p.task_feature_lengths,
-        dataset_split=p.split_name,
+        'and a seed of %s', self._mixture_or_task.name, p.batch_size,
+        p.input_random_seed)
+    ds = self._get_backing_ds(
         shuffle=self.shuffle,
         num_epochs=-1 if self.repeat else 1,
-        feature_converter=p.feature_converter,
-        shard_info=self._shard_info,
-        use_cached=p.use_cached,
-        seed=p.input_random_seed,
-        trim_output_features=p.trim_output_features)
+        shard_info=self._shard_info)
     ds = self._pad_to_batch_size(ds)
     ds = ds.batch(
         p.batch_size, drop_remainder=True, num_parallel_calls=tf.data.AUTOTUNE)
@@ -260,19 +264,25 @@ class SeqIOInput(base_input.BaseInput):
       ret.append(vocab.decode(row))
     return ret
 
-  def _get_global_ds(self) -> tf.data.Dataset:
+  def _get_backing_ds(self,
+                      shuffle,
+                      num_epochs,
+                      shard_info) -> tf.data.Dataset:
     p = self.hparams
-    return seqio.get_dataset(
-        mixture_or_task_name=p.mixture_name,
-        task_feature_lengths=p.task_feature_lengths,
-        dataset_split=p.split_name,
-        shuffle=False,
-        num_epochs=1,
-        feature_converter=p.feature_converter,
-        shard_info=None,  # we get the full dataset
+    ds = self._mixture_or_task.get_dataset(
+        sequence_length=p.task_feature_lengths,
+        split=p.split_name,
+        shuffle=shuffle,
+        num_epochs=num_epochs,
+        shard_info=shard_info,
         use_cached=p.use_cached,
         seed=p.input_random_seed,
         trim_output_features=p.trim_output_features)
+
+    return p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
+
+  def _get_global_ds(self) -> tf.data.Dataset:
+    return self._get_backing_ds(shuffle=False, num_epochs=1, shard_info=None)
 
   def _get_one_example_ds(self, ds: tf.data.Dataset) -> tf.data.Dataset:
     """Gets a dataset with just one example."""
@@ -521,6 +531,7 @@ class SeqIOInput(base_input.BaseInput):
       metrics.append(m)
     return metrics
 
+
 # Below we provide some pre-canned feature converters. Example usage:
 #   seqio_input_params.feature_converter = LanguageModelFeatures(pack=True)
 
@@ -578,16 +589,15 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
         from 'targets' have weights of 1.0. When set to 'False', all non-padded
         tokens have weights of 1.0, even those with negative ids.
       apply_length_check: if True, it checks whether output feature lengths are
-        less than the lengths given by `sequence_length` in the
-        get_dataset function.
+        less than the lengths given by `sequence_length` in the get_dataset
+        function.
     """
     self._weights_on_targets_only = weights_on_targets_only
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
         use_custom_packing_ops=use_custom_packing_ops,
-        apply_length_check=apply_length_check
-    )
+        apply_length_check=apply_length_check)
 
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax LanguageModel."""
