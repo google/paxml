@@ -287,9 +287,10 @@ def write_summary_tensor(step_i: int, key: str,
   # recent ones. Only useful for non-aggregated summaries.
   tensors_it = reversed(tensors)
   if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
-    logging.info('summary tensor at step=%s %s %s', step_i, key, tensor)
     # Force DeviceArray to NumPy array conversion before taking the mean.
-    tensor = np.mean([np.array(t) for t in tensors_it]).item()
+    np_tensors = [np.array(t) for t in tensors_it]
+    logging.info('summary tensor at step=%s %s %s', step_i, key, np_tensors)
+    tensor = np.mean(np_tensors).item()
     tf_summary.scalar(key, tensor, step_i)
   elif base_layer.get_summary_base_type(summary_type) == SummaryType.IMAGE:
     remaining_max_images = MAX_IMAGES_PER_SUMMARY
