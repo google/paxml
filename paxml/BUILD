@@ -130,8 +130,10 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
+        # Implicit optax dependency.
         "//praxis:asserts",
         "//praxis:py_utils",
+        "//praxis:pytypes",
         "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
     ],

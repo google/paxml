@@ -19,7 +19,7 @@ from concurrent import futures
 import datetime
 import os
 import re
-from typing import Optional
+from typing import Any, Optional, Sequence, Tuple
 
 from absl import logging
 from flax.training import checkpoints as flax_checkpoints
@@ -29,10 +29,12 @@ from jax.experimental import multihost_utils
 from jax.experimental.gda_serialization import serialization as gda_serialization
 gda_serialization_spec = gda_serialization  # mapped to internal
 import numpy as np
+import optax
 from paxml import base_task
 from paxml import checkpoint_pb2
 from praxis import asserts
 from praxis import py_utils
+from praxis import pytypes
 from praxis import train_states
 import tensorflow.compat.v2 as tf
 
@@ -45,6 +47,7 @@ TMP_CHECKPOINT_PATTERN_RE = re.compile(
 _MAX_CHECKPOINT_FLAX = 1000000
 
 CheckpointType = checkpoint_pb2.CheckpointType
+JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 
 
 def _is_checkpoint_asset(x: str) -> bool:
@@ -315,7 +318,8 @@ def _extract_nested_prefix_names(
           'opt_states',
           key_separator=key_separator,
           left_separator=left_separator,
-          right_separator=right_separator))
+          right_separator=right_separator,
+          is_leaf=py_utils.is_optax_masked_node))
 
 
 def _mkdir_path(name: str, tmp_dir: str) -> str:
@@ -347,6 +351,60 @@ def delete_temp_directories(checkpoint_dir: str, overwrite: bool = False):
     # delete.
     py_utils.sync_global_devices('Wait for checkpoint tmp dir deletions to '
                                  'finish.')
+
+
+def _masked_node_to_none(mask: Any, value: Any) -> Any:
+  """Return value when `mask` is not a MaskedNode, or MaskedNode otherwise."""
+  if py_utils.is_optax_masked_node(mask):
+    return optax.MaskedNode()
+  return value
+
+
+def _tensorstore_prepare(
+    train_state: train_states.TrainState,
+    state_specs: Optional[train_states.TrainState] = None
+) -> Tuple[Sequence[JTensorOrPartitionSpec], Sequence[str],
+           Optional[Sequence[JTensorOrPartitionSpec]]]:
+  """Prepares data prior to saving/restoring it from/to TensorStore.
+
+  Args:
+    train_state: A partitioned train_state that is a Pytree of
+      GlobalDeviceArray.
+    state_specs: [optional] The partition specs corresponding to this TrainState
+      instance, when it is used for checkpoint restoring.
+
+  Returns:
+    A 3-tuple (flattened_traine_state, flattened_nested_names, out), where:
+    - flattened_traine_state: A flattened version of the train state, where all
+      MaskedNode instances have been filtered out.
+    - flattened_nested_names: A flattened version of the nested names, where all
+      entries corresponding to MaskedNode have been filtered out.
+    - out: Either None when the input state_specs is None or the flattened
+      version of the state_specs, where all entries corresponding to MaskedNode
+      instances have been filtered out.
+  """
+  # This replaces MaskedNode instances by None values ...
+  train_state_none = jax.tree_map(_masked_node_to_none, train_state,
+                                  train_state)
+  if state_specs is not None:
+    state_specs_none = jax.tree_map(
+        _masked_node_to_none,
+        train_state,
+        state_specs,
+        is_leaf=py_utils.is_optax_masked_node)
+  # ... that are filtered out when calling jax.tree_flatten() here.
+  flattened_train_state, _ = jax.tree_flatten(train_state_none)
+  if state_specs is not None:
+    flattened_state_specs, _ = jax.tree_flatten(state_specs_none)
+  else:
+    flattened_state_specs = None
+
+  # _extract_nested_prefix_names() also replaces MaskedNode instances by None
+  # values ...
+  nested_names = _extract_nested_prefix_names(train_state)
+  # ... that are filtered out when calling jax.tree_flatten() here.
+  flattened_nested_names, _ = jax.tree_flatten(nested_names)
+  return flattened_train_state, flattened_nested_names, flattened_state_specs
 
 
 def _save_checkpoint_gda(
@@ -392,8 +450,10 @@ def _save_checkpoint_gda(
       checkpoint_dir, step, sync_timestamp=True)
   logging.info('Saving to a tmp checkpoint dir %s', checkpoint_step_tmp_dir)
 
-  nested_names = _extract_nested_prefix_names(train_state)
-  flattened_nested_names, _ = jax.tree_flatten(nested_names)
+  flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
+      train_state)
+  # At that point, the flattened entries do not contain any reference to
+  # MaskedNode's.
 
   if jax.process_index() == 0:
     # Create the tmp parent dir.
@@ -407,17 +467,16 @@ def _save_checkpoint_gda(
                                f'creation {checkpoint_step_tmp_dir} to finish.')
 
   tspecs = jax.tree_map(gda_serialization_spec.get_tensorstore_spec, ckpt_paths)
-  leaves, _ = jax.tree_flatten(train_state)
 
   if async_ckpt_manager is not None:
     async_ckpt_manager.serialize(
-        leaves,
+        flattened_train_state,
         tspecs,
         temp_checkpoint_dir=checkpoint_step_tmp_dir,
         final_checkpoint_dir=checkpoint_step_dir)
     logging.info('Started GDA asynchrounous checkpoint.')
   else:
-    gda_serialization.run_serialization(leaves, tspecs)
+    gda_serialization.run_serialization(flattened_train_state, tspecs)
     # Note we must barrier across all processes before the directory rename.
     py_utils.sync_global_devices('Wait for checkpoint chunk writes to '
                                  f'{checkpoint_step_tmp_dir} to finish.')
@@ -428,6 +487,35 @@ def _save_checkpoint_gda(
       tf.io.gfile.rename(checkpoint_step_tmp_dir, checkpoint_step_dir)
     logging.info('Finished saving GDA checkpoint for step `%s` to `%s`.', step,
                  checkpoint_step_dir)
+
+
+def _tensorstore_reconstruct(
+    state_global_shapes: train_states.TrainState,
+    restored_train_state: Sequence[JTensorOrPartitionSpec]
+) -> train_states.TrainState:
+  """Reconstructs a nested train state including MaskedNode.
+
+  Args:
+    state_global_shapes: The original nested train state with GDAs, which
+      includes MaskedNode entries.
+    restored_train_state: A flattened version of the restored train state, which
+      does not include any MaskedNode entry.
+
+  Returns:
+    A nested version of `restored_train_state` after adding back the MaskedNode
+    instances, based on the original structure of `state_global_shapes`.
+  """
+  c = 0
+  restored_flattened_train_state = []
+  flattened_state_global_shapes, treedef = jax.tree_flatten(state_global_shapes)
+  for l in flattened_state_global_shapes:
+    if py_utils.is_optax_masked_node(l):
+      restored_flattened_train_state.append(optax.MaskedNode())
+    else:
+      restored_flattened_train_state.append(restored_train_state[c])
+      c += 1
+  assert c == len(restored_train_state)
+  return jax.tree_unflatten(treedef, restored_flattened_train_state)
 
 
 def _restore_checkpoint_gda(
@@ -472,13 +560,13 @@ def _restore_checkpoint_gda(
           f'No checkpoint found for restore in {checkpoint_step_dir}')
 
   logging.info('GDA checkpoint restore started...')
-  leaves, treedef = jax.tree_flatten(state_global_shapes)
-  partition_spec_leaves, _ = jax.tree_flatten(state_specs)
-  nested_names = _extract_nested_prefix_names(state_global_shapes)
+  flattened_train_state, flattened_nested_names, flattened_state_specs = (
+      _tensorstore_prepare(state_global_shapes, state_specs))
+  # At that point, the flattened entries do not contain any reference to
+  # MaskedNode's.
 
-  global_shapes = jax.tree_map(lambda x: x.shape, leaves)
-
-  flattened_nested_names, _ = jax.tree_flatten(nested_names)
+  flattened_global_shapes = jax.tree_map(lambda x: x.shape,
+                                         flattened_train_state)
 
   ckpt_paths = [
       os.path.join(checkpoint_step_dir, x).rstrip('/')
@@ -486,17 +574,22 @@ def _restore_checkpoint_gda(
   ]
   tspecs = jax.tree_map(gda_serialization_spec.get_tensorstore_spec, ckpt_paths)
 
+  # Consequently, we restore the checkpoint that does not contain any reference
+  # to MaskedNode's.
   logging.info('GDA checkpoint restore global_mesh: %s', global_mesh)
-  logging.info('GDA checkpoint restore partition_spec_leaves: %s',
-               partition_spec_leaves)
   logging.info('GDA checkpoint restore tspecs: %s', tspecs)
+  logging.info('GDA checkpoint restore partition_spec_leaves: %s',
+               flattened_state_specs)
   train_state_gda = gda_serialization.run_deserialization(
       [global_mesh] * len(tspecs),
-      partition_spec_leaves,
+      flattened_state_specs,
       tspecs,
-      global_shapes=global_shapes)
+      global_shapes=flattened_global_shapes)
 
-  restored_train_state = jax.tree_unflatten(treedef, train_state_gda)
+  # We add back the MaskedNode entries into the pytree.
+  restored_train_state = _tensorstore_reconstruct(state_global_shapes,
+                                                  train_state_gda)
+
   # Barrier across all processes to ensure all restore finish.
   py_utils.sync_global_devices('Wait for checkpoint restore from '
                                f'{checkpoint_step_dir} to finish.')
