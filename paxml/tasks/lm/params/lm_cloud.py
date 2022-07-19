@@ -147,7 +147,7 @@ class LmCloudSpmd2B(LmCloudSpmd):
 
   Global batch size = 2 * 2 * 1 * 32 = 128
   """
-  PERCORE_BATCH_SIZE = 32
+  PERCORE_BATCH_SIZE = 8
 
   NUM_LAYERS = 18
   MODEL_DIMS = 3072

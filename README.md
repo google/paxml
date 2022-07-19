@@ -316,6 +316,13 @@ subclass is a `SingleTask` which requires the following Hparams:
       vn: HParams to control variational noise.
 ```
 
+## Releases
+PyPI Version | Commit
+------------ | ----------------------------------------
+0.1.0        | 546370f5323ef8b27d38ddc32445d7d3d1e4da9a
+
+
+
     Copyright 2022 Google LLC
 
     Licensed under the Apache License, Version 2.0 (the "License");
