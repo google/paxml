@@ -18,6 +18,22 @@
 load("//paxml:paxml.bzl", "py_strict_test")
 load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_binary")
 
+def _shell_quote(s):
+    """Copy of bazel-skylib's shell.quote.
+
+    Quotes the given string for use in a shell command.
+
+    This function quotes the given string (in case it contains spaces or other
+    shell metacharacters.)
+
+    Args:
+      s: The string to quote.
+
+    Returns:
+      A quoted version of the string that can be passed to a shell command.
+    """
+    return "'" + s.replace("'", "'\\''") + "'"
+
 def _export_sources_impl(ctx):
     files = []
     for dep in ctx.attr.deps:
@@ -54,6 +70,7 @@ def pax_targets(
         prefix_name = "",
         name = "",
         add_main_gpu_target = True,
+        smoke_test_exclude_regexes = "",
         smoke_test_kwargs = None):
     """Macro to define a collection of Pax targets with custom dependencies.
 
@@ -76,6 +93,9 @@ def pax_targets(
           main target is ":test_main".
       name: unused.
       add_main_gpu_target: Build with jax GPU dependency.
+      smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
+          passed to the smoke test. The matching experiment configurations will
+          be disabled from the smoke test.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
     """
@@ -122,6 +142,10 @@ def pax_targets(
 
     test_name = "all_experiments_smoke_test"
     test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
+    if smoke_test_exclude_regexes:
+        args = ["--exclude_regexes=" + _shell_quote(smoke_test_exclude_regexes)]
+    else:
+        args = []
     smoke_test_kwargs = smoke_test_kwargs or {}
     _export_test(
         name = test_name,
@@ -129,11 +153,13 @@ def pax_targets(
         exp_sources = exp_sources,
         deps = [
             # Implicit absl.app dependency.
+            # Implicit absl.flags dependency.
             # Implicit absl.testing.absltest.absltest dependency.
             "//paxml:experiment_imports_test_helper",
             "//paxml:experiment_registry",
         ] + extra_deps,
         timeout = "long",
+        args = args,
         **smoke_test_kwargs
     )
 
@@ -165,6 +191,7 @@ def _export_test(
         test_src,
         deps,
         exp_sources,
+        args,
         **kwargs):
     """Define a `py_test()` at the current package.
 
@@ -173,6 +200,7 @@ def _export_test(
       test_src: target of the original source of the py_test.
       deps: Dependencies of the py_test.
       exp_sources: target of experiment source files.
+      args: arguments/flags to be passed to the test rule.
       **kwargs: all remaining arguments are passed through.
     """
     test_copied = "%s.py" % name
@@ -183,6 +211,7 @@ def _export_test(
         python_version = "PY3",
         srcs_version = "PY3",
         srcs = [test_copied],
+        args = args,
         deps = deps,
         **kwargs
     )

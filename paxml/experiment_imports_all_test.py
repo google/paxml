@@ -16,9 +16,18 @@
 """Test experiment configurations import and construction."""
 
 from absl import app
+from absl import flags
 from absl.testing import absltest
 from paxml import experiment_imports_test_helper
 from paxml import experiment_registry
+
+flags.DEFINE_list(
+    'exclude_regexes', [],
+    'Exclusion regexes of experiment configurations to be passed to the smoke '
+    'test. The matching experiment configurations will be disabled from the '
+    'smoke test.')
+
+FLAGS = flags.FLAGS
 
 
 class Test(experiment_imports_test_helper.ExperimentImportsTestHelper):
@@ -29,11 +38,13 @@ def main(args):
   del args  # Unused.
 
   n = Test.create_test_methods_for_all_registered_experiments(
-      experiment_registry, task_regexes=[""], exclude_regexes=[])
-  assert n > 0, "No experiment registered!"
+      experiment_registry,
+      task_regexes=[''],
+      exclude_regexes=FLAGS.exclude_regexes)
+  assert n > 0, 'No experiment registered!'
 
   absltest.main()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   app.run(main)
