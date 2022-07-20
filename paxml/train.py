@@ -431,18 +431,8 @@ def train_and_evaluate_pmap(
     checkpoints.delete_temp_directories(checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
-    dummy_global_mesh = maps.Mesh(np.array(jax.devices()), axis_names=('x',))
-    fully_replicated_state_specs = jax.tree_map(
-        lambda x: pjit.PartitionSpec(None), train_state_global_shapes)
-    fully_replicated_gda_model_states = checkpoints.restore_checkpoint(
-        train_state_global_shapes,
-        checkpoint_dir,
-        global_mesh=dummy_global_mesh,
-        checkpoint_type=CheckpointType.CHECKPOINT_GDA,
-        state_specs=fully_replicated_state_specs)
-    # model_states is GDA; must convert back to SDA.
-    model_states = jax.tree_map(lambda x: x.local_data(0),
-                                fully_replicated_gda_model_states)
+    model_states = tasks_lib.restore_pmap_from_tensorstore(
+        train_state_global_shapes, checkpoint_dir)
   else:
     model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
                                                   checkpoint_dir)

@@ -334,8 +334,12 @@ class _PmapEvalRunner:
     global_shapes = jax_task.create_train_state_unpadded_shapes(
         vars_weight_params)
     # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
-    model_states = checkpoints.restore_checkpoint(
-        global_shapes, checkpoint_dir, step=checkpoint_step)
+    if py_utils.pmap_use_tensorstore():
+      model_states = tasks_lib.restore_pmap_from_tensorstore(
+          global_shapes, checkpoint_dir, step=checkpoint_step)
+    else:
+      model_states = checkpoints.restore_checkpoint(
+          global_shapes, checkpoint_dir, step=checkpoint_step)
     if model_states is None:
       model_states = trainer_lib.initialize_model_state(
           jax_task, init_key, discard_opt_states=not use_ema)
@@ -482,8 +486,12 @@ def evaluate_pmap_model(
         new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
       # There must be a new checkpoint here.
       logging.info('Found new checkpoint: %s', new_checkpoint)
-      model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                    checkpoint_dir)
+      if py_utils.pmap_use_tensorstore():
+        model_states = tasks_lib.restore_pmap_from_tensorstore(
+            train_state_global_shapes, checkpoint_dir)
+      else:
+        model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
+                                                      checkpoint_dir)
       if use_ema:
         model_states = extract_ema(model_states)
       else:
@@ -951,8 +959,12 @@ def decode_pmap_model(
         time.sleep(60)
         new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
       logging.info('Found new checkpoint: %s', new_checkpoint)
-      model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                    restore_checkpoint_dir)
+      if py_utils.pmap_use_tensorstore():
+        model_states = tasks_lib.restore_pmap_from_tensorstore(
+            train_state_global_shapes, restore_checkpoint_dir)
+      else:
+        model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
+                                                      restore_checkpoint_dir)
       if use_ema:
         model_states = extract_ema(model_states)
       elif not track_metric:

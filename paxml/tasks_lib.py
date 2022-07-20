@@ -30,6 +30,7 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import pjit
+import numpy as np
 import optax
 from paxml import base_inference_runner
 from paxml import base_metrics
@@ -65,6 +66,38 @@ instantiate = base_hyperparams.instantiate
 # Shorthand for a loading rule that loads everything as is.
 # e.g. load_rules = [LOAD_ALL]
 LOAD_ALL = ('(.*)', '{}')
+
+
+# TODO(pax-dev): Move this function when `pmap_use_tensorstore` flag is deleted.
+def restore_pmap_from_tensorstore(global_shapes, checkpoint_dir, step=None):
+  """Restores pmap checkpoints from tensorstore.
+
+  The model_states returned are of type `DeviceArray`. They are later converted
+  to SDA by calling `replicate_model_state` where this function is used.
+
+  Args:
+    global_shapes: Global shapes of the tensors to be restored.
+    checkpoint_dir: Checkpoint directory where the tensorstore checkpoints are
+      present.
+    step: Step to restore checkpoint from.
+
+  Returns:
+    Restored model states of type `DeviceArray`.
+  """
+  dummy_global_mesh = maps.Mesh(np.array(jax.devices()), axis_names=('x',))
+  fully_replicated_state_specs = jax.tree_map(
+      lambda x: pjit.PartitionSpec(None), global_shapes)
+  fully_replicated_gda_model_states = checkpoints.restore_checkpoint(
+      global_shapes,
+      checkpoint_dir,
+      global_mesh=dummy_global_mesh,
+      checkpoint_type=CheckpointType.CHECKPOINT_GDA,
+      state_specs=fully_replicated_state_specs,
+      step=step)
+  # model_states is GDA; must convert back to DA.
+  model_states = jax.tree_map(lambda x: x.local_data(0),
+                              fully_replicated_gda_model_states)
+  return model_states
 
 
 class CheckpointLoadingRules(NamedTuple):
@@ -618,14 +651,18 @@ class SingleTask(base_task.BaseTask):
         if train_state_pspecs is not None:
           train_state_pspecs = train_state_pspecs.replace(opt_states={})
 
-
-    loaded_train_state = checkpoints.restore_checkpoint(
-        ckpt_train_state,
-        ckpt_path,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type,
-        state_specs=train_state_pspecs,
-        step=rules.step)
+    if py_utils.pmap_use_tensorstore():
+      assert checkpoint_type == CheckpointType.CHECKPOINT_GDA
+      loaded_train_state = restore_pmap_from_tensorstore(
+          ckpt_train_state, ckpt_path, step=rules.step)
+    else:
+      loaded_train_state = checkpoints.restore_checkpoint(
+          ckpt_train_state,
+          ckpt_path,
+          global_mesh=global_mesh,
+          checkpoint_type=checkpoint_type,
+          state_specs=train_state_pspecs,
+          step=rules.step)
     if loaded_train_state is None:
       raise RuntimeError(f'Cannot find checkpoint from {ckpt_path}')
 

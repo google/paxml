@@ -149,11 +149,16 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
     del initial_vars['params_axes']
   train_state = jax_task.create_train_state(initial_vars, vars_weight_params,
                                             discard_opt_states)
+  # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
+    if py_utils.pmap_use_tensorstore():
+      checkpoint_type = CheckpointType.CHECKPOINT_GDA
+    else:
+      checkpoint_type = CheckpointType.CHECKPOINT_FLAX
     # Overwrite some parts if init_checkpoint_rules are set (warm-start)
     # Note that this assumes a pmap model with Flax checkpoint(s).
     train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
-        train_state)
+        train_state, checkpoint_type=checkpoint_type)
     if update_opt_states:
       # Re-compute opt_states after the model variables are updated.
       opt_states = jax_task.create_opt_states(train_state.mdl_vars,

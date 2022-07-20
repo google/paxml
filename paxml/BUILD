@@ -300,6 +300,7 @@ pytype_strict_library(
         ":io_utils",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
+        # Implicit numpy dependency.
         # Implicit optax dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
