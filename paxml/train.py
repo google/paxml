@@ -863,32 +863,6 @@ def train_and_evaluate_spmd_model(
   model_p = task_p.model
   local_device_count = jax.local_device_count()
 
-  if eval_input_p:
-    eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
-    trainer_lib.check_unique_names(eval_input_pipelines)
-    if eval_input_p[0].num_infeed_hosts < jax.process_count() or (
-        eval_input_p[0].cls.get_batch_size(
-            eval_input_p[0]) < local_device_count):
-      raise NotImplementedError(
-          'Per-device batch size < 1 not supported for eval inputs.')
-    # Do not mutate eval_input_pipelines itself. Instantiate a new one
-    # to get sample input.
-    sample_eval_model_inputs = instantiate(eval_input_p[0]).get_next()
-    eval_test_inputs_shape = tf.nest.map_structure(
-        py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
-    eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
-        model_p.mesh_axis_names, eval_test_inputs_shape)
-  if decode_input_p:
-    decode_input_pipelines = [
-        instantiate(input_p) for input_p in decode_input_p
-    ]
-    trainer_lib.check_unique_names(decode_input_pipelines)
-    for input_p in decode_input_p:
-      if input_p.num_infeed_hosts < jax.process_count() or (
-          input_p.cls.get_batch_size(input_p) < local_device_count):
-        raise NotImplementedError(
-            'Per-device batch size < 1 not supported for decode inputs.')
-
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
@@ -922,6 +896,33 @@ def train_and_evaluate_spmd_model(
   model_inputs_for_shape = train_input_for_shape.get_next_padded()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                        model_inputs_for_shape)
+
+  if eval_input_p:
+    eval_input_pipelines = []
+    for input_p in eval_input_p:
+      input_p = _adjust_input_params_for_small_batch(input_p, global_mesh)
+      eval_input_pipelines.append(instantiate(input_p))
+    trainer_lib.check_unique_names(eval_input_pipelines)
+    # Do not mutate eval_input_pipelines itself. Instantiate a new one
+    # to get sample input.
+    sample_eval_model_inputs = instantiate(
+        _adjust_input_params_for_small_batch(eval_input_p[0],
+                                             global_mesh)).get_next_padded()
+    eval_test_inputs_shape = tf.nest.map_structure(
+        py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
+    eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
+        model_p.mesh_axis_names, eval_test_inputs_shape)
+  if decode_input_p:
+    decode_input_pipelines = [
+        instantiate(input_p) for input_p in decode_input_p
+    ]
+    trainer_lib.check_unique_names(decode_input_pipelines)
+    for input_p in decode_input_p:
+      if input_p.num_infeed_hosts < jax.process_count() or (
+          input_p.cls.get_batch_size(input_p) < local_device_count):
+        raise NotImplementedError(
+            'Per-device batch size < 1 not supported for decode inputs.')
+
   with global_mesh:
     jax_task = instantiate(task_p)
     vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)

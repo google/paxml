@@ -180,7 +180,7 @@ def run_eval_loop_over_test_splits(
     while num_split_steps < 0 or step_num < num_split_steps:
       step_num += 1
       try:
-        eval_inputs = model_inputs[split].get_next()
+        eval_inputs = model_inputs[split].get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         if num_split_steps > 0:
           raise
