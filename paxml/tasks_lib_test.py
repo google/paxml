@@ -23,10 +23,12 @@ from absl.testing import absltest
 import jax
 import jax.numpy as jnp
 import numpy as np
+from paxml import base_experiment
 from paxml import checkpoints
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
+from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
 from praxis import optimizers
@@ -48,6 +50,30 @@ RANDOM = base_layer.RANDOM
 PARAMS = base_layer.PARAMS
 
 instantiate = base_hyperparams.instantiate
+
+
+class TestInput(base_input.BaseInput):
+
+  class HParams(base_input.BaseInput.HParams):
+    input_dims: int = 0
+
+  def get_next(self):
+    p = self.hparams
+    sample_inputs = jnp.ones((p.batch_size, p.input_dims), dtype=jnp.float32)
+    return sample_inputs
+
+
+class TestExperiment(base_experiment.BaseExperiment):
+
+  def __init__(self, task_p, input_dims):
+    self.task_p = task_p
+    self.input_dims = input_dims
+
+  def task(self):
+    return self.task_p
+
+  def datasets(self):
+    return [TestInput.HParams(batch_size=1, input_dims=self.input_dims)]
 
 
 class TestModel01(base_model.BaseModel):
@@ -271,7 +297,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
             tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p, load_rules=[(r'params/(.*)', 'params/{}')])
+                experiment_config=TestExperiment(ext_task_p, input_dims),
+                load_rules=[(r'params/(.*)', 'params/{}')])
     }
     task = instantiate(task_p)
 
@@ -321,7 +348,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
             tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p,
+                experiment_config=TestExperiment(ext_task_p, input_dims),
                 load_rules=[(r'params/(.*)', 'ema/params/{}')])
     }
     task = instantiate(task_p)

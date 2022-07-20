@@ -294,6 +294,7 @@ pytype_strict_library(
     srcs = ["tasks_lib.py"],
     srcs_version = "PY3",
     deps = [
+        ":base_experiment",
         ":base_inference_runner",
         ":base_metrics",
         ":base_task",
@@ -468,6 +469,7 @@ py_strict_test(
     python_version = "PY3",
     srcs_version = "PY3",
     deps = [
+        ":base_experiment",
         ":checkpoints",
         ":tasks_lib",
         ":trainer_lib",
@@ -475,6 +477,7 @@ py_strict_test(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
+        "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:optimizers",

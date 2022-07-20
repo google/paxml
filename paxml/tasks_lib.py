@@ -32,6 +32,7 @@ from jax.experimental import maps
 from jax.experimental import pjit
 import numpy as np
 import optax
+from paxml import base_experiment
 from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
@@ -116,6 +117,7 @@ class CheckpointLoadingRules(NamedTuple):
   ```
     CheckpointLoadingRules(
         task_p=task_p,
+        experiment_config=experiment_config,
         load_rules=[(r'params/decoder/lm/(.*)$', 'params/lm/{}')]
         ignore_rules=[r'^.*/b$'])
   ```
@@ -144,6 +146,9 @@ class CheckpointLoadingRules(NamedTuple):
 
   Attributes:
     task_p: An `Task.HParams` used for producing checkpoints to be loaded.
+      Deprecated in favor of experiment_config.
+    experiment_config: A `BaseExperiment` used for producing checkpoints to be
+      loaded.
     load_rules: List of pairs of variable-name regex patterns and variable names
       in the external checkpoint.  For each item `(pattern, source)` in the
       list, if the model to be trained has a variable that matches to the regex
@@ -160,8 +165,9 @@ class CheckpointLoadingRules(NamedTuple):
     load_opt_states: whether to load opt_states (in its entirety) from this
       checkpoint.
   """
-  task_p: SingleTask.HParams
-  load_rules: Sequence[Tuple[RegexStr, str]]
+  task_p: Optional[SingleTask.HParams] = None
+  experiment_config: Optional[base_experiment.BaseExperiment] = None
+  load_rules: Sequence[Tuple[RegexStr, str]] = []
   ignore_rules: Optional[Sequence[RegexStr]] = None
   step: Optional[int] = None
   load_step: bool = False
@@ -623,7 +629,12 @@ class SingleTask(base_task.BaseTask):
       global_mesh: Optional[maps.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX):
     """Applies one CheckpointLoadingRules to train_state."""
-    ckpt_task = instantiate(rules.task_p)
+    if rules.experiment_config:
+      ckpt_task_p = rules.experiment_config.task()
+    else:
+      assert rules.task_p, 'Either experiment_config or task_p must be present'
+      ckpt_task_p = rules.task_p
+    ckpt_task = instantiate(ckpt_task_p)
     is_step_loaded, is_initialized, is_opt_states_loaded = load_status
     model_vars = train_state.mdl_vars
 
@@ -635,8 +646,9 @@ class SingleTask(base_task.BaseTask):
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
         vars_weight_params)
 
-    load_ema_state = (hasattr(rules.task_p, 'train') and
-                      rules.task_p.train.learner.optimizer.ema_decay > 0.0)
+    load_ema_state = (
+        hasattr(ckpt_task_p, 'train') and
+        ckpt_task_p.train.learner.optimizer.ema_decay > 0.0)
 
     # For GDA checkpoint type, skip loading step / opt states from the
     # checkpoint if rules are set to False. FLAX checkpoint type doesn't support
