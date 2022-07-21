@@ -142,24 +142,12 @@ def save_checkpoint(
   """
   del state_specs
 
-  if jax.config.jax_parallel_functions_output_gda:
-    asserts.eq(checkpoint_type, CheckpointType.CHECKPOINT_GDA)
-    step = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
+  step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
+
+  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     _save_checkpoint_gda(train_state, checkpoint_dir, overwrite, step,
                          async_ckpt_manager)
-    return
-
-  if train_state.step.ndim == 0:
-    step = jax.device_get(train_state.step)
-  elif train_state.step.ndim == 1:
-    step = jax.device_get(train_state.step[0])
-  else:
-    raise ValueError(
-        f'Expecting a replicated 1D global step (got `{train_state.step.ndim}`).'
-    )
-
-  if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     _save_checkpoint_flax(train_state, checkpoint_dir, overwrite, step)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
@@ -218,12 +206,10 @@ def restore_checkpoint(
     ValueError: When a mismatch between the current checkpoint structure and
     the saved checkpoint one is detected.
   """
-  if jax.config.jax_parallel_functions_output_gda:
-    asserts.eq(checkpoint_type, CheckpointType.CHECKPOINT_GDA)
+  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     return _restore_checkpoint_gda(state_global_shapes, checkpoint_dir,
                                    global_mesh, state_specs, step)
-
-  if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     return _restore_checkpoint_flax(state_global_shapes, checkpoint_dir, step)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
