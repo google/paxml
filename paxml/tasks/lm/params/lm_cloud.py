@@ -103,6 +103,16 @@ class LmCloudTransformerAdamTest(LmCloudTransformerAdam):
   NUM_LAYERS = 2
 
 
+@experiment_registry.register
+class LmCloudTransformerAdamLimitSteps(LmCloudTransformerAdam):
+  NUM_LAYERS = 10
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    task_p.train.num_train_steps = 2000
+    return task_p
+
+
 ## SPMD Model parallel training.
 
 
@@ -155,6 +165,19 @@ class LmCloudSpmd2B(LmCloudSpmd):
 
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 4, 1]
+
+
+@experiment_registry.register
+class LmCloudSpmd2BLimitSteps(LmCloudSpmd2B):
+  """SPMD model with 2B params and limited steps.
+
+  Global batch size = 2 * 2 * 1 * 32 = 128
+  """
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
 
 
 @experiment_registry.register
