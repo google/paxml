@@ -272,7 +272,7 @@ def flatten_summary_dict(summary_dict: Dict[str, JTensor],
 
 
 def write_summary_tensor(step_i: int, key: str,
-                         tensor: Union[float, JTensor, Sequence[JTensor]],
+                         tensor: Union[float, JTensor, str, Sequence[JTensor]],
                          summary_type: SummaryType) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
@@ -308,9 +308,12 @@ def write_summary_tensor(step_i: int, key: str,
     for tensor in tensors_it:
       if remaining_max_texts <= 0:
         break
-      for i in range(min(tensor.shape[0], remaining_max_texts)):
-        tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
-      remaining_max_texts -= tensor.shape[0]
+      if isinstance(tensor, str):
+        tf_summary.text(f'{key}', tensor, step_i)
+      else:
+        for i in range(min(tensor.shape[0], remaining_max_texts)):
+          tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
+        remaining_max_texts -= tensor.shape[0]
   else:
     assert False, 'Unsupported summary type: ' + str(summary_type)
 

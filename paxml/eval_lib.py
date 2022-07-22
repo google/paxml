@@ -849,6 +849,12 @@ def _write_clu_metric_summaries(metrics: Metrics, step_i: int) -> None:
       are expected to have a compute() function that returns a Dict or scalar.
     step_i: An int representing the current step of decoding.
   """
+  def _get_summary_type(metric_value: Any) -> summary_utils.SummaryType:
+    summary_type = summary_utils.SummaryType.SCALAR
+    if isinstance(metric_value, (str, bytes)):
+      summary_type = summary_utils.SummaryType.TEXT
+    return summary_type
+
   logging.info('Summarizing metrics.')
   for metric_name, metric in metrics.items():
     logging.info('Computing metric %s' % metric_name)
@@ -861,10 +867,18 @@ def _write_clu_metric_summaries(metrics: Metrics, step_i: int) -> None:
     if isinstance(metric_values, (dict, NestedMap)):
       for metric_key, metric_value in metric_values.items():
         summary_key = f'{metric_name}/{metric_key}'
-        # TODO(bencaine): Support other summary types.
-        logging.info('  %s=%f', summary_key, metric_value)
-        summary_utils.write_summary_tensor(step_i, summary_key, metric_value,
-                                           summary_utils.SummaryType.SCALAR)
+        # TODO(bencaine): Support other summary types: b/239852549.
+        if isinstance(metric_value, list):
+          for i, value in enumerate(metric_value):
+            summary_type = _get_summary_type(value)
+            logging.info('  %s=%f', f'{summary_key}_{i}', value)
+            summary_utils.write_summary_tensor(
+                step_i, f'{summary_key}_{i}', value, summary_type)
+        else:
+          logging.info('  %s=%f', summary_key, metric_value)
+          summary_type = _get_summary_type(metric_value)
+          summary_utils.write_summary_tensor(
+              step_i, summary_key, metric_value, summary_type)
     else:
       # Otherwise we assume compute() returned a float or integer.
       summary_key = f'{metric_name}'
