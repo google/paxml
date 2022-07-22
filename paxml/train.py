@@ -745,86 +745,6 @@ def compile_for_auto_sharding(train_step: Any,
   return compiled, compiled.input_shardings
 
 
-def _adjust_input_params_for_small_batch(
-    inp_p: base_input.BaseInput.HParams,
-    global_mesh: maps.Mesh) -> base_input.BaseInput.HParams:
-  """Creates a copy of inp_p adjusted when per-device batch < 1."""
-  # Two cases are supported:
-  #   1) num_infeed_hosts == 1, and batch_size < local_device_count.
-  #   2) 1 < num_infeed_hosts < process_count, and batch_size ==
-  #     local_device_count.
-  local_device_count = jax.local_device_count()
-  batch_size = inp_p.cls.get_batch_size(inp_p)
-
-  # Case 1: num_infeed_hosts == 1 and process_count == 1, and batch_size <
-  # local_device_count.
-  if inp_p.num_infeed_hosts == 1 and jax.process_count() == 1:
-    if batch_size >= local_device_count:
-      return inp_p
-    copy = inp_p.clone()
-    copy.batch_padding_size = local_device_count - batch_size
-    return copy
-
-  # Case 2: 1 < num_infeed_hosts < process_count, and batch_size ==
-  #     local_device_count.
-  # This implementation requires part of the hosts to infeed real data, and that
-  # a host emits data for either all local cores or none of the local cores. It
-  # has limitations for TPU slice topologies, and the minimum per-core batch
-  # size also depends on the logical mesh shape.
-
-  # Despite the limitations, it should be generally fine for cases like:
-  #   TPUv4, physical topo 4xYxZ, minimum per-core batch size is at least 1/2
-  #   TPUv4, physical topo 8xYxZ, minimum per-core batch size is at least 1/4
-  #   ...
-  #   2x TPUv4 topology of 4xYxZ, minimum per-core batch size is at least 1/4
-  #   4x TPUv4 topology of 8xYxZ, minimum per-core batch size is at least 1/16
-
-  # A more ideal way would be to still have each host infeed data, then pad for
-  # the local cores. However, that would require shuffling the batch since the
-  # cores that have data may not be contiguous on the device mesh. It is
-  # solvable by having a different device mesh for the inputs, then we
-  # immediately reshard it with the default device mesh (collective permute),
-  # but pjit doesn't support specific mesh on part of the arguments.
-  if inp_p.num_infeed_hosts == jax.process_count():
-    return inp_p
-  assert inp_p.num_infeed_hosts < jax.process_count()
-  if local_device_count != batch_size:
-    raise NotImplementedError(
-        'Per-process batch size must be set to local_device_count when '
-        'num_infeed_hosts < process_count')
-  global_batch_size = batch_size * inp_p.num_infeed_hosts
-  if global_batch_size % local_device_count != 0:
-    raise NotImplementedError(
-        'Global batch size must be divisible by local_device_count.')
-  copy = inp_p.clone()
-  # Some hosts will produce duplicate data, but they will be discarded.
-  copy.infeed_host_index = 0
-  has_real_data = [None] * jax.process_count()
-  global_device_idx = 0
-  # We place useful data on the left-aligned subsequence of all devices.
-  for device in global_mesh.devices.flat:
-    process_idx = device.process_index
-    device_has_data = global_device_idx < global_batch_size
-    if has_real_data[process_idx] is None:
-      has_real_data[process_idx] = device_has_data
-    elif has_real_data[process_idx] != device_has_data:
-      raise NotImplementedError(
-          'Devices in a process must either all receive inputs, or none '
-          'receives input. Try a larger num_infeed_hosts.')
-    global_device_idx += 1
-  process_idx = jax.process_index()
-  if has_real_data[process_idx]:
-    copy.infeed_host_index = sum(
-        [1 if p else 0 for p in has_real_data[:process_idx]])
-    logging.info('Process %s: infeed_host_index is set to %s', process_idx,
-                 copy.infeed_host_index)
-  else:
-    logging.info(
-        'Process %s: infeed data will be dropped. infeed_host_index '
-        'is set to 0', process_idx)
-  return copy
-
-
 def train_and_evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
@@ -890,38 +810,39 @@ def train_and_evaluate_spmd_model(
   train_unpadded_global_batch_size = (
       train_input_p.cls.get_batch_size(train_input_p) *
       train_input_p.num_infeed_hosts)
-  train_input_p = _adjust_input_params_for_small_batch(train_input_p,
-                                                       global_mesh)
+  train_input_p = trainer_lib.adjust_input_params_for_small_batch(
+      train_input_p, global_mesh)
   train_input_for_shape = instantiate(train_input_p)
   model_inputs_for_shape = train_input_for_shape.get_next_padded()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                        model_inputs_for_shape)
 
   if eval_input_p:
-    eval_input_pipelines = []
-    for input_p in eval_input_p:
-      input_p = _adjust_input_params_for_small_batch(input_p, global_mesh)
-      eval_input_pipelines.append(instantiate(input_p))
+    eval_input_p = [
+        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
+        for input_p in eval_input_p
+    ]
+    eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
     trainer_lib.check_unique_names(eval_input_pipelines)
     # Do not mutate eval_input_pipelines itself. Instantiate a new one
     # to get sample input.
-    sample_eval_model_inputs = instantiate(
-        _adjust_input_params_for_small_batch(eval_input_p[0],
-                                             global_mesh)).get_next_padded()
+    sample_eval_model_inputs = instantiate(eval_input_p[0]).get_next_padded()
     eval_test_inputs_shape = tf.nest.map_structure(
         py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
     eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
         model_p.mesh_axis_names, eval_test_inputs_shape)
   if decode_input_p:
+    decode_input_p = [
+        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
+        for input_p in decode_input_p
+    ]
     decode_input_pipelines = [
         instantiate(input_p) for input_p in decode_input_p
     ]
     trainer_lib.check_unique_names(decode_input_pipelines)
-    for input_p in decode_input_p:
-      if input_p.num_infeed_hosts < jax.process_count() or (
-          input_p.cls.get_batch_size(input_p) < local_device_count):
-        raise NotImplementedError(
-            'Per-device batch size < 1 not supported for decode inputs.')
+    decode_sample_inputs = instantiate(decode_input_p[0]).get_next_padded()
+    decode_inputs_shape = tf.nest.map_structure(
+        py_utils.get_global_input_shape_dtype, decode_sample_inputs)
 
   with global_mesh:
     jax_task = instantiate(task_p)
@@ -1014,9 +935,6 @@ def train_and_evaluate_spmd_model(
         is_eval=True,
         unpadded_global_batch_size=train_unpadded_global_batch_size)
     if decode_input_p:
-      decode_sample_inputs = instantiate(decode_input_p[0]).get_next()
-      decode_inputs_shape = tf.nest.map_structure(
-          py_utils.get_global_input_shape_dtype, decode_sample_inputs)
       # TODO(pax-dev): Support auto-sharding for decoder step.
       decode_step_fn, decode_inputs_partition_spec = (
           trainer_lib.get_partitioned_spmd_model_decode_fn(

@@ -119,6 +119,86 @@ def write_post_init_model_hparams_file(model, vars_weight_params,
         params_file.write(params_inits_text)
 
 
+def adjust_input_params_for_small_batch(
+    inp_p: base_input.BaseInput.HParams,
+    global_mesh: maps.Mesh) -> base_input.BaseInput.HParams:
+  """Creates a copy of inp_p adjusted when per-device batch < 1."""
+  # Two cases are supported:
+  #   1) num_infeed_hosts == 1, and batch_size < local_device_count.
+  #   2) 1 < num_infeed_hosts < process_count, and batch_size ==
+  #     local_device_count.
+  local_device_count = jax.local_device_count()
+  batch_size = inp_p.cls.get_batch_size(inp_p)
+
+  # Case 1: num_infeed_hosts == 1 and process_count == 1, and batch_size <
+  # local_device_count.
+  if inp_p.num_infeed_hosts == 1 and jax.process_count() == 1:
+    if batch_size >= local_device_count:
+      return inp_p
+    copy = inp_p.clone()
+    copy.batch_padding_size = local_device_count - batch_size
+    return copy
+
+  # Case 2: 1 < num_infeed_hosts < process_count, and batch_size ==
+  #     local_device_count.
+  # This implementation requires part of the hosts to infeed real data, and that
+  # a host emits data for either all local cores or none of the local cores. It
+  # has limitations for TPU slice topologies, and the minimum per-core batch
+  # size also depends on the logical mesh shape.
+
+  # Despite the limitations, it should be generally fine for cases like:
+  #   TPUv4, physical topo 4xYxZ, minimum per-core batch size is at least 1/2
+  #   TPUv4, physical topo 8xYxZ, minimum per-core batch size is at least 1/4
+  #   ...
+  #   2x TPUv4 topology of 4xYxZ, minimum per-core batch size is at least 1/4
+  #   4x TPUv4 topology of 8xYxZ, minimum per-core batch size is at least 1/16
+
+  # A more ideal way would be to still have each host infeed data, then pad for
+  # the local cores. However, that would require shuffling the batch since the
+  # cores that have data may not be contiguous on the device mesh. It is
+  # solvable by having a different device mesh for the inputs, then we
+  # immediately reshard it with the default device mesh (collective permute),
+  # but pjit doesn't support specific mesh on part of the arguments.
+  if inp_p.num_infeed_hosts == jax.process_count():
+    return inp_p
+  assert inp_p.num_infeed_hosts < jax.process_count()
+  if local_device_count != batch_size:
+    raise NotImplementedError(
+        'Per-process batch size must be set to local_device_count when '
+        'num_infeed_hosts < process_count')
+  global_batch_size = batch_size * inp_p.num_infeed_hosts
+  if global_batch_size % local_device_count != 0:
+    raise NotImplementedError(
+        'Global batch size must be divisible by local_device_count.')
+  copy = inp_p.clone()
+  # Some hosts will produce duplicate data, but they will be discarded.
+  copy.infeed_host_index = 0
+  has_real_data = [None] * jax.process_count()
+  global_device_idx = 0
+  # We place useful data on the left-aligned subsequence of all devices.
+  for device in global_mesh.devices.flat:
+    process_idx = device.process_index
+    device_has_data = global_device_idx < global_batch_size
+    if has_real_data[process_idx] is None:
+      has_real_data[process_idx] = device_has_data
+    elif has_real_data[process_idx] != device_has_data:
+      raise NotImplementedError(
+          'Devices in a process must either all receive inputs, or none '
+          'receives input. Try a larger num_infeed_hosts.')
+    global_device_idx += 1
+  process_idx = jax.process_index()
+  if has_real_data[process_idx]:
+    copy.infeed_host_index = sum(
+        [1 if p else 0 for p in has_real_data[:process_idx]])
+    logging.info('Process %s: infeed_host_index is set to %s', process_idx,
+                 copy.infeed_host_index)
+  else:
+    logging.info(
+        'Process %s: infeed data will be dropped. infeed_host_index '
+        'is set to 0', process_idx)
+  return copy
+
+
 def initialize_model_state(jax_task: tasks_lib.SingleTask,
                            prng_key: PRNGKey,
                            discard_opt_states: bool = False,

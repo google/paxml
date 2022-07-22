@@ -536,7 +536,7 @@ class _SpmdEvalRunner:
     self._task_p = task_p
 
     # setup input_shape.
-    sample_model_inputs = instantiate(self._eval_input_p[0]).get_next()
+    sample_model_inputs = instantiate(self._eval_input_p[0]).get_next_padded()
     self._inputs_shape = tf.nest.map_structure(
         py_utils.get_global_input_shape_dtype, sample_model_inputs)
     self.global_mesh = global_mesh
@@ -676,6 +676,11 @@ def evaluate_spmd_model(
        jax_task, global_mesh, init_key, checkpoint_dir, checkpoint_type)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
+
+  eval_input_p = [
+      trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
+      for inp in eval_input_p
+  ]
 
   runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
                            init_key, partitioned_specs)
@@ -1189,17 +1194,27 @@ def decode_spmd_model(
   restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
       job_log_dir, 'checkpoints')
 
+  model_p = task_p.model
+  device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
+                                            model_p.dcn_mesh_shape)
+  global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+
+  input_p = [
+      trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
+      for inp in input_p
+  ]
+  eval_input_p = [
+      trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
+      for inp in eval_input_p
+  ]
+
   sample_input_p = input_p[0] if input_p else eval_input_p[0]
-  sample_inputs = instantiate(sample_input_p).get_next()
+  sample_inputs = instantiate(sample_input_p).get_next_padded()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                        sample_inputs)
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
-  model_p = task_p.model
-  device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
-                                            model_p.dcn_mesh_shape)
-  global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
   (partitioned_train_state, partitioned_specs,
    train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
        jax_task,
@@ -1345,7 +1360,7 @@ def decode_once_spmd_model(
     while num_split_steps < 0 or step_num < num_split_steps:
       step_num += 1
       try:
-        batch = inputs[split].get_next()
+        batch = inputs[split].get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         inputs[split].reset()
         break
