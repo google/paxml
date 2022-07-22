@@ -39,6 +39,23 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   def datasets(self) -> List[base_input.BaseInput.HParams]:
     """Returns the list of dataset parameters."""
 
+  def training_dataset(self) -> base_input.BaseInput.HParams:
+    """Returns the tentatively unique training split.
+
+    Raises a ValueError exception if there is no training split or there are
+    multiple of them.
+    """
+    training_splits = [s for s in self.datasets() if s.is_training]
+    if not training_splits:
+      raise ValueError(
+          'Could not find any training split dataset in this experiment '
+          'config (`{self.datasets()}`).')
+    if len(training_splits) > 1:
+      raise ValueError(
+          'Found multiple training split datasets in this experiment '
+          'config (`{self.datasets()}`).')
+    return training_splits[0]
+
   # Optional. Returns a list of datasets to be decoded.
   # When specified, all decoder datasets must have unique names.
   def decoder_datasets(self) -> List[base_input.BaseInput.HParams]:
@@ -57,3 +74,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   def __init_subclass__(cls):
     """Modifications to the subclasses."""
     automl.enable_class_level_hyper_primitives(cls)
+
+
+def create_input_specs_provider(
+    experiment: BaseExperiment) -> base_input.DatasetInputSpecsProvider.HParams:
+  """Creates a DatasetInputSpecsProvider from an experiment configuration."""
+  input_p = experiment.training_dataset()
+  return base_input.DatasetInputSpecsProvider.HParams(input_p=input_p)

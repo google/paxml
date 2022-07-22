@@ -305,6 +305,7 @@ pytype_strict_library(
         # Implicit optax dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
+        "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:learners",

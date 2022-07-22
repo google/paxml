@@ -52,28 +52,16 @@ PARAMS = base_layer.PARAMS
 instantiate = base_hyperparams.instantiate
 
 
-class TestInput(base_input.BaseInput):
+class CustomInputSpecsProvider(base_input.BaseInputSpecsProvider):
+  """Class to provide input specs for model initialization."""
 
-  class HParams(base_input.BaseInput.HParams):
+  class HParams(base_input.BaseInputSpecsProvider.HParams):
     input_dims: int = 0
 
-  def get_next(self):
+  def get_input_specs(self):
     p = self.hparams
-    sample_inputs = jnp.ones((p.batch_size, p.input_dims), dtype=jnp.float32)
-    return sample_inputs
-
-
-class TestExperiment(base_experiment.BaseExperiment):
-
-  def __init__(self, task_p, input_dims):
-    self.task_p = task_p
-    self.input_dims = input_dims
-
-  def task(self):
-    return self.task_p
-
-  def datasets(self):
-    return [TestInput.HParams(batch_size=1, input_dims=self.input_dims)]
+    batch_size = 1
+    return jax.ShapeDtypeStruct((batch_size, p.input_dim), dtype=jnp.float32)
 
 
 class TestModel01(base_model.BaseModel):
@@ -297,8 +285,10 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
             tasks_lib.CheckpointLoadingRules(
-                experiment_config=TestExperiment(ext_task_p, input_dims),
-                load_rules=[(r'params/(.*)', 'params/{}')])
+                task_p=ext_task_p,
+                load_rules=[(r'params/(.*)', 'params/{}')],
+                input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                    input_dims=input_dims)),
     }
     task = instantiate(task_p)
 
@@ -348,8 +338,10 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
             tasks_lib.CheckpointLoadingRules(
-                experiment_config=TestExperiment(ext_task_p, input_dims),
-                load_rules=[(r'params/(.*)', 'ema/params/{}')])
+                task_p=ext_task_p,
+                load_rules=[(r'params/(.*)', 'ema/params/{}')],
+                input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                    input_dims=input_dims)),
     }
     task = instantiate(task_p)
 
