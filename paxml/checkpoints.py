@@ -232,7 +232,8 @@ def _save_checkpoint_flax(train_state: train_states.TrainState,
 
   # Extract/flatten data structure to store to disk. Flax requires a flattened
   # data structure to be passed to the checkpointer.
-  flattened_state, pytree_state = jax.tree_flatten(jax.device_get(train_state))
+  flattened_state, pytree_state = jax.tree_util.tree_flatten(
+      jax.device_get(train_state))
   checkpoint_target = {
       'flattened_state': flattened_state,
       # Saves a serialized version of the pytree structure to detect potential
@@ -255,7 +256,8 @@ def _restore_checkpoint_flax(
     step: Optional[int] = None) -> Optional[train_states.TrainState]:
   """Restores a checkpoint using Flax serialization mechanism."""
   # Input the same data structure as in save_checkpoint().
-  flattened_state, pytree_state = jax.tree_flatten(state_global_shapes)
+  flattened_state, pytree_state = jax.tree_util.tree_flatten(
+      state_global_shapes)
   str_pytree_state = str(pytree_state)
   input_target = {
       'flattened_state': flattened_state,
@@ -276,7 +278,7 @@ def _restore_checkpoint_flax(
         'A possible mismatch (could be spurious) between the saved '
         'checkpoint structure and the current one has been detected '
         '(%s vs %s).', restored_str_pytree_state, str_pytree_state)
-  return jax.tree_unflatten(pytree_state, restored_state)
+  return jax.tree_util.tree_unflatten(pytree_state, restored_state)
 
 
 def _extract_nested_prefix_names(
@@ -378,18 +380,18 @@ def _tensorstore_prepare(
         train_state,
         state_specs,
         is_leaf=py_utils.is_optax_masked_node)
-  # ... that are filtered out when calling jax.tree_flatten() here.
-  flattened_train_state, _ = jax.tree_flatten(train_state_none)
+  # ... that are filtered out when calling jax.tree_util.tree_flatten() here.
+  flattened_train_state, _ = jax.tree_util.tree_flatten(train_state_none)
   if state_specs is not None:
-    flattened_state_specs, _ = jax.tree_flatten(state_specs_none)
+    flattened_state_specs, _ = jax.tree_util.tree_flatten(state_specs_none)
   else:
     flattened_state_specs = None
 
   # _extract_nested_prefix_names() also replaces MaskedNode instances by None
   # values ...
   nested_names = _extract_nested_prefix_names(train_state)
-  # ... that are filtered out when calling jax.tree_flatten() here.
-  flattened_nested_names, _ = jax.tree_flatten(nested_names)
+  # ... that are filtered out when calling jax.tree_util.tree_flatten() here.
+  flattened_nested_names, _ = jax.tree_util.tree_flatten(nested_names)
   return flattened_train_state, flattened_nested_names, flattened_state_specs
 
 
@@ -493,7 +495,8 @@ def _tensorstore_reconstruct(
   """
   c = 0
   restored_flattened_train_state = []
-  flattened_state_global_shapes, treedef = jax.tree_flatten(state_global_shapes)
+  flattened_state_global_shapes, treedef = jax.tree_util.tree_flatten(
+      state_global_shapes)
   for l in flattened_state_global_shapes:
     if py_utils.is_optax_masked_node(l):
       restored_flattened_train_state.append(optax.MaskedNode())
@@ -501,7 +504,7 @@ def _tensorstore_reconstruct(
       restored_flattened_train_state.append(restored_train_state[c])
       c += 1
   assert c == len(restored_train_state)
-  return jax.tree_unflatten(treedef, restored_flattened_train_state)
+  return jax.tree_util.tree_unflatten(treedef, restored_flattened_train_state)
 
 
 def _restore_checkpoint_gda(

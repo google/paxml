@@ -601,7 +601,7 @@ class SingleTask(base_task.BaseTask):
 
       # Check if any variables match the rule
       # If vn_scale > 0.0 but none of variables match, throw error
-      if not any(jax.tree_leaves(vn_mask)):
+      if not any(jax.tree_util.tree_leaves(vn_mask)):
         raise RuntimeError('Variational noise is enabled but rules don\'t '
                            'match any variables. Please disable vn by specify'
                            ' vn.vn_scale = 0. or check vn.vn_regex. One common'
@@ -613,7 +613,7 @@ class SingleTask(base_task.BaseTask):
       params_flat, params_def = jax.tree_util.tree_flatten(names)
 
       rng_flat = jax.random.split(prng_key, len(params_flat))
-      rng_tree = jax.tree_unflatten(params_def, rng_flat)
+      rng_tree = jax.tree_util.tree_unflatten(params_def, rng_flat)
 
       # VN only updates trainable part and copy non-trainable
       ret = mdl_vars.copy()

@@ -81,7 +81,8 @@ class BaseInferenceRunnerTest(test_utils.TestCase):
       output_np = jax.tree_map(lambda x: x.numpy(), output)
 
       for output_leaf, expected_leaf in zip(
-          jax.tree_leaves(output_np), jax.tree_leaves(expected)):
+          jax.tree_util.tree_leaves(output_np),
+          jax.tree_util.tree_leaves(expected)):
         self.assertArraysEqual(output_leaf, expected_leaf)
 
 

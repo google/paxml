@@ -1059,7 +1059,7 @@ def get_partitioned_spmd_model_step_fn(
       # and inner >= unpadded_global_batch_size. This way, halo exchange will be
       # limited inside the inner dim, and replication on the outer-dim is a
       # single all-reduce.
-      padded_global_batch_size = jax.tree_leaves(inputs)[0].shape[0]
+      padded_global_batch_size = jax.tree_util.tree_leaves(inputs)[0].shape[0]
       inner_reshape_dim = padded_global_batch_size
       outer_reshape_dim = 1
       # Find a size for inner_reshape_dim that can evenly divide
