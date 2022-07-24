@@ -99,6 +99,7 @@ def main(argv) -> None:
       params_file.write(dataset.to_text())
       params_file.write('\n\n')
     params_file.write(experiment_config.task().to_text())
+    # TODO(b/236417790): Dump input specs for model weight initialization.
 
   if FLAGS.post_init_params_ofile:
     _write_post_init_model_hparams_file(experiment_config.task().model,

@@ -66,6 +66,28 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   def task(self) -> base_task.BaseTask.HParams:
     """Returns the task parameters."""
 
+  def get_input_specs_provider_params(
+      self) -> base_input.BaseInputSpecsProvider.HParams:
+    """Returns the hparams of the input specs provider.
+
+    By default, it retrieves the input specs from the training input pipeline
+    (hence, required to exist). But the method can be overridden in derived
+    classes to return a different input specs provider, which directly
+    returns the specs.
+
+    Returns:
+      An InputSpecsProvider instance.
+
+    Raises:
+      A ValueError if there is no training set. In this case, the user must
+      override this method to provide the input specs for model weight
+      initialization.
+    """
+    # TODO(b/236417790): Make this method fully abstract and enforce users to
+    # provide input specs.
+    input_p = self.training_dataset()
+    return base_input.DatasetInputSpecsProvider.HParams(input_p=input_p)
+
   def search(self) -> automl.SearchHParams:
     """Returns the parameters for AutoML search."""
     raise NotImplementedError(
@@ -74,10 +96,3 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   def __init_subclass__(cls):
     """Modifications to the subclasses."""
     automl.enable_class_level_hyper_primitives(cls)
-
-
-def create_input_specs_provider(
-    experiment: BaseExperiment) -> base_input.DatasetInputSpecsProvider.HParams:
-  """Creates a DatasetInputSpecsProvider from an experiment configuration."""
-  input_p = experiment.training_dataset()
-  return base_input.DatasetInputSpecsProvider.HParams(input_p=input_p)
