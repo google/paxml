@@ -28,6 +28,7 @@ package(default_visibility = JAX_VISIBILITY)
 exports_files(
     [
         "LICENSE",
+        "build_defs.bzl",
         "experiment_imports_all_test.py",
         "main.py",
     ],

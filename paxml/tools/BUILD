@@ -15,10 +15,27 @@
 
 # Tools and utilities for Pax users.
 
+load("//paxml:paxml.bzl", "pytype_strict_library")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
 package(default_visibility = JAX_VISIBILITY)
 
 licenses(["notice"])
 
-exports_files(["dump_hparams.py"])
+pytype_strict_library(
+    name = "dump_input_specs_lib",
+    srcs = ["dump_input_specs_lib.py"],
+    deps = [
+        # Implicit absl.logging dependency.
+        # Implicit jax dependency.
+        "//paxml:base_experiment",
+        "//praxis:base_hyperparams",
+        "//praxis:base_input",
+        "//praxis:pytypes",
+    ],
+)
+
+exports_files([
+    "dump_hparams.py",
+    "dump_input_specs.py",
+])

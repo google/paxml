@@ -50,9 +50,9 @@ def _export_sources_impl(ctx):
 # For example, if we have:
 #   py_library(name = "my_lib", srcs = ["my_lib.py"], ...)
 # , then
-#   _export_sources(name = "lib_files", deps = [":my_lib"])
+#   export_sources(name = "lib_files", deps = [":my_lib"])
 # defines a target ":lib_files" which is [":my_lib.py"].
-_export_sources = rule(
+export_sources = rule(
     implementation = _export_sources_impl,
     attrs = {
         "deps": attr.label_list(
@@ -106,7 +106,7 @@ def pax_targets(
         fail("name is not used and has no effect. Specify prefix_name instead.")
 
     exp_sources = ("_exp_sources" if not prefix_name else "_%s_exp_sources" % prefix_name)
-    _export_sources(
+    export_sources(
         name = exp_sources,
         deps = experiments,
     )
@@ -114,7 +114,7 @@ def pax_targets(
 
     main_name = "main"
     main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
-    _export_binary(
+    export_binary(
         name = main_name,
         main = "//paxml:main.py",
         py_binary_rule = pytype_binary,
@@ -128,7 +128,7 @@ def pax_targets(
     if add_main_gpu_target:
         main_name = "main_gpu"
         main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
-        _export_binary(
+        export_binary(
             name = main_name,
             main = "//paxml:main.py",
             py_binary_rule = pytype_binary,
@@ -168,7 +168,7 @@ def pax_targets(
         prefix_name,
         dump_hparams_name,
     )
-    _export_binary(
+    export_binary(
         name = dump_hparams_name,
         main = "//paxml/tools:dump_hparams.py",
         py_binary_rule = pytype_strict_binary,
@@ -181,6 +181,25 @@ def pax_targets(
             "//paxml:experiment_registry",
             "//praxis:base_hyperparams",
             "//praxis:base_layer",
+            # Implicit tensorflow_no_contrib dependency.
+        ] + extra_deps,
+        exp_sources = exp_sources,
+    )
+
+    dump_input_specs_name = "dump_input_specs"
+    dump_input_specs_name = dump_input_specs_name if not prefix_name else "%s_%s" % (
+        prefix_name,
+        dump_input_specs_name,
+    )
+    export_binary(
+        name = dump_input_specs_name,
+        main = "//paxml/tools:dump_input_specs.py",
+        py_binary_rule = pytype_strict_binary,
+        deps = [
+            # Implicit absl.app dependency.
+            # Implicit absl.flags dependency.
+            "//paxml:experiment_registry",
+            "//paxml/tools:dump_input_specs_lib",
             # Implicit tensorflow_no_contrib dependency.
         ] + extra_deps,
         exp_sources = exp_sources,
@@ -216,7 +235,7 @@ def _export_test(
         **kwargs
     )
 
-def _export_binary(
+def export_binary(
         name,
         main,
         deps,
