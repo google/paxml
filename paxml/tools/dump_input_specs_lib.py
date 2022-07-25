@@ -47,7 +47,8 @@ def extract_input_specs(
   # Input specs from experiment config
   logging.info('Extracting input specs info from input pipeline.')
   try:
-    train_input_p = experiment_config.training_dataset()
+    # Clone it since we may mutate a few attributes below.
+    train_input_p = experiment_config.training_dataset().clone()
   except ValueError:
     logging.info('Could not find a training input pipeline for %s',
                  experiment_config)
@@ -58,9 +59,9 @@ def extract_input_specs(
 
   # Attempt at reducing loading time when using Lingvo input.
   if isinstance(train_input_p, base_input.LingvoInputAdaptor):
-    train_input_p.num_batcher_threads = 1
-    train_input_p.file_parallelism = 1
-    train_input_p.file_buffer_size = 32
+    train_input_p.input.num_batcher_threads = 1
+    train_input_p.input.file_parallelism = 1
+    train_input_p.input.file_buffer_size = 32
 
   logging.info('Instantiating input pipeline...')
   input_pipeline = instantiate(train_input_p)
