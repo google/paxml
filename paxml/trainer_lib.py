@@ -826,7 +826,7 @@ def initialize_partitioned_model_states(
     global_mesh: Optional[maps.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
     state_specs: Optional[TrainState] = None,
-) -> Tuple[TrainState, TrainState]:
+    do_init_checkpoint_rules: bool = True) -> Tuple[TrainState, TrainState]:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first.
@@ -845,6 +845,7 @@ def initialize_partitioned_model_states(
       the init_checkpoint_rules.
     state_specs: The TrainState specs when restoring weights based on the
       init_checkpoint_rules. Required for GDA-based checkpoints.
+    do_init_checkpoint_rules: If apply init_checkpoint_rules.
 
   Returns:
     The partitioned specs and the partitioned vars themselves.
@@ -895,7 +896,8 @@ def initialize_partitioned_model_states(
   assert py_utils.global_mesh_defined(), 'must be inside maps.mesh scope'
   partitioned_vars = init_fn(prng_key)
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
-  if jax_task.hparams.train.init_from_checkpoint_rules:
+  if (do_init_checkpoint_rules and
+      jax_task.hparams.train.init_from_checkpoint_rules):
     # TODO(b/230132535): Note that this application after constructing the
     # partitioned vars is currently inconsistent with what is being performed
     # for pmap models.
