@@ -503,7 +503,8 @@ def _train_step_single_learner_with_model(
   init_key = {PARAMS: k1, NON_PAX_RNG_KEY: k2}
   parent_model = jax_task.model
 
-  var_weight_hparams = parent_model.abstract_init_with_metadata(init_key)
+  with base_layer.JaxContext.new_context(hparams=context_p):
+    var_weight_hparams = parent_model.abstract_init_with_metadata(init_key)
 
   updated_mdl_vars = jax_task.maybe_adjust_train_state(states.step,
                                                        states.mdl_vars,
