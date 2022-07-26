@@ -482,7 +482,7 @@ def _save_checkpoint_gda(
         tspecs,
         on_commit_callback=functools.partial(on_commit_callback,
                                              checkpoint_step_tmp_dir,
-                                             checkpoint_step_dir)),
+                                             checkpoint_step_dir))
     logging.info('Started GDA asynchrounous checkpoint.')
   else:
     gda_serialization.run_serialization(flattened_train_state, tspecs)
