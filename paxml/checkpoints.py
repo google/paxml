@@ -17,6 +17,7 @@
 
 from concurrent import futures
 import datetime
+import functools
 import os
 import re
 from typing import Any, Optional, Sequence, Tuple
@@ -48,6 +49,7 @@ _MAX_CHECKPOINT_FLAX = 1000000
 
 CheckpointType = checkpoint_pb2.CheckpointType
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
+COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
 def _is_checkpoint_asset(x: str) -> bool:
@@ -395,6 +397,17 @@ def _tensorstore_prepare(
   return flattened_train_state, flattened_nested_names, flattened_state_specs
 
 
+def on_commit_callback(temp_ckpt_dir, final_ckpt_dir):
+  if temp_ckpt_dir == final_ckpt_dir:
+    with tf.io.gfile.GFile(
+        os.path.join(final_ckpt_dir, COMMIT_SUCCESS_FILE), 'w') as f:
+      f.write(f'Checkpoint commit was successful to {final_ckpt_dir}')
+  else:
+    logging.info('Renaming %s to %s', temp_ckpt_dir, final_ckpt_dir)
+    tf.io.gfile.rename(temp_ckpt_dir, final_ckpt_dir)
+    logging.info('Finished saving checkpoint to `%s`.', final_ckpt_dir)
+
+
 def _save_checkpoint_gda(
     train_state: train_states.TrainState,
     checkpoint_dir: str,
@@ -434,8 +447,15 @@ def _save_checkpoint_gda(
         return
 
   checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
-  checkpoint_step_tmp_dir = _make_tmp_checkpoint_dir(
-      checkpoint_dir, step, sync_timestamp=True)
+  # If the checkpoint directory is a GCS directory, then keep the final
+  # checkpoint directory as the temporary checkpoint directory. This is because
+  # renames are not atomic on GCS. When restoring check for the existence of a
+  # success file.
+  if checkpoint_step_dir.startswith('gs://'):
+    checkpoint_step_tmp_dir = checkpoint_step_dir
+  else:
+    checkpoint_step_tmp_dir = _make_tmp_checkpoint_dir(
+        checkpoint_dir, step, sync_timestamp=True)
   logging.info('Saving to a tmp checkpoint dir %s', checkpoint_step_tmp_dir)
 
   flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
@@ -460,8 +480,9 @@ def _save_checkpoint_gda(
     async_ckpt_manager.serialize(
         flattened_train_state,
         tspecs,
-        temp_checkpoint_dir=checkpoint_step_tmp_dir,
-        final_checkpoint_dir=checkpoint_step_dir)
+        on_commit_callback=functools.partial(on_commit_callback,
+                                             checkpoint_step_tmp_dir,
+                                             checkpoint_step_dir)),
     logging.info('Started GDA asynchrounous checkpoint.')
   else:
     gda_serialization.run_serialization(flattened_train_state, tspecs)
@@ -547,6 +568,12 @@ def _restore_checkpoint_gda(
         checkpoint_step_dir):
       raise FileNotFoundError(
           f'No checkpoint found for restore in {checkpoint_step_dir}')
+
+  if (checkpoint_step_dir.startswith('gs://') and not tf.io.gfile.exists(
+      os.path.join(checkpoint_step_dir, COMMIT_SUCCESS_FILE))):
+    raise ValueError('The checkpoint save failed since the commit_success.txt '
+                     "file doesn't exist hence restore cannot be done as the "
+                     'checkpoints saved are probably corrupted.')
 
   logging.info('GDA checkpoint restore started...')
   flattened_train_state, flattened_nested_names, flattened_state_specs = (
