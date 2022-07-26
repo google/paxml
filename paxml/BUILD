@@ -150,6 +150,7 @@ pytype_strict_library(
         ":checkpoint_py_pb2",
         ":io_utils",
         ":metric_tracker_utils",
+        ":metric_utils",
         ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
@@ -255,6 +256,33 @@ pytype_strict_library(
         # Implicit jax dependency.
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "metric_utils",
+    srcs = ["metric_utils.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":summary_utils",
+        # Implicit absl.logging dependency.
+        "//third_party/py/clu:values",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+    ],
+)
+
+py_strict_test(
+    name = "metric_utils_test",
+    srcs = ["metric_utils_test.py"],
+    deps = [
+        ":metric_utils",
+        ":summary_utils",
+        # Implicit absl.testing.absltest.absltest dependency.
+        "//third_party/py/clu:metrics",
+        "//third_party/py/clu:values",
+        # Implicit flax dependency.
+        # Implicit numpy dependency.
     ],
 )
 

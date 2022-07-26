@@ -37,6 +37,7 @@ from paxml import base_metrics
 from paxml import checkpoint_pb2
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
+from paxml import metric_utils
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -839,54 +840,6 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
   return metrics
 
 
-def _write_clu_metric_summaries(metrics: Metrics, step_i: int) -> None:
-  """Given a dict of clu metrics, write them out as tensorboard summaries.
-
-  This is expected to be called under a summary context.
-
-  Args:
-    metrics: A NestedMap of string -> clu_metrics.Metric objects. These metrics
-      are expected to have a compute() function that returns a Dict or scalar.
-    step_i: An int representing the current step of decoding.
-  """
-  def _get_summary_type(metric_value: Any) -> summary_utils.SummaryType:
-    summary_type = summary_utils.SummaryType.SCALAR
-    if isinstance(metric_value, (str, bytes)):
-      summary_type = summary_utils.SummaryType.TEXT
-    return summary_type
-
-  logging.info('Summarizing metrics.')
-  for metric_name, metric in metrics.items():
-    logging.info('Computing metric %s' % metric_name)
-    metric_values = metric.compute()
-    # clu.metrics compute() can return arbitrary types. For simple Metrics
-    # this is usually just a float or integer. For more complicated Metrics
-    # we expect users to return a dictionary of floats/integers.
-    # Here we check which it is, and if it's not a dictionary assume it's a
-    # scalar type.
-    if isinstance(metric_values, (dict, NestedMap)):
-      for metric_key, metric_value in metric_values.items():
-        summary_key = f'{metric_name}/{metric_key}'
-        # TODO(bencaine): Support other summary types: b/239852549.
-        if isinstance(metric_value, list):
-          for i, value in enumerate(metric_value):
-            summary_type = _get_summary_type(value)
-            logging.info('  %s=%f', f'{summary_key}_{i}', value)
-            summary_utils.write_summary_tensor(
-                step_i, f'{summary_key}_{i}', value, summary_type)
-        else:
-          logging.info('  %s=%f', summary_key, metric_value)
-          summary_type = _get_summary_type(metric_value)
-          summary_utils.write_summary_tensor(
-              step_i, summary_key, metric_value, summary_type)
-    else:
-      # Otherwise we assume compute() returned a float or integer.
-      summary_key = f'{metric_name}'
-      logging.info('  %s=%f', summary_key, metric_values)
-      summary_utils.write_summary_tensor(step_i, summary_key, metric_values,
-                                         summary_utils.SummaryType.SCALAR)
-
-
 def decode_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
     input_p: Sequence[base_input.BaseInput.HParams],
@@ -1140,6 +1093,9 @@ def decode_once_pmap_model(
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
+    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
+    metric_values = metric_utils.compute_metric_values(metrics)
+
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
       decode_metrics.summarize(step_i, 'decode_metrics')
@@ -1149,7 +1105,7 @@ def decode_once_pmap_model(
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
-      _write_clu_metric_summaries(metrics, step_i)
+      metric_utils.write_clu_metric_summaries(metric_values, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
@@ -1434,6 +1390,8 @@ def decode_once_spmd_model(
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
+    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
+    metric_values = metric_utils.compute_metric_values(metrics)
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
       decode_metrics.summarize(step_i, 'decode_metrics')
@@ -1443,7 +1401,7 @@ def decode_once_spmd_model(
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
-      _write_clu_metric_summaries(metrics, step_i)
+      metric_utils.write_clu_metric_summaries(metric_values, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
