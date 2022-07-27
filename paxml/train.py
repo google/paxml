@@ -408,15 +408,11 @@ def train_and_evaluate_pmap(
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
-  prng_key, init_key = jax.random.split(prng_key)
+  prng_key, k1, k2 = jax.random.split(prng_key, 3)
+  init_key = {PARAMS: k1, NON_PAX_RNG_KEY: k2}
 
   checkpoint_dir = _checkpoint_dir(job_log_dir)
-
-  # Get shape and dtype of model_inputs.
-  train_input_for_shape = instantiate(train_input_p)
-  sample_inputs = train_input_for_shape.get_next_padded()
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(
-      init_key, sample_inputs)
+  vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
   # Dump out model meta info for debugging.
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model, vars_weight_params, job_log_dir)
@@ -442,8 +438,7 @@ def train_and_evaluate_pmap(
                                                   checkpoint_dir)
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
-    model_states = trainer_lib.initialize_model_state(jax_task, init_key,
-                                                      sample_inputs)
+    model_states = trainer_lib.initialize_model_state(jax_task, init_key)
 
   logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
 
@@ -818,9 +813,9 @@ def train_and_evaluate_spmd_model(
   train_input_p = trainer_lib.adjust_input_params_for_small_batch(
       train_input_p, global_mesh)
   train_input_for_shape = instantiate(train_input_p)
-  sample_inputs = train_input_for_shape.get_next_padded()
+  model_inputs_for_shape = train_input_for_shape.get_next_padded()
   inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                       sample_inputs)
+                                       model_inputs_for_shape)
 
   if eval_input_p:
     eval_input_p = [
@@ -851,8 +846,7 @@ def train_and_evaluate_spmd_model(
 
   with global_mesh:
     jax_task = instantiate(task_p)
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(
-        init_key, inputs_shape)
+    vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, vars_weight_params, job_log_dir)
@@ -922,7 +916,6 @@ def train_and_evaluate_spmd_model(
           trainer_lib.initialize_partitioned_model_states(
               jax_task,
               init_key,
-              sample_inputs,
               global_mesh=global_mesh,
               # Note: We currently enforce that the checkpoint to reload via
               # init_checkpoint_rules are in the same format as the checkpoint

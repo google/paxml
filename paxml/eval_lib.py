@@ -297,7 +297,6 @@ class _PmapEvalRunner:
 
     runner = _PmapEvalRunner(task_p, eval_input_params, jax_task, prng_key)
     metrics_list = runner.run_one_step(replicated_model_states,
-                                       sample_input_params,
                                        eval_summary_writers)
   """
 
@@ -322,17 +321,15 @@ class _PmapEvalRunner:
   @classmethod
   def get_model_states(
       cls, jax_task: tasks_lib.SingleTask, prng_key: PRNGKey,
-      sample_input_p: base_input.BaseInput.HParams, checkpoint_dir: str,
-      checkpoint_step: Optional[int], use_ema: bool, track_metric: bool
-  ) -> Tuple[train_states.TrainState, train_states.TrainState, PRNGKey]:
+      checkpoint_dir: str, checkpoint_step: Optional[int], use_ema: bool,
+      track_metric: bool) -> Tuple[
+          train_states.TrainState, train_states.TrainState, PRNGKey]:
     """Returns the (replicated) model states."""
     prng_key, init_key = jax.random.split(prng_key)
-    sample_model_inputs = instantiate(sample_input_p).get_next()
 
     # Restore flax checkpoints still required bak variables in TrainState
     # TODO(pax): add is_eval=True to initialize_model_state
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(
-        init_key, sample_model_inputs)
+    vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
     # Note: `discard_opt_states` is not supported when restoring pmap
     # checkpoints. We must restore the entire checkpoint and then trim the
     # unrelevant states.
@@ -347,11 +344,7 @@ class _PmapEvalRunner:
           global_shapes, checkpoint_dir, step=checkpoint_step)
     if model_states is None:
       model_states = trainer_lib.initialize_model_state(
-          jax_task,
-          init_key,
-          sample_model_inputs,
-          discard_opt_states=not use_ema,
-          is_eval=True)
+          jax_task, init_key, discard_opt_states=not use_ema)
     elif not use_ema and not track_metric:
       model_states = trim_opt_states(model_states)
     if use_ema:
@@ -442,15 +435,11 @@ def evaluate_pmap_model(
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
 
-  if not eval_input_p:
-    return
-
   prng_key = jax.random.PRNGKey(1234)
   (replicated_model_states, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(
        jax_task,
        prng_key,
-       eval_input_p[0],
        checkpoint_dir,
        checkpoint_step=None,
        use_ema=use_ema,
@@ -521,9 +510,9 @@ class _SpmdEvalRunner:
 
     (partitioned_train_state, partitioned_specs
      ) = _SpmdEvalRunner.get_model_states(
-        jax_task, init_key, eval_input_params, checkpoint_dir, checkpoint_type)
+        jax_task, init_key, checkpoint_dir, checkpoint_type)
     runner = _SpmdEvalRunner(
-        task_p, sample_input_params, jax_task, global_mesh,
+        task_p, eval_input_params, jax_task, global_mesh,
         init_key, partitioned_specs)
     metrics_list = runner.run_one_step(partitioned_train_state,
                                        eval_summary_writers, eval_key,
@@ -565,7 +554,6 @@ class _SpmdEvalRunner:
       jax_task: tasks_lib.SingleTask,
       global_mesh: maps.Mesh,
       init_key: PRNGKey,
-      sample_input_p: base_input.BaseInput.HParams,
       checkpoint_dir: str,
       checkpoint_type: CheckpointType,
       checkpoint_step: Optional[int] = None,
@@ -573,9 +561,7 @@ class _SpmdEvalRunner:
              train_states.TrainState]:
     """Gets a partitioned model states and their specs from checkpoint_dir."""
     with global_mesh:
-      sample_model_inputs = instantiate(sample_input_p).get_next()
-      vars_weight_params = jax_task.model.abstract_init_with_metadata(
-          init_key, sample_model_inputs)
+      vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
       # Restore flax checkpoints still required backward variables in TrainState
       discard_opt_states = jax.config.jax_parallel_functions_output_gda
       train_state_global_shapes = (
@@ -596,10 +582,7 @@ class _SpmdEvalRunner:
       if partitioned_train_state is None:
         _, partitioned_train_state = (
             trainer_lib.initialize_partitioned_model_states(
-                jax_task,
-                init_key,
-                sample_model_inputs,
-                global_mesh=global_mesh,
+                jax_task, init_key, global_mesh=global_mesh,
                 # Note: We currently enforce that the checkpoint to reload via
                 # init_checkpoint_rules are in the same format as the checkpoint
                 # solution used by the experiment.
@@ -692,8 +675,7 @@ def evaluate_spmd_model(
 
   (partitioned_train_state, partitioned_specs,
    train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
-       jax_task, global_mesh, init_key, eval_input_p[0], checkpoint_dir,
-       checkpoint_type)
+       jax_task, global_mesh, init_key, checkpoint_dir, checkpoint_type)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
@@ -890,29 +872,17 @@ def decode_pmap_model(
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, eval_key = jax.random.split(prng_key, 2)
-  # _PmapEvalRunner requires drawing a sample input for restoring checkpoints.
-  # We assume that either eval_input or decoder_input can be used to retrieve
-  # all the model variable shapes.
-  # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-  # same regardless of which eval_input or decoder_input we use to draw the
-  # sample inputs, we need to revisit the design here.
-  sample_input_p = input_p[0] if input_p else eval_input_p[0]
 
   eval_runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, eval_key)
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
-      jax_task.model.abstract_init_with_metadata(
-          prng_key,
-          instantiate(sample_input_p).get_next()),
+      jax_task.model.abstract_init_with_metadata(prng_key),
       os.path.join(job_log_dir, 'decoder_out'))
 
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
   (replicated_model_states, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(
        jax_task,
        prng_key,
-       sample_input_p,
        restore_checkpoint_dir,
        checkpoint_step=restore_checkpoint_step,
        use_ema=use_ema,
@@ -1218,22 +1188,11 @@ def decode_spmd_model(
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
-
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
-  # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
-  # We assume that either eval_input or decoder_input can be used to retrieve
-  # all the model variable shapes.
-  # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-  # same regardless of which eval_input or decoder_input we use to draw the
-  # sample inputs, we need to revisit the design here.
-  sample_input_p = input_p[0] if input_p else eval_input_p[0]
   (partitioned_train_state, partitioned_specs,
    train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
        jax_task,
        global_mesh,
        init_key,
-       sample_input_p,
        restore_checkpoint_dir,
        checkpoint_type,
        checkpoint_step=restore_checkpoint_step)
@@ -1245,9 +1204,7 @@ def decode_spmd_model(
                                   init_key, partitioned_specs)
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model,
-        jax_task.model.abstract_init_with_metadata(
-            init_key,
-            instantiate(sample_input_p).get_next()),
+        jax_task.model.abstract_init_with_metadata(init_key),
         os.path.join(job_log_dir, 'decoder_out'))
     summary_base_dir = os.path.join(job_log_dir, 'summaries')
     summary_decode_dirs = [
@@ -1562,10 +1519,8 @@ def infer_and_write_pmap(
   prng_key = jax.random.PRNGKey(0)
   infer_writer_p = task_p.infer_writer
 
-  assert inputs_p
-
   (replicated_model_states, _, prng_key) = _PmapEvalRunner.get_model_states(
-      task, prng_key, inputs_p[0], infer_writer_p.restore_checkpoint_dir,
+      task, prng_key, infer_writer_p.restore_checkpoint_dir,
       infer_writer_p.restore_checkpoint_step, has_ema(task_p), track_metric)
 
   @functools.partial(jax.pmap, axis_name=PMAP_PARALLEL_AXIS_NAME, out_axes=None)

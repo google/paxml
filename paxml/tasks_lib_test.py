@@ -142,9 +142,8 @@ class BaseTaskTest(test_utils.TestCase):
     jax_task = instantiate(task_p)
     prng_key = jax.random.PRNGKey(12345)
     prng_key, init_key = jax.random.split(prng_key)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
     replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
-        jax_task, init_key, sample_inputs)
+        jax_task, init_key)
 
     def train_step(states, prng_key, inputs):
       return trainer_lib.train_step_single_learner(jax_task, states, prng_key,
@@ -210,9 +209,8 @@ class BaseTaskTest(test_utils.TestCase):
     jax_task = instantiate(task_p)
     prng_key = jax.random.PRNGKey(12345)
     prng_key, init_key = jax.random.split(prng_key)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
     replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
-        jax_task, init_key, sample_inputs)
+        jax_task, init_key)
 
     def find_ema(model_states):
       for i in range(len(model_states.opt_states[0])):
@@ -268,9 +266,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
 
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+        instantiate(ext_task_p), jax.random.PRNGKey(0))
 
     # Modify var01 to be random
     var_shape = ext_train_state.mdl_vars['params']['var01'].shape
@@ -297,7 +294,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Now initialize also includes warm start (loading from ckpt)
     train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs)
+        task, jax.random.PRNGKey(1))
 
     self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
                         train_state.mdl_vars['params']['var01'][0])
@@ -323,9 +320,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
 
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+        instantiate(ext_task_p), jax.random.PRNGKey(0))
 
     # Modify var01 to be random
     var_shape = ext_train_state.mdl_vars['params']['var01'].shape
@@ -354,9 +350,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ext_ema = v.ema
 
     # Now initialize also includes warm start (loading from ckpt)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
     train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs)
+        task, jax.random.PRNGKey(1))
 
     self.assertAllClose(ext_ema['params']['var01'],
                         train_state.mdl_vars['params']['var01'][0])

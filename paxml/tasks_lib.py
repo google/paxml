@@ -52,7 +52,6 @@ from paxml import checkpoints  # mapped to internal
 
 BaseInferenceRunner = base_inference_runner.BaseInferenceRunner
 CheckpointType = checkpoints.CheckpointType
-Nested = pytypes.Nested
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor
 JTensor = base_layer.JTensor
@@ -60,11 +59,11 @@ PartitionSpec = pjit.PartitionSpec
 TrainState = train_states.TrainState
 
 PRNGKey = pytypes.PRNGKey
-PyTreeDef = pytypes.PyTreeDef
 sub_config_field = base_hyperparams.sub_config_field
 RegexStr = str
 
 instantiate = base_hyperparams.instantiate
+
 
 # Shorthand for a loading rule that loads everything as is.
 # e.g. load_rules = [LOAD_ALL]
@@ -238,13 +237,13 @@ class SingleTask(base_task.BaseTask):
       save_max_to_keep: The maximum number of recent checkpoints to keep.
       summary_interval_steps: How frequently to generate summaries in terms of
         the number of training steps.
-      log_train_output_interval_steps:  How frequently to log training output to
-        the INFO stream. If set to None, use the same value as for
+      log_train_output_interval_steps:  How frequently to log training output
+        to the INFO stream. If set to None, use the same value as for
         `summary_interval_steps`.
       summary_accumulate_interval_steps: How frequently to accumulate summary
         values across steps before writing them to disk. If unset, no
-        accumulation is performed and summaries will be written solely based on
-        the current step's values.
+        accumulation is performed and summaries will be written solely based
+        on the current step's values.
       variable_norm_summary: Whether to compute variable norm summaries.
       eval_interval_steps: How frequently to evaluate the model on the
         evaluation splits in terms of the number of training steps. Set to 0 to
@@ -262,8 +261,8 @@ class SingleTask(base_task.BaseTask):
         `CheckpointLoadingRules`. See doc string on CheckpointLoadingRules on
         how these rules are interpreted.
       decode_interval_steps: How frequently to run decode on the model on the
-        decoder_datasets() in terms of the number of training steps. Skipped if
-        this value is not a positive int. Set to 0 to disable decode steps.
+        decoder_datasets() in terms of the number of training steps. Skipped
+        if this value is not a positive int. Set to 0 to disable decode steps.
     """
     learner: learners_lib.Learner.HParams = sub_config_field(
         learners_lib.Learner.HParams)
@@ -461,23 +460,21 @@ class SingleTask(base_task.BaseTask):
 
     model_state_partition_specs = self.create_train_state_partition_specs(
         var_weight_hparams, discard_opt_states)
-    tf.nest.assert_same_structure(model_state_partition_specs, unpadded_shapes)
+    tf.nest.assert_same_structure(model_state_partition_specs,
+                                  unpadded_shapes)
 
     def _maybe_pad(shape_dtype, pspec):
       if py_utils.is_optax_masked_node(shape_dtype):
         return shape_dtype
       unpadded_shape = shape_dtype.shape
-      paddings = py_utils.get_uneven_sharding_paddings(pspec, unpadded_shape,
-                                                       mesh_shape,
-                                                       mesh_axis_names)
+      paddings = py_utils.get_uneven_sharding_paddings(
+          pspec, unpadded_shape, mesh_shape, mesh_axis_names)
       padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
       return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
 
-    padded_shapes = jax.tree_map(
-        _maybe_pad,
-        unpadded_shapes,
-        model_state_partition_specs,
-        is_leaf=py_utils.is_optax_masked_node)
+    padded_shapes = jax.tree_map(_maybe_pad, unpadded_shapes,
+                                 model_state_partition_specs,
+                                 is_leaf=py_utils.is_optax_masked_node)
     return padded_shapes
 
   def create_train_state_unpadded_shapes(self,
@@ -558,17 +555,16 @@ class SingleTask(base_task.BaseTask):
           return x.inner_state
         return x
 
-      opt_var_partition_specs = jax.tree_map(
-          _maybe_unmask_outer_masked_state,
-          opt_var_partition_specs,
-          is_leaf=_is_instance_masked_state)
+      opt_var_partition_specs = jax.tree_map(_maybe_unmask_outer_masked_state,
+                                             opt_var_partition_specs,
+                                             is_leaf=_is_instance_masked_state)
     return TrainState(
         step=step_partition_spec,
         mdl_vars=var_partition_specs,
         opt_states=opt_var_partition_specs)
 
   def maybe_adjust_train_state(self, step: int, mdl_vars: Dict[
-      str, JTensor], var_weight_hparams: Nested[base_layer.WeightHParams],
+      str, JTensor], var_weight_hparams: Dict[str, base_layer.WeightHParams],
                                prng_key: PRNGKey) -> Dict[str, JTensor]:
     """Maybe adjust train state.
 
@@ -649,9 +645,9 @@ class SingleTask(base_task.BaseTask):
     is_step_loaded, is_initialized, is_opt_states_loaded = load_status
     model_vars = train_state.mdl_vars
 
-    # TODO(shafey): Use input_specs_provider_p.
+    # Initialize with a dummy seed
     vars_weight_params = ckpt_task.model.abstract_init_with_metadata(
-        jax.random.PRNGKey(0), None)
+        jax.random.PRNGKey(0))
     ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
