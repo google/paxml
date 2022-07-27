@@ -38,6 +38,7 @@ from paxml import checkpoint_pb2
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
+from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -219,7 +220,7 @@ def run_eval_loop_over_test_splits(
         metrics[k].append(eval_metrics[k])
 
     if (model_inputs[split].hparams.reset_for_eval and
-        hasattr(model_inputs[split], 'compute_metrics_eval') and
+        isinstance(model_inputs[split], seqio_input.SeqIOInput) and
         jax.process_index() == 0):
       seqio_metrics = model_inputs[split].compute_metrics_eval(
           per_example_scores, verbose_entries=1)
@@ -1114,7 +1115,9 @@ def decode_once_pmap_model(
       work_unit.set_task_status(f'Finished decoding input batch {step_num} '
                                 f'on {input_p[split].name}')
 
-    if hasattr(inputs[split], 'compute_metrics') and jax.process_index() == 0:
+    if (inputs[split].hparams.reset_for_eval
+        and isinstance(inputs[split], seqio_input.SeqIOInput)
+        and jax.process_index() == 0):
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')
@@ -1424,7 +1427,9 @@ def decode_once_spmd_model(
       processed_decodes.extend(processed)
       logging.info('Finished processing decoded input batch %d', step_num)
 
-    if hasattr(inputs[split], 'compute_metrics') and jax.process_index() == 0:
+    if (inputs[split].hparams.reset_for_eval
+        and isinstance(inputs[split], seqio_input.SeqIOInput)
+        and jax.process_index() == 0):
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')

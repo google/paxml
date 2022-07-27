@@ -182,6 +182,24 @@ class SeqIOInput(base_input.BaseInput):
     if self.hparams.deterministic_input:
       raise ValueError('deterministic_input is not supported')
 
+  def _validate_compute_metrics_config(self, raise_exception: bool):
+    """Computing metrics with eval_loop_num_batches is not supported."""
+    p = self.hparams
+    # eval_loop_num_batches gets ignored if reset_for_eval is True
+    if not (not p.is_training
+            and not p.reset_for_eval
+            and p.eval_loop_num_batches is not None):
+      return
+
+    message = (
+        'eval_loop_num_batches is not supported for eval SeqIOInput when '
+        'computing metrics - both self.compute_metrics() and '
+        'self.compute_metrics_eval() will fail if called')
+    if raise_exception:
+      raise ValueError(message)
+    else:
+      logging.info(message)
+
   def _validate_hparams(self):
     p = self.hparams
     if not p.mixture_name and not p.mixture_or_task:
@@ -194,6 +212,10 @@ class SeqIOInput(base_input.BaseInput):
       logging.warn(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
+
+    # Not raising during construction since some users don't compute metrics
+    self._validate_compute_metrics_config(raise_exception=False)
+
     self._mixture_or_task = p.mixture_or_task or seqio.get_mixture_or_task(
         p.mixture_name)
     shard_info = seqio.ShardInfo(
@@ -387,6 +409,8 @@ class SeqIOInput(base_input.BaseInput):
     if not task.predict_metric_fns:
       return []
 
+    self._validate_compute_metrics_config(raise_exception=True)
+
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # get a dict key-ed by detokenized inputs (tokenized inputs are truncated
     # to inputs_length).
@@ -505,6 +529,8 @@ class SeqIOInput(base_input.BaseInput):
                        f'got {type(self._mixture_or_task)} for {p.name}.')
     if not task.score_metric_fns:
       return []
+
+    self._validate_compute_metrics_config(raise_exception=True)
 
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # produce a dict key-ed by tuple of `labels` token ids.

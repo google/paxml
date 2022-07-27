@@ -151,6 +151,7 @@ pytype_strict_library(
         ":io_utils",
         ":metric_tracker_utils",
         ":metric_utils",
+        ":seqio_input",
         ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
