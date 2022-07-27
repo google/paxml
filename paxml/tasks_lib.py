@@ -649,12 +649,9 @@ class SingleTask(base_task.BaseTask):
     is_step_loaded, is_initialized, is_opt_states_loaded = load_status
     model_vars = train_state.mdl_vars
 
-    input_specs_provider_p = rules.input_specs_provider_p
-    input_specs_provider = instantiate(input_specs_provider_p)
-    inputs_shape_dtype = input_specs_provider.get_input_specs()
-    # Initialize with a dummy seed
+    # TODO(shafey): Use input_specs_provider_p.
     vars_weight_params = ckpt_task.model.abstract_init_with_metadata(
-        jax.random.PRNGKey(0), inputs_shape_dtype)
+        jax.random.PRNGKey(0), None)
     ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(

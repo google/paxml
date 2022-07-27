@@ -61,7 +61,7 @@ class CustomInputSpecsProvider(base_input.BaseInputSpecsProvider):
   def get_input_specs(self):
     p = self.hparams
     batch_size = 1
-    return jax.ShapeDtypeStruct((batch_size, p.input_dims), dtype=jnp.float32)
+    return jax.ShapeDtypeStruct((batch_size, p.input_dim), dtype=jnp.float32)
 
 
 class TestModel01(base_model.BaseModel):
