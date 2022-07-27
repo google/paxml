@@ -59,24 +59,6 @@ SummaryWriter = tf.summary.SummaryWriter
 _N_STEPS_WARMUP_LOGGING = 5
 
 
-def _write_hparams_file(model_config: base_experiment.BaseExperiment,
-                        job_log_dir: str) -> None:
-  """Writes a params file into the root `job_log_dir`."""
-  if jax.process_index() == 0:
-    params_fpath = os.path.join(job_log_dir, 'model_params.txt')
-    if not tf.io.gfile.exists(job_log_dir):
-      tf.io.gfile.makedirs(job_log_dir)
-    with tf.io.gfile.GFile(params_fpath, 'w') as hparams_file:
-      for dataset in model_config.datasets():
-        hparams_file.write(dataset.to_text())
-        hparams_file.write('\n\n')
-      for decoder_dataset in model_config.decoder_datasets():
-        hparams_file.write('decoder dataset hparams\n')
-        hparams_file.write(decoder_dataset.to_text())
-        hparams_file.write('\n\n')
-      hparams_file.write(model_config.task().to_text())
-
-
 def _checkpoint_dir(job_log_dir: str) -> str:
   """Returns the checkpoint directory from the root `job_log_dir`."""
   return os.path.join(job_log_dir, 'checkpoints')
@@ -187,6 +169,25 @@ def _should_log_train(step: int,
     return step % train_p.summary_interval_steps == 0
 
 
+def write_hparams_file(model_config: base_experiment.BaseExperiment,
+                       job_log_dir: str, filename_prefix: str = '') -> None:
+  """Writes a params file into the root `job_log_dir`."""
+  if jax.process_index() == 0:
+    params_fpath = os.path.join(job_log_dir,
+                                filename_prefix + 'model_params.txt')
+    if not tf.io.gfile.exists(job_log_dir):
+      tf.io.gfile.makedirs(job_log_dir)
+    with tf.io.gfile.GFile(params_fpath, 'w') as hparams_file:
+      for dataset in model_config.datasets():
+        hparams_file.write(dataset.to_text())
+        hparams_file.write('\n\n')
+      for decoder_dataset in model_config.decoder_datasets():
+        hparams_file.write('decoder dataset hparams\n')
+        hparams_file.write(decoder_dataset.to_text())
+        hparams_file.write('\n\n')
+      hparams_file.write(model_config.task().to_text())
+
+
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: Optional[str],
@@ -224,7 +225,6 @@ def train_and_evaluate(
       training, model runs decode.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
   """
-  _write_hparams_file(experiment_config, job_log_dir)
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
 

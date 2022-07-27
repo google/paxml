@@ -177,6 +177,8 @@ def run_experiment(
     early_stopping_fn: The early stopping function for training and evaluation.
       If None, the training and evaluation will train to requested steps.
   """
+  train.write_hparams_file(experiment_config, job_log_dir,
+                           '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
