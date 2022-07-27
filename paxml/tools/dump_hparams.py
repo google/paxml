@@ -57,7 +57,7 @@ def _get_experiment(experiment_name: str) -> BaseExperimentT:
 
 
 def _write_post_init_model_hparams_file(model_param, filepath,
-                                        sample_inputs) -> None:
+                                        input_specs) -> None:
   """Dumps post init model hparams file."""
   model = instantiate(model_param)
 
@@ -83,7 +83,7 @@ def _write_post_init_model_hparams_file(model_param, filepath,
     fout.write(hyper_params_dump)
     fout.write('\n\n')
 
-    params_inits = model.abstract_init_with_metadata(prng_key, sample_inputs)
+    params_inits = model.abstract_init_with_metadata(prng_key, input_specs)
     params_inits_text = base_hyperparams.nested_struct_to_text(params_inits)
     fout.write(params_inits_text)
 
@@ -103,15 +103,12 @@ def main(argv) -> None:
     # TODO(b/236417790): Dump input specs for model weight initialization.
 
   if FLAGS.post_init_params_ofile:
-    ds = [d for d in experiment_config.datasets() if d.is_training]
-    if not ds:
-      raise NotImplementedError(
-          'No datasets() available for shape inference and `inputs_for_model_init` was overridden.'
-      )
-    ds = base_hyperparams.instantiate(ds[0])
-    inputs = ds.get_next()
+    input_specs_provider = instantiate(
+        experiment_config.get_input_specs_provider_params())
+    input_specs = input_specs_provider.get_input_specs()
     _write_post_init_model_hparams_file(experiment_config.task().model,
-                                        FLAGS.post_init_params_ofile, inputs)
+                                        FLAGS.post_init_params_ofile,
+                                        input_specs)
 
 
 if __name__ == '__main__':
