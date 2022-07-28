@@ -14,9 +14,10 @@
 # limitations under the License.
 
 """Tests for metric_utils."""
-from typing import Any, Dict, List, Tuple, Union
-
 import os
+
+from typing import Any, Dict, List, Tuple
+
 from absl.testing import absltest
 
 import clu.metrics as clu_metrics
@@ -58,6 +59,7 @@ class MetricUtilsTest(absltest.TestCase):
     return os.path.join(absltest.get_default_test_tmpdir(), 'summary')
 
   def test_scalar_compute_metric_values(self):
+    @flax.struct.dataclass
     class ScalarMetric(MockMetric):
 
       def compute_value(self) -> clu_values.Scalar:
@@ -74,6 +76,7 @@ class MetricUtilsTest(absltest.TestCase):
       metric_utils.write_clu_metric_summaries(metric_values, step_i=0)
 
   def test_list_compute_metric_values(self):
+    @flax.struct.dataclass
     class ScalarListMetric(MockMetric):
 
       def compute_value(self) -> List[Any]:
@@ -92,6 +95,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/test_3'].value.shape, (2, 12, 12, 3))
 
   def test_tuple_compute_metric_values(self):
+    @flax.struct.dataclass
     class ScalarTupleMetric(MockMetric):
 
       def compute_value(self) -> Tuple[Any]:
@@ -103,6 +107,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/test_1'].value, 'hi')
 
   def test_scalar_dict_comptue_metric_values(self):
+    @flax.struct.dataclass
     class ScalarDictMetric(MockMetric):
 
       def compute_value(self) -> Dict[str, Any]:
@@ -124,6 +129,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/image_1'].value.shape, (5, 12, 12, 3))
 
   def test_mixed_dict_compute_metric_values(self):
+    @flax.struct.dataclass
     class MixedDictMetric(MockMetric):
 
       def compute_value(self) -> Dict[str, Any]:
@@ -152,6 +158,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/image_0'].value.shape, (5, 12, 12, 3))
 
   def test_write_clu_metric_summaries(self):
+    @flax.struct.dataclass
     class MixedDictMetric(MockMetric):
 
       def compute_value(self) -> Dict[str, Any]:
