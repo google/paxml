@@ -132,6 +132,7 @@ pytype_strict_library(
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
+        "//third_party/py/orbax/checkpoint",
         "//praxis:asserts",
         "//praxis:py_utils",
         "//praxis:pytypes",

@@ -494,6 +494,9 @@ def _save_checkpoint_gda(
       logging.info('Renaming %s to %s', checkpoint_step_tmp_dir,
                    checkpoint_step_dir)
       tf.io.gfile.rename(checkpoint_step_tmp_dir, checkpoint_step_dir)
+    py_utils.sync_global_devices(
+        f'Finished saving GDA checkpoint for step {step} to {checkpoint_step_dir}'
+    )
     logging.info('Finished saving GDA checkpoint for step `%s` to `%s`.', step,
                  checkpoint_step_dir)
 
