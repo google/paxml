@@ -976,9 +976,17 @@ def decode_once_pmap_model(
   metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
+  # decode_metrics and process_decode_metrics work on WeightedScalars
+  # which are string -> (value, weight) pairs where value and weight
+  # scalars. These metrics are configured on the task.
   decode_metrics = instantiate(metrics_p)
   process_decode_metrics = instantiate(metrics_p)
+
+  # metrics and processed_metrics are dictionaries of
+  # strings -> clu_metrics.Metric objects. metrics is returned from decode()
+  # and processed_metrics is returned from process_decode_out.
   metrics = {}
+  processed_metrics = {}
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
@@ -1077,10 +1085,21 @@ def decode_once_pmap_model(
       metrics = _merge_clu_metrics(metrics, updated_metrics)
 
       if jax.process_index() == 0:
-        process_metrics, processed = model.process_decode_out(
-            inputs[split], out)
-        processed_decodes.extend(processed)
-        process_decode_metrics.store(process_metrics)
+        process_decode_output = model.process_decode_out(inputs[split], out)
+        # The process_decode_out API allows either two or three returns, so we
+        # handle that here.
+        if len(process_decode_output) == 2:
+          (processed_scalars, processed_out) = process_decode_output
+          processed_metric_updates = None
+        else:
+          (processed_scalars, processed_out,
+           processed_metric_updates) = process_decode_output
+        process_decode_metrics.store(processed_scalars)
+        processed_decodes.extend(processed_out)
+        if processed_metric_updates:
+          processed_metrics = _merge_clu_metrics(processed_metrics,
+                                                 processed_metric_updates)
+
         logging.info('Finished processing decoded input batch %d', step_num)
       work_unit.set_task_status(f'Finished decoding input batch {step_num} '
                                 f'on {input_p[split].name}')
@@ -1098,6 +1117,8 @@ def decode_once_pmap_model(
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
+    process_metric_values = metric_utils.compute_metric_values(
+        processed_metrics)
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
@@ -1109,6 +1130,7 @@ def decode_once_pmap_model(
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
       metric_utils.write_clu_metric_summaries(metric_values, step_i)
+      metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
@@ -1297,9 +1319,18 @@ def decode_once_spmd_model(
   metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
+  # decode_metrics and process_decode_metrics work on WeightedScalars
+  # which are string -> (value, weight) pairs where value and weight
+  # scalars. These metrics are configured on the task.
   decode_metrics = instantiate(metrics_p)
   process_decode_metrics = instantiate(metrics_p)
+
+  # metrics and processed_metrics are dictionaries of
+  # strings -> clu_metrics.Metric objects. metrics is returned from decode()
+  # and processed_metrics is returned from process_decode_out.
   metrics = {}
+  processed_metrics = {}
+
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
   basedir = os.path.join(job_log_dir, 'decoder_out')
@@ -1375,13 +1406,23 @@ def decode_once_spmd_model(
         continue
       decode_metrics.store(weighted_scalars)
 
-      process_weighted_scalars, processed = jax_task.model.process_decode_out(
+      process_decode_output = jax_task.model.process_decode_out(
           inputs[split], out)
-      process_weighted_scalars = (
-          py_utils.maybe_unreplicate_for_fully_replicated(
-              process_weighted_scalars))
+      # The process_decode_out API allows either two or three returns, so we
+      # handle that here.
+      if len(process_decode_output) == 2:
+        process_weighted_scalars, processed = process_decode_output
+        processed_metric_updates = None
+      else:
+        (process_weighted_scalars, processed,
+         processed_metric_updates) = process_decode_output
+
       process_decode_metrics.store(process_weighted_scalars)
       processed_decodes.extend(processed)
+      if processed_metric_updates:
+        processed_metrics = _merge_clu_metrics(processed_metrics,
+                                               processed_metric_updates)
+
       logging.info('Finished processing decoded input batch %d', step_num)
 
     if (inputs[split].hparams.reset_for_eval
@@ -1397,6 +1438,9 @@ def decode_once_spmd_model(
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
+    process_metric_values = metric_utils.compute_metric_values(
+        processed_metrics)
+
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
       decode_metrics.summarize(step_i, 'decode_metrics')
@@ -1407,6 +1451,7 @@ def decode_once_spmd_model(
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
                                            summary_type)
       metric_utils.write_clu_metric_summaries(metric_values, step_i)
+      metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
