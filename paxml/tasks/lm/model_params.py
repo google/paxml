@@ -31,6 +31,7 @@ from praxis import schedules
 from praxis.layers import activations
 from praxis.layers import embedding_softmax
 from praxis.layers import models
+from praxis.layers import transformer_models
 
 NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
@@ -251,7 +252,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     task_p = tasks_lib.SingleTask.HParams(name='bert_task')
     task_p.model = models.BertModel.HParams(name='bert_lm')
     model_p = task_p.model
-    model_p.lm.masked_lm = True
+    model_p.lm.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
     model_p.lm.packed_input = True
     model_p.lm.model_dims = self.MODEL_DIMS
     model_p.lm.vocab_size = self.VOCAB_SIZE
@@ -336,7 +337,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.model = models.BertModel.HParams(name='bert_lm')
     model_p = task_p.model
     model_p.mask_token_id = self.MASK_TOKEN_ID
-    model_p.lm.masked_lm = True
+    model_p.lm.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
     model_p.lm.packed_input = True
     model_p.lm.model_dims = self.MODEL_DIMS
     model_p.lm.vocab_size = self.VOCAB_SIZE

@@ -54,6 +54,7 @@ pytype_strict_library(
         "//praxis/layers:activations",
         "//praxis/layers:embedding_softmax",
         "//praxis/layers:models",
+        "//praxis/layers:transformer_models",
     ],
 )
 
