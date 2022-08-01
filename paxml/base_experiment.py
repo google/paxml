@@ -88,6 +88,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     input_p = self.training_dataset()
     return base_input.DatasetInputSpecsProvider.HParams(input_p=input_p)
 
+  def validate(self) -> None:
+    """Validates the experiment config but raises if misconfigured."""
+    return
+
   def search(self) -> automl.SearchHParams:
     """Returns the parameters for AutoML search."""
     raise NotImplementedError(

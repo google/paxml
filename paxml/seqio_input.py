@@ -246,6 +246,10 @@ class SeqIOInput(base_input.BaseInput):
       return p.is_training and not self.is_deterministic
     return p.repeat
 
+  @property
+  def mixture_or_task(self) -> Union[seqio.Task, seqio.Mixture]:
+    return self._mixture_or_task
+
   def _get_dataset(self) -> tf.data.Dataset:
     p = self.hparams
     logging.info(

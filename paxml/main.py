@@ -457,6 +457,7 @@ def main(argv: Sequence[str]) -> None:
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks)
 
   experiment_config = _get_experiment(FLAGS.exp)()
+  experiment_config.validate()
   run(experiment_config)
 
 
