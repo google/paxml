@@ -783,12 +783,46 @@ class SequenceModelFeatures(seqio.EncDecFeatureConverter):
       ret.tgt.segment_ids = tf.cast(1.0 - ret.tgt.paddings, tf.int32)
       pos = tf.range(ret.tgt.segment_ids.shape[0])
       ret.tgt.segment_pos = ret.tgt.segment_ids * pos
+
+    if hasattr(b, 'src_task_ids'):
+      ret.src.task_ids = b.src_task_ids
+    if hasattr(b, 'tgt_task_ids'):
+      ret.tgt.task_ids = b.tgt_task_ids
+    if hasattr(b, 'task_ids'):
+      ret.src.task_ids = b.task_ids
+      ret.tgt.task_ids = b.task_ids
     return ret
 
   def __call__(self, ds: tf.data.Dataset,
                task_feature_lengths: Mapping[str, int]) -> tf.data.Dataset:
     ds = super().__call__(ds, task_feature_lengths)
     ds = ds.map(self._to_pax)
+    return ds
+
+
+class SequenceModelFeaturesWithTaskInfo(SequenceModelFeatures):
+  """A feature converter for a sequence model with custom task level features.
+
+  Typical use case is TaskMoE where we want some task level features to guide
+  routing decision.
+  """
+
+  def _convert_example(
+      self, features: Mapping[str, tf.Tensor]) -> Mapping[str, tf.Tensor]:
+    d = super()._convert_example(features)
+    d = dict(d)
+    if 'src_task_ids' in features:
+      d['src_task_ids'] = features['src_task_ids']
+    if 'tgt_task_ids' in features:
+      d['tgt_task_ids'] = features['tgt_task_ids']
+    if 'task_ids' in features:
+      d['task_ids'] = features['task_ids']
+    return d
+
+  def __call__(self, ds: tf.data.Dataset,
+               task_feature_lengths: Mapping[str, int]) -> tf.data.Dataset:
+    ds = self._convert_features(ds, task_feature_lengths)
+    ds = ds.map(self._to_pax)  # convert features to Pax format.
     return ds
 
 
