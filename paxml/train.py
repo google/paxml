@@ -987,9 +987,13 @@ def train_and_evaluate_spmd_model(
                                             train_unpadded_global_batch_size)
 
       train_summary_handler = summary_utils.SummaryHandler(
-          train_summary_writer, train_p.summary_interval_steps)
+          train_summary_writer,
+          train_p.summary_interval_steps,
+          accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
       eval_summary_handler = summary_utils.SummaryHandler(
-          eval_summary_writer, train_p.summary_interval_steps)
+          eval_summary_writer,
+          train_p.summary_interval_steps,
+          accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
 
       summary_last_time = time.time()
       summary_last_step = None
