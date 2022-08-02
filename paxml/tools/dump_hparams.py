@@ -19,9 +19,9 @@ The binary target `:dump_hparams` is defined by `pax_targets()` in the `BUILD`
 file.
 
 Example commandline:
-bazel run //PATH/TO/PAX/TARGETS:dump_hparams -- \
-    --exp=lm1b.Lm1bTransformerL32H8kSPMD8x8Repeat \
-    --params_ofile=/tmp/lm.txt
+python paxml/tools/dump_hparams.py \
+    --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
+    --params_ofile=/tmp/bert.txt
 
 To examine post-init model params, specify one more parameter:
   --post_init_params_ofile=/tmp/lm_post.txt

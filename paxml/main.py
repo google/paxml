@@ -16,10 +16,9 @@
 r"""Main file for running a PAX training and evaluation loop.
 
 Example usage:
-$ bazel run -c opt \
-    third_party/py/paxml/tasks/lm/params:main -- \
-    --exp=bert.BertAdamL4H128 \
-    --job_log_dir=/tmp/jax_log_dir/exp01 --alsologtostderr
+python paxml/main.py \
+    --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
+    --job_log_dir=/tmp/jax_log_dir/exp01
 """
 
 import importlib
