@@ -123,9 +123,14 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
     else:
       global_batch_size = int(self.PERCORE_BATCH_SIZE * num_local_devices *
                               jax.process_count())
-      assert global_batch_size % num_local_devices == 0
-      batch_size_per_process = num_local_devices
-      num_infeed_hosts = global_batch_size // batch_size_per_process
+      if jax.process_count() > 1:
+        assert global_batch_size % num_local_devices == 0
+        batch_size_per_process = num_local_devices
+        num_infeed_hosts = global_batch_size // batch_size_per_process
+      else:
+        batch_size_per_process = int(self.PERCORE_BATCH_SIZE *
+                                     num_local_devices)
+        num_infeed_hosts = 1
     p = seqio_input.SeqIOInput.HParams(
         name='C4Train' if is_training else 'C4Validation',
         mixture_name='c4_lm_v301_gpt',
@@ -413,89 +418,3 @@ class C4SpmdGpt3L16AdamOrgHP(C4SpmdGpt3AdamOrgHP):
   FPROP_DTYPE = jnp.float32
   PERCORE_BATCH_SIZE = 3
   ICI_MESH_SHAPE = [1, 16, 4]
-
-
-class TransformerLmSpmdPipelineAdam(
-    model_params.TransformerLmSpmdPipelineAdafactor):
-  """Pipelined Transformer using Adam optimizer."""
-  # architecture related
-  NUM_STAGES = 2
-  NUM_LAYERS_PER_STAGE = 1
-  NUM_LAYERS = NUM_LAYERS_PER_STAGE * NUM_STAGES
-  PERCORE_BATCH_SIZE = 1
-  NUM_MICROBATCHES = 1
-
-  MAX_SEQ_LEN = 2048
-  NUM_HEADS = 96
-  MODEL_DIMS = 12288
-  HIDDEN_DIMS = MODEL_DIMS * 4
-  DIMS_PER_HEAD = MODEL_DIMS // NUM_HEADS
-  VOCAB_SIZE = 50257
-  ACTIVATION_CLS = layers.GELU
-  USE_GATED_ACTIVATION = False
-  PACKED_INPUT = True
-
-  # optimizer related
-  LEARNING_RATE = 1e-3
-  ADAM_BETA1 = 0.9
-  ADAM_BETA2 = 0.99
-  ADAM_EPSILON = 1e-6
-  ADAM_EPSILON_ROOT = 0.0
-
-  # Learning rate schedule
-  LR_LRED_WARMUP = 4000
-  LR_LRED_DECAY_START = 4001
-  LR_LRED_DECAY_END = 300000
-  LR_LRED_MIN_RATIO = 0.1
-  LR_LRED_MAX = 1.0
-
-  def task(self) -> tasks_lib.SingleTask.HParams:
-    """Returns the task parameters."""
-    task_p = super().task()
-
-    lp = task_p.train.learner
-    lp.loss_name = 'total_loss'
-    lp.optimizer = optimizers.Adam.HParams(
-        beta1=self.ADAM_BETA1,
-        beta2=self.ADAM_BETA2,
-        weight_decay=self.WEIGHT_DECAY,
-        epsilon=self.ADAM_EPSILON,
-        epsilon_root=self.ADAM_EPSILON_ROOT,
-        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE)
-    lp.optimizer.learning_rate = self.LEARNING_RATE
-
-    lp.optimizer.lr_schedule = (
-        schedules.LinearRampupExponentialDecay.HParams(
-            warmup_steps=self.LR_LRED_WARMUP,
-            decay_start=self.LR_LRED_DECAY_START,
-            decay_end=self.LR_LRED_DECAY_END,
-            min_ratio=self.LR_LRED_MIN_RATIO,
-            max=self.LR_LRED_MAX))
-    return task_p
-
-
-@experiment_registry.register
-class Gpt3SpmdPipelineAdam2Slice2Stage2x2x1(TransformerLmSpmdPipelineAdam,
-                                            C4UnsupervisedDataset):
-  """One GPT-3 single layer per stage; 2 stages; SPMD sharded."""
-  ICI_MESH_SHAPE = [1, 1, 1, 4]
-  DCN_MESH_SHAPE = [2, 1, 1, 1]
-  EMB_W_DATA_DIMS = ('replica', 'data')
-  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
-  STREAM_IO = False
-
-
-@experiment_registry.register
-class Gpt3SpmdPipelineAdam4Slice4Stage2x2x1(TransformerLmSpmdPipelineAdam,
-                                            C4UnsupervisedDataset):
-  """One GPT-3 single layer per stage; 4 stages; SPMD sharded."""
-  ICI_MESH_SHAPE = [1, 1, 1, 4]
-  DCN_MESH_SHAPE = [4, 1, 1, 1]
-  EMB_W_DATA_DIMS = ('replica', 'data')
-  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
-  STREAM_IO = False
-  NUM_STAGES = 4
-  NUM_LAYERS_PER_STAGE = 1
-  PERCORE_BATCH_SIZE = 4
-  NUM_MICROBATCHES = 4
-  NUM_LAYERS = NUM_LAYERS_PER_STAGE * NUM_STAGES
