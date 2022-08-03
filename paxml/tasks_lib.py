@@ -379,10 +379,6 @@ class SingleTask(base_task.BaseTask):
   def inference_runner(self) -> BaseInferenceRunner:
     return self._inference_runner
 
-  def get_model_name_for_step(self, step_i):
-    del step_i
-    return 'base_model'
-
   def create_opt_states(
       self, mdl_vars: NestedJTensor,
       var_weight_hparams: NestedJTensor) -> List[NestedJTensor]:

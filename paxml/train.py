@@ -466,25 +466,23 @@ def train_and_evaluate_pmap(
 
   fprop_dtype = task_p.model.fprop_dtype
 
-  def train_step(states, prng_key, inputs, model_name):
+  def train_step(states, prng_key, inputs):
     """Train model for a single step."""
     return trainer_lib.train_step_single_learner(
         jax_task,
         states,
         prng_key,
         inputs,
-        fprop_dtype=fprop_dtype,
-        model_name=model_name)
+        fprop_dtype=fprop_dtype)
 
-  def eval_step(states, prng_key, inputs, model_name):
+  def eval_step(states, prng_key, inputs):
     eval_states = trainer_lib.train_state_for_eval_step(states)
     return trainer_lib.eval_step_single_learner(
         jax_task,
         eval_states,
         prng_key,
         inputs,
-        fprop_dtype=fprop_dtype,
-        model_name=model_name)
+        fprop_dtype=fprop_dtype)
 
   num_devices = jax.local_device_count()
   prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
@@ -501,12 +499,10 @@ def train_and_evaluate_pmap(
   p_train_step = jax.pmap(
       train_step,
       donate_argnums=(0,),
-      axis_name=PMAP_PARALLEL_AXIS_NAME,
-      static_broadcasted_argnums=(3,))
+      axis_name=PMAP_PARALLEL_AXIS_NAME)
   p_eval_step = jax.pmap(
       eval_step,
-      axis_name=PMAP_PARALLEL_AXIS_NAME,
-      static_broadcasted_argnums=(3,))
+      axis_name=PMAP_PARALLEL_AXIS_NAME)
 
   logging.info('Training loop starting...')
   if eval_input_p:
@@ -599,12 +595,9 @@ def train_and_evaluate_pmap(
       logging.debug('  Retrieved inputs.')
       logging.debug('  Performing train_step().')
       with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-        model_name = jax_task.get_model_name_for_step(step_i)
-
         (replicated_model_states, loss, weighted_scalars, per_example_out,
          summary_tensors) = p_train_step(replicated_model_states,
-                                         train_prng_seed, model_inputs,
-                                         model_name)
+                                         train_prng_seed, model_inputs)
       logging.debug('  Completed train_step().')
 
       logging.debug('  Writing summaries (attempt).')
@@ -649,12 +642,9 @@ def train_and_evaluate_pmap(
           step_i % train_p.eval_interval_steps == 0):
 
         def eval_step_fn(inputs):
-          model_name = jax_task.get_model_name_for_step(step_i)
           logging.info('step=%d', step_i)
-          logging.info('model=%s', model_name)
           # TODO(pax): shall we eval all sub-models during eval?
-          return p_eval_step(replicated_model_states, eval_prng_seed, inputs,
-                             model_name)
+          return p_eval_step(replicated_model_states, eval_prng_seed, inputs)
 
         logging.debug('  Starting eval_step().')
         if eval_input_p:

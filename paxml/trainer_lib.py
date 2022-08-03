@@ -639,11 +639,9 @@ def train_step_single_learner(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32,
-    model_name: Optional[str] = None
+    fprop_dtype: jnp.dtype = jnp.float32
 ) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
   """Trains a model (or a submodel) for a single step."""
-  del model_name
   # default model is the base model in jax_task
   model = jax_task.model
 
@@ -739,12 +737,9 @@ def eval_step_single_learner(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32,
-    model_name: Optional[str] = None,
+    fprop_dtype: jnp.dtype = jnp.float32
 ) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
   """Evaluates a model (or submodel)."""
-  del model_name  # TODO(johans) place holder for multi task info propagation
-
   # default model is the base model in jax_task
   model = jax_task.model
   return _eval_step_single_learner_with_model(jax_task, model, states, prng_key,

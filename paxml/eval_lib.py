@@ -366,14 +366,13 @@ class _PmapEvalRunner:
     if not self._eval_input_p:
       return
 
-    def eval_step(mdl_states, prng_key, inputs, model_name):
+    def eval_step(mdl_states, prng_key, inputs):
       return trainer_lib.eval_step_single_learner(
           self._jax_task,
           mdl_states,
           prng_key,
           inputs,
-          fprop_dtype=self._jax_task.model.fprop_dtype,
-          model_name=model_name)
+          fprop_dtype=self._jax_task.model.fprop_dtype)
 
     num_devices = jax.local_device_count()
     prng_key, eval_key = jax.random.split(prng_key)
@@ -382,8 +381,7 @@ class _PmapEvalRunner:
 
     self._pmap_eval_step = jax.pmap(
         eval_step,
-        axis_name=PMAP_PARALLEL_AXIS_NAME,
-        static_broadcasted_argnums=(3,))
+        axis_name=PMAP_PARALLEL_AXIS_NAME)
 
   def run_one_step(
       self,
@@ -398,10 +396,9 @@ class _PmapEvalRunner:
             replicated_model_states.step))
 
     def eval_step_fn(inputs):
-      model_name = self._jax_task.get_model_name_for_step(step_i)
       # TODO(pax): shall we eval all sub-models during eval?
       return self._pmap_eval_step(replicated_model_states, self._eval_prng_seed,
-                                  inputs, model_name)
+                                  inputs)
 
     # Run the eval loop.
     metrics_list = run_eval_loop_over_test_splits(
@@ -992,9 +989,7 @@ def decode_once_pmap_model(
       py_utils.maybe_unreplicate_for_fully_replicated(
           replicated_model_states.step))
 
-  model_name = jax_task.get_model_name_for_step(step_i)
   logging.info('step=%d', step_i)
-  logging.info('model=%s', model_name)
 
   def decode_step(mdl_states, prng_key, inputs):
     mdl_states = trainer_lib.train_state_for_eval_step(mdl_states)
