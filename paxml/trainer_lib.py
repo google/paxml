@@ -725,6 +725,8 @@ def _eval_step_single_learner_with_model(
          _maybe_to_float32,
          (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
 
+  aggregated_summaries = NestedMap(fwd_summary_tensors=aggregated_summaries)
+
   # Adding the unchanged state to the return list so that both
   # eval_step_single_learner and train_step_single_learner have the same api to
   # facilitate some down-stream code.

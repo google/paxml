@@ -211,11 +211,13 @@ def run_eval_loop_over_test_splits(
           eval_summary_tensors)
       per_example_scores.append(per_example_output)
       loss += [eval_loss]
-      for k in eval_summary_tensors:
+      eval_summary_tensors = summary_utils.flatten_summary_dict(
+          eval_summary_tensors)
+      for k, v in eval_summary_tensors:
         if k in summary_tensors:
-          summary_tensors[k] += [eval_summary_tensors[k]]
+          summary_tensors[k] += [v]
         else:
-          summary_tensors[k] = [eval_summary_tensors[k]]
+          summary_tensors[k] = [v]
       for k in eval_metrics:
         metrics[k].append(eval_metrics[k])
 
@@ -1005,6 +1007,7 @@ def decode_once_pmap_model(
     summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_tensors)
+    aggregated_summaries = NestedMap(fwd_summary_tensors=aggregated_summaries)
 
     # We want to aggregate metrics across workers.
     # In pmap we do an all gather of the metric state across workers, and then
@@ -1389,10 +1392,12 @@ def decode_once_spmd_model(
       metrics = _merge_clu_metrics(metrics, updated_metrics)
 
       summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
       del updated_vars  # release GDA memory allocations
 
       summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
           summary_tensors)
+      summary_tensors = NestedMap(fwd_summary_tensors=summary_tensors)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
 
