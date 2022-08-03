@@ -17,6 +17,7 @@
 import collections
 import functools
 import re
+import sys
 from typing import List, Mapping, Optional
 
 from paxml import base_experiment
@@ -92,8 +93,10 @@ class _ExperimentRegistryHelper:
     if preexisting and not allow_overwrite:
       raise ValueError(f'Experiment already registered: {canonical_key}')
     cls._registry[canonical_key] = experiment_class
-    print('Registered experiment `%s`%s' % (
-        canonical_key, ' (overwritten)' if preexisting else ''))
+    print(
+        'Registered experiment `%s`%s' %
+        (canonical_key, ' (overwritten)' if preexisting else ''),
+        file=sys.stderr)
     if preexisting:
       # No need to update secondary keys.
       return experiment_class
