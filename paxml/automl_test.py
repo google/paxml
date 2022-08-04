@@ -259,6 +259,11 @@ class TuningExperimentWithOverride(TuningExperiment):
   LEARNING_RATE = 0.1
 
 
+class TuningExperimentWithoutHyperName(RegularExperiment):
+  """Tuning experiment without specifying name for `pg.oneof`."""
+  BATCH_SIZE = pg.oneof([8, 16, 32])
+
+
 class ClassLevelHyperPrimitiveTest(absltest.TestCase):
   """Test class-level hyper primitives on experiment specifications."""
 
@@ -291,14 +296,15 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
         'program_str': VarString(init_value='bar', name='program_str')
     })
 
-  def test_bad_tuning_experiment(self):
+  def test_tuning_experiment_without_hyper_name(self):
     """Test enable_class_level_hyper_primitives on bad experiment spec."""
-    with self.assertRaisesRegex(
-        ValueError, 'Missing the \'name\' argument for the value of .*'):
-
-      class BadTuningExperiment(RegularExperiment):  # pylint: disable=unused-variable
-        """Bad tuning experiment without specifying name for `pg.oneof`."""
-        BATCH_SIZE = pg.oneof([8, 16, 32])
+    context = pg.hyper.DynamicEvaluationContext()
+    with context.collect():
+      _ = TuningExperimentWithoutHyperName().task()
+    self.assertEqual(
+        context.hyper_dict, {
+            'BATCH_SIZE': pg.oneof([8, 16, 32], name='BATCH_SIZE')
+        })
 
 
 if __name__ == '__main__':

@@ -386,14 +386,15 @@ def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
   """Enable class-level hypers for a BaseExperiment subclass."""
 
   def create_hyper_property(name: str, hyper: pg.hyper.HyperPrimitive):
-    if hyper.name is None:
-      raise ValueError(
-          f'Missing the \'name\' argument for the value of {name!r}: {hyper!r}')
     attr_name = f'_PROPERTY_{name}'
+    hyper_kwargs = dict(hyper.sym_init_args)
+    if hyper.name is None:
+      hyper_kwargs['name'] = name
+
     def getter(x):
       if hasattr(x, attr_name):
         return getattr(x, attr_name)
-      return hyper.__class__(**hyper.sym_init_args)  # pytype: disable=not-instantiable
+      return hyper.__class__(**hyper_kwargs)  # pytype: disable=not-instantiable
 
     def setter(x, v):
       setattr(x, attr_name, v)
