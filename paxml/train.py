@@ -41,6 +41,7 @@ from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import pytypes
 from praxis import py_utils
 from praxis import train_states
 import tensorflow.compat.v2 as tf
@@ -52,6 +53,7 @@ instantiate = base_hyperparams.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PARAMS = base_layer.PARAMS
+NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 SummaryWriter = tf.summary.SummaryWriter
 
 _N_STEPS_WARMUP_LOGGING = 5
@@ -408,11 +410,16 @@ def train_and_evaluate_pmap(
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
-  prng_key, k1, k2 = jax.random.split(prng_key, 3)
-  init_key = {PARAMS: k1, NON_PAX_RNG_KEY: k2}
+  prng_key, init_key = jax.random.split(prng_key)
 
   checkpoint_dir = _checkpoint_dir(job_log_dir)
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
+
+  train_input_pipeline = _PeekableInput(instantiate(train_input_p))
+
+  # Get shape and dtype of model_inputs.
+  sample_inputs = train_input_pipeline.peek_padded()
+  vars_weight_params = jax_task.model.abstract_init_with_metadata(
+      init_key, sample_inputs)
   # Dump out model meta info for debugging.
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model, vars_weight_params, job_log_dir)
@@ -438,7 +445,8 @@ def train_and_evaluate_pmap(
                                                   checkpoint_dir)
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
-    model_states = trainer_lib.initialize_model_state(jax_task, init_key)
+    model_states = trainer_lib.initialize_model_state(jax_task, init_key,
+                                                      sample_inputs)
 
   logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
 
@@ -450,7 +458,6 @@ def train_and_evaluate_pmap(
   logging.info('Model initial global_step=%d', initial_global_step)
   _update_latest_model_step(train_input_p, initial_global_step,
                             train_p.eval_interval_steps)
-  train_input_pipeline = _PeekableInput(instantiate(train_input_p))
 
   # Unreplicated model states are not needed anymore at that point.
   del model_states
@@ -707,7 +714,8 @@ def train_and_evaluate_pmap(
 
 def compile_for_auto_sharding(train_step: Any,
                               train_state: train_states.TrainState,
-                              train_key: jnp.ndarray, inputs_shape: Any):
+                              train_key: jnp.ndarray,
+                              inputs_shape_dtype: NestedShapeDtypeLike):
   """Compiles train_step ahead of time to extract the shardings.
 
   The sharding is returned by the auto spmd partitioner and is attached on the
@@ -718,7 +726,8 @@ def compile_for_auto_sharding(train_step: Any,
     train_state: Train state which contains abstract values for ahead of time
       compilation.
     train_key: Prng key used for training.
-    inputs_shape: The shape of the inputs.
+    inputs_shape_dtype: Inputs with shape/dtype attributes to be used for shape
+      inference.
 
   Returns:
     * A compiled train_step function
@@ -729,9 +738,9 @@ def compile_for_auto_sharding(train_step: Any,
     return jax.ShapedArray(x.shape, x.dtype)
 
   train_key = jax.tree_map(_create_aval, train_key)
-  inputs_shape = jax.tree_map(_create_aval, inputs_shape)
+  inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
   compiled = train_step.lower(
-      train_state, train_key, inputs_shape, _global_avals=True).compile()
+      train_state, train_key, inputs_shape_dtype, _global_avals=True).compile()
   return compiled, compiled.input_shardings
 
 
@@ -797,15 +806,18 @@ def train_and_evaluate_spmd_model(
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
 
   logging.info('Retrieving model inputs for shape info.')
+  create_gda_for_inputs = (
+      jax.config.jax_parallel_functions_output_gda and
+      checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
   train_unpadded_global_batch_size = (
       train_input_p.cls.get_batch_size(train_input_p) *
       train_input_p.num_infeed_hosts)
   train_input_p = trainer_lib.adjust_input_params_for_small_batch(
       train_input_p, global_mesh)
   train_input_for_shape = instantiate(train_input_p)
-  model_inputs_for_shape = train_input_for_shape.get_next_padded()
-  inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                       model_inputs_for_shape)
+  sample_inputs = train_input_for_shape.get_next_padded()
+  inputs_shape_dtype = tf.nest.map_structure(
+      py_utils.get_global_input_shape_dtype, sample_inputs)
 
   if eval_input_p:
     eval_input_p = [
@@ -817,10 +829,10 @@ def train_and_evaluate_spmd_model(
     # Do not mutate eval_input_pipelines itself. Instantiate a new one
     # to get sample input.
     sample_eval_model_inputs = instantiate(eval_input_p[0]).get_next_padded()
-    eval_test_inputs_shape = tf.nest.map_structure(
+    eval_test_inputs_shape_dtype = tf.nest.map_structure(
         py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
     eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
-        model_p.mesh_axis_names, eval_test_inputs_shape)
+        model_p.mesh_axis_names, eval_test_inputs_shape_dtype)
   if decode_input_p:
     decode_input_p = [
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
@@ -831,12 +843,13 @@ def train_and_evaluate_spmd_model(
     ]
     trainer_lib.check_unique_names(decode_input_pipelines)
     decode_sample_inputs = instantiate(decode_input_p[0]).get_next_padded()
-    decode_inputs_shape = tf.nest.map_structure(
+    decode_inputs_shape_dtype = tf.nest.map_structure(
         py_utils.get_global_input_shape_dtype, decode_sample_inputs)
 
   with global_mesh:
     jax_task = instantiate(task_p)
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(init_key)
+    vars_weight_params = jax_task.model.abstract_init_with_metadata(
+        init_key, inputs_shape_dtype)
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, vars_weight_params, job_log_dir)
@@ -869,7 +882,7 @@ def train_and_evaluate_spmd_model(
           jax_task,
           init_key=None,
           model_state_partition_specs=None,
-          inputs_shape=inputs_shape,
+          inputs_shape_dtype=inputs_shape_dtype,
           is_eval=False)
       # NOTE(pax-dev): The following is currently incompatible with variable
       # uneven-sharding padding. When enable_auto_sharding is False,
@@ -879,7 +892,7 @@ def train_and_evaluate_spmd_model(
           # TODO(pax-dev): set discard_opt_states according to is_eval.
           discard_opt_states=False)
       train_step, input_shardings = compile_for_auto_sharding(
-          train_step, abstract_train_state, train_key, inputs_shape)
+          train_step, abstract_train_state, train_key, inputs_shape_dtype)
       train_state_pspecs = jax.tree_map(lambda x: x.spec, input_shardings[0])
       inputs_pspecs = jax.tree_map(lambda x: x.spec, input_shardings[2])
     else:
@@ -888,7 +901,7 @@ def train_and_evaluate_spmd_model(
               jax_task,
               init_key,
               train_state_pspecs,
-              inputs_shape,
+              inputs_shape_dtype,
               is_eval=False,
               unpadded_global_batch_size=train_unpadded_global_batch_size))
 
@@ -902,10 +915,15 @@ def train_and_evaluate_spmd_model(
 
     # Randomly initialized variables if no files in checkpoint dir.
     if partitioned_train_state is None:
+      if create_gda_for_inputs:
+        # pjit(model.init) requires a GDA input.
+        sample_inputs = py_utils.create_gda(sample_inputs, inputs_shape_dtype,
+                                            global_mesh, inputs_pspecs)
       _, partitioned_train_state = (
           trainer_lib.initialize_partitioned_model_states(
               jax_task,
               init_key,
+              sample_inputs,
               global_mesh=global_mesh,
               # Note: We currently enforce that the checkpoint to reload via
               # init_checkpoint_rules are in the same format as the checkpoint
@@ -921,7 +939,7 @@ def train_and_evaluate_spmd_model(
         jax_task,
         init_key,
         trainer_lib.train_state_for_eval_step(train_state_pspecs),
-        inputs_shape,
+        inputs_shape_dtype,
         is_eval=True,
         unpadded_global_batch_size=train_unpadded_global_batch_size)
     if decode_input_p:
@@ -930,7 +948,7 @@ def train_and_evaluate_spmd_model(
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task, init_key,
               trainer_lib.train_state_for_eval_step(train_state_pspecs),
-              decode_inputs_shape))
+              decode_inputs_shape_dtype))
 
     logging.info(
         'partitioned_train_state shapes '
@@ -977,13 +995,9 @@ def train_and_evaluate_spmd_model(
                                             train_unpadded_global_batch_size)
 
       train_summary_handler = summary_utils.SummaryHandler(
-          train_summary_writer,
-          train_p.summary_interval_steps,
-          accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+          train_summary_writer, train_p.summary_interval_steps)
       eval_summary_handler = summary_utils.SummaryHandler(
-          eval_summary_writer,
-          train_p.summary_interval_steps,
-          accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+          eval_summary_writer, train_p.summary_interval_steps)
 
       summary_last_time = time.time()
       summary_last_step = None
@@ -992,9 +1006,6 @@ def train_and_evaluate_spmd_model(
           py_utils.maybe_unreplicate_for_fully_replicated(
               partitioned_train_state.step))
       step_counter = 0
-      create_gda_for_inputs = (
-          jax.config.jax_parallel_functions_output_gda and
-          checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
 
       # Start the train loop. Make sure all at the same step.
       py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
@@ -1037,10 +1048,10 @@ def train_and_evaluate_spmd_model(
           if step_counter <= _N_STEPS_WARMUP_LOGGING:
             start = time.time()
           py_utils.assert_same_shape_and_dtype(
-              inputs_shape,
+              inputs_shape_dtype,
               tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
                                     model_inputs))
-          model_inputs = py_utils.create_gda(model_inputs, inputs_shape,
+          model_inputs = py_utils.create_gda(model_inputs, inputs_shape_dtype,
                                              global_mesh, inputs_pspecs)
           if step_counter <= _N_STEPS_WARMUP_LOGGING:
             logging.info('GDA train batch input creation time %s',
@@ -1112,7 +1123,7 @@ def train_and_evaluate_spmd_model(
                 step_i,
                 eval_input_pipelines,
                 eval_test_inputs_pspecs,
-                eval_test_inputs_shape,
+                eval_test_inputs_shape_dtype,
                 global_mesh,
                 reshard_inputs=False,
                 create_gda_for_inputs=create_gda_for_inputs)
@@ -1130,7 +1141,8 @@ def train_and_evaluate_spmd_model(
               logging.debug('  eval_inputs is None. Skipping eval_train.')
             else:
               if create_gda_for_inputs:
-                eval_inputs = py_utils.create_gda(eval_inputs, inputs_shape,
+                eval_inputs = py_utils.create_gda(eval_inputs,
+                                                  inputs_shape_dtype,
                                                   global_mesh, inputs_pspecs)
               logging.debug('  Retrieved eval model_inputs.')
               logging.debug('  Performing eval_step() runs on training split.')
@@ -1158,7 +1170,7 @@ def train_and_evaluate_spmd_model(
               jax_task, task_p, decode_input_pipelines, decode_input_p,
               job_log_dir, partitioned_train_state, decode_summary_writers,
               decode_key, global_mesh, decode_step_fn, create_gda_for_inputs,
-              decode_inputs_shape, decode_inputs_partition_spec)
+              decode_inputs_shape_dtype, decode_inputs_partition_spec)
         logging.debug('step=`%d`: End', step_i - 1)
         if _should_early_stop_training(early_stopping_fn, task_p, step_i,
                                        eval_metrics):
