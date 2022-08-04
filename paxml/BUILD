@@ -240,6 +240,8 @@ pytype_strict_library(
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        "//third_party/py/fiddle",
+        "//third_party/py/fiddle/absl_flags",
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.

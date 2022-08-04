@@ -18,7 +18,7 @@ r"""Main file for running a PAX training and evaluation loop.
 Example usage:
 python paxml/main.py \
     --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
-    --job_log_dir=/tmp/jax_log_dir/exp01
+    --job_log_dir=/tmp/jax_log_dir/exp01    
 """
 
 import importlib
@@ -26,12 +26,14 @@ import os
 import random
 import re
 import time
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Dict, Optional, Sequence, Union
 
 from absl import app
 from absl import flags
 from absl import logging
 from clu import platform
+import fiddle as fdl
+from fiddle import absl_flags
 import jax
 from jax.experimental.gda_serialization import serialization as gda_serialization
 import numpy as np
@@ -45,6 +47,7 @@ from paxml import trainer_lib
 from praxis import py_utils
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
+
 persistence_gda_serialization = gda_serialization  # mapped to internal
 
 # Required import to setup work units when running through XManager.
@@ -52,12 +55,11 @@ persistence_gda_serialization = gda_serialization  # mapped to internal
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    'exp',
-    None, 'Experiment configuration identifier name. This name typically '
+    'exp', None,
+    'Experiment configuration identifier name. This name typically '
     'has a format like "<task>.<module>.<experiment>", which should have been '
     'already registered in the global experiment registry with '
-    '@experiment_registry.register.',
-    required=True)
+    '@experiment_registry.register.')
 flags.DEFINE_string('job_log_dir', None,
                     'Directory where all experiment assets will be stored.')
 flags.DEFINE_enum('mode', 'train',
@@ -469,9 +471,15 @@ def main(argv: Sequence[str]) -> None:
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks)
 
-  experiment_config = _get_experiment(FLAGS.exp)()
+  if FLAGS.exp is not None:
+    experiment_config = _get_experiment(FLAGS.exp)()
+  else:
+    cfg = absl_flags.create_buildable_from_flags(
+        module=None, allow_imports=True)
+    experiment_config = fdl.build(cfg)
+
   experiment_config.validate()
-  run(experiment_config)
+  run(experiment_config=experiment_config)
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
@@ -490,4 +498,4 @@ if __name__ == '__main__':
   jax.config.config_with_absl()
 
   # TODO(shafey): Make `job_log_dir` mandatory?
-  app.run(main)
+  app.run(main, flags_parser=absl_flags.flags_parser)
