@@ -365,7 +365,7 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
         trainer_lib.WeightedScalarsList, trainer_lib.WeightedScalars]]],
                           global_step: int, is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
-      if FLAGS.metrics_from == FLAGS.mode:
+      if FLAGS.metrics_from == FLAGS.mode and jax.process_index() == 0:
         # `metrics_by_dataset` could be None for interleaved train/eval
         # when evaluation is not performed at current global step.
         if metrics_by_dataset is not None:
@@ -373,8 +373,13 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
           metrics = extract_metrics(metrics_by_dataset)
           reward = reward_fn(metrics, global_step)
           feedback.add_measurement(reward, metrics=metrics, step=global_step)
+          logging.info(
+              'Measurement is reported to trial %d at step %d '
+              'with reward value %f (is_last_checkpoint=%s): %s.',
+              feedback.id, global_step, reward, is_last_checkpoint, metrics)
         if is_last_checkpoint:
           feedback.done()
+          logging.info('Trial %d is now completed.', feedback.id)
       return feedback.should_stop_early()
 
     return should_stop_early
@@ -396,18 +401,27 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
                          os.path.join(job_log_dir, str(feedback.id)),
                          get_early_stopping_fn(feedback))
         except automl.EarlyStoppingError as e:
-          if e.skip:
-            feedback.skip(e.skip_reason or 'Unknown.')
-          else:
-            reward = e.reward
-            if reward is None:
-              reward = reward_fn(e.metrics, e.step)
-            feedback.add_measurement(
-                reward=reward,
-                step=e.step,
-                metrics=e.metrics,
-                checkpoint_path=e.checkpoint)
-            feedback.done()
+          if jax.process_index() == 0:
+            if e.skip:
+              feedback.skip(e.skip_reason or 'Unknown.')
+              logging.info(
+                  'Trial %d is early stopped at step %d and will be skipped '
+                  'by controller. Reason: %s.',
+                  feedback.id, e.step, e.skip_reason)
+            else:
+              reward = e.reward
+              if reward is None:
+                reward = reward_fn(e.metrics, e.step)
+              feedback.add_measurement(
+                  reward=reward,
+                  step=e.step,
+                  metrics=e.metrics,
+                  checkpoint_path=e.checkpoint)
+              feedback.done()
+              logging.info(
+                  'Trial %d is early stopped at step %d with reward %f which '
+                  'will be fed back to the controller. Metrics: %s.',
+                  feedback.id, e.step, reward, e.metrics)
   logging.info('Completed with all trials for study %r', FLAGS.study)
 
 
