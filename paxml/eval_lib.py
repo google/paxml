@@ -1464,6 +1464,7 @@ def decode_once_spmd_model(
       logging.info('Finished decoding input batch %d', step_num)
       if jax.process_index() != 0:
         continue
+      weighted_scalars = jax.tree_map(np.array, weighted_scalars)
       decode_metrics.store(weighted_scalars)
 
       process_decode_output = jax_task.model.process_decode_out(
