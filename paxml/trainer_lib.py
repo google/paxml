@@ -17,7 +17,7 @@
 
 import functools
 import os
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -289,6 +289,9 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
     mdl_vars: A nested structure of vars.
     var_weight_hparams: A nested structure of the variable weight params.
       var_weight_hparams must have the same structure as mdl_vars.
+
+  Returns:
+    vars with dtype of bfloat16 for every compatible tensor.
   """
   tf.nest.assert_same_structure(mdl_vars, var_weight_hparams)
 

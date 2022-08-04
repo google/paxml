@@ -18,7 +18,7 @@ r"""Main file for running a PAX training and evaluation loop.
 Example usage:
 python paxml/main.py \
     --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
-    --job_log_dir=/tmp/jax_log_dir/exp01    
+    --job_log_dir=/tmp/jax_log_dir/exp01
 """
 
 import importlib
@@ -161,6 +161,58 @@ def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
 def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
   """Sleeps for a random short interval to avoid thundering herd RPC calls."""
   time.sleep(random.randint(min_secs, max_secs))
+
+
+def extract_metrics(
+    metrics_by_dataset: Dict[str, Union[trainer_lib.WeightedScalars,
+                                        trainer_lib.WeightedScalarsList]]
+) -> Dict[str, float]:
+  """Extract a flattened metric dict from a metric dict per dataset."""
+  metrics = {}
+
+  def add_metric(dataset_name, key, values):
+    if dataset_name is not None:
+      key = f'{dataset_name}/{key}'
+    if isinstance(values, tuple):
+      values = [values]
+    metric_values = np.stack([v[0] for v in values])
+    metric_weights = np.stack([v[1] for v in values])
+    metrics[key] = np.sum(
+        metric_values * metric_weights) / np.sum(metric_weights)
+
+  # When there is only one dataset, we allow the metric key to be directly
+  # used in reward_fn without providing the dataset name.
+  if len(metrics_by_dataset) == 1:
+    the_dataset_metric = list(metrics_by_dataset.values())[0]
+    for k, v in the_dataset_metric.items():
+      add_metric(None, k, v)
+
+  for dataset_name, dataset_metrics in metrics_by_dataset.items():
+    for k, v in dataset_metrics.items():
+      add_metric(dataset_name, k, v)
+  return metrics
+
+
+def _default_early_stopping_fn(weighted_scalars,
+                               step_i: int,
+                               unused_arg: bool):
+  """Dumping metrics into JSON file for debugging and other consumptions."""
+  if jax.process_index() == 0:
+    metric_dir = os.path.join(FLAGS.job_log_dir, 'metrics')
+    if not tf.io.gfile.exists(metric_dir):
+      tf.io.gfile.makedirs(metric_dir)
+    if not tf.io.gfile.isdir(metric_dir):
+      raise ValueError(f'{metric_dir} should be a directory.')
+    metric_file_name = os.path.join(metric_dir, f'step-{step_i:06d}.json')
+    # Update and re-save the metrics.
+    if weighted_scalars is not None:
+      if tf.io.gfile.exists(metric_file_name):
+        metrics = pg.load(metric_file_name)
+      else:
+        metrics = {}
+      metrics.update(extract_metrics(weighted_scalars))
+      pg.save(metrics, metric_file_name)
+  return False
 
 
 def run_experiment(
@@ -329,35 +381,6 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
   work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
                             'search_algorithm')
 
-  def extract_metrics(
-      metrics_by_dataset: Dict[str, Union[trainer_lib.WeightedScalars,
-                                          trainer_lib.WeightedScalarsList]]
-  ) -> Dict[str, float]:
-    """Extract a flattened metric dict from a metric dict per dataset."""
-    metrics = {}
-
-    def add_metric(dataset_name, key, values):
-      if dataset_name is not None:
-        key = f'{dataset_name}/{key}'
-      if isinstance(values, tuple):
-        values = [values]
-      metric_values = np.stack([v[0] for v in values])
-      metric_weights = np.stack([v[1] for v in values])
-      metrics[key] = np.sum(
-          metric_values * metric_weights) / np.sum(metric_weights)
-
-    # When there is only one dataset, we allow the metric key to be directly
-    # used in reward_fn without providing the dataset name.
-    if len(metrics_by_dataset) == 1:
-      the_dataset_metric = list(metrics_by_dataset.values())[0]
-      for k, v in the_dataset_metric.items():
-        add_metric(None, k, v)
-
-    for dataset_name, dataset_metrics in metrics_by_dataset.items():
-      for k, v in dataset_metrics.items():
-        add_metric(dataset_name, k, v)
-    return metrics
-
   # Helper functions for tuning.
   def get_early_stopping_fn(
       feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
@@ -459,7 +482,11 @@ def run(experiment_config: base_experiment.BaseExperimentT):
                      'only supported with --mode=decode_once.')
 
   if FLAGS.study is None:
-    run_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
+    run_experiment(
+        experiment_config,
+        work_unit,
+        job_log_dir=FLAGS.job_log_dir,
+        early_stopping_fn=_default_early_stopping_fn)
   else:
     tune_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
 

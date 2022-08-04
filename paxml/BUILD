@@ -373,7 +373,6 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
-        # Implicit numpy dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",

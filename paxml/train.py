@@ -27,10 +27,8 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 from absl import logging
 import jax
 from jax.experimental import maps
-from jax.experimental import pjit
 from jax.experimental.gda_serialization import serialization as gda_serialization
 import jax.numpy as jnp
-import numpy as np
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
@@ -41,8 +39,8 @@ from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
-from praxis import pytypes
 from praxis import py_utils
+from praxis import pytypes
 from praxis import train_states
 import tensorflow.compat.v2 as tf
 
@@ -125,6 +123,7 @@ def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
                               initial_global_step: int,
                               eval_interval_steps: int) -> None:
   """Updates `train_input_p` in place its latest model step."""
+  del eval_interval_steps
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     return
   dp = train_input_p.deterministic_input_start_index
