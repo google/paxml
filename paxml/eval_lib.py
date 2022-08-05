@@ -1022,17 +1022,6 @@ def decode_once_pmap_model(
   metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
-  # decode_metrics and process_decode_metrics work on WeightedScalars
-  # which are string -> (value, weight) pairs where value and weight
-  # scalars. These metrics are configured on the task.
-  decode_metrics = instantiate(metrics_p)
-  process_decode_metrics = instantiate(metrics_p)
-
-  # metrics and processed_metrics are dictionaries of
-  # strings -> clu_metrics.Metric objects. metrics is returned from decode()
-  # and processed_metrics is returned from process_decode_out.
-  metrics = {}
-  processed_metrics = {}
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
@@ -1093,20 +1082,31 @@ def decode_once_pmap_model(
     # TODO(pax): shall we eval all sub-models during eval?
     return pmap_decode_step(replicated_model_states, prng_seed, inputs)
 
-  num_steps = [
+  num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
   basedir = os.path.join(job_log_dir, 'decoder_out')
   dirnames = _get_dir_names(input_p)
   filename = _get_filename(replicated_model_states.step)
   filenames = [os.path.join(basedir, s, filename) for s in dirnames]
-  for split, num_split_steps in enumerate(num_steps):
+  for split, num_split_steps in enumerate(num_steps_per_input):
     if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
       continue
     logging.info('Start decoding on input %s', input_p[split].name)
     step_num = 0
+    # decode_metrics and process_decode_metrics work on WeightedScalars
+    # which are string -> (value, weight) pairs where value and weight
+    # scalars. These metrics are configured on the task.
+    decode_metrics = instantiate(metrics_p)
+    process_decode_metrics = instantiate(metrics_p)
+
+    # metrics and processed_metrics are dictionaries of
+    # strings -> clu_metrics.Metric objects. metrics is returned from decode()
+    # and processed_metrics is returned from process_decode_out.
+    metrics = {}
+    processed_metrics = {}
     processed_decodes = []
     all_summary_tensors = collections.defaultdict(list)
     while num_split_steps < 0 or step_num < num_split_steps:
@@ -1377,17 +1377,6 @@ def decode_once_spmd_model(
   metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
-  # decode_metrics and process_decode_metrics work on WeightedScalars
-  # which are string -> (value, weight) pairs where value and weight
-  # scalars. These metrics are configured on the task.
-  decode_metrics = instantiate(metrics_p)
-  process_decode_metrics = instantiate(metrics_p)
-
-  # metrics and processed_metrics are dictionaries of
-  # strings -> clu_metrics.Metric objects. metrics is returned from decode()
-  # and processed_metrics is returned from process_decode_out.
-  metrics = {}
-  processed_metrics = {}
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
@@ -1407,16 +1396,27 @@ def decode_once_spmd_model(
       decode_step_fn, trainer_lib.train_state_for_eval_step(train_state),
       prng_key)
 
-  num_steps = [
+  num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
-  for split, num_split_steps in enumerate(num_steps):
+  for split, num_split_steps in enumerate(num_steps_per_input):
     if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
       continue
     logging.info('Start decoding on input %s', input_p[split].name)
     step_num = 0
+    # decode_metrics and process_decode_metrics work on WeightedScalars
+    # which are string -> (value, weight) pairs where value and weight
+    # scalars. These metrics are configured on the task.
+    decode_metrics = instantiate(metrics_p)
+    process_decode_metrics = instantiate(metrics_p)
+
+    # metrics and processed_metrics are dictionaries of
+    # strings -> clu_metrics.Metric objects. metrics is returned from decode()
+    # and processed_metrics is returned from process_decode_out.
+    metrics = {}
+    processed_metrics = {}
     processed_decodes = []
     all_summary_tensors = collections.defaultdict(list)
     while num_split_steps < 0 or step_num < num_split_steps:
