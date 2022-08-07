@@ -482,11 +482,13 @@ def run(experiment_config: base_experiment.BaseExperimentT):
                      'only supported with --mode=decode_once.')
 
   if FLAGS.study is None:
+    # TODO(b/241666951): disable default_early_stopping_fn since this
+    # breaks when training LaMDA models.
     run_experiment(
         experiment_config,
         work_unit,
         job_log_dir=FLAGS.job_log_dir,
-        early_stopping_fn=_default_early_stopping_fn)
+        early_stopping_fn=None)
   else:
     tune_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
 
