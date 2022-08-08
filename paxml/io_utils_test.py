@@ -20,11 +20,14 @@ import pathlib
 import random
 import string
 from typing import Sequence
+import numpy
+import pickle
 
 from absl import flags
 from absl.testing import absltest
 from paxml import io_utils
 import tensorflow.compat.v2 as tf
+
 
 FLAGS = flags.FLAGS
 
@@ -36,6 +39,31 @@ class IoUtilsTest(absltest.TestCase):
     kv = {'word1': 7, 'word2': 4, 'word3': 5}
     io_utils.write_key_value_pairs(filename, kv)
     self.assertTrue(pathlib.Path(filename).exists())
+
+  def test_write_key_value_pairs_with_device_array(self):
+
+    # Class that mocks the interface of xla_extension.DeviceArray for testing,
+    # without actually depending on this part of tensorflow library.
+    class MockDeviceArray(object):
+
+      def __init__(self, ndarray_value):
+        self._ndarray_value = ndarray_value
+
+      @property
+      def _value(self):
+        return self._ndarray_value
+
+    filename = os.path.join(FLAGS.test_tmpdir, 'kvd.pickle')
+    kv = {
+        'word1': MockDeviceArray(numpy.asarray([7])),
+        'word2': MockDeviceArray(numpy.asarray([4])),
+        'word3': MockDeviceArray(numpy.asarray([5])),
+    }
+    io_utils.write_key_value_pairs(filename, kv, cast_to_ndarray=True)
+    kv_reload = pickle.load(open(filename, 'rb'))
+    self.assertEqual(numpy.ndarray, type(kv_reload['word1']))
+    self.assertEqual(numpy.ndarray, type(kv_reload['word2']))
+    self.assertEqual(numpy.ndarray, type(kv_reload['word3']))
 
   def test_validate_none_step_invalid(self):
     fnames = [f'decoder_out_200_shard_{x}.pickle' for x in range(3)]

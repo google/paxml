@@ -492,6 +492,7 @@ py_strict_test(
         ":io_utils",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

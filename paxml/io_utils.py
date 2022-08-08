@@ -130,11 +130,26 @@ class ShardedParallelWriter:
       writer.close()
 
 
-def write_key_value_pairs(
-    filename: str, key_value_pairs: Sequence[Tuple[str, Any]]) -> None:
+def write_key_value_pairs(filename: str,
+                          key_value_pairs: Sequence[Tuple[str, Any]],
+                          cast_to_ndarray: bool = True) -> None:
   """Writes `key_value_pairs` to file."""
   if not filename.endswith('.pickle'):
     filename += '.pickle'
+
+  if cast_to_ndarray:
+    # Values in key_value_pairs may contain numpy ndarrays, but may also
+    # contain DeviceArray types -- which are equivalent to ndarray in all
+    # respects, except one: they require additional dependencies in code
+    # that attempts to load the .pickle file.
+    # For such types the _value property returns a proper numpy.ndarray.
+    def _to_ndarray(x):
+      if hasattr(x, '_value'):
+        x = x._value
+      return x
+
+    key_value_pairs = tf.nest.map_structure(_to_ndarray, key_value_pairs)
+
   with tf.io.gfile.GFile(filename, 'wb') as f:
     pickle.dump(key_value_pairs, f, protocol=pickle.HIGHEST_PROTOCOL)
 
