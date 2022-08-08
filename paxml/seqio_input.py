@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import collections
 import enum
+import os
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
@@ -36,6 +37,11 @@ sub_config_field = base_hyperparams.sub_config_field
 NestedMap = py_utils.NestedMap
 NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
+
+PROVENANCE_PREFIX = 'provenance'
+SHARD_INDEX_KEY = os.path.join(PROVENANCE_PREFIX, 'shard_index')
+NUM_SHARDS_KEY = os.path.join(PROVENANCE_PREFIX, 'num_shards')
+INDEX_WITHIN_SHARD_KEY = os.path.join(PROVENANCE_PREFIX, 'index_within_shard')
 
 
 def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any],
@@ -72,6 +78,18 @@ def _get_targets_str(example: Mapping[str, Any], task: seqio.Task) -> str:
   if isinstance(target, bytes):
     target = target.decode('utf-8')
   return target
+
+
+def get_example_id(index_within_shard: int, shard_index: int,
+                   num_shards: int) -> Optional[str]:
+  """Construct a unique ID from enumeration provenance fields."""
+  if shard_index >= num_shards:
+    raise ValueError(
+        'shard_index must be less than the total number of shards'
+        f' (shard_index={shard_index}, num_shards={num_shards})')
+
+  return os.path.join(f'index_within_shard={index_within_shard}',
+                      f'shard_index={shard_index}', f'num_shards={num_shards}')
 
 
 class SeqIOInput(base_input.BaseInput):
@@ -144,6 +162,15 @@ class SeqIOInput(base_input.BaseInput):
         for targets when processing the targets as ground truths to compute
         eval metrics. It has no effect on get_next(), but only affects
         compute_metrics(). If set to None, won't truncate.
+      use_enumeration: whether to use enumeration in both batch generation
+        (get_next()) and metrics computation. When this param is set to True,
+        we'll return a NestedMap including enumeration related provenance
+        fields, which will assign each example a globally-unique ID within a
+        given dataset. In `__call__` of the model, the user is then expected to
+        return a NestedMap including '.enumerated_index' and for
+        `process_decode_out` the key in the sequence of tuples should be the
+        enumerated index. At metrics computation time, we'll join the enumerated
+        index.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -169,10 +196,17 @@ class SeqIOInput(base_input.BaseInput):
     deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
         sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
+    use_enumeration: bool = False
 
   def __init__(self, hparams: ParamsT) -> None:
+    # Modify hparams in-place before freezing hparams
     if not hparams.name:
       hparams.name = f'{hparams.mixture_name}_{hparams.split_name}'
+    if hparams.input_random_seed is None and hparams.use_enumeration:
+      # Since we want the enumeration to be deterministic, in the case that
+      # there's no explicit seed set, we default to a fixed seed
+      hparams.input_random_seed = 42
+
     super().__init__(hparams)
     self._validate_hparams()
     self._dataset = self._get_dataset()
@@ -294,6 +328,26 @@ class SeqIOInput(base_input.BaseInput):
       ret.append(vocab.decode(row))
     return ret
 
+  def _enumerate(self, ds: tf.data.Dataset,
+                 shard_info: seqio.ShardInfo) -> tf.data.Dataset:
+    """Adds provenance enumeration fields."""
+
+    def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
+      ex[SHARD_INDEX_KEY] = shard_info.index
+      ex[NUM_SHARDS_KEY] = shard_info.num_shards
+      return ex
+
+    def _fold_in_local_enumeration(index_within_shard: int,
+                                   ex: Dict[str, Any]) -> Dict[str, Any]:
+      ex[INDEX_WITHIN_SHARD_KEY] = index_within_shard
+      return ex
+
+    ds = ds.map(_add_shard_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.enumerate()
+    ds = ds.map(_fold_in_local_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+
+    return ds
+
   def _get_backing_ds(self,
                       shuffle: bool,
                       num_epochs: int,
@@ -309,7 +363,14 @@ class SeqIOInput(base_input.BaseInput):
         seed=p.input_random_seed,
         trim_output_features=p.trim_output_features)
 
-    return p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
+    ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
+    if p.use_enumeration:
+      # We want to add enumeration provenance fields *after* applying all
+      # feature converters since feature converters don't pass through
+      # unrecognized fields by default
+      ds = self._enumerate(ds, shard_info)
+
+    return ds
 
   def _get_global_ds(self) -> tf.data.Dataset:
     return self._get_backing_ds(shuffle=False, num_epochs=1, shard_info=None)
@@ -372,6 +433,9 @@ class SeqIOInput(base_input.BaseInput):
       verbose_entries: Optional[int] = 0
   ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given decoder outputs using predict_metric_fns.
+
+    TODO(b/241386390): use enumeration ID instead of prefix-matching
+    when `hparams.use_enumeration = True`.
 
     This function basically does the following:
       1. Iterate through SeqIO task's dataset to construct both (a) the
@@ -499,6 +563,9 @@ class SeqIOInput(base_input.BaseInput):
       verbose_entries: int = 0
   ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
+
+    TODO(b/241386390): use enumeration ID instead of prefix-matching
+    when `hparams.use_enumeration = True`.
 
     This function basically does the following:
       1. Iterate through SeqIO task's dataset to construct both (a) the 'labels'
