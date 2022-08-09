@@ -116,6 +116,7 @@ def run_eval_one_step(eval_inputs: NestedJTensor,
 def _summary_seqio_metrics(seqio_metrics: Sequence[Mapping[str, Union[
     seqio.metrics.MetricValue, float]]], metric_name_prefix: str,
                            step: int) -> None:
+  """Writes seqio metrics to summaries."""
   for m_dict in seqio_metrics:
     for k, v in m_dict.items():
       metric_name = f'{metric_name_prefix}/{k}'
@@ -803,7 +804,7 @@ def decode(
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
   if not run_eval:
     eval_inputs = []
-  if not (decoder_inputs + eval_inputs):
+  if not decoder_inputs and not eval_inputs:
     logging.info('No input datasets defined.')
     return
 
@@ -1256,7 +1257,6 @@ def decode_spmd_model(
                                        inputs_sample)
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
-
 
   # Either decoder or eval inputs is not empty.
   assert list(input_p) + list(eval_input_p)

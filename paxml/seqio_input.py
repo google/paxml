@@ -653,7 +653,7 @@ class SeqIOInput(base_input.BaseInput):
               'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
               'is_correct=%s\ntarget=%s\nscore=%s\n\n',
               e['inputs_pretokenized'], e['targets_pretokenized'],
-              e['is_correct'], target_post, score)
+              e.get('is_correct', 'N/A'), target_post, score)
           verbose_entries_idx += 1
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
