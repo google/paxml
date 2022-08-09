@@ -151,10 +151,14 @@ class CheckpointManager:
     if (jax.config.jax_coordination_service and
         multihost_utils.reached_preemption_sync_point(global_step_id)):
       return True
+    save_interval_steps = self._save_interval_steps or 1
+    # Save to nearest save_interval_steps multiplers after restoring from a
+    # on-demand checkpoint.
+    should_save_ckpt = (self._last_saved_checkpoint_step is None) or (
+        global_step_id > self._last_saved_checkpoint_step and
+        global_step_id % save_interval_steps == 0)
     # Whether to save a periodic checkpoint
-    return (self._last_saved_checkpoint_step is None or
-            global_step_id - self._last_saved_checkpoint_step >=
-            self._save_interval_steps)
+    return should_save_ckpt
 
   def save_metadata(self, global_step_id: int) -> None:
     """Adds a new checkpoint to the manager.

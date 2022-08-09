@@ -370,9 +370,10 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_datetimes_2.append(current_datetime)
         current_datetime += datetime.timedelta(hours=1)
 
-    saved_steps_2 = saved_steps_2_init + [11000, 14000, 17000]
+    # expect saved steps at multipliers of 3000.
+    saved_steps_2 = saved_steps_2_init + [12000, 15000, 18000]
     saved_checkpoint_datetimes_2 = (
-        saved_checkpoint_datetimes_2_init + checkpoint_datetimes_2[1:10:3])
+        saved_checkpoint_datetimes_2_init + checkpoint_datetimes_2[2:10:3])
     filenames = [
         os.path.basename(v) for v in tf.io.gfile.glob(
             os.path.join(root_dir, f'{CHECKPOINT_PREFIX}*'))
@@ -384,6 +385,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     expected_proto = _create_reference_checkpoint_history(
         config_name, root_dir, checkpoint_type, saved_steps_2,
         saved_checkpoint_datetimes_2)
+    print(checkpoint_managers.read_checkpoint_file(checkpoints_filename))
+    print(expected_proto)
     self.assertCheckpointsFileProto(checkpoints_filename, expected_proto)
 
   @parameterized.named_parameters(
