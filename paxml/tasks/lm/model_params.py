@@ -167,7 +167,11 @@ def maybe_setup_moe_params(model_p: base_model.BaseModel.HParams) -> None:
   # Copy over othe params.
   moe_p.name = ff_p.name
   moe_p.input_dims = ff_p.input_dims
-  moe_p.hidden_dims = ff_p.hidden_dims
+  if not moe_p.hidden_dims:
+    # We can generally use different hidden_dims for FFN and MoE
+    #
+    # We should not override if moe_p.hidden_dims is explicitly set already.
+    moe_p.hidden_dims = ff_p.hidden_dims
   moe_p.ln_tpl = ff_p.ln_tpl.clone()
   moe_p.activation_tpl = ff_p.activation_tpl.clone()
   # TransformerFeedForwardMoe does not have use_gated_activation
