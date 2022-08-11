@@ -388,7 +388,7 @@ def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
   def create_hyper_property(name: str, hyper: pg.hyper.HyperPrimitive):
     attr_name = f'_PROPERTY_{name}'
     hyper_kwargs = dict(hyper.sym_init_args)
-    if hyper.name is None:
+    if 'name' not in hyper_kwargs or hyper_kwargs['name'] is None:
       hyper_kwargs['name'] = name
 
     def getter(x):
