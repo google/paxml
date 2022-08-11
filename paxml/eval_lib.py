@@ -1258,28 +1258,37 @@ def decode_spmd_model(
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
-  # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
-  # We assume that either eval_input or decoder_input can be used to retrieve
-  # all the model variable shapes.
-  # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-  # same regardless of which eval_input or decoder_input we use to draw the
-  # sample inputs, we need to revisit the design here.
-  sample_input_p = input_p[0] if input_p else eval_input_p[0]
-  (partitioned_train_state, partitioned_specs,
-   train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
-       jax_task,
-       global_mesh,
-       init_key,
-       inputs_sample,
-       restore_checkpoint_dir,
-       checkpoint_type,
-       checkpoint_step=restore_checkpoint_step)
   with global_mesh:
+    vars_weight_params = jax_task.model.abstract_init_with_metadata(
+        init_key, inputs_sample)
+    # Restore flax checkpoints still required backward variables in TrainState
+    discard_opt_states = jax.config.jax_parallel_functions_output_gda
+    partitioned_specs = jax_task.create_train_state_partition_specs(
+        vars_weight_params, discard_opt_states=discard_opt_states)
     decode_step_fn, inputs_partition_spec = (
         trainer_lib.get_partitioned_spmd_model_decode_fn(
             jax_task, init_key, partitioned_specs, inputs_shape))
+    use_gda = (
+        jax.config.jax_parallel_functions_output_gda and
+        checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
+    if use_gda:
+      inputs_sample = py_utils.create_gda(inputs_sample, inputs_shape,
+                                          global_mesh, inputs_partition_spec)
+    # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
+    # We assume that either eval_input or decoder_input can be used to retrieve
+    # all the model variable shapes.
+    # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
+    # same regardless of which eval_input or decoder_input we use to draw the
+    # sample inputs, we need to revisit the design here.
+    (partitioned_train_state, partitioned_specs,
+     train_state_global_shapes) = _SpmdEvalRunner.get_model_states(
+         jax_task,
+         global_mesh,
+         init_key,
+         inputs_sample,
+         restore_checkpoint_dir,
+         checkpoint_type,
+         checkpoint_step=restore_checkpoint_step)
     eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
                                   init_key, partitioned_specs)
     trainer_lib.write_post_init_model_hparams_file(
@@ -1297,9 +1306,6 @@ def decode_spmd_model(
     # TODO(pax): support ema.
     partitioned_train_state = trim_opt_states(partitioned_train_state)
     last_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
-    use_gda = (
-        jax.config.jax_parallel_functions_output_gda and
-        checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
     with contextlib.ExitStack() as exit_stack:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
