@@ -739,7 +739,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         circular_repeat=self.CIRCULAR_REPEAT,
         num_pipeline_microbatches=self.NUM_MICROBATCHES,
         pipeline_microbatch_size=self.MICROBATCH_SIZE,
-        stream_io=self.STREAM_IO)
+        stream_io=self.STREAM_IO,
+        checkpoint_policy=self.CHECKPOINT_POLICY)
 
     # Enable bf16.
     model_p.fprop_dtype = self.FPROP_DTYPE
