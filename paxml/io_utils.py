@@ -18,6 +18,7 @@
 import collections
 import concurrent
 import enum
+import numpy
 import os
 import pickle
 import re
@@ -144,7 +145,7 @@ def write_key_value_pairs(filename: str,
     # that attempts to load the .pickle file.
     # For such types the _value property returns a proper numpy.ndarray.
     def _to_ndarray(x):
-      if hasattr(x, '_value'):
+      if hasattr(x, '_value') and isinstance(x._value, numpy.ndarray):
         x = x._value
       return x
 
