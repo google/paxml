@@ -95,10 +95,18 @@ def main(argv) -> None:
   experiment_config = _get_experiment(FLAGS.exp)()
 
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
+    params_file.write('============= Trainer / Evaler datasets.\n\n')
     datasets = experiment_config.datasets()
     for dataset in datasets:
       params_file.write(dataset.to_text())
       params_file.write('\n\n')
+
+    params_file.write('============= Decoder datasets.\n\n')
+    dec_datasets = experiment_config.decoder_datasets()
+    for dataset in dec_datasets:
+      params_file.write(dataset.to_text())
+      params_file.write('\n\n')
+
     params_file.write(experiment_config.task().to_text())
     # TODO(b/236417790): Dump input specs for model weight initialization.
 
