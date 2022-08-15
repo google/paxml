@@ -390,10 +390,10 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
         trainer_lib.WeightedScalarsList, trainer_lib.WeightedScalars]]],
                           global_step: int, is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
-      if FLAGS.metrics_from == FLAGS.mode and jax.process_index() == 0:
+      if FLAGS.metrics_from == FLAGS.mode:
         # `metrics_by_dataset` could be None for interleaved train/eval
         # when evaluation is not performed at current global step.
-        if metrics_by_dataset is not None:
+        if metrics_by_dataset is not None and jax.process_index() == 0:
           # Computing reward and report back to the tuning service.
           metrics = extract_metrics(metrics_by_dataset)
           reward = reward_fn(metrics, global_step)
@@ -403,7 +403,13 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
               'with reward value %f (is_last_checkpoint=%s): %s.',
               feedback.id, global_step, reward, is_last_checkpoint, metrics)
         if is_last_checkpoint:
-          feedback.done()
+          py_utils.sync_global_devices(
+              f'Trial termination at step {global_step} started.')
+          # `feedback.done` should be called just once per trial.
+          if jax.process_index() == 0:
+            feedback.done()
+          py_utils.sync_global_devices(
+              f'Trial termination at step {global_step} completed.')
           logging.info('Trial %d is now completed.', feedback.id)
       return feedback.should_stop_early()
 
