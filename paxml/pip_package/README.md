@@ -18,7 +18,7 @@ docker build --tag jax:paxml-pip - < pip_package/Dockerfile
 Enter the docker image, mapping local directory /tmp/paxml to docker directory /tmp/paxml :
 
 ```
-docker run --rm -it -v /tmp/paxml:/tmp/paxml jax:paxml-pip bash
+docker run --rm -it -v /tmp/paxml:/tmp/paxml --name <name> jax:paxml-pip bash
 
 #inside docker
 cd /tmp/paxml
