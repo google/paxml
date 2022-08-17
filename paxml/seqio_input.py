@@ -947,6 +947,7 @@ def get_eval_hparams_for_seqio(
     metric_type: MetricType,
     split_name: str = 'validation',
     feature_converter: Optional[seqio.FeatureConverter] = None,
+    num_infeed_hosts: int = 0,
 ) -> Sequence[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -978,6 +979,10 @@ def get_eval_hparams_for_seqio(
     split_name: The split to use for evaluation, defaults to 'validation'.
     feature_converter: The SeqIO FeatureConverter to use to transform data,
       defaults to seqio_input.LanguageModelFeatures with packing disabled
+    num_infeed_hosts: Usually set to jax.process_count(). Implementation must
+        ensure that the data is sharded into these many shards. If
+        num_infeed_hosts is 0, it will be given a default value by the trainer;
+        if it is still not set during __init__, a value of 1 will be used.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -992,6 +997,7 @@ def get_eval_hparams_for_seqio(
       eval_loop_num_batches=None,
       reset_for_eval=True,
       batch_size=batch_size,
+      num_infeed_hosts=num_infeed_hosts,
       input_random_seed=seed)
 
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
