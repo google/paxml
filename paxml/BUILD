@@ -127,14 +127,13 @@ pytype_strict_library(
         ":base_task",
         ":checkpoint_py_pb2",
         # Implicit absl.logging dependency.
-        "//third_party/py/etils/epath",
-        "//third_party/py/flax:core",
         # Implicit flax.training dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         "//third_party/py/orbax/checkpoint",
+        "//praxis:asserts",
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:train_states",
@@ -231,7 +230,6 @@ pytype_strict_library(
     deps = [
         ":automl",
         ":base_experiment",
-        ":checkpoints",
         ":eval_lib",
         ":experiment_registry",
         ":setup_jax",
@@ -248,7 +246,6 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
-        "//third_party/py/orbax/checkpoint",
         "//praxis:py_utils",
         # Implicit internal pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.
