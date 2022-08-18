@@ -18,6 +18,7 @@
 import collections
 import contextlib
 import functools
+import io
 import os
 import sys
 import time
@@ -1168,14 +1169,18 @@ def decode_once_pmap_model(
       work_unit.set_task_status(f'Finished decoding input batch {step_num} '
                                 f'on {input_p[split].name}')
 
+    plain_text_output = None
+
     if (inputs[split].hparams.reset_for_eval
         and isinstance(inputs[split], seqio_input.SeqIOInput)
         and jax.process_index() == 0):
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')
+      plain_text_output = io.StringIO()
       seqio_metrics = inputs[split].compute_metrics(
-          processed_decodes, verbose_entries=1)
+          processed_decodes, verbose_entries=1,
+          plain_text_output=plain_text_output)
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
@@ -1219,6 +1224,13 @@ def decode_once_pmap_model(
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
+
+      if plain_text_output is not None:
+        plain_text_output_file = filenames[split] + '.txt'
+        logging.info('Writing decoder output to %s', plain_text_output_file)
+        with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
+          f.write(plain_text_output.getvalue())
+
 
 
 def decode_spmd_model(
@@ -1515,14 +1527,18 @@ def decode_once_spmd_model(
 
       logging.info('Finished processing decoded input batch %d', step_num)
 
+    plain_text_output = None
+
     if (inputs[split].hparams.reset_for_eval
         and isinstance(inputs[split], seqio_input.SeqIOInput)
         and jax.process_index() == 0):
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       logging.info('Computing metrics.')
+      plain_text_output = io.StringIO()
       seqio_metrics = inputs[split].compute_metrics(
-          processed_decodes, verbose_entries=1)
+          processed_decodes, verbose_entries=1,
+          text_output=plain_text_output)
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
@@ -1560,6 +1576,12 @@ def decode_once_spmd_model(
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
+
+      if plain_text_output is not None:
+        plain_text_output_file = filenames[split] + '.txt'
+        logging.info('Writing decoder output to %s', plain_text_output_file)
+        with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
+          f.write(plain_text_output.getvalue())
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_p[split].name}')

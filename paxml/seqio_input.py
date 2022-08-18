@@ -20,7 +20,7 @@ from __future__ import annotations
 import collections
 import enum
 import os
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 from jax.experimental import multihost_utils
@@ -430,7 +430,8 @@ class SeqIOInput(base_input.BaseInput):
   def compute_metrics(
       self,
       decoder_outputs: Sequence[Tuple[str, NestedMap]],
-      verbose_entries: Optional[int] = 0
+      verbose_entries: Optional[int] = 0,
+      plain_text_output: Optional[TextIO] = None,
   ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given decoder outputs using predict_metric_fns.
 
@@ -446,6 +447,7 @@ class SeqIOInput(base_input.BaseInput):
       3. Feed the prefix-key mapped list of decoder_outputs and targets through
         all task.predict_metric_fns.
       4. Optionally log a couple entries for inspection.
+      5. Optionally log all entries in text format for inspection.
 
     For tasks with score_metric_fns, use compute_metrics_eval() below.
 
@@ -457,7 +459,8 @@ class SeqIOInput(base_input.BaseInput):
         can also be read from disk using `io_utils.load_outputs()`.
       verbose_entries: int, how many entries to log for inspection and sanity
         checking.
-
+      plain_text_output: optional output file to write decoder outputs in plain text
+        format for easier inspection
     Returns:
       The results of predict_metric_fns computed on the decoder outputs.
       Typically a list of metrics, each element being a mapping from a string
@@ -554,6 +557,18 @@ class SeqIOInput(base_input.BaseInput):
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s FROM %s\nLABEL=%s FROM %s.', i, k,
           answer_processed, answer, target_processed, target)
+
+    # Optionally log all examples for inspection in text format
+    if plain_text_output is not None:
+      for _, ans in decoder_outputs:
+        print('---', file=plain_text_output)
+        print(ans.get('prefix', ''), file=plain_text_output)
+        print('>>>', file=plain_text_output)
+        print(ans.get('decoded_substr', ''), file=plain_text_output)
+        print(ans['decoded_substr'], file=plain_text_output)
+        if 'seqio_targets' in ans:
+          print('REF', file=plain_text_output)
+          print(ans['seqio_targets'], file=plain_text_output)
 
     return metrics
 
