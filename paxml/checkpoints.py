@@ -23,6 +23,8 @@ import re
 from typing import Any, Optional, Sequence, Tuple
 
 from absl import logging
+from etils import epath
+import flax.serialization
 from flax.training import checkpoints as flax_checkpoints
 import jax
 from jax.experimental import maps
@@ -31,9 +33,9 @@ from jax.experimental.gda_serialization import serialization as gda_serializatio
 gda_serialization_spec = gda_serialization  # mapped to internal
 import numpy as np
 import optax
+import orbax.checkpoint
 from paxml import base_task
 from paxml import checkpoint_pb2
-from praxis import asserts
 from praxis import py_utils
 from praxis import pytypes
 from praxis import train_states
@@ -49,6 +51,7 @@ _MAX_CHECKPOINT_FLAX = 1000000
 
 CheckpointType = checkpoint_pb2.CheckpointType
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
+PyTreeDef = pytypes.PyTreeDef
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
@@ -58,6 +61,14 @@ def _is_checkpoint_asset(x: str) -> bool:
 
 def _is_tmp_checkpoint_asset(x: str) -> bool:
   return bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
+
+
+def _is_tmp_checkpoint(directory: str, file: str) -> bool:
+  """Determines whether the directory/file is a temporary checkpoint."""
+  return _is_tmp_checkpoint_asset(file) or (
+      tf.io.gfile.isdir(tf.io.gfile.join(directory, file)) and
+      not orbax.checkpoint.utils.is_checkpoint_finalized(
+          tf.io.gfile.join(directory, file)))
 
 
 def _to_timestamp(datetime_instance: datetime.datetime) -> int:
@@ -111,6 +122,40 @@ def retrieve_checkpoint_type(
     return CheckpointType.CHECKPOINT_FLAX
 
 
+class AsyncCheckpointer(orbax.checkpoint.AsyncCheckpointer):
+  """AsyncCheckpointer override for Pax GDA checkpointing."""
+
+  @property
+  def handler(self) -> orbax.checkpoint.AsyncCheckpointHandler:
+    return self._handler
+
+
+class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
+  """PaxCheckpointHandler override for Pax GDA checkpointing.
+
+  Allows setting parameter names manually, which would normally be extracted
+  from the train state itself. This is somewhat hacky, and we will aim to remove
+  it eventually (see below).
+
+  TODO(cpgaffney) Rework _extract_nested_prefix_names to allow extracting names
+  from a state dict.
+  """
+
+  def __init__(self, enable_flax: bool = True, param_names: PyTreeDef = None):
+    super().__init__(enable_flax=enable_flax)
+    self._param_names = param_names
+
+  def set_param_names(self, param_names: PyTreeDef):
+    self._param_names = param_names
+
+  def _get_param_names(self, item: PyTreeDef) -> PyTreeDef:
+    return self._param_names
+
+  def structure(self, directory: epath.Path) -> PyTreeDef:
+    return flax.serialization.to_state_dict(
+        jax.tree_map(epath.Path, self._param_names))
+
+
 def save_checkpoint(
     train_state: train_states.TrainState,
     checkpoint_dir: str,
@@ -119,7 +164,8 @@ def save_checkpoint(
     state_specs: Optional[train_states.TrainState] = None,
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
-) -> None:
+    use_orbax: bool = False,
+    async_checkpointer: Optional[AsyncCheckpointer] = None) -> None:
   """Saves a checkpoint into the provided base directory.
 
   This is typically called on a replicated TrainState instance.
@@ -136,6 +182,10 @@ def save_checkpoint(
       serialization and deserialization of GDA arrays. This manager allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
+    use_orbax: Use Orbax for checkpointing.
+    async_checkpointer: When async checkpointing and Orbax are enabled, allows
+      training to continue when checkpointing is going on as checkpointing
+      happens in a different thread.
 
   Raises:
     ValueError: If the global step has an unexpected shape, if `state_specs`
@@ -147,8 +197,14 @@ def save_checkpoint(
   step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
 
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    _save_checkpoint_gda(train_state, checkpoint_dir, overwrite, step,
-                         async_ckpt_manager)
+    _save_checkpoint_gda(
+        train_state,
+        checkpoint_dir,
+        overwrite,
+        step,
+        async_ckpt_manager,
+        use_orbax=use_orbax,
+        async_checkpointer=async_checkpointer)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     _save_checkpoint_flax(train_state, checkpoint_dir, overwrite, step)
   else:
@@ -184,7 +240,8 @@ def restore_checkpoint(
     global_mesh: Optional[maps.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
     state_specs: Optional[train_states.TrainState] = None,
-    step: Optional[int] = None) -> Optional[train_states.TrainState]:
+    step: Optional[int] = None,
+    use_orbax: bool = False) -> Optional[train_states.TrainState]:
   """Restores a checkpoint from the provided base directory.
 
   This is typically called on an unreplicated TrainState instance.
@@ -199,6 +256,7 @@ def restore_checkpoint(
     state_specs: If using a GDA-based checkpoint, the partition specs
       corresponding to this TrainState instance to restore.
     step: Step number to load a checkpoint from or None to load the latest.
+    use_orbax: Use Orbax for checkpointing.
 
   Returns:
     A restored `TrainState` instance. If no step specified and no checkpoint
@@ -209,8 +267,13 @@ def restore_checkpoint(
     the saved checkpoint one is detected.
   """
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    return _restore_checkpoint_gda(state_global_shapes, checkpoint_dir,
-                                   global_mesh, state_specs, step)
+    return _restore_checkpoint_gda(
+        state_global_shapes,
+        checkpoint_dir,
+        global_mesh,
+        state_specs,
+        step,
+        use_orbax=use_orbax)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     return _restore_checkpoint_flax(state_global_shapes, checkpoint_dir, step)
   else:
@@ -330,7 +393,8 @@ def delete_temp_directories(checkpoint_dir: str, overwrite: bool = False):
     # Delete tmp directories if any.
     if jax.process_index() == 0:
       tmp_checkpoint_dirnames = [
-          x for x in checkpoint_dirnames if _is_tmp_checkpoint_asset(x)
+          x for x in checkpoint_dirnames
+          if _is_tmp_checkpoint(checkpoint_dir, x)
       ]
       if tmp_checkpoint_dirnames:
         logging.warn('Found incompletely saved checkpoints %s; deleting them',
@@ -415,7 +479,8 @@ def _save_checkpoint_gda(
     step: int,
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
-) -> None:
+    use_orbax: bool = False,
+    async_checkpointer: Optional[AsyncCheckpointer] = None) -> None:
   """Saves a checkpoint using JAX GDA serialization mechanism.
 
   Note that all JAX processes must call _save_checkpoint_gda in sync because
@@ -429,6 +494,10 @@ def _save_checkpoint_gda(
     step: Step to save checkpoint for.
     async_ckpt_manager: Asynchronous checkpoint manager which manages
       serialization and deserialization of GDA arrays. This manager allows
+      training to continue when checkpointing is going on as checkpointing
+      happens in a different thread.
+    use_orbax: Use Orbax for checkpointing.
+    async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
   """
@@ -462,6 +531,17 @@ def _save_checkpoint_gda(
       train_state)
   # At that point, the flattened entries do not contain any reference to
   # MaskedNode's.
+
+  if use_orbax:
+    if async_checkpointer is not None:
+      async_checkpointer.handler.set_param_names(flattened_nested_names)  # pytype: disable=attribute-error
+      async_checkpointer.save(checkpoint_step_dir, flattened_train_state)
+    else:
+      handler = PaxCheckpointHandler(
+          enable_flax=False, param_names=flattened_nested_names)
+      checkpointer = orbax.checkpoint.Checkpointer(handler)
+      checkpointer.save(checkpoint_step_dir, flattened_train_state)
+    return
 
   if jax.process_index() == 0:
     # Create the tmp parent dir.
@@ -536,7 +616,8 @@ def _restore_checkpoint_gda(
     checkpoint_dir: str,
     global_mesh: Optional[maps.Mesh],
     state_specs: Optional[train_states.TrainState],
-    step: Optional[int] = None) -> Optional[train_states.TrainState]:
+    step: Optional[int] = None,
+    use_orbax: bool = False) -> Optional[train_states.TrainState]:
   """Restores a checkpoint using JAX GDA deserialization mechanism."""
   if not tf.io.gfile.exists(checkpoint_dir) or not tf.io.gfile.listdir(
       checkpoint_dir):
@@ -551,7 +632,7 @@ def _restore_checkpoint_gda(
   if step is None:
     checkpoint_dirnames = tf.io.gfile.listdir(checkpoint_dir)
     tmp_checkpoint_dirnames = [
-        x for x in checkpoint_dirnames if _is_tmp_checkpoint_asset(x)
+        x for x in checkpoint_dirnames if _is_tmp_checkpoint(checkpoint_dir, x)
     ]
     if tmp_checkpoint_dirnames:
       logging.warn('Found incompletely saved checkpoints %s; skipping them',
@@ -587,6 +668,30 @@ def _restore_checkpoint_gda(
 
   flattened_global_shapes = jax.tree_map(lambda x: x.shape,
                                          flattened_train_state)
+
+  if use_orbax:
+
+    def create_restore_args(pspec, shape_struct):
+      return orbax.checkpoint.RestoreArgs(
+          mesh=global_mesh, mesh_axes=pspec, global_shape=shape_struct.shape)
+
+    restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
+                                flattened_train_state)
+
+    handler = PaxCheckpointHandler(
+        enable_flax=False, param_names=flattened_nested_names)
+    checkpointer = orbax.checkpoint.Checkpointer(handler)
+    # Consequently, we restore the checkpoint that does not contain any
+    # reference to MaskedNode's.
+    restored_train_state = checkpointer.restore(
+        checkpoint_step_dir,
+        item=flattened_train_state,
+        restore_args=restore_args)
+
+    # We add back the MaskedNode entries into the pytree.
+    restored_train_state = _tensorstore_reconstruct(state_global_shapes,
+                                                    restored_train_state)
+    return restored_train_state
 
   ckpt_paths = [
       os.path.join(checkpoint_step_dir, x).rstrip('/')

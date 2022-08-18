@@ -39,6 +39,7 @@ from jax.experimental.gda_serialization import serialization as gda_serializatio
 import numpy as np
 from paxml import automl
 from paxml import base_experiment
+from paxml import checkpoints
 from paxml import eval_lib
 from paxml import experiment_registry
 from paxml import setup_jax
@@ -87,6 +88,7 @@ flags.DEFINE_bool(
     'Enables fully asynchronous checkpointing via GDA and TensorStore. This '
     'means that the training can continue ahead when checkpointing is '
     'happening.')
+flags.DEFINE_bool('use_orbax', False, 'Enables Orbax for checkpointing.')
 flags.DEFINE_string(
     'checkpoint_todelete_subdir', None,
     'If set, checkpoints to be deleted will be only renamed into a '
@@ -235,12 +237,22 @@ def run_experiment(
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
+    async_checkpointer = None
     if FLAGS.jax_fully_async_checkpoint:
-      async_ckpt_manager_cls = gda_serialization.GlobalAsyncCheckpointManager
-      if FLAGS.maybe_use_persistence_checkpointing:
-        async_ckpt_manager_cls = (
-            persistence_gda_serialization.GlobalAsyncCheckpointManager)
-      async_ckpt_manager = async_ckpt_manager_cls(timeout_secs=600)
+      if FLAGS.use_orbax:
+        if FLAGS.maybe_use_persistence_checkpointing:
+          raise ValueError(
+              'Orbax persistence use case not yet supported.')
+        else:
+          async_checkpointer = checkpoints.AsyncCheckpointer(
+              checkpoints.PaxCheckpointHandler(enable_flax=False))
+      else:
+        if FLAGS.maybe_use_persistence_checkpointing:
+          async_ckpt_manager = persistence_gda_serialization.GlobalAsyncCheckpointManager(
+              timeout_secs=600)
+        else:
+          async_ckpt_manager = gda_serialization.GlobalAsyncCheckpointManager(
+              timeout_secs=600)
     else:
       async_ckpt_manager = None
 
@@ -254,7 +266,9 @@ def run_experiment(
         early_stopping_fn=early_stopping_fn,
         async_ckpt_manager=async_ckpt_manager,
         run_decode=FLAGS.decode_during_train,
-        enable_auto_sharding=FLAGS.enable_auto_sharding)
+        enable_auto_sharding=FLAGS.enable_auto_sharding,
+        use_orbax=FLAGS.use_orbax,
+        async_checkpointer=async_checkpointer)
   elif FLAGS.mode == 'eval':
     work_unit.set_task_status(f'Eval experiment {FLAGS.exp} at'
                               f' {job_log_dir}')

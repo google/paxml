@@ -197,7 +197,9 @@ def train_and_evaluate(
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     run_decode: bool = False,
-    enable_auto_sharding: bool = False) -> None:
+    enable_auto_sharding: bool = False,
+    use_orbax: bool = False,
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
   """Runs the training and evaluation loop.
 
   Args:
@@ -223,6 +225,10 @@ def train_and_evaluate(
       If and only if this is True, every `task_p.train.decode_interval_steps` of
       training, model runs decode.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
+    use_orbax: Enables checkpointing backed by Orbax.
+    async_checkpointer: When async checkpointing and Orbax are enabled, allows
+      training to continue when checkpointing is going on as checkpointing
+      happens in a different thread.
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -267,15 +273,31 @@ def train_and_evaluate(
                                                   checkpoint_todelete_subdir)
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
-                                  checkpoint_manager, checkpoint_type,
-                                  eval_input_p, decode_input_p,
-                                  early_stopping_fn, async_ckpt_manager,
-                                  enable_auto_sharding)
+    train_and_evaluate_spmd_model(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpoint_manager,
+        checkpoint_type,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+        async_ckpt_manager,
+        enable_auto_sharding,
+        use_orbax=use_orbax,
+        async_checkpointer=async_checkpointer)
   else:
-    train_and_evaluate_pmap(task_p, train_input_p, job_log_dir,
-                            checkpoint_manager, eval_input_p, decode_input_p,
-                            early_stopping_fn, async_ckpt_manager)
+    train_and_evaluate_pmap(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpoint_manager,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+        async_ckpt_manager,
+        use_orbax=use_orbax,
+        async_checkpointer=async_checkpointer)
 
 
 class _PeekableInput:
@@ -373,7 +395,8 @@ def train_and_evaluate_pmap(
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
-) -> None:
+    use_orbax: bool = False,
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
   """Runs the training and evaluation loop.
 
   Args:
@@ -390,6 +413,10 @@ def train_and_evaluate_pmap(
       should_stop_early.
     async_ckpt_manager: Asynchronous checkpoint manager which manages
       serialization and deserialization of GDA arrays. This manager allows
+      training to continue when checkpointing is going on as checkpointing
+      happens in a different thread.
+    use_orbax: Enables checkpointing backed by Orbax.
+    async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
   """
@@ -420,8 +447,9 @@ def train_and_evaluate_pmap(
   vars_weight_params = jax_task.model.abstract_init_with_metadata(
       init_key, sample_inputs)
   # Dump out model meta info for debugging.
-  trainer_lib.write_post_init_model_hparams_file(
-      jax_task.model, vars_weight_params, job_log_dir)
+  trainer_lib.write_post_init_model_hparams_file(jax_task.model,
+                                                 vars_weight_params,
+                                                 job_log_dir)
 
   train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
       vars_weight_params)
@@ -440,8 +468,8 @@ def train_and_evaluate_pmap(
     model_states = tasks_lib.restore_pmap_from_tensorstore(
         train_state_global_shapes, checkpoint_dir)
   else:
-    model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                  checkpoint_dir)
+    model_states = checkpoints.restore_checkpoint(
+        train_state_global_shapes, checkpoint_dir, use_orbax=use_orbax)
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
     model_states = trainer_lib.initialize_model_state(jax_task, init_key,
@@ -574,7 +602,9 @@ def train_and_evaluate_pmap(
               fully_replicated_gda_model_states,
               checkpoint_dir,
               checkpoint_type=CheckpointType.CHECKPOINT_GDA,
-              async_ckpt_manager=async_ckpt_manager)
+              async_ckpt_manager=async_ckpt_manager,
+              use_orbax=use_orbax,
+              async_checkpointer=async_checkpointer)
           py_utils.sync_global_devices(
               f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')
         else:
@@ -582,8 +612,11 @@ def train_and_evaluate_pmap(
             # We just need to save the first model replica.
             unreplicated_model_states = jax.tree_map(lambda x: x[0],
                                                      replicated_model_states)
-            checkpoints.save_checkpoint(unreplicated_model_states,
-                                        checkpoint_dir)
+            checkpoints.save_checkpoint(
+                unreplicated_model_states,
+                checkpoint_dir,
+                use_orbax=use_orbax,
+                async_checkpointer=async_checkpointer)
         checkpoint_manager.save_metadata(global_step_id=step_i)
 
       if async_ckpt_manager is not None:
@@ -755,7 +788,8 @@ def train_and_evaluate_spmd_model(
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     enable_auto_sharding: bool = False,
-) -> None:
+    use_orbax: bool = False,
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
   """Runs the training and evaluation loop.
 
   Args:
@@ -776,6 +810,10 @@ def train_and_evaluate_spmd_model(
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
+    use_orbax: Enables checkpointing backed by Orbax.
+    async_checkpointer: When async checkpointing and Orbax are enabled, allows
+      training to continue when checkpointing is going on as checkpointing
+      happens in a different thread.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   model_p = task_p.model
@@ -910,7 +948,8 @@ def train_and_evaluate_spmd_model(
         checkpoint_dir,
         global_mesh=global_mesh,
         checkpoint_type=checkpoint_type,
-        state_specs=train_state_pspecs)
+        state_specs=train_state_pspecs,
+        use_orbax=use_orbax)
 
     # Randomly initialized variables if no files in checkpoint dir.
     if partitioned_train_state is None:
@@ -1026,7 +1065,9 @@ def train_and_evaluate_spmd_model(
               checkpoint_dir,
               checkpoint_type=checkpoint_type,
               state_specs=train_state_pspecs,
-              async_ckpt_manager=async_ckpt_manager)
+              async_ckpt_manager=async_ckpt_manager,
+              use_orbax=use_orbax,
+              async_checkpointer=async_checkpointer)
           checkpoint_manager.save_metadata(global_step_id=step_i)
           py_utils.sync_global_devices(
               f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')
