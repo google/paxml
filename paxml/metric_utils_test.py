@@ -26,6 +26,7 @@ import flax
 import numpy as np
 from paxml import metric_utils
 from paxml import summary_utils
+import seqio
 
 
 @flax.struct.dataclass
@@ -176,6 +177,61 @@ class MetricUtilsTest(absltest.TestCase):
     with summary_utils.get_summary_writer(test_dir):
       metric_utils.write_clu_metric_summaries(metric_values, step_i=0)
 
+  def is_float_convertible(self):
+    self.assertTrue(metric_utils.is_float_convertible(0.1))
+    self.assertTrue(metric_utils.is_float_convertible(np.float32(0.1)))
+    self.assertTrue(metric_utils.is_float_convertible(clu_values.Scalar(0.1)))
+    self.assertTrue(
+        metric_utils.is_float_convertible(seqio.metrics.Scalar(0.1)))
+    self.assertTrue(
+        metric_utils.is_float_convertible((np.array([1.0]), np.array([0.1]))))
+    self.assertTrue(
+        metric_utils.is_float_convertible([(np.array([1.0]), np.array([0.1]))]))
+    self.assertFalse(metric_utils.is_float_convertible('abc'))
+    self.assertFalse(
+        metric_utils.is_float_convertible(seqio.metrics.Text('abc')))
+    self.assertFalse(metric_utils.is_float_convertible(clu_values.Text('abc')))
+
+  def test_as_float(self):
+    self.assertEqual(metric_utils.as_float(0.2), 0.2)
+    self.assertEqual(metric_utils.as_float(np.float32(1.0)), 1.0)
+    self.assertEqual(metric_utils.as_float(clu_values.Scalar(0.2)), 0.2)
+    self.assertEqual(
+        metric_utils.as_float(clu_values.Scalar(np.float32(1.0))), 1.0)
+
+    self.assertEqual(
+        metric_utils.as_float((np.array([1.0]), np.array([0.1]))), 1.0)
+    self.assertEqual(
+        metric_utils.as_float([(np.array([1.0]), np.array([0.1])),
+                               (np.array([3.0]), np.array([0.1]))]), 2.0)
+
+  def test_as_float_dict(self):
+    self.assertEqual(metric_utils.as_float_dict({'x': 0.2}), {'x': 0.2})
+    self.assertEqual(
+        metric_utils.as_float_dict({'x': np.float32(1.0)}), {'x': 1.0})
+    self.assertEqual(
+        metric_utils.as_float_dict({
+            'x': clu_values.Scalar(np.float32(1.0)),
+            'y': 0.3,
+            'z': clu_values.Text('abc')
+        }), {
+            'x': 1.0,
+            'y': 0.3
+        })
+
+  def test_merge_float_dict(self):
+    m1 = {'a': 1, 'b': 2}
+    self.assertEqual(
+        metric_utils.update_float_dict(m1, {'a': 2}), {
+            'a': 2,
+            'b': 2
+        })
+    self.assertEqual(
+        metric_utils.update_float_dict(m1, {'a': 2}, prefix='x'), {
+            'a': 2,
+            'b': 2,
+            'x/a': 2
+        })
 
 if __name__ == '__main__':
   absltest.main()

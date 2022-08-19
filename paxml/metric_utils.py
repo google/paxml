@@ -15,17 +15,28 @@
 
 """Utility functions for metric evaluation in Pax."""
 
-from typing import Any, Dict, Union
+import numbers
+import typing
+from typing import Any, Dict, List, Optional, Sequence, Union
 from absl import logging
 
 import clu.values as clu_values
+from jax import numpy as jnp
+import numpy as np
 
 from paxml import summary_utils
+from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
+import seqio
+from tensorflow.compat.v2 import summary as tf_summary
 
 
 Metrics = pytypes.Metrics
+WeightedScalar = pytypes.WeightedScalar
+WeightedScalars = pytypes.WeightedScalars
+WeightedScalarsList = pytypes.WeightedScalarsList
+
 NestedMap = py_utils.NestedMap
 SummaryValueTypes = Union[
     clu_values.Scalar, clu_values.Image, clu_values.Text]
@@ -108,3 +119,163 @@ def write_clu_metric_summaries(
     summary_type = _get_summary_type(metric_value)
     summary_utils.write_summary_tensor(
         step_i, metric_name, metric_value.value, summary_type)
+
+
+def write_seqio_metric_summaries(seqio_metrics: Sequence[Dict[str, Union[
+    seqio.metrics.MetricValue, float]]], metric_name_prefix: str,
+                                 step: int) -> None:
+  """Write seqio metric as tensorboard summaries.
+
+  Args:
+    seqio_metrics: A sequence of Dict of str to seqio metric value or float.
+    metric_name_prefix: A prefix added to metric name.
+    step: An int. representing the current step.
+  """
+  for m_dict in seqio_metrics:
+    for k, v in m_dict.items():
+      metric_name = f'{metric_name_prefix}/{k}'
+      if isinstance(v, seqio.metrics.Text):
+        metric_str = (
+            v.textdata.decode()
+            if isinstance(v.textdata, bytes) else v.textdata)
+        logging.info('Writing summary of %s with string value %s.', metric_name,
+                     metric_str)
+        tf_summary.text(metric_name, metric_str, step=step)
+        continue
+      if isinstance(v, seqio.metrics.Scalar):
+        v = float(v.value)
+      else:
+        v = float(v)
+      logging.info('Writing summary of %s with value %.4f.', metric_name, v)
+      summary_utils.write_summary_tensor(step, metric_name, v,
+                                         summary_utils.SummaryType.SCALAR)
+
+
+def is_weighted_scalar(v: Any) -> bool:
+  """Returns True if input is a weighted scalar."""
+  return (isinstance(v, tuple) and len(v) == 2 and
+          isinstance(v[0], (np.ndarray, jnp.ndarray)) and
+          isinstance(v[1], (np.ndarray, jnp.ndarray)))
+
+
+def is_float_convertible(metric_value: Union[numbers.Number, clu_values.Value,
+                                             seqio.metrics.MetricValue]):
+  """Returns True if a metricv value is float convertible."""
+  return (isinstance(metric_value, numbers.Number) or
+          isinstance(metric_value, clu_values.Scalar) or
+          isinstance(metric_value, seqio.metrics.Scalar) or
+          is_weighted_scalar(metric_value) or
+          (isinstance(metric_value, list) and
+           all(is_weighted_scalar(v) for v in metric_value)))
+
+
+def as_float(
+    metric_value: Union[numbers.Number, clu_values.Scalar, seqio.metrics.Scalar,
+                        WeightedScalar, Sequence[WeightedScalar]]
+) -> float:
+  """Returns the aggregated float value from heterogeneous metric value."""
+  if is_weighted_scalar(metric_value):
+    metric_value = [metric_value]
+
+  if isinstance(metric_value, list):
+    assert all(is_weighted_scalar(v) for v in metric_value), metric_value
+    values = np.stack([x[0] for x in metric_value])
+    weights = np.stack([x[1] for x in metric_value])
+    return np.sum(values * weights) / np.sum(weights)
+  if isinstance(metric_value, (clu_values.Scalar, seqio.metrics.Scalar)):
+    return metric_value.value
+  assert isinstance(metric_value, numbers.Number), metric_value
+  return float(typing.cast(Any, metric_value))
+
+
+def as_float_dict(
+    metric_output: Union[Dict[str, SummaryValueTypes], WeightedScalars,
+                         WeightedScalarsList],
+    raise_on_non_float_convertible: bool = False) -> Dict[str, float]:
+  """Returns a float dict from heterogeneous metric output."""
+  results = {}
+  for k, v in metric_output.items():
+    if not is_float_convertible(v):
+      if raise_on_non_float_convertible:
+        raise ValueError(f'Summary value cannot be converted to float: {v}.')
+      continue
+    results[k] = as_float(v)
+  return results
+
+
+def update_float_dict(target: Dict[str, float],
+                      source: Dict[str, float],
+                      prefix: Optional[str] = None) -> Dict[str, float]:
+  """Inserts items from source dict to target dict with an optional prefix."""
+  if prefix is None:
+    target.update(source)
+  else:
+    for k, v in source.items():
+      target[f'{prefix}/{k}'] = v
+  return target
+
+
+def aggregate_metrics_for_tuning(
+    train_metrics: Optional[Dict[str, float]] = None,
+    eval_train_metrics: Optional[Dict[str, float]] = None,
+    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
+    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
+    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
+        str, float]]]] = None,
+    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    num_params: Optional[float] = None,
+    train_steps_per_sec: Optional[float] = None,
+    eval_steps_per_sec: Optional[float] = None,
+    decode_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
+  """Aggregate metrics from training, evaluation and decoding for tuning."""
+  metrics = {}
+  if train_metrics is not None:
+    update_float_dict(metrics, train_metrics, 'train')
+
+  if eval_train_metrics is not None:
+    update_float_dict(metrics, eval_train_metrics, 'eval_train/metrics')
+
+  def _add_input_based_metrics(
+      input_p: Optional[List[base_input.BaseInput.HParams]],
+      metrics_list: Optional[List[Optional[Dict[str, float]]]],
+      dataset_type: Optional[str] = None,
+      category: Optional[str] = None):
+    if input_p is None or metrics_list is None:
+      return
+    assert len(input_p) == len(metrics_list), (input_p, metrics_list)
+    merged = {}
+    for p, m in zip(input_p, metrics_list):
+      if m is not None:
+        prefix = p.name
+        if dataset_type is not None:
+          prefix = f'{dataset_type}_{prefix}'
+        if category is not None:
+          prefix = f'{prefix}/{category}'
+        update_float_dict(merged, m, prefix)
+    update_float_dict(metrics, merged)
+
+  _add_input_based_metrics(eval_input_p, eval_metrics_list, 'eval_test',
+                           'metrics')
+  _add_input_based_metrics(eval_input_p, eval_scoring_metrics_list, 'eval_test',
+                           'scoring_eval')
+  _add_input_based_metrics(decode_input_p, decode_metrics_list, 'decode_test')
+  _add_input_based_metrics(decode_input_p, processed_decode_metrics_list,
+                           'decode_test')
+  _add_input_based_metrics(decode_input_p, decode_seqio_metrics_list,
+                           'decode_test')
+
+  # Add training metrics.
+  def _add_metric_if_not_none(name: str, value: Optional[float]):
+    if value is not None:
+      metrics[name] = value
+
+  _add_metric_if_not_none('train_steps_per_sec', train_steps_per_sec)
+  _add_metric_if_not_none('eval_steps_per_sec', eval_steps_per_sec)
+  _add_metric_if_not_none('decode_steps_per_sec', decode_steps_per_sec)
+  _add_metric_if_not_none('num_params', num_params)
+  return metrics

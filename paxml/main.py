@@ -26,7 +26,7 @@ import os
 import random
 import re
 import time
-from typing import Dict, Optional, Sequence, Union
+from typing import Dict, Optional, Sequence
 
 from absl import app
 from absl import flags
@@ -36,7 +36,6 @@ import fiddle as fdl
 from fiddle import absl_flags
 import jax
 from jax.experimental.gda_serialization import serialization as gda_serialization
-import numpy as np
 from paxml import automl
 from paxml import base_experiment
 from paxml import checkpoints
@@ -127,7 +126,7 @@ flags.DEFINE_string(
     'one process should report the measurement and signal the completion or '
     'stopping of the training. See flag `metrics_from` for details.')
 flags.DEFINE_enum(
-    'metrics_from', 'eval', ['train', 'eval'],
+    'metrics_from', 'eval', ['train', 'eval', 'decode'],
     'This flag specifies from which process the measurements should be '
     'used for tuning. By default it is set to eval.')
 flags.DEFINE_integer(
@@ -165,39 +164,9 @@ def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
   time.sleep(random.randint(min_secs, max_secs))
 
 
-def extract_metrics(
-    metrics_by_dataset: Dict[str, Union[trainer_lib.WeightedScalars,
-                                        trainer_lib.WeightedScalarsList]]
-) -> Dict[str, float]:
-  """Extract a flattened metric dict from a metric dict per dataset."""
-  metrics = {}
-
-  def add_metric(dataset_name, key, values):
-    if dataset_name is not None:
-      key = f'{dataset_name}/{key}'
-    if isinstance(values, tuple):
-      values = [values]
-    metric_values = np.stack([v[0] for v in values])
-    metric_weights = np.stack([v[1] for v in values])
-    metrics[key] = np.sum(
-        metric_values * metric_weights) / np.sum(metric_weights)
-
-  # When there is only one dataset, we allow the metric key to be directly
-  # used in reward_fn without providing the dataset name.
-  if len(metrics_by_dataset) == 1:
-    the_dataset_metric = list(metrics_by_dataset.values())[0]
-    for k, v in the_dataset_metric.items():
-      add_metric(None, k, v)
-
-  for dataset_name, dataset_metrics in metrics_by_dataset.items():
-    for k, v in dataset_metrics.items():
-      add_metric(dataset_name, k, v)
-  return metrics
-
-
-def _default_early_stopping_fn(weighted_scalars,
-                               step_i: int,
-                               unused_arg: bool):
+def _default_early_stopping_fn(metrics: Dict[str, float],
+                               running_mode: trainer_lib.RunningMode,
+                               step_i: int, unused_arg: bool) -> bool:
   """Dumping metrics into JSON file for debugging and other consumptions."""
   if jax.process_index() == 0:
     metric_dir = os.path.join(FLAGS.job_log_dir, 'metrics')
@@ -207,12 +176,15 @@ def _default_early_stopping_fn(weighted_scalars,
       raise ValueError(f'{metric_dir} should be a directory.')
     metric_file_name = os.path.join(metric_dir, f'step-{step_i:06d}.json')
     # Update and re-save the metrics.
-    if weighted_scalars is not None:
+    if (running_mode & trainer_lib.RunningMode.EVAL or
+        running_mode & trainer_lib.RunningMode.DECODE):
       if tf.io.gfile.exists(metric_file_name):
-        metrics = pg.load(metric_file_name)
+        # NOTE(daiyip): converting pg.Dict to dict which allows updates
+        # with dot ('.') separated keys. (dot can be a part of dataset name)
+        existing_metrics = dict(pg.load(metric_file_name))
       else:
-        metrics = {}
-      metrics.update(extract_metrics(weighted_scalars))
+        existing_metrics = {}
+      metrics.update(existing_metrics)
       pg.save(metrics, metric_file_name)
   return False
 
@@ -229,8 +201,8 @@ def run_experiment(
     experiment_config: The experiment to run.
     work_unit: Work unit for adding experiment artifact and reporting status.
     job_log_dir: The directory for storing logs and writing checkpoints.
-    early_stopping_fn: The early stopping function for training and evaluation.
-      If None, the training and evaluation will train to requested steps.
+    early_stopping_fn: The early stopping function for training, evaluation
+      and decoding. If None, the training will train to requested steps.
   """
   train.write_hparams_file(experiment_config, job_log_dir,
                            '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
@@ -290,7 +262,7 @@ def run_experiment(
         restore_checkpoint_step=None,
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
-    )
+        early_stopping_fn=early_stopping_fn)
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -303,7 +275,7 @@ def run_experiment(
         restore_checkpoint_step=FLAGS.restore_checkpoint_step,
         continuous_decode=False,
         run_eval=FLAGS.eval_during_decode,
-    )
+        early_stopping_fn=early_stopping_fn)
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
@@ -362,6 +334,7 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
   def inspect_search_space() -> None:
     _ = experiment_config.task()
     _ = experiment_config.datasets()
+    _ = experiment_config.decoder_datasets()
 
   search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
   if search_space.dna_spec.is_constant:
@@ -400,22 +373,24 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
       feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
     """Gets early stopping function based on a feedback object."""
 
-    def should_stop_early(metrics_by_dataset: Optional[Dict[str, Union[
-        trainer_lib.WeightedScalarsList, trainer_lib.WeightedScalars]]],
+    def should_stop_early(metrics: Dict[str, float],
+                          running_mode: trainer_lib.RunningMode,
                           global_step: int, is_last_checkpoint: bool) -> bool:
       """Early stopping function."""
       if FLAGS.metrics_from == FLAGS.mode:
         # `metrics_by_dataset` could be None for interleaved train/eval
         # when evaluation is not performed at current global step.
-        if metrics_by_dataset is not None and jax.process_index() == 0:
+        if (jax.process_index() == 0 and
+            (running_mode & trainer_lib.RunningMode.EVAL or
+             running_mode & trainer_lib.RunningMode.DECODE)):
           # Computing reward and report back to the tuning service.
-          metrics = extract_metrics(metrics_by_dataset)
           reward = reward_fn(metrics, global_step)
           feedback.add_measurement(reward, metrics=metrics, step=global_step)
           logging.info(
               'Measurement is reported to trial %d at step %d '
-              'with reward value %f (is_last_checkpoint=%s): %s.',
-              feedback.id, global_step, reward, is_last_checkpoint, metrics)
+              'with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
+              feedback.id, global_step, reward, running_mode,
+              is_last_checkpoint, metrics)
         if is_last_checkpoint:
           py_utils.sync_global_devices(
               f'Trial termination at step {global_step} started.')
@@ -426,7 +401,6 @@ def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
               f'Trial termination at step {global_step} completed.')
           logging.info('Trial %d is now completed.', feedback.id)
       return feedback.should_stop_early()
-
     return should_stop_early
 
   for example, feedback in pg.sample(

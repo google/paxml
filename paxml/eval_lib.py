@@ -23,16 +23,14 @@ import os
 import sys
 import time
 import typing
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from absl import flags
 from absl import logging
 from clu import platform
 import jax
-from jax.experimental import global_device_array as gda_lib
 from jax.experimental import maps
 from jax.experimental import multihost_utils
-import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
@@ -47,19 +45,17 @@ from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
-from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
 from praxis import train_states
-import seqio
 import tensorflow.compat.v2 as tf
-from tensorflow.compat.v2 import summary as tf_summary
 import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
 
 CheckpointType = checkpoint_pb2.CheckpointType
-WeightedScalars = base_model.WeightedScalars
+WeightedScalars = pytypes.WeightedScalars
+WeightedScalarsList = pytypes.WeightedScalarsList
 Metrics = pytypes.Metrics
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
@@ -115,30 +111,6 @@ def run_eval_one_step(eval_inputs: NestedJTensor,
   return loss, weighted_scalars, per_example_output, summary_tensors
 
 
-def _summary_seqio_metrics(seqio_metrics: Sequence[Mapping[str, Union[
-    seqio.metrics.MetricValue, float]]], metric_name_prefix: str,
-                           step: int) -> None:
-  """Writes seqio metrics to summaries."""
-  for m_dict in seqio_metrics:
-    for k, v in m_dict.items():
-      metric_name = f'{metric_name_prefix}/{k}'
-      if isinstance(v, seqio.metrics.Text):
-        metric_str = (
-            v.textdata.decode()
-            if isinstance(v.textdata, bytes) else v.textdata)
-        logging.info('Writing summary of %s with string value %s.', metric_name,
-                     metric_str)
-        tf_summary.text(metric_name, metric_str, step=step)
-        continue
-      if isinstance(v, seqio.metrics.Scalar):
-        v = float(v.value)
-      else:
-        v = float(v)
-      logging.info('Writing summary of %s with value %.4f.', metric_name, v)
-      summary_utils.write_summary_tensor(step, metric_name, v,
-                                         summary_utils.SummaryType.SCALAR)
-
-
 def run_eval_loop_over_test_splits(
     num_steps: List[int],
     eval_step: Callable[[NestedJTensor], Any],
@@ -150,7 +122,10 @@ def run_eval_loop_over_test_splits(
     global_mesh=None,
     reshard_inputs: Optional[bool] = False,
     create_gda_for_inputs: bool = False
-) -> List[summary_utils.WeightedScalarsList]:
+) -> Tuple[List[Dict[str, float]],  # eval metrics.
+           List[Optional[Dict[str, float]]],  # eval scoring metrics.
+           List[int]  # performed eval steps.
+          ]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -166,11 +141,16 @@ def run_eval_loop_over_test_splits(
     create_gda_for_inputs: Whether to create GDAs for model inputs.
 
   Returns:
-    A list of eval metrics dictionaries (same order as eval splits/pipelines).
+    A tuple of (a list of eval metrics,
+                a list of optional scoring metrics (seqio)
+                a list of integer as performed evaluation steps).
+      Items from each list are aligned with the `model_inputs`.
   """
   # If reshard_inputs = True, meaning this is called from pmap, hence we need to
   # unreplicate metrics for reporting.
-  metrics_output = []
+  eval_metrics_list = []
+  eval_scoring_metrics_list = []
+  num_eval_steps = []
   for split, num_split_steps in enumerate(num_steps):
     logging.info('Starting eval data split=%d with num_steps=%d', split,
                  num_split_steps)
@@ -224,6 +204,7 @@ def run_eval_loop_over_test_splits(
       for k in eval_metrics:
         metrics[k].append(eval_metrics[k])
 
+    eval_scoring_metrics = None
     if (model_inputs[split].hparams.reset_for_eval and
         isinstance(model_inputs[split], seqio_input.SeqIOInput) and
         jax.process_index() == 0):
@@ -231,7 +212,12 @@ def run_eval_loop_over_test_splits(
           per_example_scores, verbose_entries=1)
       logging.info('Eval metrics from seqio: %s.', seqio_metrics)
       with summary_writers[split].as_default():
-        _summary_seqio_metrics(seqio_metrics, 'scoring_eval', step)
+        metric_utils.write_seqio_metric_summaries(seqio_metrics, 'scoring_eval',
+                                                  step)
+      eval_scoring_metrics = {}
+      for sm in seqio_metrics:
+        eval_scoring_metrics = metric_utils.update_float_dict(
+            eval_scoring_metrics, metric_utils.as_float_dict(sm))
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -239,17 +225,18 @@ def run_eval_loop_over_test_splits(
     loss = np.mean(loss, axis=0)
     logging.info('step_i: %d, eval test split %s loss: %s', step, split, loss)
     for key, values in metrics.items():
-      metric_values = np.stack([v[0] for v in values])
-      metric_weights = np.stack([v[1] for v in values])
-      sum_metric_weights = np.sum(metric_weights)
-      weighted_average = np.sum(
-          metric_values * metric_weights) / sum_metric_weights
-      logging.info('  %s=%f (weight=%f)', key, weighted_average.item(),
+      # `metric_utils.as_float` computes the average from a list of weighted
+      # scalars.
+      weighted_average = metric_utils.as_float(values)
+      sum_metric_weights = np.sum(np.stack([v[1] for v in values]))
+      logging.info('  %s=%f (weight=%f)', key, weighted_average,
                    sum_metric_weights.item())
     summary_utils.write_summary_entry(summary_writers[split], step, loss,
                                       metrics, summary_tensors)
-    metrics_output.append(metrics)
-  return metrics_output
+    eval_metrics_list.append(metric_utils.as_float_dict(metrics))
+    eval_scoring_metrics_list.append(eval_scoring_metrics)
+    num_eval_steps.append(step_num)
+  return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 
 
 def evaluate(
@@ -268,7 +255,8 @@ def evaluate(
     early_stopping_fn: An optional callable object for reporting eval metrics
       and determining whether to early stop current training.
       The callable object has signature:
-      (metrics_by_dataset, ckpt_step, is_final_ckpt) -> should_stop_early.
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -302,9 +290,9 @@ class _PmapEvalRunner:
         track_metric)
 
     runner = _PmapEvalRunner(task_p, eval_input_params, jax_task, prng_key)
-    metrics_list = runner.run_one_step(replicated_model_states,
-                                       sample_inputs,
-                                       eval_summary_writers)
+    metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+        runner.run_one_step(
+            replicated_model_states, sample_inputs, eval_summary_writers))
   """
 
   def __init__(self, task_p: tasks_lib.SingleTask.HParams,
@@ -394,10 +382,13 @@ class _PmapEvalRunner:
       self,
       replicated_model_states: train_states.TrainState,
       eval_summary_writers: List[SummaryWriter],
-  ):
+  ) -> Tuple[List[Dict[str, float]],  # eval metrics list.
+             List[Optional[Dict[str, float]]],  # seqio metrics list.
+             List[int]  # actual eval steps.
+            ]:
     """Runs evaluate for one step for all test splits."""
     if not self._eval_input_p:
-      return []
+      return [], [], []
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             replicated_model_states.step))
@@ -408,14 +399,13 @@ class _PmapEvalRunner:
                                   inputs)
 
     # Run the eval loop.
-    metrics_list = run_eval_loop_over_test_splits(
+    return run_eval_loop_over_test_splits(
         self._eval_num_steps,
         eval_step_fn,
         eval_summary_writers,
         step_i,
         self._eval_input_pipelines,
         reshard_inputs=True)
-    return metrics_list
 
 
 def evaluate_pmap_model(
@@ -429,10 +419,10 @@ def evaluate_pmap_model(
     task_p: Params for the task encapsulating the data parallel model.
     eval_input_p: List of params for the eval data input pipelines.
     job_log_dir: Directory for the job logs.
-    early_stopping_fn: An optional callable object for reporting eval metrics
+    early_stopping_fn: An optional callable object for reporting metrics
       and determining whether to early stop current training.
-      The callable object has signature: (metrics_by_dataset, ckpt_step,
-        is_final_ckpt) -> should_stop_early.
+      The callable object has signature:
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
@@ -473,8 +463,10 @@ def evaluate_pmap_model(
     ]
 
     while True:
-      metrics_list = runner.run_one_step(replicated_model_states,
-                                         eval_summary_writers)
+      with py_utils.timeit() as eval_period:
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            runner.run_one_step(replicated_model_states, eval_summary_writers))
+
       # If the last check point evaluated matches max train steps, exit.
       if last_checkpoint is not None:
         last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
@@ -482,8 +474,13 @@ def evaluate_pmap_model(
         exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if early_stopping_fn is not None:
-          metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
-          if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
+          metrics = metric_utils.aggregate_metrics_for_tuning(
+              eval_input_p=eval_input_p,
+              eval_metrics_list=eval_metrics_list,
+              eval_scoring_metrics_list=eval_scoring_metrics_list,
+              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+          if early_stopping_fn(metrics, trainer_lib.RunningMode.EVAL,
+                               last_ckpt_step, is_last_ckpt):
             logging.info(
                 'Evaluation is early stopped at checkpoint step %d by the'
                 'tuner, while the num_train_steps is %d', last_ckpt_step,
@@ -527,9 +524,9 @@ class _SpmdEvalRunner:
     runner = _SpmdEvalRunner(
         task_p, sample_input_params, jax_task, global_mesh,
         init_key, partitioned_specs)
-    metrics_list = runner.run_one_step(partitioned_train_state,
-                                       eval_summary_writers, eval_key,
-                                       create_gda_for_inputs)
+    eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+        runner.run_one_step(partitioned_train_state, eval_summary_writers,
+                            eval_key, create_gda_for_inputs))
   """
 
   def __init__(self, task_p: tasks_lib.SingleTask.HParams,
@@ -620,12 +617,17 @@ class _SpmdEvalRunner:
       self._eval_step = eval_step
       self._inputs_partition_specs = inputs_partition_specs
 
-  def run_one_step(self, partitioned_train_state: train_states.TrainState,
-                   eval_summary_writers: List[SummaryWriter], eval_key: PRNGKey,
-                   use_gda: bool):
+  def run_one_step(
+      self, partitioned_train_state: train_states.TrainState,
+      eval_summary_writers: List[SummaryWriter], eval_key: PRNGKey,
+      use_gda: bool
+  ) -> Tuple[List[Dict[str, float]],  # eval metrics list.
+             List[Optional[Dict[str, float]]],  # eval scoring metrics list.
+             List[int]  # performed eval steps.
+            ]:
     """Runs evaluate for one step. Requires calling run_pjit() prior."""
     if not self._eval_input_p:
-      return []
+      return [], [], []
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
@@ -635,7 +637,7 @@ class _SpmdEvalRunner:
         eval_key)
     # Run the eval loop.
     with self.global_mesh:
-      metrics_list = run_eval_loop_over_test_splits(
+      return run_eval_loop_over_test_splits(
           self._eval_num_steps,
           eval_step_fn,
           eval_summary_writers,
@@ -646,7 +648,6 @@ class _SpmdEvalRunner:
           self.global_mesh,
           reshard_inputs=False,
           create_gda_for_inputs=use_gda)
-    return metrics_list
 
 
 def evaluate_spmd_model(
@@ -662,10 +663,10 @@ def evaluate_spmd_model(
     eval_input_p: List of Params for the eval data pipelines.
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
-    early_stopping_fn: An optional callable object for reporting eval metrics
+    early_stopping_fn: An optional callable object for reporting metrics
       and determining whether to early stop current training.
       The callable object has signature:
-      (metrics_by_dataset, ckpt_step, is_final_ckpt) -> should_stop_early.
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
@@ -746,9 +747,10 @@ def evaluate_spmd_model(
         for d in summary_eval_dirs
     ]
     while True:
-      metrics_list = runner.run_one_step(partitioned_train_state,
-                                         eval_summary_writers, eval_key,
-                                         create_gda_for_inputs)
+      with py_utils.timeit() as eval_period:
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            runner.run_one_step(partitioned_train_state, eval_summary_writers,
+                                eval_key, create_gda_for_inputs))
       # If the last check point evaluated matches max train steps, exit.
       if last_checkpoint is not None:
         last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
@@ -756,8 +758,13 @@ def evaluate_spmd_model(
         exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if early_stopping_fn is not None:
-          metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
-          if early_stopping_fn(metrics, last_ckpt_step, is_last_ckpt):
+          metrics = metric_utils.aggregate_metrics_for_tuning(
+              eval_input_p=eval_input_p,
+              eval_metrics_list=eval_metrics_list,
+              eval_scoring_metrics_list=eval_scoring_metrics_list,
+              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+          if early_stopping_fn(metrics, trainer_lib.RunningMode.EVAL,
+                               last_ckpt_step, is_last_ckpt):
             logging.info(
                 'Evaluation is early stopped at checkpoint step %d by the'
                 'tuner, while the num_train_steps is %d', last_ckpt_step,
@@ -790,7 +797,7 @@ def decode(
     restore_checkpoint_step: Optional[int],
     continuous_decode: bool,
     run_eval: Optional[bool] = False,
-) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs decoding on the decoder datasets.
 
   Args:
@@ -805,6 +812,10 @@ def decode(
     continuous_decode: whether to continuously decode on the latest ckpt.
     run_eval: whether to run evaluate() (i.e. to obtain scoring based metrics)
       as well.
+    early_stopping_fn: An optional callable object for reporting metrics
+      and determining whether to early stop current training.
+      The callable object has signature:
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   if continuous_decode and restore_checkpoint_dir:
     raise ValueError('restore_checkpoint_{dir,step} only supported with '
@@ -837,11 +848,12 @@ def decode(
         maybe_use_persistence_checkpointing, task_p)
     decode_spmd_model(task_p, decoder_inputs, eval_inputs, job_log_dir,
                       checkpoint_type, restore_checkpoint_dir,
-                      restore_checkpoint_step, continuous_decode)
+                      restore_checkpoint_step, continuous_decode,
+                      early_stopping_fn)
   else:
     decode_pmap_model(task_p, decoder_inputs, eval_inputs, job_log_dir,
                       restore_checkpoint_dir, restore_checkpoint_step,
-                      continuous_decode)
+                      continuous_decode, early_stopping_fn)
 
 
 def _get_dir_names(
@@ -892,7 +904,7 @@ def decode_pmap_model(
     restore_checkpoint_dir: Optional[str],
     restore_checkpoint_step: Optional[int],
     continuous_decode: bool,
-) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs the decoding on the entire decoder datasets for a PMAP model.
 
   Args:
@@ -905,6 +917,10 @@ def decode_pmap_model(
     restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
       try to restore from the latest checkpoint if any.
     continuous_decode: whether to continuously decode on the latest ckpt.
+    early_stopping_fn: An optional callable object for reporting metrics
+      and determining whether to early stop current training.
+      The callable object has signature:
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
       job_log_dir, 'checkpoints')
@@ -979,16 +995,43 @@ def decode_pmap_model(
     last_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
 
     while True:
-      decode_once_pmap_model(jax_task, task_p, inputs, input_p, prng_seed,
-                             job_log_dir, replicated_model_states,
-                             summary_writers)
-      eval_runner.run_one_step(replicated_model_states, eval_summary_writers)
+      with py_utils.timeit() as decode_period:
+        (decode_metrics_list, processed_decode_metrics_list,
+         decode_seqio_metrics_list, num_decode_steps) = decode_once_pmap_model(
+             jax_task, task_p, inputs, input_p, prng_seed, job_log_dir,
+             replicated_model_states, summary_writers)
+
+      with py_utils.timeit() as eval_period:
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            eval_runner.run_one_step(replicated_model_states,
+                                     eval_summary_writers))
+
       if not continuous_decode:
         break
       if last_checkpoint is not None:
         last_ckpt_step = int(last_checkpoint.split('_')[-1])
         exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
-        if exceeded_ckpt > task_p.train.num_train_steps:
+        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
+        if early_stopping_fn:
+          metrics = metric_utils.aggregate_metrics_for_tuning(
+              eval_input_p=eval_input_p,
+              eval_metrics_list=eval_metrics_list,
+              eval_scoring_metrics_list=eval_scoring_metrics_list,
+              decode_input_p=input_p,
+              decode_metrics_list=decode_metrics_list,
+              processed_decode_metrics_list=processed_decode_metrics_list,
+              decode_seqio_metrics_list=decode_seqio_metrics_list,
+              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+              decode_steps_per_sec=sum(num_decode_steps) /
+              decode_period.elapsed)
+          if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
+                               last_ckpt_step, is_last_ckpt):
+            logging.info(
+                'Decoding is early stopped at checkpoint step %d by the'
+                'tuner, while the num_train_steps is %d', last_ckpt_step,
+                task_p.train.num_train_steps)
+            break
+        if is_last_ckpt:
           break
       # Release replicated_model_states.
       del replicated_model_states
@@ -1021,7 +1064,11 @@ def decode_once_pmap_model(
     job_log_dir: str,
     replicated_model_states: train_states.TrainState,
     summary_writers: List[SummaryWriter],
-) -> None:
+) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
+           List[Optional[Dict[str, float]]],  # processed decode metrics.
+           List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+           List[int]  # performed decode steps.
+          ]:
   """Runs the decoding on the entire decoder datasets for a PMAP model.
 
   Args:
@@ -1033,9 +1080,16 @@ def decode_once_pmap_model(
     job_log_dir: Directory for the job logs.
     replicated_model_states: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
+
+  Returns:
+    A tuple of (a list of decode metrics,
+                a list of processed decode metrics,
+                a list of optional decoder (seqio) metrics.
+                 list of integers as performed decode steps for each input).
+      Items from each list are aligned with each input from input_p.
   """
   if not input_p:
-    return
+    return [], [], [], []
   work_unit = platform.work_unit()
   model = jax_task.model
   model_p = task_p.model
@@ -1109,10 +1163,20 @@ def decode_once_pmap_model(
   dirnames = _get_dir_names(input_p)
   filename = _get_filename(replicated_model_states.step)
   filenames = [os.path.join(basedir, s, filename) for s in dirnames]
+
+  decode_metrics_list = []
+  processed_decode_metrics_list = []
+  seqio_metrics_list = []
+  num_decode_steps = []
+
   for split, num_split_steps in enumerate(num_steps_per_input):
     if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
+      decode_metrics_list.append(None)
+      processed_decode_metrics_list.append(None)
+      seqio_metrics_list.append(None)
+      num_decode_steps.append(0)
       continue
     logging.info('Start decoding on input %s', input_p[split].name)
     step_num = 0
@@ -1169,8 +1233,10 @@ def decode_once_pmap_model(
       work_unit.set_task_status(f'Finished decoding input batch {step_num} '
                                 f'on {input_p[split].name}')
 
+    # Now the decode loop of multiple batches on current dataset is done,
+    # we start to aggregate copmuted metrics and put them in summary.
+    seqio_metric_values = None
     plain_text_output = None
-
     if (inputs[split].hparams.reset_for_eval
         and isinstance(inputs[split], seqio_input.SeqIOInput)
         and jax.process_index() == 0):
@@ -1182,7 +1248,12 @@ def decode_once_pmap_model(
           processed_decodes, verbose_entries=1,
           plain_text_output=plain_text_output)
       with summary_writers[split].as_default():
-        _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
+        metric_utils.write_seqio_metric_summaries(
+            seqio_metrics, 'decoder', step_i)
+      seqio_metric_values = {}
+      for sm in seqio_metrics:
+        seqio_metric_values = metric_utils.update_float_dict(
+            seqio_metric_values, metric_utils.as_float_dict(sm))
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
@@ -1193,7 +1264,8 @@ def decode_once_pmap_model(
       logging.info('Summarizing of decode_metrics.')
       decode_metrics.summarize(step_i, 'decode_metrics')
       logging.info('Summarizing of process_decode_metrics.')
-      m = process_decode_metrics.summarize(step_i, 'process_decode_metrics')
+      processed_metric_dict = process_decode_metrics.summarize(
+          step_i, 'process_decode_metrics')
       for key, tensor in all_summary_tensors.items():
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
@@ -1203,8 +1275,8 @@ def decode_once_pmap_model(
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
-    if track_metric and track_metric in m:
-      (m_value, _) = m[track_metric]
+    if track_metric and track_metric in processed_metric_dict:
+      (m_value, _) = processed_metric_dict[track_metric]
       tracker_dir_path = os.path.join(
           basedir, dirnames[split], track_metric + '_min_tracker')
       maybe_update_min_tracked_metric(m_value, step_i,
@@ -1225,12 +1297,19 @@ def decode_once_pmap_model(
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
 
-      if plain_text_output is not None:
+    if plain_text_output is not None:
         plain_text_output_file = filenames[split] + '.txt'
         logging.info('Writing decoder output to %s', plain_text_output_file)
         with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
           f.write(plain_text_output.getvalue())
 
+    decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
+    processed_decode_metrics_list.append(
+        metric_utils.as_float_dict(process_metric_values))
+    seqio_metrics_list.append(seqio_metric_values)
+    num_decode_steps.append(step_num)
+  return (decode_metrics_list, processed_decode_metrics_list,
+          seqio_metrics_list, num_decode_steps)
 
 
 def decode_spmd_model(
@@ -1242,7 +1321,7 @@ def decode_spmd_model(
     restore_checkpoint_dir: str,
     restore_checkpoint_step: Optional[int],
     continuous_decode: bool,
-) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs the decoding on the entire decoder datasets for SPMD model.
 
   Args:
@@ -1255,6 +1334,10 @@ def decode_spmd_model(
     restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
       try to restore from the latest checkpoint if any.
     continuous_decode: whether to continuously decode on the latest ckpt.
+    early_stopping_fn: An optional callable object for reporting metrics
+      and determining whether to early stop current training.
+      The callable object has signature:
+      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
@@ -1351,19 +1434,46 @@ def decode_spmd_model(
           for d in summary_eval_dirs
       ]
       while True:
-        decode_once_spmd_model(jax_task, task_p, inputs, input_p, job_log_dir,
-                               partitioned_train_state, summary_writers,
-                               prng_key, global_mesh, decode_step_fn, use_gda,
-                               inputs_shape, inputs_partition_spec)
-        eval_runner.run_one_step(partitioned_train_state, eval_summary_writers,
-                                 eval_key, use_gda)
+        with py_utils.timeit() as decode_period:
+          (decode_metrics_list, processed_decode_metrics_list,
+           decode_seqio_metrics_list,
+           num_decode_steps) = decode_once_spmd_model(
+               jax_task, task_p, inputs, input_p, job_log_dir,
+               partitioned_train_state, summary_writers, prng_key, global_mesh,
+               decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
+        with py_utils.timeit() as eval_period:
+          (eval_metrics_list, eval_scoring_metrics_list,
+           num_eval_steps) = eval_runner.run_one_step(partitioned_train_state,
+                                                      eval_summary_writers,
+                                                      eval_key, use_gda)
+
         if not continuous_decode:
           break
         if last_checkpoint is not None:
           last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
               last_checkpoint)
           exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
-          if exceeded_ckpt > task_p.train.num_train_steps:
+          is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
+          if early_stopping_fn:
+            metrics = metric_utils.aggregate_metrics_for_tuning(
+                eval_input_p=eval_input_p,
+                eval_metrics_list=eval_metrics_list,
+                eval_scoring_metrics_list=eval_scoring_metrics_list,
+                decode_input_p=input_p,
+                decode_metrics_list=decode_metrics_list,
+                processed_decode_metrics_list=processed_decode_metrics_list,
+                decode_seqio_metrics_list=decode_seqio_metrics_list,
+                eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+                decode_steps_per_sec=sum(num_decode_steps) /
+                decode_period.elapsed)
+            if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
+                                 last_ckpt_step, is_last_ckpt):
+              logging.info(
+                  'Decoding is early stopped at checkpoint step %d by the'
+                  'tuner, while the num_train_steps is %d', last_ckpt_step,
+                  task_p.train.num_train_steps)
+              break
+          if is_last_ckpt:
             break
         new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
         while new_checkpoint == last_checkpoint:
@@ -1396,7 +1506,12 @@ def decode_once_spmd_model(
     use_gda: bool,
     inputs_shape: pytypes.NestedShapeDtypeStruct,
     inputs_partition_spec: train_states.TrainState,
-) -> None:
+) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
+           List[Optional[Dict[str, float]]],  # processed decode metrics.
+           List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+           List[int]  # performed decode steps.
+          ]:
+
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
@@ -1413,6 +1528,13 @@ def decode_once_spmd_model(
     use_gda: bool, whether GDA is used.
     inputs_shape: nested map of shapes of inputs.
     inputs_partition_spec: Partition spec for inputs.
+
+  Returns:
+    A tuple of (a list of decode metrics,
+                a list of processed decode metrics,
+                a list of optional decoder (seqio) metrics.
+                 list of integers as performed decode steps for each input).
+      Items from each list are aligned with each input from input_p.
   """
   work_unit = platform.work_unit()
   metrics_p = task_p.metrics
@@ -1440,10 +1562,19 @@ def decode_once_spmd_model(
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
+  decode_metrics_list = []
+  processed_decode_metrics_list = []
+  seqio_metrics_list = []
+  num_decode_steps = []
+
   for split, num_split_steps in enumerate(num_steps_per_input):
     if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
+      decode_metrics_list.append(None)
+      processed_decode_metrics_list.append(None)
+      seqio_metrics_list.append(None)
+      num_decode_steps.append(0)
       continue
     logging.info('Start decoding on input %s', input_p[split].name)
     step_num = 0
@@ -1527,8 +1658,10 @@ def decode_once_spmd_model(
 
       logging.info('Finished processing decoded input batch %d', step_num)
 
+    # Now the decode loop of multiple batches on current dataset is done,
+    # we start to aggregate copmuted metrics and put them in summary.
+    seqio_metric_values = None
     plain_text_output = None
-
     if (inputs[split].hparams.reset_for_eval
         and isinstance(inputs[split], seqio_input.SeqIOInput)
         and jax.process_index() == 0):
@@ -1540,7 +1673,12 @@ def decode_once_spmd_model(
           processed_decodes, verbose_entries=1,
           plain_text_output=plain_text_output)
       with summary_writers[split].as_default():
-        _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
+        metric_utils.write_seqio_metric_summaries(
+            seqio_metrics, 'decoder', step_i)
+      seqio_metric_values = {}
+      for sm in seqio_metrics:
+        seqio_metric_values = metric_utils.update_float_dict(
+            seqio_metric_values, metric_utils.as_float_dict(sm))
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
@@ -1551,7 +1689,8 @@ def decode_once_spmd_model(
       logging.info('Summarizing of decode_metrics.')
       decode_metrics.summarize(step_i, 'decode_metrics')
       logging.info('Summarizing of process_decode_metrics.')
-      m = process_decode_metrics.summarize(step_i, 'process_decode_metrics')
+      processed_metric_dict = process_decode_metrics.summarize(
+          step_i, 'process_decode_metrics')
       for key, tensor in all_summary_tensors.items():
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(step_i, key, np.array(tensor),
@@ -1561,7 +1700,7 @@ def decode_once_spmd_model(
 
     # Track metric specified by task_p.track_decoder_metric.
     track_metric = task_p.track_decoder_metric
-    if track_metric and track_metric in m:
+    if track_metric and track_metric in processed_metric_dict:
       logging.warn('Decoder metric tracking is not implemented yet for pjit '
                    'models. Ignoring metric tracking.')
     elif track_metric:
@@ -1585,6 +1724,14 @@ def decode_once_spmd_model(
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_p[split].name}')
+
+    decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
+    processed_decode_metrics_list.append(
+        metric_utils.as_float_dict(process_metric_values))
+    seqio_metrics_list.append(seqio_metric_values)
+    num_decode_steps.append(step_num)
+  return (decode_metrics_list, processed_decode_metrics_list,
+          seqio_metrics_list, num_decode_steps)
 
 
 def maybe_update_min_tracked_metric(

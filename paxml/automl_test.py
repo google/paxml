@@ -23,50 +23,199 @@ from paxml import base_task
 import pyglove as pg
 
 
+class MetricTest(absltest.TestCase):
+  """Tests for automl.Metric class."""
+
+  def test_custom_type_metrics(self):
+    m = automl.Metric.train_steps_per_second()
+    self.assertEqual(m.pattern, '^train_steps_per_sec$')
+    self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+
+    m = automl.Metric.eval_steps_per_second()
+    self.assertEqual(m.pattern, '^eval_steps_per_sec$')
+    self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+
+    m = automl.Metric.decode_steps_per_second()
+    self.assertEqual(m.pattern, '^decode_steps_per_sec$')
+    self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+
+    m = automl.Metric.num_params()
+    self.assertEqual(m.pattern, '^num_params$')
+    self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+
+  def test_train(self):
+    m = automl.Metric.train('loss')
+    self.assertEqual(m.metric_type, automl.MetricType.TRAIN_METRICS)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertEqual(m.metric_name, 'loss')
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.pattern, '^train/loss$')
+
+  def test_eval_train(self):
+    m = automl.Metric.eval_train('log_pplx')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_TRAIN_METRICS)
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertEqual(m.metric_name, 'log_pplx')
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.pattern, '^eval_train/metrics/log_pplx$')
+
+  def test_eval(self):
+    m = automl.Metric.eval('total_loss')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_METRICS)
+    self.assertTrue(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.metric_name, 'total_loss')
+    self.assertEqual(m.pattern, '^eval_test_[^/]+/metrics/total_loss$')
+    self.assertEqual(
+        m.get_value({'eval_test_abc:xyz/metrics/total_loss': 0.1}), 0.1)
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc:xyz/metrics/total_loss': 0.1,
+            'eval_test_xyz:abc/metrics/total_loss': 0.2
+        }), [0.1, 0.2])
+
+    m = automl.Metric.eval('total_loss', 'xyz')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_METRICS)
+    self.assertEqual(m.metric_name, 'total_loss')
+    self.assertEqual(m.dataset_name, 'xyz')
+    self.assertEqual(m.pattern, '^eval_test_xyz/metrics/total_loss$')
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc/metrics/total_loss': 0.1,
+            'eval_test_xyz/metrics/total_loss': 0.2
+        }), [0.2])
+
+  def test_eval_scoring(self):
+    m = automl.Metric.eval_scoring('blue')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_SCORING_METRICS)
+    self.assertTrue(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.metric_name, 'blue')
+    self.assertEqual(m.pattern, '^eval_test_[^/]+/scoring_eval/blue$')
+    self.assertEqual(
+        m.get_value({'eval_test_abc:xyz/scoring_eval/blue': 0.1}), 0.1)
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc:xyz/scoring_eval/blue': 0.1,
+            'eval_test_xyz:abc/scoring_eval/blue': 0.2
+        }), [0.1, 0.2])
+
+    m = automl.Metric.eval_scoring('blue', 'xyz')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_SCORING_METRICS)
+    self.assertEqual(m.metric_name, 'blue')
+    self.assertEqual(m.dataset_name, 'xyz')
+    self.assertEqual(m.pattern, '^eval_test_xyz/scoring_eval/blue$')
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc/scoring_eval/blue': 0.1,
+            'eval_test_xyz/scoring_eval/blue': 0.2
+        }), [0.2])
+
+  def test_decode(self):
+    m = automl.Metric.decode('num_decoded')
+    self.assertEqual(m.metric_type, automl.MetricType.DECODE_METRICS)
+    self.assertTrue(m.applies_to_multiple_datasets)
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.metric_name, 'num_decoded')
+    self.assertEqual(m.pattern, '^decode_test_[^/]+/num_decoded$')
+    self.assertEqual(m.get_value({'decode_test_abc:xyz/num_decoded': 1}), 1)
+    self.assertEqual(
+        m.get_values({
+            'decode_test_abc:xyz/num_decoded': 1.,
+            'decode_test_xyz:abc/num_decoded': 2.
+        }), [1., 2.])
+
+    m = automl.Metric.decode('num_decoded', 'xyz')
+    self.assertEqual(m.metric_type, automl.MetricType.DECODE_METRICS)
+    self.assertEqual(m.metric_name, 'num_decoded')
+    self.assertEqual(m.dataset_name, 'xyz')
+    self.assertEqual(m.pattern, '^decode_test_xyz/num_decoded$')
+    self.assertFalse(m.applies_to_multiple_datasets)
+    self.assertEqual(
+        m.get_values({
+            'decode_test_abc/num_decoded': 1.,
+            'decode_test_xyz/num_decoded': 2.
+        }), [2.])
+
+  def test_case_insensitive(self):
+    m = automl.Metric.decode('mAP/map')
+    self.assertEqual(m.get_value({
+        'decode_test_xyz.bcd/mAP/mAP': 1.,
+    }), 1.)
+
+
 class SearchHParamsTest(absltest.TestCase):
   """Tests for search hyperparameters."""
 
   def test_hyperparameter_tuning(self):
-    p = automl.hyperparameter_tuning('accuracy')
+    p = automl.hyperparameter_tuning(automl.Metric.eval('accuracy'))
     # Check algorithm cls for hyperparameter tuning.
     self.assertIs(p.search_algorithm.cls, automl.Sweeping)
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
-    self.assertEqual(p.search_reward.metric_key, 'accuracy')
+    self.assertEqual(p.search_reward.metric, automl.Metric.eval('accuracy'))
     self.assertEqual(p.search_reward.goal, 'maximize')
     self.assertEqual(p.max_num_trials, 100)
 
   def test_neural_architecture_search_single_objective(self):
-    p = automl.neural_architecture_search('accuracy')
+    p = automl.neural_architecture_search(automl.Metric.eval('accuracy'))
     self.assertIs(p.search_algorithm.cls, automl.RegularizedEvolution)
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
-    self.assertEqual(p.search_reward.metric_key, 'accuracy')
+    self.assertEqual(p.search_reward.metric, automl.Metric.eval('accuracy'))
     self.assertEqual(p.max_num_trials, 10000)
 
   def test_neural_architecture_search_multi_objective(self):
-    p = automl.neural_architecture_search(['accuracy', 'latency'],
+    p = automl.neural_architecture_search([
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ],
                                           150,
                                           max_num_trials=6000)
     self.assertIs(p.search_algorithm.cls, automl.RegularizedEvolution)
     self.assertIs(p.search_reward.cls, automl.MultiObjective)
-    self.assertEqual(p.search_reward.metric_keys, ['accuracy', 'latency'])
+    self.assertEqual(p.search_reward.metrics, [
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ])
     self.assertEqual(p.search_reward.aggregator.cost_objective, 150)
     self.assertEqual(p.max_num_trials, 6000)
 
   def test_neural_architecture_search_multi_objective_aggregators(self):
-    p = automl.neural_architecture_search(['accuracy', 'latency'],
+    p = automl.neural_architecture_search([
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ],
                                           150,
                                           reward_type='tunas').search_reward
     self.assertIsInstance(p.aggregator, automl.TunasAbsolute.HParams)
-    p = automl.neural_architecture_search(['accuracy', 'latency'],
+    p = automl.neural_architecture_search([
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ],
                                           150,
                                           reward_type='mnas_hard').search_reward
     self.assertIsInstance(p.aggregator, automl.MnasHard.HParams)
-    p = automl.neural_architecture_search(['accuracy', 'latency'],
+    p = automl.neural_architecture_search([
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ],
                                           150,
                                           reward_type='mnas_soft').search_reward
     self.assertIsInstance(p.aggregator, automl.MnasSoft.HParams)
     with self.assertRaisesRegex(ValueError, 'Unsupported reward type'):
-      automl.neural_architecture_search(['accuracy', 'latency'],
+      automl.neural_architecture_search([
+          automl.Metric.eval('accuracy'),
+          automl.Metric.train_steps_per_second()
+      ],
                                         150,
                                         reward_type='unsupported_type')
 
@@ -99,47 +248,62 @@ class RewardsTest(absltest.TestCase):
 
   def test_single_objective(self):
     reward_fn = automl.SingleObjective.HParams(
-        metric_key='accuracy').Instantiate()
+        metric=automl.Metric.eval('accuracy')).Instantiate()
     self.assertIsInstance(reward_fn, automl.SingleObjective)
-    self.assertEqual(reward_fn({'accuracy': 0.9}, 0), 0.9)
+    self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
 
     reward_fn = automl.SingleObjective.HParams(
-        metric_key='accuracy', goal='minimize').Instantiate()
+        metric=automl.Metric.eval('accuracy'), goal='minimize').Instantiate()
     self.assertIsInstance(reward_fn, automl.SingleObjective)
-    self.assertEqual(reward_fn({'accuracy': 0.9}, 0), -0.9)
+    self.assertEqual(
+        reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), -0.9)
 
     with self.assertRaisesRegex(ValueError,
-                                'Param `metric_key` should not be None'):
+                                'Param `metric` should not be None'):
       _ = automl.SingleObjective.HParams()
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `goal` should be either .*'):
-      _ = automl.SingleObjective.HParams(metric_key='accuracy', goal='abc')
+      _ = automl.SingleObjective.HParams(
+          metric=automl.Metric.eval('accuracy'), goal='abc')
 
-    with self.assertRaisesRegex(ValueError, 'Metric .* does not exist.'):
-      _ = reward_fn({'latency': 0.1}, 0)
+    with self.assertRaisesRegex(KeyError,
+                                'Metric .* does not match with any metrics'):
+      _ = reward_fn({'eval_test_abc/log_pplx': 0.1}, 0)
 
   def test_multi_objective(self):
     reward_fn = automl.MultiObjective.HParams(
-        metric_keys=['accuracy']).Instantiate()
+        metrics=[automl.Metric.eval('accuracy')]).Instantiate()
     self.assertIsInstance(reward_fn, automl.MultiObjective)
-    self.assertEqual(reward_fn({'accuracy': 0.9}, 0), 0.9)
+    self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
 
     reward_fn = automl.MultiObjective.HParams(
-        metric_keys=['accuracy', 'latency'],
+        metrics=[
+            automl.Metric.eval('accuracy'),
+            automl.Metric.train_steps_per_second()
+        ],
         aggregator=automl.MnasHard.HParams(cost_objective=150)).Instantiate()
     self.assertIsInstance(reward_fn, automl.MultiObjective)
-    self.assertEqual(reward_fn({'accuracy': 0.9, 'latency': 140}, 0), 0.9)
+    self.assertEqual(
+        reward_fn(
+            {
+                'eval_test_abc/metrics/accuracy': 0.9,
+                'train_steps_per_sec': 140
+            }, 0), 0.9)
 
     with self.assertRaisesRegex(ValueError,
-                                'Param `metric_keys` must be provided.'):
+                                'Param `metrics` must be provided.'):
       _ = automl.MultiObjective.HParams()
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `aggregator` must be provided.'):
-      _ = automl.MultiObjective.HParams(metric_keys=['accuracy', 'latency'])
+      _ = automl.MultiObjective.HParams(metrics=[
+          automl.Metric.eval('accuracy'),
+          automl.Metric.train_steps_per_second()
+      ])
 
-    with self.assertRaisesRegex(ValueError, 'Metric .* does not exist.'):
+    with self.assertRaisesRegex(KeyError,
+                                'Metric .* does not match with any metrics'):
       _ = reward_fn({'cost': 0.1}, 0)
 
 

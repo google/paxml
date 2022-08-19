@@ -33,6 +33,7 @@ from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
 from paxml import eval_lib
+from paxml import metric_utils
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -130,21 +131,27 @@ def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
   dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
 
 
-def _should_early_stop_training(
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-    task_p: tasks_lib.SingleTask.HParams, step_i: int,
-    weighted_scalars: Optional[Dict[str, trainer_lib.WeightedScalars]]) -> bool:
+def _should_early_stop_training(early_stopping_fn: trainer_lib.EarlyStoppingFn,
+                                running_mode: trainer_lib.RunningMode,
+                                task_p: tasks_lib.SingleTask.HParams,
+                                step_i: int, metrics: Dict[str, float]) -> bool:
   """Returns True if current training should be stopped."""
-  if early_stopping_fn is None:
-    return False
+  assert early_stopping_fn is not None
   train_p = task_p.train
-  if weighted_scalars is None:
-    is_last_ckpt = step_i == train_p.num_train_steps
-  else:
-    remaining = train_p.num_train_steps - step_i
-    is_last_ckpt = remaining < max(train_p.eval_interval_steps,
-                                   train_p.save_interval_steps)
-  return early_stopping_fn(weighted_scalars, step_i, is_last_ckpt)
+
+  remaining = train_p.num_train_steps - step_i
+  is_last_ckpt = remaining == 0
+  if not is_last_ckpt:
+    last_eval = False
+    if running_mode & trainer_lib.RunningMode.EVAL:
+      last_eval = remaining < max(train_p.eval_interval_steps,
+                                  train_p.save_interval_steps)
+    last_decode = False
+    if running_mode & trainer_lib.RunningMode.DECODE:
+      last_decode = remaining < max(train_p.decode_interval_steps,
+                                    train_p.save_interval_steps)
+    is_last_ckpt = last_eval or last_decode
+  return early_stopping_fn(metrics, running_mode, step_i, is_last_ckpt)
 
 
 def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
@@ -155,7 +162,6 @@ def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
   duration_sec = time.time() - summary_last_time
   num_steps = step_i - summary_last_step
   steps_per_sec = num_steps / duration_sec
-  logging.info('steps/sec: %f', steps_per_sec)
   return steps_per_sec
 
 
@@ -634,14 +640,15 @@ def train_and_evaluate_pmap(
       logging.debug('  Retrieved inputs.')
       logging.debug('  Performing train_step().')
       with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-        (replicated_model_states, loss, weighted_scalars, per_example_out,
-         summary_tensors) = p_train_step(replicated_model_states,
-                                         train_prng_seed, model_inputs)
-      logging.debug('  Completed train_step().')
+        with py_utils.timeit() as train_period:
+          (replicated_model_states, loss, weighted_scalars, per_example_out,
+           summary_tensors) = p_train_step(replicated_model_states,
+                                           train_prng_seed, model_inputs)
+      logging.debug('  Completed train_step() in %f seconds.',
+                    train_period.elapsed)
 
       logging.debug('  Writing summaries (attempt).')
       step_i += 1
-      steps_per_sec = None
       should_accumulate = train_summary_handler.should_accumulate(step_i)
       should_write_summary = train_summary_handler.should_write(step_i)
       should_log = _should_log_train(step_i, train_p)
@@ -658,9 +665,13 @@ def train_and_evaluate_pmap(
             per_example_out)
         logging.info('per_example_out: %s', per_example_out)
         logging.info('summary_tensors: %s', summary_tensors)
+
+      # Train metrics.
+      train_metrics = metric_utils.as_float_dict(weighted_scalars)
+      steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
+                                             summary_last_step)
       if should_write_summary:
-        steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
-                                               summary_last_step)
+        logging.info('steps/sec: %f', steps_per_sec)
         summary_last_time = time.time()
         summary_last_step = step_i
       if train_summary_handler.process(
@@ -675,8 +686,11 @@ def train_and_evaluate_pmap(
                 replicated_model_states.step))
       logging.debug('  Wrote summaries (attempted).')
 
+      eval_metrics_list = None
+      eval_scoring_metrics_list = None
+      eval_steps_per_sec = None
+      eval_train_metrics = None
       # Run eval at regular step interval.
-      eval_metrics = None
       if (train_p.eval_interval_steps and
           step_i % train_p.eval_interval_steps == 0):
 
@@ -689,15 +703,19 @@ def train_and_evaluate_pmap(
         if eval_input_p:
           # Eval on the test sets.
           logging.debug('  Performing eval_step() runs on test splits.')
-          metrics_list = eval_lib.run_eval_loop_over_test_splits(
-              eval_num_steps,
-              eval_step_fn,
-              eval_test_summary_writers,
-              step_i,
-              eval_input_pipelines,
-              reshard_inputs=True)
-          eval_metrics = {p.name: m for p, m in zip(eval_input_p, metrics_list)}
-          logging.debug('  Completed eval_step() runs on test splits.')
+          with py_utils.timeit() as eval_period:
+            eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+                eval_lib.run_eval_loop_over_test_splits(
+                    eval_num_steps,
+                    eval_step_fn,
+                    eval_test_summary_writers,
+                    step_i,
+                    eval_input_pipelines,
+                    reshard_inputs=True))
+          eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+          logging.debug(
+              '  Completed eval_step() runs on test splits in %f seconds.',
+              eval_period.elapsed)
         if train_p.eval_skip_train:
           logging.debug('  train_p.eval_skip_train is True. '
                         'Skipping eval_train.')
@@ -726,22 +744,57 @@ def train_and_evaluate_pmap(
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):
               logging.debug('  Wrote eval summaries.')
+            eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
+      decode_metrics_list = None
+      processed_decode_metrics_list = None
+      decode_seqio_metrics_list = None
+      decode_steps_per_sec = None
       if (decode_input_p and train_p.decode_interval_steps and
           step_i % train_p.decode_interval_steps == 0):
-        eval_lib.decode_once_pmap_model(jax_task, task_p,
-                                        decode_input_pipelines, decode_input_p,
-                                        decode_prng_seed, job_log_dir,
-                                        replicated_model_states,
-                                        decode_summary_writers)
+        with py_utils.timeit() as decode_period:
+          (decode_metrics_list, processed_decode_metrics_list,
+           decode_seqio_metrics_list, num_decode_steps) = (
+               eval_lib.decode_once_pmap_model(jax_task, task_p,
+                                               decode_input_pipelines,
+                                               decode_input_p, decode_prng_seed,
+                                               job_log_dir,
+                                               replicated_model_states,
+                                               decode_summary_writers))
+        decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+
       logging.debug('step=`%d`: End', step_i - 1)
-      if _should_early_stop_training(early_stopping_fn, task_p, step_i,
-                                     eval_metrics):
-        logging.info(
-            'Training loop is early stopped at step `%d` by the '
-            'tuner, while num_train_step is `%d`.', step_i,
-            train_p.num_train_steps)
-        break
+
+      if early_stopping_fn is not None:
+        # Determine running mode for current step.
+        running_mode = trainer_lib.RunningMode.TRAIN
+        if eval_metrics_list or eval_train_metrics:
+          running_mode |= trainer_lib.RunningMode.EVAL
+        if decode_metrics_list:
+          running_mode |= trainer_lib.RunningMode.DECODE
+
+        metrics = metric_utils.aggregate_metrics_for_tuning(
+            train_metrics=train_metrics,
+            eval_train_metrics=eval_train_metrics,
+            eval_input_p=eval_input_p,
+            eval_metrics_list=eval_metrics_list,
+            eval_scoring_metrics_list=eval_scoring_metrics_list,
+            decode_input_p=decode_input_p,
+            decode_metrics_list=decode_metrics_list,
+            processed_decode_metrics_list=processed_decode_metrics_list,
+            decode_seqio_metrics_list=decode_seqio_metrics_list,
+            train_steps_per_sec=steps_per_sec,
+            eval_steps_per_sec=eval_steps_per_sec,
+            decode_steps_per_sec=decode_steps_per_sec,
+            num_params=total_num_params)
+
+        if _should_early_stop_training(early_stopping_fn, running_mode, task_p,
+                                       step_i, metrics):
+          logging.info(
+              'Training loop is early stopped at step `%d` by the '
+              'tuner, while num_train_step is `%d`.', step_i,
+              train_p.num_train_steps)
+          break
 
 
 def compile_for_auto_sharding(train_step: Any,
@@ -888,8 +941,9 @@ def train_and_evaluate_spmd_model(
     vars_weight_params = jax_task.model.abstract_init_with_metadata(
         init_key, inputs_shape_dtype)
     # Dump out model meta info for debugging.
-    trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model, vars_weight_params, job_log_dir)
+    trainer_lib.write_post_init_model_hparams_file(jax_task.model,
+                                                   vars_weight_params,
+                                                   job_log_dir)
     train_state_global_shapes = jax_task.create_train_state_padded_shapes(
         vars_weight_params)
     train_state_pspecs = jax_task.create_train_state_partition_specs(
@@ -1101,13 +1155,13 @@ def train_and_evaluate_spmd_model(
 
         logging.debug('  Performing train_step().')
         with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-          (partitioned_train_state, loss, weighted_scalars, per_example_out,
-           summary_tensors) = train_step(partitioned_train_state, train_key,
-                                         model_inputs)
-        logging.debug('  Completed train_step().')
-
+          with py_utils.timeit() as train_period:
+            (partitioned_train_state, loss, weighted_scalars, per_example_out,
+             summary_tensors) = train_step(partitioned_train_state, train_key,
+                                           model_inputs)
+        logging.debug('  Completed train_step() in %f seconds.',
+                      train_period.elapsed)
         logging.debug('  Writing summaries (attempt).')
-        steps_per_sec = None
         should_accumulate = train_summary_handler.should_accumulate(step_i)
         should_write_summary = train_summary_handler.should_write(step_i)
         should_log = _should_log_train(step_i, train_p)
@@ -1124,9 +1178,13 @@ def train_and_evaluate_spmd_model(
               per_example_out)
           logging.info('per_example_out: %s', per_example_out)
           logging.info('summary_tensors: %s', summary_tensors)
+
+        # Train metrics.
+        train_metrics = metric_utils.as_float_dict(weighted_scalars)
+        steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
+                                               summary_last_step)
         if should_write_summary:
-          steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
-                                                 summary_last_step)
+          logging.info('steps/sec: %f', steps_per_sec)
           summary_last_time = time.time()
           summary_last_step = step_i
         if train_summary_handler.process(
@@ -1143,8 +1201,11 @@ def train_and_evaluate_spmd_model(
           step_i += 1
         logging.debug('  Wrote summaries (attempted).')
 
+        eval_metrics_list = None
+        eval_scoring_metrics_list = None
+        eval_steps_per_sec = None
+        eval_train_metrics = None
         # Run eval at regular step interval.
-        eval_metrics = None
         if (train_p.eval_interval_steps and
             step_i % train_p.eval_interval_steps == 0):
           eval_step_fn = functools.partial(
@@ -1156,21 +1217,23 @@ def train_and_evaluate_spmd_model(
           # If we have eval test then also evaluate on test.
           if eval_input_p:
             logging.debug('  Performing eval_step() runs on test splits.')
-            metrics_list = eval_lib.run_eval_loop_over_test_splits(
-                eval_num_steps,
-                eval_step_fn,
-                eval_test_summary_writers,
-                step_i,
-                eval_input_pipelines,
-                eval_test_inputs_pspecs,
-                eval_test_inputs_shape_dtype,
-                global_mesh,
-                reshard_inputs=False,
-                create_gda_for_inputs=create_gda_for_inputs)
-            eval_metrics = {
-                p.name: m for p, m in zip(eval_input_p, metrics_list)
-            }
-            logging.debug('  Completed eval_step() runs on test splits.')
+            with py_utils.timeit() as eval_period:
+              eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+                  eval_lib.run_eval_loop_over_test_splits(
+                      eval_num_steps,
+                      eval_step_fn,
+                      eval_test_summary_writers,
+                      step_i,
+                      eval_input_pipelines,
+                      eval_test_inputs_pspecs,
+                      eval_test_inputs_shape_dtype,
+                      global_mesh,
+                      reshard_inputs=False,
+                      create_gda_for_inputs=create_gda_for_inputs))
+            eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+            logging.debug(
+                '  Completed eval_step() runs on test splits in %f seconds.',
+                eval_period.elapsed)
           if train_p.eval_skip_train:
             logging.debug('  train_p.eval_skip_train is True. Skipping '
                           'eval_train.')
@@ -1203,20 +1266,51 @@ def train_and_evaluate_spmd_model(
               if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                               summary_tensors):
                 logging.debug('  Wrote eval summaries.')
+              eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
+        decode_metrics_list = None
+        processed_decode_metrics_list = None
+        decode_seqio_metrics_list = None
+        decode_steps_per_sec = None
         if (decode_input_p and train_p.decode_interval_steps and
             step_i % train_p.decode_interval_steps == 0):
-          eval_lib.decode_once_spmd_model(
-              jax_task, task_p, decode_input_pipelines, decode_input_p,
-              job_log_dir, partitioned_train_state, decode_summary_writers,
-              decode_key, global_mesh, decode_step_fn, create_gda_for_inputs,
-              decode_inputs_shape_dtype, decode_inputs_partition_spec)
+          with py_utils.timeit() as decode_period:
+            (decode_metrics_list, processed_decode_metrics_list,
+             decode_seqio_metrics_list, num_decode_steps) = (
+                 eval_lib.decode_once_spmd_model(
+                     jax_task, task_p, decode_input_pipelines, decode_input_p,
+                     job_log_dir, partitioned_train_state,
+                     decode_summary_writers, decode_key, global_mesh,
+                     decode_step_fn, create_gda_for_inputs,
+                     decode_inputs_shape_dtype, decode_inputs_partition_spec))
+          decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
         logging.debug('step=`%d`: End', step_i - 1)
-        if _should_early_stop_training(early_stopping_fn, task_p, step_i,
-                                       eval_metrics):
-          logging.info(
-              'Training loop is early stopped at step `%d` by the '
-              'tuner, while num_train_step is `%d`.', step_i,
-              train_p.num_train_steps)
-          break
+        if early_stopping_fn is not None:
+          metrics = metric_utils.aggregate_metrics_for_tuning(
+              train_metrics=train_metrics,
+              eval_train_metrics=eval_train_metrics,
+              eval_input_p=eval_input_p,
+              eval_metrics_list=eval_metrics_list,
+              eval_scoring_metrics_list=eval_scoring_metrics_list,
+              decode_input_p=decode_input_p,
+              decode_metrics_list=decode_metrics_list,
+              processed_decode_metrics_list=processed_decode_metrics_list,
+              decode_seqio_metrics_list=decode_seqio_metrics_list,
+              train_steps_per_sec=steps_per_sec,
+              eval_steps_per_sec=eval_steps_per_sec,
+              decode_steps_per_sec=decode_steps_per_sec,
+              num_params=total_num_params)
+          # Determine running mode for current step.
+          running_mode = trainer_lib.RunningMode.TRAIN
+          if eval_metrics_list or eval_train_metrics:
+            running_mode |= trainer_lib.RunningMode.EVAL
+          if decode_metrics_list:
+            running_mode |= trainer_lib.RunningMode.DECODE
+          if _should_early_stop_training(early_stopping_fn, running_mode,
+                                         task_p, step_i, metrics):
+            logging.info(
+                'Training loop is early stopped at step `%d` by the '
+                'tuner, while num_train_step is `%d`.', step_i,
+                train_p.num_train_steps)
+            break
         step_counter += 1

@@ -15,6 +15,7 @@
 
 """Shared trainer lib utilities."""
 
+import enum
 import functools
 import os
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
@@ -56,10 +57,6 @@ TrainStepFn = Callable[[TrainState, JTensor, NestedJTensor], Tuple[TrainState,
 EvalStepFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor], Tuple]
 DecodeFn = Callable[[NestedJTensor, JTensor, JTensor, NestedJTensor],
                     NestedJTensor]
-EarlyStoppingFn = Callable[[
-    Optional[Dict[str, Union[WeightedScalarsList,
-                             WeightedScalars]]], int, bool
-], bool]
 CheckpointType = checkpoints.CheckpointType
 
 PARAMS = base_layer.PARAMS
@@ -73,6 +70,16 @@ NON_PAX_VAR_COLLECTION = base_layer.NON_PAX_VAR_COLLECTION
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 instantiate = base_hyperparams.instantiate
+
+
+class RunningMode(enum.Flag):
+  """Running mode."""
+  TRAIN = enum.auto()
+  EVAL = enum.auto()
+  DECODE = enum.auto()
+
+
+EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 
 def write_post_init_model_hparams_file(model, vars_weight_params,

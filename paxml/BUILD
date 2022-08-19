@@ -247,7 +247,6 @@ pytype_strict_library(
         "//third_party/py/fiddle/absl_flags",
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
-        # Implicit numpy dependency.
         "//third_party/py/orbax/checkpoint",
         "//praxis:py_utils",
         # Implicit internal pyglove dependency.
@@ -274,8 +273,13 @@ pytype_strict_library(
         ":summary_utils",
         # Implicit absl.logging dependency.
         "//third_party/py/clu:values",
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit seqio dependency.
+        "//third_party/py/tensorflow",
     ],
 )
 
@@ -290,6 +294,7 @@ py_strict_test(
         "//third_party/py/clu:values",
         # Implicit flax dependency.
         # Implicit numpy dependency.
+        # Implicit seqio dependency.
     ],
 )
 
@@ -371,6 +376,7 @@ pytype_strict_library(
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
         ":eval_lib",
+        ":metric_utils",
         ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
