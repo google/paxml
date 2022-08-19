@@ -1538,7 +1538,7 @@ def decode_once_spmd_model(
       plain_text_output = io.StringIO()
       seqio_metrics = inputs[split].compute_metrics(
           processed_decodes, verbose_entries=1,
-          text_output=plain_text_output)
+          plain_text_output=plain_text_output)
       with summary_writers[split].as_default():
         _summary_seqio_metrics(seqio_metrics, 'decoder', step_i)
 
