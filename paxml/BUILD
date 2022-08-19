@@ -507,7 +507,7 @@ py_strict_test(
     python_version = "PY3",
     srcs_version = "PY3",
     deps = [
-        ":checkpoint_py_pb2",
+        ":base_experiment",
         ":checkpoints",
         ":tasks_lib",
         ":trainer_lib",

@@ -23,7 +23,7 @@ from absl.testing import absltest
 import jax
 import jax.numpy as jnp
 import numpy as np
-from paxml import checkpoint_pb2
+from paxml import base_experiment
 from paxml import checkpoints
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -45,7 +45,6 @@ WeightInit = base_layer.WeightInit
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 BaseHParams = base_layer.BaseLayer.HParams
-CheckpointType = checkpoint_pb2.CheckpointType
 
 RANDOM = base_layer.RANDOM
 PARAMS = base_layer.PARAMS
@@ -253,7 +252,7 @@ class BaseTaskTest(test_utils.TestCase):
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
-  def test_load_base(self):
+  def test_load(self):
     input_dims = 3
     output_dims = 5
 
@@ -275,17 +274,11 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Modify var01 to be random
     var_shape = ext_train_state.mdl_vars['params']['var01'].shape
-    random_var = jnp.array(np.random.normal(size=var_shape[1:]))
-    ext_train_state.mdl_vars['params']['var01'] = jax.device_put_replicated(
-        random_var, jax.local_devices())
+    random_var = jnp.array(np.random.normal(size=var_shape))
+    ext_train_state.mdl_vars['params']['var01'] = random_var
 
     tempdir = self.create_tempdir()
-    fully_replicated_gda_model_states = jax.tree_map(
-        py_utils.convert_fully_replicated_sda_to_gda, ext_train_state)
-    checkpoints.save_checkpoint(
-        fully_replicated_gda_model_states,
-        tempdir.full_path,
-        checkpoint_type=CheckpointType.CHECKPOINT_GDA)
+    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
 
     # Create task with warm-start
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -307,12 +300,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         task, jax.random.PRNGKey(1), sample_inputs)
 
     self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
-                        train_state.mdl_vars['params']['var01'])
+                        train_state.mdl_vars['params']['var01'][0])
 
     for v in train_state.opt_states[0]:
       if 'ema' in v:
         self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
-                            v.ema['params']['var01'])
+                            v.ema['params']['var01'][0])
 
   def test_load_ema(self):
     input_dims = 3
@@ -336,17 +329,11 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Modify var01 to be random
     var_shape = ext_train_state.mdl_vars['params']['var01'].shape
-    random_var = jnp.array(np.random.normal(size=var_shape[1:]))
-    ext_train_state.mdl_vars['params']['var01'] = jax.device_put_replicated(
-        random_var, jax.local_devices())
+    random_var = jnp.array(np.random.normal(size=var_shape))
+    ext_train_state.mdl_vars['params']['var01'] = random_var
 
     tempdir = self.create_tempdir()
-    fully_replicated_gda_model_states = jax.tree_map(
-        py_utils.convert_fully_replicated_sda_to_gda, ext_train_state)
-    checkpoints.save_checkpoint(
-        fully_replicated_gda_model_states,
-        tempdir.full_path,
-        checkpoint_type=CheckpointType.CHECKPOINT_GDA)
+    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
     task_p.model = TestModel01.HParams(
@@ -372,12 +359,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         task, jax.random.PRNGKey(1), sample_inputs)
 
     self.assertAllClose(ext_ema['params']['var01'],
-                        train_state.mdl_vars['params']['var01'])
+                        train_state.mdl_vars['params']['var01'][0])
 
     for v in train_state.opt_states[0]:
       if 'ema' in v:
         self.assertAllClose(ext_ema['params']['var01'],
-                            v.ema['params']['var01'])
+                            v.ema['params']['var01'][0])
 
 
 if __name__ == '__main__':
