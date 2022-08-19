@@ -472,8 +472,10 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   MODEL_DIMS = 2048
   HIDDEN_DIMS = MODEL_DIMS * 4
   FPROP_DTYPE = jnp.bfloat16
+  PACKED_INPUT = True
 
   USE_REPEATED_LAYER = False
+  SEPARATE_EMBEDDING = False
   TRAINABLE_POSITION_EMB = False
   TRAINABLE_PE_MAX_SEQ_LEN = 16 * 1024
   RELATIVE_BIAS = False
@@ -499,6 +501,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   CHECKPOINT_EVERY_N_STEPS = 5000
   SUMMARY_INTERVAL_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
+  EVAL_INTERVAL_STEPS = 100
 
   # Sub-class has to specify a mesh.
   ICI_MESH_SHAPE = None
@@ -522,14 +525,23 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
     task_p.model = models.LanguageModel.HParams(name='xformer_lm')
     model_p = task_p.model
-    model_p.lm.packed_input = True
+    model_p.lm.packed_input = self.PACKED_INPUT
     model_p.lm.model_dims = self.MODEL_DIMS
     model_p.lm.vocab_size = self.VOCAB_SIZE
+
+    if self.SEPARATE_EMBEDDING:
+      model_p.lm.separate_embedding_tpl = (
+          layers.Embedding.HParams())
+      model_p.lm.softmax_tpl = (
+          layers.FullSoftmax.HParams())
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm.softmax_tpl.params_init = softmax_init
-    model_p.lm.softmax_tpl.scale_sqrt_depth = True
+    if self.SEPARATE_EMBEDDING:
+      model_p.lm.separate_embedding_tpl.scale_sqrt_depth = True
+    else:
+      model_p.lm.softmax_tpl.scale_sqrt_depth = True
     model_p.lm.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
@@ -589,6 +601,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
     task_p.train.summary_interval_steps = self.SUMMARY_INTERVAL_STEPS
     task_p.train.save_max_to_keep = self.CHECKPOINT_MAX_TO_KEEP
+    task_p.train.eval_interval_steps = self.EVAL_INTERVAL_STEPS
 
     if self.ICI_MESH_SHAPE is not None:
       set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
