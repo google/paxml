@@ -206,7 +206,7 @@ def train_and_evaluate(
     enable_auto_sharding: bool = False,
     use_orbax: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
-  """Runs the training and evaluation loop.
+  """The shared path to run the training and evaluation loop.
 
   Args:
     experiment_config: an instance of BaseExperiment for the experiment to train
@@ -403,7 +403,7 @@ def train_and_evaluate_pmap(
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     use_orbax: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
-  """Runs the training and evaluation loop.
+  """Runs the training and evaluation loop with PMAP.
 
   Args:
     task_p: HParams for the task encapsulating the data parallel model.
@@ -843,7 +843,7 @@ def train_and_evaluate_spmd_model(
     enable_auto_sharding: bool = False,
     use_orbax: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
-  """Runs the training and evaluation loop.
+  """Runs the training and evaluation loop with PJIT.
 
   Args:
     task_p: Params for task encapsulating the SPMD model.
