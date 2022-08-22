@@ -270,6 +270,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":summary_utils",
+        # Implicit internal Jax runtime dependency.
         # Implicit absl.logging dependency.
         "//third_party/py/clu:values",
         # Implicit jax dependency.
@@ -278,7 +279,7 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit seqio dependency.
-        "//third_party/py/tensorflow",
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 

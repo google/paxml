@@ -31,6 +31,8 @@ from praxis import pytypes
 import seqio
 from tensorflow.compat.v2 import summary as tf_summary
 
+# internal runtime import
+
 
 Metrics = pytypes.Metrics
 WeightedScalar = pytypes.WeightedScalar
@@ -151,11 +153,15 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Dict[str, Union[
                                          summary_utils.SummaryType.SCALAR)
 
 
+def _is_nparray_like(v: Any) -> bool:
+  """Returns True if input is a NumPy array-like instance."""
+  return isinstance(v, (np.ndarray, jnp.ndarray))
+
+
 def is_weighted_scalar(v: Any) -> bool:
   """Returns True if input is a weighted scalar."""
-  return (isinstance(v, tuple) and len(v) == 2 and
-          isinstance(v[0], (np.ndarray, jnp.ndarray)) and
-          isinstance(v[1], (np.ndarray, jnp.ndarray)))
+  return (isinstance(v, tuple) and len(v) == 2 and _is_nparray_like(v[0]) and
+          _is_nparray_like(v[1]))
 
 
 def is_float_convertible(metric_value: Union[numbers.Number, clu_values.Value,
