@@ -247,7 +247,6 @@ pytype_strict_library(
         "//third_party/py/fiddle/absl_flags",
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
-        "//third_party/py/orbax/checkpoint",
         "//praxis:py_utils",
         # Implicit internal pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.

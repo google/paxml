@@ -48,6 +48,7 @@ from praxis import py_utils
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
 
+AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
 persistence_gda_serialization = gda_serialization  # mapped to internal
 
 # Required import to setup work units when running through XManager.
@@ -210,11 +211,11 @@ def run_experiment(
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
     async_checkpointer = None
+    async_ckpt_manager = None
     if FLAGS.jax_fully_async_checkpoint:
       if FLAGS.use_orbax:
         if FLAGS.maybe_use_persistence_checkpointing:
-          raise ValueError(
-              'Orbax persistence use case not yet supported.')
+          async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
         else:
           async_checkpointer = checkpoints.AsyncCheckpointer(
               checkpoints.PaxCheckpointHandler(enable_flax=False))
@@ -225,8 +226,6 @@ def run_experiment(
         else:
           async_ckpt_manager = gda_serialization.GlobalAsyncCheckpointManager(
               timeout_secs=600)
-    else:
-      async_ckpt_manager = None
 
     train.train_and_evaluate(
         experiment_config=experiment_config,
