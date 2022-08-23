@@ -830,11 +830,19 @@ def decode(
     raise ValueError('restore_checkpoint_{dir,step} only supported with '
                      'decode once, i.e. it requires continuous_decode=False.')
 
-  if restore_checkpoint_dir:
-    logging.info('running decode_once restored from %s', restore_checkpoint_dir)
+  restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
+      job_log_dir, 'checkpoints')
+
+  if continuous_decode:
+    logging.info('running continuous_decode from %s', restore_checkpoint_dir)
   else:
-    logging.info('running continuous_decode from %s',
-                 os.path.join(job_log_dir, 'checkpoints'))
+    logging.info('running decode_once restored from %s', restore_checkpoint_dir)
+
+  if restore_checkpoint_step is None:
+    restore_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+        restore_checkpoint_dir)
+    # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
+    # retrieved.
 
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -910,7 +918,7 @@ def decode_pmap_model(
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: Optional[str],
-    restore_checkpoint_dir: Optional[str],
+    restore_checkpoint_dir: str,
     restore_checkpoint_step: Optional[int],
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
@@ -921,18 +929,15 @@ def decode_pmap_model(
     input_p: List of input params to be decoded.
     eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
-    restore_checkpoint_dir: The directory from which to restore checkpoint. If
-      None, uses job_log_dir.
-    restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
-      try to restore from the latest checkpoint if any.
+    restore_checkpoint_dir: The directory from which to restore checkpoint.
+    restore_checkpoint_step: The checkpoint step to restore. If unset, the
+      decoded model will be randomly initialized.
     continuous_decode: whether to continuously decode on the latest ckpt.
     early_stopping_fn: An optional callable object for reporting metrics
       and determining whether to early stop current training.
       The callable object has signature:
       (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
-  restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
-      job_log_dir, 'checkpoints')
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
   track_metric = bool(task_p.track_decoder_metric)
@@ -1340,8 +1345,8 @@ def decode_spmd_model(
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
     restore_checkpoint_dir: The directory from which to restore checkpoint.
-    restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
-      try to restore from the latest checkpoint if any.
+    restore_checkpoint_step: The checkpoint step to restore. If unset, the
+      decoded model will be randomly initialized.
     continuous_decode: whether to continuously decode on the latest ckpt.
     early_stopping_fn: An optional callable object for reporting metrics
       and determining whether to early stop current training.
@@ -1353,9 +1358,6 @@ def decode_spmd_model(
   prng_key, init_key, eval_key = jax.random.split(prng_key, 3)
 
   jax_task = instantiate(task_p)
-
-  restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
-      job_log_dir, 'checkpoints')
 
   model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
