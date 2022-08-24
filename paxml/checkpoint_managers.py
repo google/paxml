@@ -15,15 +15,20 @@
 
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
+import dataclasses
 import datetime
 import itertools
 import os
-from typing import Optional
+import typing
+from typing import Optional, Sequence
 
 from absl import logging
+from etils import epath
 import jax
 from jax.experimental import multihost_utils
+import orbax.checkpoint
 from paxml import checkpoint_pb2
+from paxml import checkpoints
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
@@ -31,6 +36,7 @@ CheckpointType = checkpoint_pb2.CheckpointType
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 CHECKPOINT_BASENAME = 'checkpoints.pb'
+TRAIN_STATE_KEY = 'train_state'
 
 
 def to_timestamp(datetime_instance: datetime.datetime) -> int:
@@ -367,3 +373,74 @@ class CheckpointManager:
       The parsed CheckpointHistory proto.
     """
     return read_checkpoint_file(self.checkpoint_filename)
+
+
+@dataclasses.dataclass
+class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
+  """Options for constructing OrbaxCheckpointManager.
+
+  See superclass.
+
+  Attributes:
+    todelete_subdir: If set, checkpoints to be deleted will be only renamed into
+      a subdirectory with the provided string. Otherwise, they will be directly
+      deleted from the file system. Useful if checkpoint deletion is time
+      consuming. By default, delete the checkpoint assets.
+  """
+  todelete_subdir: Optional[str] = None
+
+
+class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
+  """Provides Pax-specific logic for orbax.checkpoint.CheckpointManager.
+
+  Pax only supports a single checkpointable item (TrainState) and checkpoints
+  are saved under a different folder name in a flat manner (no per-item
+  sub-directories).
+
+  Additionally, Pax supports extra options provided via CheckpointManagerOptions
+  (see above).
+
+  An instance of this class can be created on several JAX processes.
+  All public APIs may be called by all processes.
+  """
+
+  def all_steps(self) -> Sequence[int]:
+    """See superclass documentation."""
+    checkpoint_dirnames = tf.io.gfile.listdir(self.directory)
+    dirnames = [
+        x for x in checkpoint_dirnames if checkpoints.is_checkpoint_asset(x)
+    ]
+    steps = [
+        int(os.path.basename(x).replace(checkpoints.CHECKPOINT_PREFIX, ''))
+        for x in dirnames
+    ]
+    return steps
+
+  def _get_save_directory(self,
+                          step: int,
+                          directory: epath.Path,
+                          key_name: Optional[str] = None) -> epath.Path:
+    """Returns the standardized path to a save directory for a single item."""
+    if key_name is None or key_name == TRAIN_STATE_KEY:
+      return epath.Path(
+          checkpoints._make_checkpoint_step_dir(os.fspath(directory), step))  # pylint: disable=protected-access
+    else:
+      raise ValueError(
+          f'Unrecognized item {key_name} is not currently supported.')
+
+  def _delete_directory(self, step: int):
+    if jax.process_index() != 0:
+      return
+    options = typing.cast(CheckpointManagerOptions, self._options)
+    todelete_subdir = options.todelete_subdir
+    if todelete_subdir:
+      checkpoint_name = checkpoints.checkpoint_name(step)
+      rename_dir = self.directory / todelete_subdir
+      if not rename_dir.exists():
+        rename_dir.mkdir(parents=True)
+      src = self.directory / checkpoint_name
+      dst = rename_dir / checkpoint_name
+      # TODO(pax-team): Check if dst already exists?
+      tf.io.gfile.rename(src, dst)
+    else:
+      super()._delete_directory(step)

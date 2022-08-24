@@ -67,8 +67,11 @@ pytype_strict_library(
     srcs = ["checkpoint_managers.py"],
     deps = [
         ":checkpoint_py_pb2",
+        ":checkpoints",
         # Implicit absl.logging dependency.
+        "//third_party/py/etils/epath",
         # Implicit jax dependency.
+        "//third_party/py/orbax/checkpoint",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -490,6 +493,22 @@ py_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+py_strict_test(
+    name = "orbax_checkpoint_managers_test",
+    srcs = ["orbax_checkpoint_managers_test.py"],
+    deps = [
+        ":checkpoint_managers",
+        ":checkpoint_py_pb2",
+        # Implicit absl.flags dependency.
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//third_party/py/orbax/checkpoint",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

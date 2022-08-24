@@ -56,7 +56,7 @@ AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
-def _is_checkpoint_asset(x: str) -> bool:
+def is_checkpoint_asset(x: str) -> bool:
   return bool(CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
 
 
@@ -78,11 +78,15 @@ def _to_timestamp(datetime_instance: datetime.datetime) -> int:
   return int(round(timedelta.total_seconds()))
 
 
+def checkpoint_name(step: int) -> str:
+  return f'{CHECKPOINT_PREFIX}{step:08d}'
+
+
 def _make_checkpoint_step_dir(
     checkpoint_dir: str,
     step: int,
 ) -> str:
-  return os.path.join(checkpoint_dir, f'{CHECKPOINT_PREFIX}{step:08d}')
+  return os.path.join(checkpoint_dir, checkpoint_name(step))
 
 
 def _make_tmp_checkpoint_dir(checkpoint_dir: str,
@@ -189,10 +193,10 @@ def latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
   """
   if not tf.io.gfile.exists(checkpoint_dir):
     return None
-  # Note: _is_checkpoint_asset() already filters out flax temporary checkpoints
+  # Note: is_checkpoint_asset() already filters out flax temporary checkpoints
   # that would be ending with `tmp`.
   checkpoint_assets = [
-      v for v in tf.io.gfile.listdir(checkpoint_dir) if _is_checkpoint_asset(v)
+      v for v in tf.io.gfile.listdir(checkpoint_dir) if is_checkpoint_asset(v)
   ]
   if not checkpoint_assets:
     return None
@@ -592,7 +596,7 @@ def _save_checkpoint_gda(
   if not overwrite:
     checkpoint_dirnames = tf.io.gfile.listdir(checkpoint_dir)
     sorted_dirnames = sorted(
-        [x for x in checkpoint_dirnames if _is_checkpoint_asset(x)])
+        [x for x in checkpoint_dirnames if is_checkpoint_asset(x)])
     if sorted_dirnames:
       latest_checkpoint_dirname = sorted_dirnames[-1]
       previous_step = get_step_from_checkpoint_asset(latest_checkpoint_dirname)
@@ -694,7 +698,7 @@ def _restore_checkpoint_gda(
       logging.warn('Found incompletely saved checkpoints %s; skipping them',
                    tmp_checkpoint_dirnames)
     sorted_dirnames = sorted(
-        [x for x in checkpoint_dirnames if _is_checkpoint_asset(x)])
+        [x for x in checkpoint_dirnames if is_checkpoint_asset(x)])
     if not sorted_dirnames:
       logging.info(
           f'No checkpoint found for restore in {checkpoint_dir}')

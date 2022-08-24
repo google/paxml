@@ -13,7 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for Pax checkpoint_managers."""
+"""Tests for Pax checkpoint_managers.
+
+TODO(b/235241387): Replace with orbax_checkpoint_managers_test.
+"""
 
 import datetime
 import os
