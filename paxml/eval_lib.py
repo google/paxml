@@ -60,6 +60,7 @@ Metrics = pytypes.Metrics
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
+NestedPartitionSpec = pytypes.NestedPartitionSpec
 PRNGKey = pytypes.PRNGKey
 TrainState = train_states.TrainState
 SummaryWriter = tf.summary.SummaryWriter
@@ -1303,10 +1304,10 @@ def decode_once_pmap_model(
       io_utils.write_key_value_pairs(output_file, processed_decodes)
 
     if plain_text_output is not None:
-        plain_text_output_file = filenames[split] + '.txt'
-        logging.info('Writing decoder output to %s', plain_text_output_file)
-        with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
-          f.write(plain_text_output.getvalue())
+      plain_text_output_file = filenames[split] + '.txt'
+      logging.info('Writing decoder output to %s', plain_text_output_file)
+      with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
+        f.write(plain_text_output.getvalue())
 
     decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
     processed_decode_metrics_list.append(
@@ -1507,7 +1508,7 @@ def decode_once_spmd_model(
                              Tuple[Tuple[NestedMap, NestedMap], NestedMap]],
     use_gda: bool,
     inputs_shape: pytypes.NestedShapeDtypeStruct,
-    inputs_partition_spec: train_states.TrainState,
+    inputs_partition_spec: NestedPartitionSpec,
 ) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
            List[Optional[Dict[str, float]]],  # processed decode metrics.
            List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
