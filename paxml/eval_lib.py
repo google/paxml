@@ -998,7 +998,8 @@ def decode_pmap_model(
         exit_stack.enter_context(summary_utils.get_summary_writer(d))
         for d in summary_eval_dirs
     ]
-    last_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
+    last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+        restore_checkpoint_dir)
 
     while True:
       with py_utils.timeit() as decode_period:
@@ -1014,9 +1015,8 @@ def decode_pmap_model(
 
       if not continuous_decode:
         break
-      if last_checkpoint is not None:
-        last_ckpt_step = int(last_checkpoint.split('_')[-1])
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+      if last_checkpoint_step is not None:
+        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if early_stopping_fn:
           metrics = metric_utils.aggregate_metrics_for_tuning(
@@ -1031,34 +1031,40 @@ def decode_pmap_model(
               decode_steps_per_sec=sum(num_decode_steps) /
               decode_period.elapsed)
           if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
-                               last_ckpt_step, is_last_ckpt):
+                               last_checkpoint_step, is_last_ckpt):
             logging.info(
                 'Decoding is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d', last_ckpt_step,
+                'tuner, while the num_train_steps is %d', last_checkpoint_step,
                 task_p.train.num_train_steps)
             break
         if is_last_ckpt:
           break
       # Release replicated_model_states.
       del replicated_model_states
-      new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
-      while new_checkpoint == last_checkpoint:
+      new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+          restore_checkpoint_dir)
+      while new_checkpoint_step == last_checkpoint_step:
         logging.info('Sleep before checking for new latest checkpoint.')
         time.sleep(60)
-        new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
-      logging.info('Found new checkpoint: %s', new_checkpoint)
+        new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+            restore_checkpoint_dir)
+      logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
       if py_utils.pmap_use_tensorstore():
         model_states = tasks_lib.restore_pmap_from_tensorstore(
-            train_state_global_shapes, restore_checkpoint_dir)
+            train_state_global_shapes,
+            restore_checkpoint_dir,
+            step=new_checkpoint_step)
       else:
-        model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                      restore_checkpoint_dir)
+        model_states = checkpoints.restore_checkpoint(
+            train_state_global_shapes,
+            restore_checkpoint_dir,
+            step=new_checkpoint_step)
       if use_ema:
         model_states = extract_ema(model_states)
       elif not track_metric:
         model_states = trim_opt_states(model_states)
       replicated_model_states = trainer_lib.replicate_model_state(model_states)
-      last_checkpoint = new_checkpoint
+      last_checkpoint_step = new_checkpoint_step
 
 
 def decode_once_pmap_model(
@@ -1426,7 +1432,8 @@ def decode_spmd_model(
     ]
     # TODO(pax): support ema.
     partitioned_train_state = trim_opt_states(partitioned_train_state)
-    last_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
+    last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+        restore_checkpoint_dir)
     with contextlib.ExitStack() as exit_stack:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
@@ -1452,10 +1459,8 @@ def decode_spmd_model(
 
         if not continuous_decode:
           break
-        if last_checkpoint is not None:
-          last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
-              last_checkpoint)
-          exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+        if last_checkpoint_step is not None:
+          exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
           is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
           if early_stopping_fn:
             metrics = metric_utils.aggregate_metrics_for_tuning(
@@ -1470,28 +1475,31 @@ def decode_spmd_model(
                 decode_steps_per_sec=sum(num_decode_steps) /
                 decode_period.elapsed)
             if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
-                                 last_ckpt_step, is_last_ckpt):
+                                 last_checkpoint_step, is_last_ckpt):
               logging.info(
                   'Decoding is early stopped at checkpoint step %d by the'
-                  'tuner, while the num_train_steps is %d', last_ckpt_step,
-                  task_p.train.num_train_steps)
+                  'tuner, while the num_train_steps is %d',
+                  last_checkpoint_step, task_p.train.num_train_steps)
               break
           if is_last_ckpt:
             break
-        new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
-        while new_checkpoint == last_checkpoint:
+        new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+            restore_checkpoint_dir)
+        while new_checkpoint_step == last_checkpoint_step:
           logging.info('Sleep before checking for new latest checkpoint.')
           time.sleep(60)
-          new_checkpoint = checkpoints.latest_checkpoint(restore_checkpoint_dir)
-        logging.info('Found new checkpoint: %s', new_checkpoint)
+          new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+              restore_checkpoint_dir)
+        logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
         partitioned_train_state = checkpoints.restore_checkpoint(
             train_state_global_shapes,
             restore_checkpoint_dir,
             global_mesh=global_mesh,
             checkpoint_type=checkpoint_type,
-            state_specs=partitioned_specs)
+            state_specs=partitioned_specs,
+            step=new_checkpoint_step)
         partitioned_train_state = trim_opt_states(partitioned_train_state)
-        last_checkpoint = new_checkpoint
+        last_checkpoint_step = new_checkpoint_step
 
 
 def decode_once_spmd_model(
