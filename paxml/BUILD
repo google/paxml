@@ -229,7 +229,6 @@ pytype_strict_library(
     srcs = ["main.py"],
     srcs_version = "PY3",
     deps = [
-        ":automl",
         ":base_experiment",
         ":checkpoints",
         ":eval_lib",
@@ -237,18 +236,18 @@ pytype_strict_library(
         ":setup_jax",
         ":train",
         ":trainer_lib",
+        ":tuning_lib",
         # Implicit internal Jax runtime dependency.  # BC internal suffix.
         # Implicit Jax software support dependency.  # BC internal suffix.
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
-        # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         "//third_party/py/fiddle",
         "//third_party/py/fiddle/absl_flags",
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         "//praxis:py_utils",
-        # Implicit internal pyglove dependency.
+        # Implicit pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -416,6 +415,22 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "tuning_lib",
+    srcs = ["tuning_lib.py"],
+    deps = [
+        ":automl",
+        ":base_experiment",
+        ":trainer_lib",
+        # Implicit absl.logging dependency.
+        # Implicit clu.platform dependency.
+        # Implicit jax dependency.
+        "//praxis:py_utils",
+        # Implicit internal pyglove dependency.
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
 py_strict_test(
     name = "automl_test",
     srcs = ["automl_test.py"],
@@ -529,6 +544,22 @@ py_strict_test(
         "//praxis:pytypes",
         "//praxis:schedules",
         "//praxis:test_utils",
+    ],
+)
+
+py_strict_test(
+    name = "tuning_lib_test",
+    srcs = ["tuning_lib_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [
+        ":automl",
+        ":base_experiment",
+        ":trainer_lib",
+        ":tuning_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit clu.platform dependency.
+        # Implicit pyglove dependency.
     ],
 )
 

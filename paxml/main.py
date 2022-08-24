@@ -30,13 +30,11 @@ from typing import Dict, Optional, Sequence
 
 from absl import app
 from absl import flags
-from absl import logging
 from clu import platform
 import fiddle as fdl
 from fiddle import absl_flags
 import jax
 from jax.experimental.gda_serialization import serialization as gda_serialization
-from paxml import automl
 from paxml import base_experiment
 from paxml import checkpoints
 from paxml import eval_lib
@@ -44,8 +42,9 @@ from paxml import experiment_registry
 from paxml import setup_jax
 from paxml import train
 from paxml import trainer_lib
+from paxml import tuning_lib
 from praxis import py_utils
-import pyglove as pg  # mapped to internal
+import pyglove as pg
 import tensorflow.compat.v2 as tf
 
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
@@ -191,7 +190,7 @@ def _default_early_stopping_fn(metrics: Dict[str, float],
 
 
 def run_experiment(
-    experiment_config: base_experiment.BaseExperimentT,
+    experiment_config: base_experiment.BaseExperiment,
     work_unit: platform.WorkUnit,
     job_log_dir: str,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -287,163 +286,7 @@ def run_experiment(
   py_utils.sync_global_devices('All tasks finish.')
 
 
-def tune_experiment(experiment_config: base_experiment.BaseExperimentT,
-                    work_unit: platform.WorkUnit, job_log_dir: str) -> None:
-  """Tune an experiment.
-
-  An experiment can be tuned by running a tuning loop, with each iteration
-  calling `run_experiment` for evaluating a trial sampled by the controller.
-
-  The tuning procedure is set up with the following steps:
-  1) It calls the `search` method of the experiment class to get the
-     hyperparameters for the search, which contains the definition for
-     the search algorithm and reward function.
-  2) It inspects the search space by calling the `task` and `datasets` methods
-     of the experiment class, thus all PyGlove search primitives (e.g.
-     `pg.oneof`) will be collected.
-  3) Then it starts a loop with `pg.sample`, based on the search space and
-     search algorithm obtained above.
-  4) Within the tuning loop, the `example` is provided as a context manager
-     to connect the controller decisions with the return value of each search
-     primitive called under the context manager. Therefore, we delegate the
-     trial evaluation logic to `run_experiment`, which is done by passing
-     a per-trial early stopping function for reporting measurements, completing/
-     early stopping the trial.
-
-  Args:
-    experiment_config: The experiment to run.
-    work_unit: Work unit for adding experiment artifact and reporting status.
-    job_log_dir: The directory used for storing logs and writing checkpoints.
-  """
-  assert FLAGS.study is not None
-  assert FLAGS.pythia_port is not None
-  # Google-internal tuning infra init.
-
-  search_hparams = experiment_config.search()
-  search_algorithm = search_hparams.search_algorithm.Instantiate()()
-  reward_fn = search_hparams.search_reward.Instantiate()
-  max_num_trials = FLAGS.num_trials or search_hparams.max_num_trials
-
-  # Inspect the search space by evaluating the hyperparameters.
-  # We include tuning parameters from both the `task` and `datasets` in the
-  # search space. A caveat is that when multiple datasets have tunable
-  # parameters, even one of them is not evaluated, its tunable parameters will
-  # be included. We can improve this in the future if this turns out to be an
-  # issue.
-  def inspect_search_space() -> None:
-    _ = experiment_config.task()
-    _ = experiment_config.datasets()
-    _ = experiment_config.decoder_datasets()
-
-  search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
-  if search_space.dna_spec.is_constant:
-    raise ValueError(f'Aborting tuning: there is no tunable parameters in'
-                     f'experiment {FLAGS.exp!r}.')
-
-  # Write debug information to files.
-  def write_once(file_path, content):
-    if not tf.io.gfile.exists(file_path):
-      try:
-        with tf.io.gfile.GFile(file_path, 'w') as f:
-          f.write(content)
-      except tf.errors.NotFoundError:
-        logging.warn(
-            'Cannot write file %r as another process is writing to the same '
-            'file. This is not an issue as the file is only created for '
-            'debugging purpose and has the same content among all the workers. '
-            'So any successful write will achieve this purpose.', file_path)
-
-  tf.io.gfile.makedirs(job_log_dir)
-
-  logging.info('Search space: %s', search_space.dna_spec)
-  search_space_debug_file = os.path.join(job_log_dir, 'search_space.txt')
-  write_once(search_space_debug_file, str(search_space.dna_spec))
-  work_unit.create_artifact(platform.ArtifactType.FILE, search_space_debug_file,
-                            'search_space')
-
-  logging.info('Search algorithm: %s', search_algorithm)
-  algorithm_debug_file = os.path.join(job_log_dir, 'search_algorithm.txt')
-  write_once(algorithm_debug_file, str(search_algorithm))
-  work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
-                            'search_algorithm')
-
-  # Helper functions for tuning.
-  def get_early_stopping_fn(
-      feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
-    """Gets early stopping function based on a feedback object."""
-
-    def should_stop_early(metrics: Dict[str, float],
-                          running_mode: trainer_lib.RunningMode,
-                          global_step: int, is_last_checkpoint: bool) -> bool:
-      """Early stopping function."""
-      if FLAGS.metrics_from == FLAGS.mode:
-        # `metrics_by_dataset` could be None for interleaved train/eval
-        # when evaluation is not performed at current global step.
-        if (jax.process_index() == 0 and
-            (running_mode & trainer_lib.RunningMode.EVAL or
-             running_mode & trainer_lib.RunningMode.DECODE)):
-          # Computing reward and report back to the tuning service.
-          reward = reward_fn(metrics, global_step)
-          feedback.add_measurement(reward, metrics=metrics, step=global_step)
-          logging.info(
-              'Measurement is reported to trial %d at step %d '
-              'with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
-              feedback.id, global_step, reward, running_mode,
-              is_last_checkpoint, metrics)
-        if is_last_checkpoint:
-          py_utils.sync_global_devices(
-              f'Trial termination at step {global_step} started.')
-          # `feedback.done` should be called just once per trial.
-          if jax.process_index() == 0:
-            feedback.done()
-          py_utils.sync_global_devices(
-              f'Trial termination at step {global_step} completed.')
-          logging.info('Trial %d is now completed.', feedback.id)
-      return feedback.should_stop_early()
-    return should_stop_early
-
-  for example, feedback in pg.sample(
-      search_space,
-      search_algorithm,
-      num_examples=max_num_trials,
-      group=FLAGS.tuner_group):
-    logging.info('Start working on trial %d (group=%r)...', feedback.id,
-                 FLAGS.tuner_group)
-    # Context manager to deliver different program hyperparameters
-    # in each trial.
-    with example():
-      # Mark trial as infeasible on NaN. PAX user can add more error types here.
-      with feedback.skip_on_exceptions((FloatingPointError,)):
-        try:
-          run_experiment(experiment_config, work_unit,
-                         os.path.join(job_log_dir, str(feedback.id)),
-                         get_early_stopping_fn(feedback))
-        except automl.EarlyStoppingError as e:
-          if jax.process_index() == 0:
-            if e.skip:
-              feedback.skip(e.skip_reason or 'Unknown.')
-              logging.info(
-                  'Trial %d is early stopped at step %d and will be skipped '
-                  'by controller. Reason: %s.',
-                  feedback.id, e.step, e.skip_reason)
-            else:
-              reward = e.reward
-              if reward is None:
-                reward = reward_fn(e.metrics, e.step)
-              feedback.add_measurement(
-                  reward=reward,
-                  step=e.step,
-                  metrics=e.metrics,
-                  checkpoint_path=e.checkpoint)
-              feedback.done()
-              logging.info(
-                  'Trial %d is early stopped at step %d with reward %f which '
-                  'will be fed back to the controller. Metrics: %s.',
-                  feedback.id, e.step, reward, e.metrics)
-  logging.info('Completed with all trials for study %r', FLAGS.study)
-
-
-def run(experiment_config: base_experiment.BaseExperimentT):
+def run(experiment_config: base_experiment.BaseExperiment):
   """Run an experiment.
 
   This function exists to provide a clear injection seam for a given run.
@@ -483,7 +326,16 @@ def run(experiment_config: base_experiment.BaseExperimentT):
         job_log_dir=FLAGS.job_log_dir,
         early_stopping_fn=None)
   else:
-    tune_experiment(experiment_config, work_unit, job_log_dir=FLAGS.job_log_dir)
+    tuning_lib.tune(
+        trial_fn=run_experiment,
+        experiment_config=experiment_config,
+        work_unit=work_unit,
+        job_log_dir=FLAGS.job_log_dir,
+        study=FLAGS.study,
+        pythia_port=FLAGS.pythia_port,
+        is_metric_reporting_role=(FLAGS.metrics_from == FLAGS.mode),
+        tuner_group=FLAGS.tuner_group,
+        max_num_trials=FLAGS.num_trials)
 
 
 def main(argv: Sequence[str]) -> None:
