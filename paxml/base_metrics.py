@@ -383,15 +383,15 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
     """
     loss_key: Optional[str] = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float]:
+  def aggregate(self, batch_metrics) -> Tuple[float, float, float]:
     """Computes the aggregated loss over shards.
 
     Args:
       batch_metrics: Input dictionary of metrics computed during model fprop.
 
     Returns:
-      A Tuple containing the weighted loss for the shard and the mean
-      across all shards.
+      A Tuple containing the weighted loss for the shard, the mean loss
+      across all shards, and the weight of the weighted loss.
 
     """
     loss_key = self.hparams.loss_key
@@ -414,7 +414,7 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
       weighted_loss = loss
       mean_loss = loss
 
-    return weighted_loss, mean_loss
+    return weighted_loss, mean_loss, loss_weight
 
 
 class MultiLossAggregator(LossAggregator):
@@ -431,7 +431,7 @@ class MultiLossAggregator(LossAggregator):
     """
     loss_keys: Optional[Sequence[str]] = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float]:
+  def aggregate(self, batch_metrics) -> Tuple[float, float, float]:
 
     total_weighted_loss = 0.0
     total_mean_loss = 0.0
@@ -459,4 +459,4 @@ class MultiLossAggregator(LossAggregator):
         total_weighted_loss += loss
         total_mean_loss += loss
 
-    return total_weighted_loss, total_mean_loss
+    return total_weighted_loss, total_mean_loss, loss_weight

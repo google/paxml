@@ -103,13 +103,16 @@ class LossAggregatorTest(test_utils.TestCase):
 
     def _decode_step(feats):
       metrics = _decode(feats)
-      weighted_loss, mean_loss = loss_aggregator.aggregate(metrics)
-      return weighted_loss, mean_loss
+      weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(metrics)
+      return weighted_loss, mean_loss, loss_weight
 
     p_decode = jax.pmap(_decode_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
-    weighted_loss, mean_loss = p_decode(feats)
+    weighted_loss, mean_loss, loss_weight = p_decode(feats)
+
     self.assertAllClose(weighted_loss, jnp.mean(feats))
     self.assertAllClose(mean_loss, jnp.mean(feats))
+    self.assertAllClose(loss_weight,
+                        jnp.mean(weighted_loss) / jnp.mean(mean_loss))
 
   def test_multiloss_aggregate_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
@@ -124,16 +127,18 @@ class LossAggregatorTest(test_utils.TestCase):
 
     def _decode_step(feats):
       metrics = _decode(feats)
-      weighted_loss, mean_loss = loss_aggregator.aggregate(metrics)
+      weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(metrics)
       metrics = metrics_aggregator.aggregate(metrics)
-      return metrics, weighted_loss, mean_loss
+      return metrics, weighted_loss, mean_loss, loss_weight
 
     p_decode = jax.pmap(_decode_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
-    metrics, weighted_loss, mean_loss = p_decode(feats)
+    metrics, weighted_loss, mean_loss, loss_weight = p_decode(feats)
 
     expected_loss = metrics['loss_a'][0][0] + metrics['loss_b'][0][0]
+
     self.assertAllClose(weighted_loss, expected_loss)
     self.assertAllClose(mean_loss, expected_loss)
+    self.assertAllClose(loss_weight, weighted_loss / expected_loss)
 
 
 if __name__ == '__main__':

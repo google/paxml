@@ -346,7 +346,7 @@ def _maybe_aggregate_metrics_summaries(
     per_example_out - the aggregated per_example_out.
   """
   # compute weighted loss and mean across shards
-  weighted_loss, mean_loss = loss_aggregator.aggregate(weighted_scalars)
+  weighted_loss, mean_loss, _ = loss_aggregator.aggregate(weighted_scalars)
 
   if base_layer.is_running_under_pmap():
     # aggregate data across devices.
