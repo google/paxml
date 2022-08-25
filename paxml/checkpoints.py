@@ -20,7 +20,7 @@ import datetime
 import functools
 import os
 import re
-from typing import Any, Optional, Sequence, Tuple, Mapping, Union
+from typing import Any, Optional, Sequence, Tuple
 
 from absl import logging
 from etils import epath
@@ -168,14 +168,17 @@ def save_checkpoint(
   step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
 
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    _save_checkpoint_gda(
-        train_state,
-        checkpoint_dir,
-        overwrite,
-        step,
-        async_ckpt_manager,
-        use_orbax=use_orbax,
-        async_checkpointer=async_checkpointer)
+    if use_orbax:
+      checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
+      if async_checkpointer is not None:
+        async_checkpointer.save(checkpoint_step_dir, train_state)
+      else:
+        checkpointer = orbax.checkpoint.Checkpointer(
+            PaxCheckpointHandler(enable_flax=False))
+        checkpointer.save(checkpoint_step_dir, train_state)
+    else:
+      _save_checkpoint_gda(train_state, checkpoint_dir, overwrite, step,
+                           async_ckpt_manager)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     _save_checkpoint_flax(train_state, checkpoint_dir, overwrite, step)
   else:
@@ -263,13 +266,24 @@ def restore_checkpoint(
     the saved checkpoint one is detected.
   """
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    return _restore_checkpoint_gda(
-        state_global_shapes,
-        checkpoint_dir,
-        global_mesh,
-        state_specs,
-        step,
-        use_orbax=use_orbax)
+    if use_orbax:
+      if step is None:
+        step = retrieve_latest_checkpoint_step(checkpoint_dir)
+        if step is None:
+          logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
+          return None
+      checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
+      checkpointer = orbax.checkpoint.Checkpointer(
+          PaxCheckpointHandler(enable_flax=False))
+      restored_train_state = checkpointer.restore(
+          checkpoint_step_dir,
+          item=state_global_shapes,
+          specs=state_specs,
+          mesh=global_mesh)
+      return restored_train_state
+    else:
+      return _restore_checkpoint_gda(state_global_shapes, checkpoint_dir,
+                                     global_mesh, state_specs, step)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     return _restore_checkpoint_flax(state_global_shapes, checkpoint_dir, step)
   else:
@@ -570,9 +584,8 @@ def _save_checkpoint_gda(
     overwrite: bool,
     step: int,
     async_ckpt_manager: Optional[
-        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
-    use_orbax: bool = False,
-    async_checkpointer: Optional[AsyncCheckpointer] = None) -> None:
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None
+) -> None:
   """Saves a checkpoint using JAX GDA serialization mechanism.
 
   Note that all JAX processes must call _save_checkpoint_gda in sync because
@@ -618,15 +631,6 @@ def _save_checkpoint_gda(
     checkpoint_step_tmp_dir = _make_tmp_checkpoint_dir(
         checkpoint_dir, step, sync_timestamp=True)
   logging.info('Saving to a tmp checkpoint dir %s', checkpoint_step_tmp_dir)
-
-  if use_orbax:
-    if async_checkpointer is not None:
-      async_checkpointer.save(checkpoint_step_dir, train_state)
-    else:
-      handler = PaxCheckpointHandler(enable_flax=False)
-      checkpointer = orbax.checkpoint.Checkpointer(handler)
-      checkpointer.save(checkpoint_step_dir, train_state)
-    return
 
   flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
       train_state)
@@ -676,8 +680,7 @@ def _restore_checkpoint_gda(
     checkpoint_dir: str,
     global_mesh: Optional[maps.Mesh],
     state_specs: Optional[train_states.TrainState],
-    step: Optional[int] = None,
-    use_orbax: bool = False) -> Optional[train_states.TrainState]:
+    step: Optional[int] = None) -> Optional[train_states.TrainState]:
   """Restores a checkpoint using JAX GDA deserialization mechanism."""
   if not tf.io.gfile.exists(checkpoint_dir) or not tf.io.gfile.listdir(
       checkpoint_dir):
@@ -721,16 +724,6 @@ def _restore_checkpoint_gda(
                      'checkpoints saved are probably corrupted.')
 
   logging.info('GDA checkpoint restore started...')
-
-  if use_orbax:
-    checkpointer = orbax.checkpoint.Checkpointer(
-        PaxCheckpointHandler(enable_flax=False))
-    restored_train_state = checkpointer.restore(
-        checkpoint_step_dir,
-        item=state_global_shapes,
-        specs=state_specs,
-        mesh=global_mesh)
-    return restored_train_state
 
   flattened_train_state, flattened_nested_names, flattened_state_specs = (
       _tensorstore_prepare(state_global_shapes, state_specs))
