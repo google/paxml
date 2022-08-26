@@ -29,7 +29,8 @@ setup(
     install_requires=[
         'praxis', 'pyglove', 'absl-py', 'jax', 'tensorflow==2.7.3',
         'tensorflow-text==2.7.3', 'numpy', 'flax',
-        'clu', 'lingvo', 't5', 'seqio-nightly', 'tensorstore'
+        'clu', 'lingvo', 't5', 'seqio-nightly', 'tensorstore',
+        'etils', 'orbax'
     ],
     url='https://github.com/google/paxml',
     license='Apache-2.0',
