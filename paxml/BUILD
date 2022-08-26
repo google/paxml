@@ -131,7 +131,7 @@ pytype_strict_library(
         ":checkpoint_py_pb2",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
-        "//third_party/py/flax:core",
+        # Implicit flax.core dependency.
         # Implicit flax.training dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
@@ -245,8 +245,8 @@ pytype_strict_library(
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
         # Implicit clu.platform dependency.
-        "//third_party/py/fiddle",
-        "//third_party/py/fiddle/absl_flags",
+        # Implicit fiddle dependency.
+        # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         "//praxis:py_utils",
@@ -274,7 +274,7 @@ pytype_strict_library(
         ":summary_utils",
         # Implicit internal Jax runtime dependency.
         # Implicit absl.logging dependency.
-        "//third_party/py/clu:values",
+        # Implicit clu.values dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_input",
@@ -292,8 +292,8 @@ py_strict_test(
         ":metric_utils",
         ":summary_utils",
         # Implicit absl.testing.absltest.absltest dependency.
-        "//third_party/py/clu:metrics",
-        "//third_party/py/clu:values",
+        # Implicit clu.metrics dependency.
+        # Implicit clu.values dependency.
         # Implicit flax dependency.
         # Implicit numpy dependency.
         # Implicit seqio dependency.
