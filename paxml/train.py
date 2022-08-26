@@ -667,7 +667,7 @@ def train_and_evaluate_pmap(
         logging.info('summary_tensors: %s', summary_tensors)
 
       # Train metrics.
-      train_metrics = metric_utils.as_float_dict(weighted_scalars)
+      train_weighted_scalars = weighted_scalars
       steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
                                              summary_last_step)
       if should_write_summary:
@@ -744,7 +744,7 @@ def train_and_evaluate_pmap(
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):
               logging.debug('  Wrote eval summaries.')
-            eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
+            eval_train_weighted_scalars = weighted_scalars
 
       decode_metrics_list = None
       processed_decode_metrics_list = None
@@ -766,6 +766,10 @@ def train_and_evaluate_pmap(
       logging.debug('step=`%d`: End', step_i - 1)
 
       if early_stopping_fn is not None:
+        train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
+        eval_train_metrics = metric_utils.as_float_dict(
+            eval_train_weighted_scalars)
+
         # Determine running mode for current step.
         running_mode = trainer_lib.RunningMode.TRAIN
         if eval_metrics_list or eval_train_metrics:
@@ -1182,7 +1186,7 @@ def train_and_evaluate_spmd_model(
           logging.info('summary_tensors: %s', summary_tensors)
 
         # Train metrics.
-        train_metrics = metric_utils.as_float_dict(weighted_scalars)
+        train_weighted_scalars = weighted_scalars
         steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
                                                summary_last_step)
         if should_write_summary:
@@ -1268,7 +1272,7 @@ def train_and_evaluate_spmd_model(
               if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                               summary_tensors):
                 logging.debug('  Wrote eval summaries.')
-              eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
+              eval_train_weighted_scalars = weighted_scalars
 
         decode_metrics_list = None
         processed_decode_metrics_list = None
@@ -1288,6 +1292,9 @@ def train_and_evaluate_spmd_model(
           decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
         logging.debug('step=`%d`: End', step_i - 1)
         if early_stopping_fn is not None:
+          train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
+          eval_train_metrics = metric_utils.as_float_dict(
+              eval_train_weighted_scalars)
           metrics = metric_utils.aggregate_metrics_for_tuning(
               train_metrics=train_metrics,
               eval_train_metrics=eval_train_metrics,
