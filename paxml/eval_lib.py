@@ -42,6 +42,7 @@ from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
+from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -474,19 +475,17 @@ def evaluate_pmap_model(
             last_checkpoint)
         exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if early_stopping_fn is not None:
-          metrics = metric_utils.aggregate_metrics_for_tuning(
-              eval_input_p=eval_input_p,
-              eval_metrics_list=eval_metrics_list,
-              eval_scoring_metrics_list=eval_scoring_metrics_list,
-              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-          if early_stopping_fn(metrics, trainer_lib.RunningMode.EVAL,
-                               last_ckpt_step, is_last_ckpt):
-            logging.info(
-                'Evaluation is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d', last_ckpt_step,
-                task_p.train.num_train_steps)
-            break
+        if tuning_lib.should_early_stop(
+            early_stopping_fn, last_ckpt_step, is_last_ckpt,
+            eval_input_p=eval_input_p,
+            eval_metrics_list=eval_metrics_list,
+            eval_scoring_metrics_list=eval_scoring_metrics_list,
+            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
+          logging.info(
+              'Evaluation is early stopped at checkpoint step %d by the'
+              'tuner, while the num_train_steps is %d', last_ckpt_step,
+              task_p.train.num_train_steps)
+          break
         if is_last_ckpt:
           break
       # Release replicated_model_states.
@@ -766,19 +765,17 @@ def evaluate_spmd_model(
             last_checkpoint)
         exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if early_stopping_fn is not None:
-          metrics = metric_utils.aggregate_metrics_for_tuning(
-              eval_input_p=eval_input_p,
-              eval_metrics_list=eval_metrics_list,
-              eval_scoring_metrics_list=eval_scoring_metrics_list,
-              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-          if early_stopping_fn(metrics, trainer_lib.RunningMode.EVAL,
-                               last_ckpt_step, is_last_ckpt):
-            logging.info(
-                'Evaluation is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d', last_ckpt_step,
-                task_p.train.num_train_steps)
-            break
+        if tuning_lib.should_early_stop(
+            early_stopping_fn, last_ckpt_step, is_last_ckpt,
+            eval_input_p=eval_input_p,
+            eval_metrics_list=eval_metrics_list,
+            eval_scoring_metrics_list=eval_scoring_metrics_list,
+            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
+          logging.info(
+              'Evaluation is early stopped at checkpoint step %d by the'
+              'tuner, while the num_train_steps is %d', last_ckpt_step,
+              task_p.train.num_train_steps)
+          break
         if is_last_ckpt:
           break
       new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
@@ -1026,25 +1023,22 @@ def decode_pmap_model(
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if early_stopping_fn:
-          metrics = metric_utils.aggregate_metrics_for_tuning(
-              eval_input_p=eval_input_p,
-              eval_metrics_list=eval_metrics_list,
-              eval_scoring_metrics_list=eval_scoring_metrics_list,
-              decode_input_p=input_p,
-              decode_metrics_list=decode_metrics_list,
-              processed_decode_metrics_list=processed_decode_metrics_list,
-              decode_seqio_metrics_list=decode_seqio_metrics_list,
-              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-              decode_steps_per_sec=sum(num_decode_steps) /
-              decode_period.elapsed)
-          if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
-                               last_checkpoint_step, is_last_ckpt):
-            logging.info(
-                'Decoding is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d', last_checkpoint_step,
-                task_p.train.num_train_steps)
-            break
+        if tuning_lib.should_early_stop(
+            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+            eval_input_p=eval_input_p,
+            eval_metrics_list=eval_metrics_list,
+            eval_scoring_metrics_list=eval_scoring_metrics_list,
+            decode_input_p=input_p,
+            decode_metrics_list=decode_metrics_list,
+            processed_decode_metrics_list=processed_decode_metrics_list,
+            decode_seqio_metrics_list=decode_seqio_metrics_list,
+            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+            decode_steps_per_sec=sum(num_decode_steps) / decode_period.elapsed):
+          logging.info(
+              'Decoding is early stopped at checkpoint step %d by the'
+              'tuner, while the num_train_steps is %d', last_checkpoint_step,
+              task_p.train.num_train_steps)
+          break
         if is_last_ckpt:
           break
       # Release replicated_model_states.
@@ -1457,25 +1451,23 @@ def decode_spmd_model(
         if last_checkpoint_step is not None:
           exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
           is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-          if early_stopping_fn:
-            metrics = metric_utils.aggregate_metrics_for_tuning(
-                eval_input_p=eval_input_p,
-                eval_metrics_list=eval_metrics_list,
-                eval_scoring_metrics_list=eval_scoring_metrics_list,
-                decode_input_p=input_p,
-                decode_metrics_list=decode_metrics_list,
-                processed_decode_metrics_list=processed_decode_metrics_list,
-                decode_seqio_metrics_list=decode_seqio_metrics_list,
-                eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-                decode_steps_per_sec=sum(num_decode_steps) /
-                decode_period.elapsed)
-            if early_stopping_fn(metrics, trainer_lib.RunningMode.DECODE,
-                                 last_checkpoint_step, is_last_ckpt):
-              logging.info(
-                  'Decoding is early stopped at checkpoint step %d by the'
-                  'tuner, while the num_train_steps is %d',
-                  last_checkpoint_step, task_p.train.num_train_steps)
-              break
+          if tuning_lib.should_early_stop(
+              early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+              eval_input_p=eval_input_p,
+              eval_metrics_list=eval_metrics_list,
+              eval_scoring_metrics_list=eval_scoring_metrics_list,
+              decode_input_p=input_p,
+              decode_metrics_list=decode_metrics_list,
+              processed_decode_metrics_list=processed_decode_metrics_list,
+              decode_seqio_metrics_list=decode_seqio_metrics_list,
+              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+              decode_steps_per_sec=sum(
+                  num_decode_steps) / decode_period.elapsed):
+            logging.info(
+                'Decoding is early stopped at checkpoint step %d by the'
+                'tuner, while the num_train_steps is %d',
+                last_checkpoint_step, task_p.train.num_train_steps)
+            break
           if is_last_ckpt:
             break
         new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(

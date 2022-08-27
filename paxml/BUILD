@@ -160,6 +160,7 @@ pytype_strict_library(
         ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
+        ":tuning_lib",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
@@ -382,6 +383,7 @@ pytype_strict_library(
         ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
+        ":tuning_lib",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
@@ -424,10 +426,12 @@ pytype_strict_library(
     deps = [
         ":automl",
         ":base_experiment",
+        ":metric_utils",
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit jax dependency.
+        "//praxis:base_input",
         "//praxis:py_utils",
         # Implicit internal pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.

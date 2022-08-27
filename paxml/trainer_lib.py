@@ -74,9 +74,26 @@ instantiate = base_hyperparams.instantiate
 
 class RunningMode(enum.Flag):
   """Running mode."""
+  UNKNOWN = 0
   TRAIN = enum.auto()
   EVAL = enum.auto()
   DECODE = enum.auto()
+
+  @classmethod
+  def detect(
+      cls,
+      has_train_metrics: bool,
+      has_eval_metrics: bool,
+      has_decode_metrics: bool) -> 'RunningMode':
+    """Detects running mode from generated metrics."""
+    mode = RunningMode.UNKNOWN
+    if has_train_metrics:
+      mode |= RunningMode.TRAIN
+    if has_eval_metrics:
+      mode |= RunningMode.EVAL
+    if has_decode_metrics:
+      mode |= RunningMode.DECODE
+    return mode
 
 
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]

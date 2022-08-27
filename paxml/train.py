@@ -37,6 +37,7 @@ from paxml import metric_utils
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
+from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -744,7 +745,7 @@ def train_and_evaluate_pmap(
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):
               logging.debug('  Wrote eval summaries.')
-            eval_train_weighted_scalars = weighted_scalars
+            eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
       decode_metrics_list = None
       processed_decode_metrics_list = None
@@ -766,19 +767,19 @@ def train_and_evaluate_pmap(
       logging.debug('step=`%d`: End', step_i - 1)
 
       if early_stopping_fn is not None:
-        train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
-        eval_train_metrics = metric_utils.as_float_dict(
-            eval_train_weighted_scalars)
-
-        # Determine running mode for current step.
-        running_mode = trainer_lib.RunningMode.TRAIN
-        if eval_metrics_list or eval_train_metrics:
-          running_mode |= trainer_lib.RunningMode.EVAL
-        if decode_metrics_list:
-          running_mode |= trainer_lib.RunningMode.DECODE
-
-        metrics = metric_utils.aggregate_metrics_for_tuning(
-            train_metrics=train_metrics,
+        if tuning_lib.should_early_stop(
+            early_stopping_fn, step_i,
+            is_last_ckpt=tuning_lib.is_last_checkpoint(
+                trainer_lib.RunningMode.detect(
+                    has_train_metrics=True,
+                    has_eval_metrics=bool(eval_metrics_list),
+                    has_decode_metrics=bool(decode_metrics_list)),
+                step_i,
+                task_p.train.num_train_steps,
+                task_p.train.eval_interval_steps,
+                task_p.train.decode_interval_steps,
+                task_p.train.save_interval_steps),
+            train_metrics=metric_utils.as_float_dict(train_weighted_scalars),
             eval_train_metrics=eval_train_metrics,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
@@ -790,10 +791,7 @@ def train_and_evaluate_pmap(
             train_steps_per_sec=steps_per_sec,
             eval_steps_per_sec=eval_steps_per_sec,
             decode_steps_per_sec=decode_steps_per_sec,
-            num_params=total_num_params)
-
-        if _should_early_stop_training(early_stopping_fn, running_mode, task_p,
-                                       step_i, metrics):
+            num_params=total_num_params):
           logging.info(
               'Training loop is early stopped at step `%d` by the '
               'tuner, while num_train_step is `%d`.', step_i,
@@ -1272,7 +1270,7 @@ def train_and_evaluate_spmd_model(
               if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                               summary_tensors):
                 logging.debug('  Wrote eval summaries.')
-              eval_train_weighted_scalars = weighted_scalars
+              eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
         decode_metrics_list = None
         processed_decode_metrics_list = None
@@ -1292,11 +1290,19 @@ def train_and_evaluate_spmd_model(
           decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
         logging.debug('step=`%d`: End', step_i - 1)
         if early_stopping_fn is not None:
-          train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
-          eval_train_metrics = metric_utils.as_float_dict(
-              eval_train_weighted_scalars)
-          metrics = metric_utils.aggregate_metrics_for_tuning(
-              train_metrics=train_metrics,
+          if tuning_lib.should_early_stop(
+              early_stopping_fn, step_i,
+              is_last_ckpt=tuning_lib.is_last_checkpoint(
+                  trainer_lib.RunningMode.detect(
+                      has_train_metrics=True,
+                      has_eval_metrics=bool(eval_metrics_list),
+                      has_decode_metrics=bool(decode_metrics_list)),
+                  step_i,
+                  task_p.train.num_train_steps,
+                  task_p.train.eval_interval_steps,
+                  task_p.train.decode_interval_steps,
+                  task_p.train.save_interval_steps),
+              train_metrics=metric_utils.as_float_dict(train_weighted_scalars),
               eval_train_metrics=eval_train_metrics,
               eval_input_p=eval_input_p,
               eval_metrics_list=eval_metrics_list,
@@ -1308,15 +1314,7 @@ def train_and_evaluate_spmd_model(
               train_steps_per_sec=steps_per_sec,
               eval_steps_per_sec=eval_steps_per_sec,
               decode_steps_per_sec=decode_steps_per_sec,
-              num_params=total_num_params)
-          # Determine running mode for current step.
-          running_mode = trainer_lib.RunningMode.TRAIN
-          if eval_metrics_list or eval_train_metrics:
-            running_mode |= trainer_lib.RunningMode.EVAL
-          if decode_metrics_list:
-            running_mode |= trainer_lib.RunningMode.DECODE
-          if _should_early_stop_training(early_stopping_fn, running_mode,
-                                         task_p, step_i, metrics):
+              num_params=total_num_params):
             logging.info(
                 'Training loop is early stopped at step `%d` by the '
                 'tuner, while num_train_step is `%d`.', step_i,

@@ -17,7 +17,7 @@
 
 import numbers
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Union
 from absl import logging
 
 import clu.values as clu_values
@@ -25,7 +25,6 @@ from jax import numpy as jnp
 import numpy as np
 
 from paxml import summary_utils
-from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
 import seqio
@@ -219,69 +218,3 @@ def update_float_dict(target: Dict[str, float],
     for k, v in source.items():
       target[f'{prefix}/{k}'] = v
   return target
-
-
-def aggregate_metrics_for_tuning(
-    train_metrics: Optional[Dict[str, float]] = None,
-    eval_train_metrics: Optional[Dict[str, float]] = None,
-    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
-    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
-    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
-    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
-        str, float]]]] = None,
-    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
-    num_params: Optional[float] = None,
-    train_steps_per_sec: Optional[float] = None,
-    eval_steps_per_sec: Optional[float] = None,
-    decode_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
-  """Aggregate metrics from training, evaluation and decoding for tuning."""
-  metrics = {}
-  if train_metrics is not None:
-    update_float_dict(metrics, train_metrics, 'train')
-
-  if eval_train_metrics is not None:
-    update_float_dict(metrics, eval_train_metrics, 'eval_train/metrics')
-
-  def _add_input_based_metrics(
-      input_p: Optional[List[base_input.BaseInput.HParams]],
-      metrics_list: Optional[List[Optional[Dict[str, float]]]],
-      dataset_type: Optional[str] = None,
-      category: Optional[str] = None):
-    if input_p is None or metrics_list is None:
-      return
-    assert len(input_p) == len(metrics_list), (input_p, metrics_list)
-    merged = {}
-    for p, m in zip(input_p, metrics_list):
-      if m is not None:
-        prefix = p.name
-        if dataset_type is not None:
-          prefix = f'{dataset_type}_{prefix}'
-        if category is not None:
-          prefix = f'{prefix}/{category}'
-        update_float_dict(merged, m, prefix)
-    update_float_dict(metrics, merged)
-
-  _add_input_based_metrics(eval_input_p, eval_metrics_list, 'eval_test',
-                           'metrics')
-  _add_input_based_metrics(eval_input_p, eval_scoring_metrics_list, 'eval_test',
-                           'scoring_eval')
-  _add_input_based_metrics(decode_input_p, decode_metrics_list, 'decode_test')
-  _add_input_based_metrics(decode_input_p, processed_decode_metrics_list,
-                           'decode_test')
-  _add_input_based_metrics(decode_input_p, decode_seqio_metrics_list,
-                           'decode_test')
-
-  # Add training metrics.
-  def _add_metric_if_not_none(name: str, value: Optional[float]):
-    if value is not None:
-      metrics[name] = value
-
-  _add_metric_if_not_none('train_steps_per_sec', train_steps_per_sec)
-  _add_metric_if_not_none('eval_steps_per_sec', eval_steps_per_sec)
-  _add_metric_if_not_none('decode_steps_per_sec', decode_steps_per_sec)
-  _add_metric_if_not_none('num_params', num_params)
-  return metrics

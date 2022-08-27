@@ -16,13 +16,15 @@
 """Tuning loop for PAX."""
 
 import os
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 from absl import logging
 from clu import platform
 import jax
 from paxml import automl
 from paxml import base_experiment
+from paxml import metric_utils
 from paxml import trainer_lib
+from praxis import base_input
 from praxis import py_utils
 
 import pyglove as pg  # mapped to internal
@@ -34,20 +36,6 @@ TrialFn = Callable[[base_experiment.BaseExperiment,  # Experiment config.
                     str,                             # Job log dir
                     trainer_lib.EarlyStoppingFn],    # Early stopping fn.
                    None]
-
-
-def write_file_once(file_path, content):
-  """Writes debug information to file only once."""
-  if not tf.io.gfile.exists(file_path):
-    try:
-      with tf.io.gfile.GFile(file_path, 'w') as f:
-        f.write(content)
-    except tf.errors.NotFoundError:
-      logging.warn(
-          'Cannot write file %r as another process is writing to the same '
-          'file. This is not an issue as the file is only created for '
-          'debugging purpose and has the same content among all the workers. '
-          'So any successful write will achieve this purpose.', file_path)
 
 
 def get_search_space(
@@ -133,13 +121,13 @@ def tune(trial_fn: TrialFn,
   tf.io.gfile.makedirs(job_log_dir)
   logging.info('Search space: %s', search_space.dna_spec)
   search_space_debug_file = os.path.join(job_log_dir, 'search_space.txt')
-  write_file_once(search_space_debug_file, str(search_space.dna_spec))
+  _write_file_once(search_space_debug_file, str(search_space.dna_spec))
   work_unit.create_artifact(platform.ArtifactType.FILE, search_space_debug_file,
                             'search_space')
 
   logging.info('Search algorithm: %s', search_algorithm)
   algorithm_debug_file = os.path.join(job_log_dir, 'search_algorithm.txt')
-  write_file_once(algorithm_debug_file, str(search_algorithm))
+  _write_file_once(algorithm_debug_file, str(search_algorithm))
   work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
                             'search_algorithm')
 
@@ -150,7 +138,7 @@ def tune(trial_fn: TrialFn,
 
     def should_stop_early(metrics: Dict[str, float],
                           running_mode: trainer_lib.RunningMode,
-                          global_step: int, is_last_checkpoint: bool) -> bool:
+                          global_step: int, is_last_ckpt: bool) -> bool:
       """Early stopping function."""
       if is_metric_reporting_role:
         # `metrics_by_dataset` could be None for interleaved train/eval
@@ -165,8 +153,8 @@ def tune(trial_fn: TrialFn,
               'Measurement is reported to trial %d at step %d '
               'with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
               feedback.id, global_step, reward, running_mode,
-              is_last_checkpoint, metrics)
-        if is_last_checkpoint:
+              is_last_ckpt, metrics)
+        if is_last_ckpt:
           py_utils.sync_global_devices(
               f'Trial termination at step {global_step} started.')
           # `feedback.done` should be called just once per trial.
@@ -216,3 +204,145 @@ def tune(trial_fn: TrialFn,
                   'will be fed back to the controller. Metrics: %s.',
                   feedback.id, e.step, reward, e.metrics)
   logging.info('Completed with all trials for study %r', study)
+
+
+def _write_file_once(file_path, content):
+  """Writes debug information to file only once."""
+  if not tf.io.gfile.exists(file_path):
+    try:
+      with tf.io.gfile.GFile(file_path, 'w') as f:
+        f.write(content)
+    except tf.errors.NotFoundError:
+      logging.warn(
+          'Cannot write file %r as another process is writing to the same '
+          'file. This is not an issue as the file is only created for '
+          'debugging purpose and has the same content among all the workers. '
+          'So any successful write will achieve this purpose.', file_path)
+
+
+def should_early_stop(
+    early_stop_fn: trainer_lib.EarlyStoppingFn,
+    global_step: int,
+    is_last_ckpt: bool,
+    train_metrics: Optional[Dict[str, float]] = None,
+    eval_train_metrics: Optional[Dict[str, float]] = None,
+    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
+    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
+    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
+        str, float]]]] = None,
+    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    num_params: Optional[float] = None,
+    train_steps_per_sec: Optional[float] = None,
+    eval_steps_per_sec: Optional[float] = None,
+    decode_steps_per_sec: Optional[float] = None) -> bool:
+  """Returns True if the training process should stop early."""
+  if early_stop_fn is None:
+    return False
+
+  # Detect running mode.
+  running_mode = trainer_lib.RunningMode.detect(
+      has_train_metrics=train_steps_per_sec is not None,
+      has_eval_metrics=bool(eval_metrics_list),
+      has_decode_metrics=bool(decode_metrics_list))
+
+  # Aggregate metrics for tuning.
+  tuning_metrics = _aggregate_metrics(
+      train_metrics, eval_train_metrics, eval_input_p,
+      eval_metrics_list, eval_scoring_metrics_list,
+      decode_input_p, decode_metrics_list, processed_decode_metrics_list,
+      decode_seqio_metrics_list, num_params, train_steps_per_sec,
+      eval_steps_per_sec, decode_steps_per_sec)
+  return early_stop_fn(tuning_metrics, running_mode, global_step, is_last_ckpt)
+
+
+def _aggregate_metrics(
+    train_metrics: Optional[Dict[str, float]] = None,
+    eval_train_metrics: Optional[Dict[str, float]] = None,
+    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
+    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
+    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
+    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
+        str, float]]]] = None,
+    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
+                                                               float]]]] = None,
+    num_params: Optional[float] = None,
+    train_steps_per_sec: Optional[float] = None,
+    eval_steps_per_sec: Optional[float] = None,
+    decode_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
+  """Aggregate metrics from training, evaluation and decoding for tuning."""
+  metrics = {}
+  if train_metrics is not None:
+    metric_utils.update_float_dict(metrics, train_metrics, 'train')
+
+  if eval_train_metrics is not None:
+    metric_utils.update_float_dict(
+        metrics, eval_train_metrics, 'eval_train/metrics')
+
+  def _add_input_based_metrics(
+      input_p: Optional[List[base_input.BaseInput.HParams]],
+      metrics_list: Optional[List[Optional[Dict[str, float]]]],
+      dataset_type: Optional[str] = None,
+      category: Optional[str] = None):
+    if input_p is None or metrics_list is None:
+      return
+    assert len(input_p) == len(metrics_list), (input_p, metrics_list)
+    merged = {}
+    for p, m in zip(input_p, metrics_list):
+      if m is not None:
+        prefix = p.name
+        if dataset_type is not None:
+          prefix = f'{dataset_type}_{prefix}'
+        if category is not None:
+          prefix = f'{prefix}/{category}'
+        metric_utils.update_float_dict(merged, m, prefix)
+    metric_utils.update_float_dict(metrics, merged)
+
+  _add_input_based_metrics(eval_input_p, eval_metrics_list, 'eval_test',
+                           'metrics')
+  _add_input_based_metrics(eval_input_p, eval_scoring_metrics_list, 'eval_test',
+                           'scoring_eval')
+  _add_input_based_metrics(decode_input_p, decode_metrics_list, 'decode_test')
+  _add_input_based_metrics(decode_input_p, processed_decode_metrics_list,
+                           'decode_test')
+  _add_input_based_metrics(decode_input_p, decode_seqio_metrics_list,
+                           'decode_test')
+
+  # Add training metrics.
+  def _add_metric_if_not_none(name: str, value: Optional[float]):
+    if value is not None:
+      metrics[name] = value
+
+  _add_metric_if_not_none('train_steps_per_sec', train_steps_per_sec)
+  _add_metric_if_not_none('eval_steps_per_sec', eval_steps_per_sec)
+  _add_metric_if_not_none('decode_steps_per_sec', decode_steps_per_sec)
+  _add_metric_if_not_none('num_params', num_params)
+  return metrics
+
+
+def is_last_checkpoint(
+    running_mode: trainer_lib.RunningMode,
+    global_step: int,
+    num_train_steps: int,
+    eval_interval_steps: int,
+    decode_interval_steps: int,
+    save_interval_steps: int) -> bool:
+  """Returns True if current step should be treated as last evaluation."""
+  remaining = num_train_steps - global_step
+  is_last = remaining == 0
+  if not is_last:
+    last_eval = False
+    if running_mode & trainer_lib.RunningMode.EVAL:
+      last_eval = remaining < max(eval_interval_steps, save_interval_steps)
+    last_decode = False
+    if running_mode & trainer_lib.RunningMode.DECODE:
+      last_decode = remaining < max(decode_interval_steps, save_interval_steps)
+    is_last = last_eval or last_decode
+  return is_last
