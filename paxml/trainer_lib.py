@@ -254,9 +254,14 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('vars_weight_params: %s', vars_weight_params)
 
-  # TODO(pax-dev): Consider using jax.jit to reduce model.init memory usage.
-  with base_layer.JaxContext.new_context():
-    initial_vars = model.init(init_key, sample_inputs)
+  # Use jax.jit to reduce model.init memory usage. Required by a few tests after
+  # migrating to shape inference.
+  @jax.jit
+  def init_fn(init_key, inputs):
+    with base_layer.JaxContext.new_context():
+      return model.init(init_key, inputs)
+
+  initial_vars = init_fn(init_key, sample_inputs)
   logging.info('initial_vars: %s', jax.tree_map(lambda x: x.shape,
                                                 initial_vars))
 
