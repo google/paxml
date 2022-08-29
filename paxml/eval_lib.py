@@ -46,6 +46,7 @@ from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import optimizer_prefix_vectorization
 from praxis import py_utils
 from praxis import pytypes
 from praxis import train_states
@@ -67,7 +68,15 @@ TrainState = train_states.TrainState
 SummaryWriter = tf.summary.SummaryWriter
 instantiate = base_hyperparams.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
+NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
+
+def _is_vectorized(train_states: train_states.TrainState) -> bool:
+  """Determines whether it is a vectorized model."""
+  if len(train_states.opt_states) == 0:
+    raise ValueError(
+        'cannot decide if it is vectorized model without opt_states')
+  return NO_PREFIX_KEY in train_states.opt_states[0]
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
   """Determines whether ema is used or not."""
@@ -80,17 +89,42 @@ def extract_ema(
   if len(model_states.opt_states) != 1:
     raise ValueError('EMA currently only supports a single learner (got '
                      f'`{len(model_states.opt_states)}`).')
-  for v in model_states.opt_states[0]:
-    if 'ema' in v:
-      return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
-  raise ValueError('Could not find EMA states in `%r`.' % model_states)
+  is_vectorized = _is_vectorized(model_states)
+  if not is_vectorized:
+    for v in model_states.opt_states[0]:
+      if isinstance(v, dict) and 'ema' in v:
+        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
+  else:
+    ret = None
+    # For vectorized model, the structure looks like this:
+    # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
+    # It is a list of dictionaries. The key corresponds to the #stages.
+    # Here the ema is constructed by combining the ema state from all those
+    # dictionaries. Each parameter belongs to one dictionary and is labelled as
+    # masked node in others.
+    for item in model_states.opt_states[0].values():
+      if isinstance(item, tuple):
+        for v in item:
+          if isinstance(v, dict) and 'ema' in v:
+            if ret is None:
+              ret = v.ema
+            else:
+              ret = jax.tree_map(
+                  lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
+                  ret,
+                  v.ema,
+                  is_leaf=py_utils.is_optax_masked_node)
+    if ret is not None:
+      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
+  raise ValueError('Could not find EMA states in `%r`.' %
+                   model_states.opt_states)
 
 
 def trim_opt_states(
     model_states: train_states.TrainState) -> train_states.TrainState:
   """Trim the optimizer states from a TrainState instance."""
   return train_states.TrainState(
-      step=model_states.step, mdl_vars=model_states.mdl_vars, opt_states=[])
+      step=model_states.step, mdl_vars=model_states.mdl_vars, opt_states={})
 
 
 def run_eval_one_step(eval_inputs: NestedJTensor,
@@ -530,10 +564,14 @@ class _SpmdEvalRunner:
                             eval_key, create_gda_for_inputs))
   """
 
-  def __init__(self, task_p: tasks_lib.SingleTask.HParams,
+  def __init__(self,
+               task_p: tasks_lib.SingleTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
-               jax_task: tasks_lib.SingleTask, global_mesh: maps.Mesh,
-               init_key: PRNGKey, partitioned_specs: train_states.TrainState):
+               jax_task: tasks_lib.SingleTask,
+               global_mesh: maps.Mesh,
+               init_key: PRNGKey,
+               partitioned_specs: train_states.TrainState,
+               use_ema: bool = False):
     self._eval_input_p = eval_input_p
     if not self._eval_input_p:
       return
@@ -559,6 +597,8 @@ class _SpmdEvalRunner:
     # Will be populated by self.run_pjit() below.
     self._eval_step = None
     self._inputs_partition_specs = None
+    if use_ema:
+      partitioned_specs = trim_opt_states(partitioned_specs)
     self._run_pjit(init_key, partitioned_specs)
 
   @classmethod
@@ -571,6 +611,7 @@ class _SpmdEvalRunner:
       checkpoint_dir: str,
       checkpoint_type: CheckpointType,
       checkpoint_step: Optional[int] = None,
+      use_ema: bool = False,
       is_decode: bool = False,
   ) -> Tuple[train_states.TrainState, Optional[train_states.TrainState],
              train_states.TrainState, Any, NestedPartitionSpec, NestedJTensor]:
@@ -580,10 +621,9 @@ class _SpmdEvalRunner:
           init_key, sample_inputs)
       train_state_global_shapes = (
           jax_task.create_train_state_padded_shapes(
-              vars_weight_params, discard_opt_states=True))
+              vars_weight_params, discard_opt_states=not use_ema))
       partitioned_specs = jax_task.create_train_state_partition_specs(
-          vars_weight_params, discard_opt_states=True)
-      # TODO(pax): support ema.
+          vars_weight_params, discard_opt_states=not use_ema)
       partitioned_train_state = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           checkpoint_dir,
@@ -599,7 +639,8 @@ class _SpmdEvalRunner:
       if is_decode:
         step_fn, inputs_partition_specs = (
             trainer_lib.get_partitioned_spmd_model_decode_fn(
-                jax_task, init_key, partitioned_specs, inputs_shape))
+                jax_task, init_key, trim_opt_states(partitioned_specs),
+                inputs_shape))
       else:
         step_fn, inputs_partition_specs = (
             trainer_lib.get_partitioned_spmd_model_step_fn(
@@ -627,6 +668,8 @@ class _SpmdEvalRunner:
                 checkpoint_type=checkpoint_type,
                 state_specs=partitioned_specs,
                 discard_opt_states=True))
+      if use_ema:
+        partitioned_train_state = extract_ema(partitioned_train_state)
     return (partitioned_train_state, partitioned_specs,
             train_state_global_shapes, step_fn, inputs_partition_specs,
             sample_inputs)
@@ -710,6 +753,8 @@ def evaluate_spmd_model(
   if not eval_input_p:
     return
 
+  use_ema = has_ema(task_p)
+
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
@@ -726,8 +771,13 @@ def evaluate_spmd_model(
 
   (partitioned_train_state, partitioned_specs, train_state_global_shapes, _, _,
    sample_inputs) = _SpmdEvalRunner.get_model_states_and_step_fn(
-       jax_task, global_mesh, init_key, sample_inputs, checkpoint_dir,
-       checkpoint_type)
+       jax_task,
+       global_mesh,
+       init_key,
+       sample_inputs,
+       checkpoint_dir,
+       checkpoint_type,
+       use_ema=use_ema)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
@@ -791,6 +841,8 @@ def evaluate_spmd_model(
           global_mesh=runner.global_mesh,
           checkpoint_type=checkpoint_type,
           state_specs=partitioned_specs)
+      if use_ema:
+        partitioned_train_state = extract_ema(partitioned_train_state)
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
       last_checkpoint = new_checkpoint
 
@@ -1382,6 +1434,7 @@ def decode_spmd_model(
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
+  use_ema = has_ema(task_p)
 
   with global_mesh:
     use_gda = (
@@ -1404,7 +1457,8 @@ def decode_spmd_model(
          restore_checkpoint_dir,
          checkpoint_type,
          checkpoint_step=restore_checkpoint_step,
-         is_decode=True)
+         is_decode=True,
+         use_ema=use_ema)
     eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
                                   init_key, partitioned_specs)
     trainer_lib.write_post_init_model_hparams_file(
@@ -1419,7 +1473,6 @@ def decode_spmd_model(
         os.path.join(summary_base_dir, f'eval_test_{p.name}')
         for p in eval_input_p
     ]
-    # TODO(pax): support ema.
     partitioned_train_state = trim_opt_states(partitioned_train_state)
     last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
         restore_checkpoint_dir)
@@ -1483,9 +1536,11 @@ def decode_spmd_model(
             restore_checkpoint_dir,
             global_mesh=global_mesh,
             checkpoint_type=checkpoint_type,
-            state_specs=partitioned_specs,
-            step=new_checkpoint_step)
-        partitioned_train_state = trim_opt_states(partitioned_train_state)
+            state_specs=partitioned_specs)
+        if use_ema:
+          partitioned_train_state = extract_ema(partitioned_train_state)
+        else:
+          partitioned_train_state = trim_opt_states(partitioned_train_state)
         last_checkpoint_step = new_checkpoint_step
 
 
