@@ -26,6 +26,7 @@ function collect_wheels() {
   pushd /tmp/staging-wheels
   cp /tmp/paxml_pip_package_build/*.whl .
   rename -v "s/^paxml-(.*?)-py3/paxml-${wheel_version}+$(date -u +%Y%m%d)-py3/" *.whl
+  rename -v "s/^praxis-(.*?)-py3/praxis-${wheel_version}+$(date -u +%Y%m%d)-py3/" *.whl
   popd
   mv /tmp/staging-wheels/* .
 }

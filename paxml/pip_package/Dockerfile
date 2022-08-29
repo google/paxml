@@ -65,22 +65,21 @@ RUN mkdir /bazel && \
     rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
 
 # Use these commits for testing
-RUN git clone https://github.com/google/paxml.git
-RUN cd paxml && git checkout 61e40c96176dc59f7b81969ce5b7a2ec1cf1d7ab
+COPY . /paxml
 RUN git clone https://github.com/google/praxis.git
-RUN cd praxis && git checkout d13f6d056dc1fef8858e7cc2d9eb572e6d9e3a7c
 
-RUN mv praxis/praxis /paxml/
+RUN cp -r praxis/praxis /paxml/
 
-RUN pip3 install paxml/paxml/pip_package
 RUN pip3 install paxml/praxis/pip_package
+RUN pip3 install paxml/paxml/pip_package
 
 RUN git clone https://github.com/google/flaxformer.git
 RUN cd flaxformer && pip3 install .
 
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
+RUN cd praxis && bash praxis/pip_package/build_pip_pkg.sh
 
-WORKDIR "/paxml"
+WORKDIR /
 
 CMD ["/bin/bash"]

@@ -93,4 +93,3 @@ DST_DIR="/tmp/paxml_pip_package_build"
 #  find "$DST_DIR" -name "*cp${PYTHON_VERSION}${PYTHON_MINOR_VERSION}*.whl" | xargs -n1 ./third_party/auditwheel.sh repair --plat manylinux2010_x86_64 -w "$DST_DIR"
 #fi
 
-rm .bazelrc
