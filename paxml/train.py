@@ -589,11 +589,7 @@ def train_and_evaluate_pmap(
             replicated_model_states.step))
     while True:
       logging.debug('step=`%d`: Beginning', step_i)
-      if step_i > train_p.num_train_steps:
-        logging.info(
-            'Training loop completed (step (`%d`) greater than '
-            'num_train_step (`%d`).', step_i, train_p.num_train_steps)
-        break
+
       if summary_last_step is None:
         summary_last_step = step_i - 1
 
@@ -632,6 +628,12 @@ def train_and_evaluate_pmap(
         # check on every step if there were any errors raised by the
         # manager and raise them in the main thread.
         async_ckpt_manager.check_for_errors()
+
+      if step_i >= train_p.num_train_steps:
+        logging.info(
+            'Training loop completed (step (`%d`) greater than '
+            'num_train_step (`%d`).', step_i, train_p.num_train_steps)
+        break
 
       if step_i <= _N_STEPS_WARMUP_LOGGING:
         logging.info('step=`%d`: Retrieving model inputs.', step_i)
@@ -797,6 +799,38 @@ def train_and_evaluate_pmap(
               'tuner, while num_train_step is `%d`.', step_i,
               train_p.num_train_steps)
           break
+
+    # Save checkpoint for the last step.
+    # TODO: Add a helper function for this if block.
+    if checkpoint_manager.last_checkpoint_step < step_i:
+      if py_utils.pmap_use_tensorstore():
+        logging.info(
+            'Pmap saving a TensorStore ckpt at final step: %d', step_i)
+        py_utils.sync_global_devices(
+            f'checkpointer:saving:{checkpoint_dir}:step-{step_i}')
+        fully_replicated_gda_model_states = jax.tree_map(
+            py_utils.convert_fully_replicated_sda_to_gda,
+            replicated_model_states)
+        checkpoints.save_checkpoint(
+            fully_replicated_gda_model_states,
+            checkpoint_dir,
+            checkpoint_type=CheckpointType.CHECKPOINT_GDA,
+            async_ckpt_manager=async_ckpt_manager,
+            use_orbax=use_orbax,
+            async_checkpointer=async_checkpointer)
+        py_utils.sync_global_devices(
+            f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')
+      else:
+        if jax.process_index() == 0:
+          # We just need to save the first model replica.
+          unreplicated_model_states = jax.tree_map(lambda x: x[0],
+                                                   replicated_model_states)
+          checkpoints.save_checkpoint(
+              unreplicated_model_states,
+              checkpoint_dir,
+              use_orbax=use_orbax,
+              async_checkpointer=async_checkpointer)
+      checkpoint_manager.save_metadata(global_step_id=step_i, force=True)
 
 
 def compile_for_auto_sharding(train_step: Any,
@@ -1107,11 +1141,6 @@ def train_and_evaluate_spmd_model(
       py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
       while True:
         logging.debug('step=`%d`: Beginning', step_i)
-        if step_i > train_p.num_train_steps:
-          logging.info(
-              'Training loop completed (step (`%d`) greater than '
-              'num_train_step (`%d`).', step_i, train_p.num_train_steps)
-          break
 
         if summary_last_step is None:
           summary_last_step = step_i - 1
@@ -1135,6 +1164,12 @@ def train_and_evaluate_spmd_model(
           # check on every step if there were any errors raised by the
           # manager and raise them in the main thread.
           async_ckpt_manager.check_for_errors()
+
+        if step_i >= train_p.num_train_steps:
+          logging.info(
+              'Training loop completed (step (`%d`) greater than '
+              'num_train_step (`%d`).', step_i, train_p.num_train_steps)
+          break
 
         # Get new model inputs
         if step_counter <= _N_STEPS_WARMUP_LOGGING:
@@ -1321,3 +1356,17 @@ def train_and_evaluate_spmd_model(
                 train_p.num_train_steps)
             break
         step_counter += 1
+      # Save checkpoint for the last step.
+      if checkpoint_manager.last_checkpoint_step < step_i:
+        logging.info('Saving a ckpt at final step: %d', step_i)
+        checkpoints.save_checkpoint(
+            partitioned_train_state,
+            checkpoint_dir,
+            checkpoint_type=checkpoint_type,
+            state_specs=train_state_pspecs,
+            async_ckpt_manager=async_ckpt_manager,
+            use_orbax=use_orbax,
+            async_checkpointer=async_checkpointer)
+        checkpoint_manager.save_metadata(global_step_id=step_i, force=True)
+        py_utils.sync_global_devices(
+            f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')

@@ -151,6 +151,10 @@ class CheckpointManager:
     """Full checkpoints' filename."""
     return os.path.join(self._root_dir, self._checkpoint_basename)
 
+  @property
+  def last_checkpoint_step(self) -> int:
+    return self._last_saved_checkpoint_step
+
   def should_save(self, global_step_id: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
     # Whether to save an on-demand checkpoint due to preemption
@@ -166,7 +170,8 @@ class CheckpointManager:
     # Whether to save a periodic checkpoint
     return should_save_ckpt
 
-  def save_metadata(self, global_step_id: int) -> None:
+  def save_metadata(self, global_step_id: int,
+                    force: bool = False) -> None:
     """Adds a new checkpoint to the manager.
 
     This function also deletes the old checkpoints if needed and generates a new
@@ -174,12 +179,14 @@ class CheckpointManager:
 
     Args:
       global_step_id: The global step identifier of the checkpoint to be added.
+      force: When set, do not call should_save() to determine whether
+        this is a valid request to save a checkpoint or not.
 
     Raises:
       ValueError: When save_metadata() was not supposed to be called yet at the
         current time. This can be verified by calling should_save() first.
     """
-    if not self.should_save(global_step_id):
+    if not force and not self.should_save(global_step_id):
       raise ValueError(
           f'Not expecting to call save_metadata() at step `{global_step_id}`'
           f'(last saved step: `{self._last_saved_checkpoint_step}` --'
