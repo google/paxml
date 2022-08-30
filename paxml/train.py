@@ -501,10 +501,12 @@ def train_and_evaluate_pmap(
   sample_inputs = train_input_pipeline.peek_padded()
   vars_weight_params = jax_task.model.abstract_init_with_metadata(
       init_key, sample_inputs)
-  # Dump out model meta info for debugging.
-  trainer_lib.write_post_init_model_hparams_file(jax_task.model,
-                                                 vars_weight_params,
-                                                 job_log_dir)
+  # JaxContext needed for shared layer lookup from global scope.
+  with base_layer.JaxContext.new_context():
+    # Dump out model meta info for debugging.
+    trainer_lib.write_post_init_model_hparams_file(jax_task.model,
+                                                   vars_weight_params,
+                                                   job_log_dir)
 
   train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
       vars_weight_params)
