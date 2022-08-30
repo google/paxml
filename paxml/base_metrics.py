@@ -20,7 +20,7 @@ from __future__ import annotations
 import abc
 import collections
 import logging
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -383,7 +383,7 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
     """
     loss_key: Optional[str] = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float, float]:
+  def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
     """Computes the aggregated loss over shards.
 
     Args:
@@ -391,7 +391,8 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
 
     Returns:
       A Tuple containing the weighted loss for the shard, the mean loss
-      across all shards, and the weight of the weighted loss.
+      across all shards, and the weight of the weighted loss (or `None`
+      if no such weight is applicable).
 
     """
     loss_key = self.hparams.loss_key
@@ -431,7 +432,7 @@ class MultiLossAggregator(LossAggregator):
     """
     loss_keys: Optional[Sequence[str]] = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float, float]:
+  def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
 
     total_weighted_loss = 0.0
     total_mean_loss = 0.0
@@ -459,4 +460,6 @@ class MultiLossAggregator(LossAggregator):
         total_weighted_loss += loss
         total_mean_loss += loss
 
-    return total_weighted_loss, total_mean_loss, loss_weight
+    # Returns `None` for loss weight given that there is a loss weight
+    # for each key, and no summary of them is particularly sensible.
+    return total_weighted_loss, total_mean_loss, None

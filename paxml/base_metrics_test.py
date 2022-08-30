@@ -138,7 +138,7 @@ class LossAggregatorTest(test_utils.TestCase):
 
     self.assertAllClose(weighted_loss, expected_loss)
     self.assertAllClose(mean_loss, expected_loss)
-    self.assertAllClose(loss_weight, weighted_loss / expected_loss)
+    self.assertIsNone(loss_weight)
 
 
 if __name__ == '__main__':
