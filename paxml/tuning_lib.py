@@ -16,7 +16,7 @@
 """Tuning loop for PAX."""
 
 import os
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Union
 from absl import logging
 from clu import platform
 import jax
@@ -26,6 +26,7 @@ from paxml import metric_utils
 from paxml import trainer_lib
 from praxis import base_input
 from praxis import py_utils
+from praxis import pytypes
 
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
@@ -64,7 +65,11 @@ def tune(trial_fn: TrialFn,
          pythia_port: Optional[int] = None,
          is_metric_reporting_role: bool = True,
          tuner_group: Optional[str] = None,
-         max_num_trials: Optional[int] = None) -> None:
+         max_num_trials: Optional[int] = None,
+         early_stopping_fn_builder: Optional[
+             Callable[[pg.tuning.Feedback],
+                      trainer_lib.EarlyStoppingFn]] = None
+         ) -> None:
   """Tune an experiment.
 
   An experiment can be tuned by running a tuning loop, with each iteration
@@ -105,6 +110,12 @@ def tune(trial_fn: TrialFn,
     max_num_trials: An optional max number of trials for current tuning.
       If not None, it will override the default max number of trials specified
       by the `search` method of the experiment.
+    early_stopping_fn_builder: An optional callable that uses a caller defined
+      early_stopping_fn instead of the the default one (get_early_stopping_fn).
+      If None, the default early_stopping_fn for tuning will be used. This flag
+      should be used only when custom logic for early_stopping_fn should be
+      performed to align with the trial_fn. For example, training multiple tasks
+      in a single trial.
   """
   # Google-internal tuning infra init.
 
@@ -132,39 +143,41 @@ def tune(trial_fn: TrialFn,
                             'search_algorithm')
 
   # Helper functions for tuning.
-  def get_early_stopping_fn(
-      feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
-    """Gets early stopping function based on a feedback object."""
+  if early_stopping_fn_builder is None:
+    def get_early_stopping_fn(
+        feedback: pg.tuning.Feedback) -> trainer_lib.EarlyStoppingFn:
+      """Gets early stopping function based on a feedback object."""
 
-    def should_stop_early(metrics: Dict[str, float],
-                          running_mode: trainer_lib.RunningMode,
-                          global_step: int, is_last_ckpt: bool) -> bool:
-      """Early stopping function."""
-      if is_metric_reporting_role:
-        # `metrics_by_dataset` could be None for interleaved train/eval
-        # when evaluation is not performed at current global step.
-        if (jax.process_index() == 0 and
-            (running_mode & trainer_lib.RunningMode.EVAL or
-             running_mode & trainer_lib.RunningMode.DECODE)):
-          # Computing reward and report back to the tuning service.
-          reward = reward_fn(metrics, global_step)
-          feedback.add_measurement(reward, metrics=metrics, step=global_step)
-          logging.info(
-              'Measurement is reported to trial %d at step %d '
-              'with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
-              feedback.id, global_step, reward, running_mode,
-              is_last_ckpt, metrics)
-        if is_last_ckpt:
-          py_utils.sync_global_devices(
-              f'Trial termination at step {global_step} started.')
-          # `feedback.done` should be called just once per trial.
-          if jax.process_index() == 0:
-            feedback.done()
-          py_utils.sync_global_devices(
-              f'Trial termination at step {global_step} completed.')
-          logging.info('Trial %d is now completed.', feedback.id)
-      return feedback.should_stop_early()
-    return should_stop_early
+      def should_stop_early(metrics: Dict[str, float],
+                            running_mode: trainer_lib.RunningMode,
+                            global_step: int, is_last_ckpt: bool) -> bool:
+        """Early stopping function."""
+        if is_metric_reporting_role:
+          # `metrics_by_dataset` could be None for interleaved train/eval
+          # when evaluation is not performed at current global step.
+          if (jax.process_index() == 0 and
+              (running_mode & trainer_lib.RunningMode.EVAL or
+               running_mode & trainer_lib.RunningMode.DECODE)):
+            # Computing reward and report back to the tuning service.
+            reward = reward_fn(metrics, global_step)
+            feedback.add_measurement(reward, metrics=metrics, step=global_step)
+            logging.info(
+                'Measurement is reported to trial %d at step %d '
+                'with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
+                feedback.id, global_step, reward, running_mode,
+                is_last_ckpt, metrics)
+          if is_last_ckpt:
+            py_utils.sync_global_devices(
+                f'Trial termination at step {global_step} started.')
+            # `feedback.done` should be called just once per trial.
+            if jax.process_index() == 0:
+              feedback.done()
+            py_utils.sync_global_devices(
+                f'Trial termination at step {global_step} completed.')
+            logging.info('Trial %d is now completed.', feedback.id)
+        return feedback.should_stop_early()
+      return should_stop_early
+    early_stopping_fn_builder = get_early_stopping_fn
 
   for example, feedback in pg.sample(
       search_space, search_algorithm, max_num_trials,
@@ -180,7 +193,7 @@ def tune(trial_fn: TrialFn,
         try:
           trial_fn(experiment_config, work_unit,
                    os.path.join(job_log_dir, str(feedback.id)),
-                   get_early_stopping_fn(feedback))
+                   early_stopping_fn_builder(feedback))
         except automl.EarlyStoppingError as e:
           if jax.process_index() == 0:
             if e.skip:
@@ -224,7 +237,8 @@ def should_early_stop(
     early_stop_fn: trainer_lib.EarlyStoppingFn,
     global_step: int,
     is_last_ckpt: bool,
-    train_metrics: Optional[Dict[str, float]] = None,
+    train_weighted_scalars: Optional[Union[pytypes.WeightedScalars,
+                                           pytypes.WeightedScalarsList]] = None,
     eval_train_metrics: Optional[Dict[str, float]] = None,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
     eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
@@ -249,6 +263,18 @@ def should_early_stop(
       has_train_metrics=train_steps_per_sec is not None,
       has_eval_metrics=bool(eval_metrics_list),
       has_decode_metrics=bool(decode_metrics_list))
+
+  # Since train metrics will be produced at each step, for performance reasons,
+  # we only aggregate the metrics at the last checkpoint or at the step when
+  # evaluation or decoding takes place.
+  train_metrics = None
+  if train_weighted_scalars is not None:
+    if is_last_ckpt or running_mode.has_eval or running_mode.has_decode:
+      train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
+      logging.info(
+          ('Aggregate train weighted scalars as tuning metrics. '
+           'Metrics=%s, WeightedScalars=%s'),
+          train_metrics, train_weighted_scalars)
 
   # Aggregate metrics for tuning.
   tuning_metrics = _aggregate_metrics(

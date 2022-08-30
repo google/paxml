@@ -434,6 +434,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         "//praxis:base_input",
         "//praxis:py_utils",
+        "//praxis:pytypes",
         # Implicit internal pyglove dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],

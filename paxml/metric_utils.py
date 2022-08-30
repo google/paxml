@@ -22,6 +22,7 @@ from absl import logging
 
 import clu.values as clu_values
 from jax import numpy as jnp
+from jax.experimental import global_device_array
 import numpy as np
 
 from paxml import summary_utils
@@ -154,7 +155,7 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Dict[str, Union[
 
 def _is_nparray_like(v: Any) -> bool:
   """Returns True if input is a NumPy array-like instance."""
-  return isinstance(v, (np.ndarray, jnp.ndarray))
+  return isinstance(v, (np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray))
 
 
 def is_weighted_scalar(v: Any) -> bool:

@@ -95,6 +95,21 @@ class RunningMode(enum.Flag):
       mode |= RunningMode.DECODE
     return mode
 
+  @property
+  def has_train(self):
+    """Returns True if current mode has training."""
+    return bool(self & RunningMode.TRAIN)
+
+  @property
+  def has_eval(self):
+    """Returns True if current mode has evaluation."""
+    return bool(self & RunningMode.EVAL)
+
+  @property
+  def has_decode(self):
+    """Returns True if current mode has decoding."""
+    return bool(self & RunningMode.DECODE)
+
 
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
