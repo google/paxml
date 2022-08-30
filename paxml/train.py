@@ -22,7 +22,7 @@ import os
 import re
 import time
 import typing
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import jax
@@ -55,6 +55,11 @@ NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PARAMS = base_layer.PARAMS
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 SummaryWriter = tf.summary.SummaryWriter
+CheckpointManager = Union[checkpoint_managers.CheckpointManager,
+                          checkpoint_managers.OrbaxCheckpointManager]
+Checkpointer = checkpoints.Checkpointer
+PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
+TRAIN_STATE_KEY = checkpoint_managers.TRAIN_STATE_KEY
 
 _N_STEPS_WARMUP_LOGGING = 5
 
@@ -62,6 +67,15 @@ _N_STEPS_WARMUP_LOGGING = 5
 def _checkpoint_dir(job_log_dir: str) -> str:
   """Returns the checkpoint directory from the root `job_log_dir`."""
   return os.path.join(job_log_dir, 'checkpoints')
+
+
+def _make_checkpoint_dir(job_log_dir: str) -> str:
+  checkpoint_dir = _checkpoint_dir(job_log_dir)
+  if jax.process_index() == 0 and not tf.io.gfile.exists(checkpoint_dir):
+    tf.io.gfile.makedirs(checkpoint_dir)
+  # Block all hosts until directory is ready.
+  py_utils.sync_global_devices(f'checkpointer:makedirs:{checkpoint_dir}')
+  return checkpoint_dir
 
 
 def _parse_duration(
@@ -102,23 +116,54 @@ def _parse_duration(
 
 
 def _create_checkpoint_manager(
-    task_p: tasks_lib.SingleTask.HParams, job_log_dir: str,
+    task_p: tasks_lib.SingleTask.HParams,
+    job_log_dir: str,
     checkpoint_type: CheckpointType,
-    todelete_subdir: Optional[str]) -> checkpoint_managers.CheckpointManager:
+    todelete_subdir: Optional[str],
+    use_orbax: bool = False,
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None
+) -> CheckpointManager:
   """Creates a checkpoint manager."""
-  checkpoint_dir = _checkpoint_dir(job_log_dir)
+  checkpoint_dir = _make_checkpoint_dir(job_log_dir)
   train_p = task_p.train
   max_to_keep = train_p.save_max_to_keep
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
-  return checkpoint_managers.CheckpointManager(
-      config_name='',
-      root_dir=checkpoint_dir,
-      checkpoint_type=checkpoint_type,
-      max_to_keep=max_to_keep,
-      save_interval_steps=save_interval_steps,
-      keep_interval_timedelta=keep_interval_timedelta,
-      todelete_subdir=todelete_subdir)
+  if use_orbax:
+    options = checkpoint_managers.CheckpointManagerOptions(
+        max_to_keep=max_to_keep,
+        save_interval_steps=save_interval_steps,
+        keep_time_interval=keep_interval_timedelta,
+        todelete_subdir=todelete_subdir)
+    checkpointer = async_checkpointer
+    if checkpointer is None:
+      checkpointer = Checkpointer(PaxCheckpointHandler(enable_flax=False))
+    return checkpoint_managers.OrbaxCheckpointManager(
+        checkpoint_dir, {TRAIN_STATE_KEY: checkpointer}, options)
+  else:
+    return checkpoint_managers.CheckpointManager(
+        config_name='',
+        root_dir=checkpoint_dir,
+        checkpoint_type=checkpoint_type,
+        max_to_keep=max_to_keep,
+        save_interval_steps=save_interval_steps,
+        keep_interval_timedelta=keep_interval_timedelta,
+        todelete_subdir=todelete_subdir)
+
+
+def _check_for_errors(async_ckpt_manager: Optional[
+    gda_serialization.GlobalAsyncCheckpointManager] = None,
+                      checkpoint_manager: Optional[CheckpointManager] = None):
+  """Calls check_for_errors on arguments if not None."""
+  # Since the checkpoint is happening asynchronously, the errors may
+  # be caught after some time (when the training is continuing). So
+  # check on every step if there were any errors raised by the
+  # manager and raise them in the main thread.
+  if async_ckpt_manager is not None:
+    async_ckpt_manager.check_for_errors()
+  if checkpoint_manager is not None and isinstance(
+      checkpoint_manager, checkpoint_managers.OrbaxCheckpointManager):
+    checkpoint_manager.check_for_errors()
 
 
 def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
@@ -275,9 +320,12 @@ def train_and_evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task_p)
 
-  checkpoint_manager = _create_checkpoint_manager(task_p, job_log_dir,
-                                                  checkpoint_type,
-                                                  checkpoint_todelete_subdir)
+  checkpoint_manager = _create_checkpoint_manager(
+      task_p,
+      job_log_dir,
+      checkpoint_type,
+      checkpoint_todelete_subdir,
+      use_orbax=use_orbax)
 
   if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(
@@ -396,7 +444,7 @@ def train_and_evaluate_pmap(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: Optional[str],
-    checkpoint_manager: checkpoint_managers.CheckpointManager,
+    checkpoint_manager: CheckpointManager,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -465,18 +513,25 @@ def train_and_evaluate_pmap(
   # and rely on replicate_model_state to replicate to all local_devices on each
   # process.
   if py_utils.pmap_use_tensorstore():
-    if jax.process_index() == 0:
-      tf.io.gfile.makedirs(checkpoint_dir)
-    # Block all hosts until directory is ready.
-    py_utils.sync_global_devices(f'checkpointer:makedirs:{checkpoint_dir}')
+    _make_checkpoint_dir(job_log_dir)
     checkpoints.delete_temp_directories(checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
     model_states = tasks_lib.restore_pmap_from_tensorstore(
         train_state_global_shapes, checkpoint_dir)
   else:
-    model_states = checkpoints.restore_checkpoint(
-        train_state_global_shapes, checkpoint_dir, use_orbax=use_orbax)
+    if use_orbax:
+      checkpoint_manager = typing.cast(
+          checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+      step = checkpoint_manager.latest_step()
+      items = {TRAIN_STATE_KEY: train_state_global_shapes}
+      if step is None:
+        model_states = None
+      else:
+        model_states = checkpoint_manager.restore(step, items=items)
+    else:
+      model_states = checkpoints.restore_checkpoint(
+          train_state_global_shapes, checkpoint_dir, use_orbax=use_orbax)
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
     model_states = trainer_lib.initialize_model_state(jax_task, init_key,
@@ -593,7 +648,25 @@ def train_and_evaluate_pmap(
       if summary_last_step is None:
         summary_last_step = step_i - 1
 
-      if checkpoint_manager.should_save(step_i):
+      if use_orbax:
+        checkpoint_manager = typing.cast(
+            checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+        if py_utils.pmap_use_tensorstore():
+          fully_replicated_gda_model_states = jax.tree_map(
+              py_utils.convert_fully_replicated_sda_to_gda,
+              replicated_model_states)
+          checkpoint_manager.save(
+              step_i, {TRAIN_STATE_KEY: fully_replicated_gda_model_states})
+        else:
+          if jax.process_index() == 0:
+            # We just need to save the first model replica.
+            unreplicated_model_states = jax.tree_map(lambda x: x[0],
+                                                     replicated_model_states)
+            checkpoint_manager.save(
+                step_i, {TRAIN_STATE_KEY: unreplicated_model_states})
+      elif checkpoint_manager.should_save(step_i):
+        checkpoint_manager = typing.cast(checkpoint_managers.CheckpointManager,
+                                         checkpoint_manager)
         if py_utils.pmap_use_tensorstore():
           logging.info('Pmap saving a TensorStore ckpt at step: %d', step_i)
           py_utils.sync_global_devices(
@@ -622,12 +695,7 @@ def train_and_evaluate_pmap(
                 async_checkpointer=async_checkpointer)
         checkpoint_manager.save_metadata(global_step_id=step_i)
 
-      if async_ckpt_manager is not None:
-        # Since the checkpoint is happening asynchronously, the errors may
-        # be caught after some time (when the training is continuing). So
-        # check on every step if there were any errors raised by the
-        # manager and raise them in the main thread.
-        async_ckpt_manager.check_for_errors()
+      _check_for_errors(async_ckpt_manager, checkpoint_manager)
 
       if step_i >= train_p.num_train_steps:
         logging.info(
@@ -802,7 +870,30 @@ def train_and_evaluate_pmap(
 
     # Save checkpoint for the last step.
     # TODO: Add a helper function for this if block.
-    if checkpoint_manager.last_checkpoint_step < step_i:
+    if use_orbax:
+      checkpoint_manager = typing.cast(
+          checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+      if checkpoint_manager.latest_step() < step_i:
+        if py_utils.pmap_use_tensorstore():
+          logging.info('Pmap saving a TensorStore ckpt at final step: %d',
+                       step_i)
+          py_utils.sync_global_devices(
+              f'checkpointer:saving:{checkpoint_dir}:step-{step_i}')
+          fully_replicated_gda_model_states = jax.tree_map(
+              py_utils.convert_fully_replicated_sda_to_gda,
+              replicated_model_states)
+          checkpoint_manager.save(
+              step_i, {TRAIN_STATE_KEY: fully_replicated_gda_model_states})
+        else:
+          if jax.process_index() == 0:
+            # We just need to save the first model replica.
+            unreplicated_model_states = jax.tree_map(lambda x: x[0],
+                                                     replicated_model_states)
+            checkpoint_manager.save(
+                step_i, {TRAIN_STATE_KEY: unreplicated_model_states})
+    else:
+      checkpoint_manager = typing.cast(checkpoint_managers.CheckpointManager,
+                                       checkpoint_manager)
       if py_utils.pmap_use_tensorstore():
         logging.info(
             'Pmap saving a TensorStore ckpt at final step: %d', step_i)
@@ -869,7 +960,7 @@ def train_and_evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: Optional[str],
-    checkpoint_manager: checkpoint_managers.CheckpointManager,
+    checkpoint_manager: CheckpointManager,
     checkpoint_type: CheckpointType,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
@@ -912,17 +1003,10 @@ def train_and_evaluate_spmd_model(
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
 
-  checkpoint_dir = _checkpoint_dir(job_log_dir)
-
   assert jax.config.jax_parallel_functions_output_gda, 'GDA must be enabled'
   multi_host_checkpointing = checkpoint_type == CheckpointType.CHECKPOINT_GDA
 
-  if jax.process_index() == 0:
-    tf.io.gfile.makedirs(checkpoint_dir)
-  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    # Block all hosts until directory is ready.
-    py_utils.sync_global_devices(f'checkpointer:makedirs:{checkpoint_dir}')
-
+  checkpoint_dir = _make_checkpoint_dir(job_log_dir)
   checkpoints.delete_temp_directories(checkpoint_dir)
 
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
@@ -1033,13 +1117,30 @@ def train_and_evaluate_spmd_model(
               unpadded_global_batch_size=train_unpadded_global_batch_size))
 
     # Try to restore from checkpoint.
-    partitioned_train_state = checkpoints.restore_checkpoint(
-        train_state_global_shapes,
-        checkpoint_dir,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type,
-        state_specs=train_state_pspecs,
-        use_orbax=use_orbax)
+    if use_orbax:
+      checkpoint_manager = typing.cast(
+          checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+      items = {TRAIN_STATE_KEY: train_state_global_shapes}
+      restore_kwargs = {
+          TRAIN_STATE_KEY: {
+              'specs': train_state_pspecs,
+              'mesh': global_mesh,
+          }
+      }
+      step = checkpoint_manager.latest_step()
+      if step is None:
+        partitioned_train_state = None
+      else:
+        partitioned_train_state = checkpoint_manager.restore(
+            step, items=items, restore_kwargs=restore_kwargs)
+    else:
+      partitioned_train_state = checkpoints.restore_checkpoint(
+          train_state_global_shapes,
+          checkpoint_dir,
+          global_mesh=global_mesh,
+          checkpoint_type=checkpoint_type,
+          state_specs=train_state_pspecs,
+          use_orbax=use_orbax)
 
     # Randomly initialized variables if no files in checkpoint dir.
     if partitioned_train_state is None:
@@ -1145,7 +1246,14 @@ def train_and_evaluate_spmd_model(
         if summary_last_step is None:
           summary_last_step = step_i - 1
 
-        if checkpoint_manager.should_save(step_i):
+        if use_orbax:
+          checkpoint_manager = typing.cast(
+              checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+          checkpoint_manager.save(step_i,
+                                  {TRAIN_STATE_KEY: partitioned_train_state})
+        elif checkpoint_manager.should_save(step_i):
+          checkpoint_manager = typing.cast(
+              checkpoint_managers.CheckpointManager, checkpoint_manager)
           logging.info('Saving a ckpt at step: %d', step_i)
           checkpoints.save_checkpoint(
               partitioned_train_state,
@@ -1158,12 +1266,8 @@ def train_and_evaluate_spmd_model(
           checkpoint_manager.save_metadata(global_step_id=step_i)
           py_utils.sync_global_devices(
               f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')
-        if async_ckpt_manager is not None:
-          # Since the checkpoint is happening asynchronously, the errors may
-          # be caught after some time (when the training is continuing). So
-          # check on every step if there were any errors raised by the
-          # manager and raise them in the main thread.
-          async_ckpt_manager.check_for_errors()
+
+        _check_for_errors(async_ckpt_manager, checkpoint_manager)
 
         if step_i >= train_p.num_train_steps:
           logging.info(
@@ -1357,16 +1461,24 @@ def train_and_evaluate_spmd_model(
             break
         step_counter += 1
       # Save checkpoint for the last step.
-      if checkpoint_manager.last_checkpoint_step < step_i:
+    if use_orbax:
+      checkpoint_manager = typing.cast(
+          checkpoint_managers.OrbaxCheckpointManager, checkpoint_manager)
+      if checkpoint_manager.latest_step() < step_i:
         logging.info('Saving a ckpt at final step: %d', step_i)
-        checkpoints.save_checkpoint(
-            partitioned_train_state,
-            checkpoint_dir,
-            checkpoint_type=checkpoint_type,
-            state_specs=train_state_pspecs,
-            async_ckpt_manager=async_ckpt_manager,
-            use_orbax=use_orbax,
-            async_checkpointer=async_checkpointer)
-        checkpoint_manager.save_metadata(global_step_id=step_i, force=True)
-        py_utils.sync_global_devices(
-            f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')
+        checkpoint_manager.save(step_i,
+                                {TRAIN_STATE_KEY: partitioned_train_state})
+    else:
+      checkpoint_manager = typing.cast(checkpoint_managers.CheckpointManager,
+                                       checkpoint_manager)
+      checkpoints.save_checkpoint(
+          partitioned_train_state,
+          checkpoint_dir,
+          checkpoint_type=checkpoint_type,
+          state_specs=train_state_pspecs,
+          async_ckpt_manager=async_ckpt_manager,
+          use_orbax=use_orbax,
+          async_checkpointer=async_checkpointer)
+      checkpoint_manager.save_metadata(global_step_id=step_i, force=True)
+      py_utils.sync_global_devices(
+          f'checkpointer:saved:{checkpoint_dir}:step-{step_i}')

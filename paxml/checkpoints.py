@@ -53,6 +53,7 @@ CheckpointType = checkpoint_pb2.CheckpointType
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 PyTreeDef = pytypes.PyTreeDef
 AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
+Checkpointer = orbax.checkpoint.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
