@@ -461,12 +461,14 @@ def evaluate_pmap_model(
       (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
-  checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
-  jax_task = instantiate(task_p)
-  use_ema = has_ema(task_p)
 
   if not eval_input_p:
     return
+
+  checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+  checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+  jax_task = instantiate(task_p)
+  use_ema = has_ema(task_p)
 
   # TODO(pax-dev): Investigate if we can use model input specs
   # instead of instantiating this input pipeline.
@@ -479,7 +481,7 @@ def evaluate_pmap_model(
        prng_key,
        sample_model_inputs,
        checkpoint_dir,
-       checkpoint_step=None,
+       checkpoint_step=checkpoint_step,
        use_ema=use_ema,
        track_metric=False)
 
@@ -491,7 +493,8 @@ def evaluate_pmap_model(
       for p in eval_input_p
   ]
 
-  last_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
+  last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+      checkpoint_dir)
   with contextlib.ExitStack() as exit_stack:
     eval_summary_writers = [
         exit_stack.enter_context(summary_utils.get_summary_writer(d))
@@ -504,46 +507,46 @@ def evaluate_pmap_model(
             runner.run_one_step(replicated_model_states, eval_summary_writers))
 
       # If the last check point evaluated matches max train steps, exit.
-      if last_checkpoint is not None:
-        last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
-            last_checkpoint)
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+      if last_checkpoint_step is not None:
+        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if tuning_lib.should_early_stop(
-            early_stopping_fn, last_ckpt_step, is_last_ckpt,
+            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
             eval_scoring_metrics_list=eval_scoring_metrics_list,
             eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
           logging.info(
               'Evaluation is early stopped at checkpoint step %d by the'
-              'tuner, while the num_train_steps is %d', last_ckpt_step,
+              'tuner, while the num_train_steps is %d', last_checkpoint_step,
               task_p.train.num_train_steps)
           break
         if is_last_ckpt:
           break
       # Release replicated_model_states.
       del replicated_model_states
-      new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
-      while new_checkpoint == last_checkpoint:
+      new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+          checkpoint_dir)
+      while new_checkpoint_step == last_checkpoint_step:
         logging.info('Sleep before checking for new latest checkpoint.')
         time.sleep(60)
-        new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
+        new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+            checkpoint_dir)
       # There must be a new checkpoint here.
-      logging.info('Found new checkpoint: %s', new_checkpoint)
+      logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
       if py_utils.pmap_use_tensorstore():
         model_states = tasks_lib.restore_pmap_from_tensorstore(
-            train_state_global_shapes, checkpoint_dir)
+            train_state_global_shapes, checkpoint_dir, step=new_checkpoint_step)
       else:
-        model_states = checkpoints.restore_checkpoint(train_state_global_shapes,
-                                                      checkpoint_dir)
+        model_states = checkpoints.restore_checkpoint(
+            train_state_global_shapes, checkpoint_dir, step=new_checkpoint_step)
       if use_ema:
         model_states = extract_ema(model_states)
       else:
         model_states = trim_opt_states(model_states)
       replicated_model_states = trainer_lib.replicate_model_state(model_states)
       del model_states  # Unused at that point.
-      last_checkpoint = new_checkpoint
+      last_checkpoint_step = new_checkpoint_step
 
 
 class _SpmdEvalRunner:
@@ -742,16 +745,18 @@ def evaluate_spmd_model(
       (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
   """
   logging.info('Using SPMD sharding for model parallelism.')
+
+  if not eval_input_p:
+    return
+
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+  checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
 
   model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
                                             model_p.dcn_mesh_shape)
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
   jax_task = instantiate(task_p)
-
-  if not eval_input_p:
-    return
 
   use_ema = has_ema(task_p)
 
@@ -777,6 +782,7 @@ def evaluate_spmd_model(
        sample_inputs,
        checkpoint_dir,
        checkpoint_type,
+       checkpoint_step=checkpoint_step,
        use_ema=use_ema)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
@@ -794,7 +800,8 @@ def evaluate_spmd_model(
       os.path.join(summary_base_dir, f'eval_test_{p.name}')
       for p in eval_input_p
   ]
-  last_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
+  last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+      checkpoint_dir)
 
   create_gda_for_inputs = (
       jax.config.jax_parallel_functions_output_gda and
@@ -810,41 +817,42 @@ def evaluate_spmd_model(
             runner.run_one_step(partitioned_train_state, eval_summary_writers,
                                 eval_key, create_gda_for_inputs))
       # If the last check point evaluated matches max train steps, exit.
-      if last_checkpoint is not None:
-        last_ckpt_step = checkpoints.get_step_from_checkpoint_asset(
-            last_checkpoint)
-        exceeded_ckpt = last_ckpt_step + task_p.train.save_interval_steps
+      if last_checkpoint_step is not None:
+        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if tuning_lib.should_early_stop(
-            early_stopping_fn, last_ckpt_step, is_last_ckpt,
+            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
             eval_scoring_metrics_list=eval_scoring_metrics_list,
             eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
           logging.info(
               'Evaluation is early stopped at checkpoint step %d by the'
-              'tuner, while the num_train_steps is %d', last_ckpt_step,
+              'tuner, while the num_train_steps is %d', last_checkpoint_step,
               task_p.train.num_train_steps)
           break
         if is_last_ckpt:
           break
-      new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
-      while new_checkpoint == last_checkpoint:
+      new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+          checkpoint_dir)
+      while new_checkpoint_step == last_checkpoint_step:
         logging.info('Sleep before checking for new latest checkpoint.')
         time.sleep(60)
-        new_checkpoint = checkpoints.latest_checkpoint(checkpoint_dir)
+        new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+            checkpoint_dir)
       # There must be a new checkpoint here.
-      logging.info('Found new checkpoint: %s', new_checkpoint)
+      logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
       partitioned_train_state = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           checkpoint_dir,
           global_mesh=runner.global_mesh,
           checkpoint_type=checkpoint_type,
-          state_specs=partitioned_specs)
+          state_specs=partitioned_specs,
+          step=new_checkpoint_step)
       if use_ema:
         partitioned_train_state = extract_ema(partitioned_train_state)
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
-      last_checkpoint = new_checkpoint
+      last_checkpoint_step = new_checkpoint_step
 
 
 def decode(
