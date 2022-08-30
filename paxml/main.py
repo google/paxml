@@ -30,6 +30,7 @@ from typing import Dict, Optional, Sequence
 
 from absl import app
 from absl import flags
+# Required import to setup work units when running through XManager.
 from clu import platform
 import fiddle as fdl
 from fiddle import absl_flags
@@ -49,8 +50,6 @@ import tensorflow.compat.v2 as tf
 
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
 persistence_gda_serialization = gda_serialization  # mapped to internal
-
-# Required import to setup work units when running through XManager.
 
 FLAGS = flags.FLAGS
 
