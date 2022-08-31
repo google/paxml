@@ -82,7 +82,7 @@ flags.DEFINE_bool(
     'If suitable, will try to rely on persistence-based checkpointing rather '
     'than Flax-based checkpointing for SPMD models.')
 flags.DEFINE_bool(
-    'jax_fully_async_checkpoint', False,
+    'jax_fully_async_checkpoint', True,
     'Enables fully asynchronous checkpointing via GDA and TensorStore. This '
     'means that the training can continue ahead when checkpointing is '
     'happening.')
