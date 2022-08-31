@@ -661,14 +661,15 @@ def _save_checkpoint_gda(
     logging.info('Started GDA asynchrounous checkpoint.')
   else:
     gda_serialization.run_serialization(flattened_train_state, tspecs)
-    # Note we must barrier across all processes before the directory rename.
-    py_utils.sync_global_devices('Wait for checkpoint chunk writes to '
-                                 f'{checkpoint_step_tmp_dir} to finish.')
-    if jax.process_index() == 0:
-      # Rename temporary checkpoint directory to its final location.
-      logging.info('Renaming %s to %s', checkpoint_step_tmp_dir,
-                   checkpoint_step_dir)
-      tf.io.gfile.rename(checkpoint_step_tmp_dir, checkpoint_step_dir)
+    if checkpoint_step_tmp_dir != checkpoint_step_dir:
+      # Note we must barrier across all processes before the directory rename.
+      py_utils.sync_global_devices('Wait for checkpoint chunk writes to '
+                                   f'{checkpoint_step_tmp_dir} to finish.')
+      if jax.process_index() == 0:
+        # Rename temporary checkpoint directory to its final location.
+        logging.info('Renaming %s to %s', checkpoint_step_tmp_dir,
+                     checkpoint_step_dir)
+        tf.io.gfile.rename(checkpoint_step_tmp_dir, checkpoint_step_dir)
     py_utils.sync_global_devices(
         f'Finished saving GDA checkpoint for step {step} to {checkpoint_step_dir}'
     )
