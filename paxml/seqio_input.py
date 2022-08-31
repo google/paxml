@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import collections
 import enum
-import os
 from typing import Any, Dict, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
@@ -42,6 +41,11 @@ ParamsT = pytypes.HParamsT
 SHARD_INDEX_KEY = py_utils.SHARD_INDEX_KEY
 NUM_SHARDS_KEY = py_utils.NUM_SHARDS_KEY
 INDEX_WITHIN_SHARD_KEY = py_utils.INDEX_WITHIN_SHARD_KEY
+
+# TODO(b/244434890): enable computing SeqIO task-defined metrics on model
+# outputs other than models.LanguageModel.
+_LM_DECODER_OUT_KEY = 'decoded_substr'
+_LM_SCORE_KEY = 'scores'
 
 
 def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any],
@@ -87,8 +91,8 @@ def _log_plain_text_output(
     print('---', file=plain_text_output)
     print(ans.get('prefix', ''), file=plain_text_output)
     print('>>>', file=plain_text_output)
-    print(ans.get('decoded_substr', ''), file=plain_text_output)
-    print(ans['decoded_substr'], file=plain_text_output)
+    print(ans.get(_LM_DECODER_OUT_KEY, ''), file=plain_text_output)
+    print(ans[_LM_DECODER_OUT_KEY], file=plain_text_output)
     if 'seqio_targets' in ans:
       print('REF', file=plain_text_output)
       print(ans['seqio_targets'], file=plain_text_output)
@@ -480,7 +484,7 @@ class SeqIOInput(base_input.BaseInput):
     targets_list = []
     for k in targets:
       ans = answers[k]
-      answer = ans['decoded_substr']
+      answer = ans[_LM_DECODER_OUT_KEY]
       # this line mutates 'decoder_outputs' which is written to disk afterwards
       ans['seqio_targets'] = targets[k]
       for target, e in zip(targets[k], examples[k]):
@@ -503,7 +507,7 @@ class SeqIOInput(base_input.BaseInput):
       k = next(it)
       ans = answers[k]
       e = examples[k][0]
-      answer = ans['decoded_substr']
+      answer = ans[_LM_DECODER_OUT_KEY]
       answer_processed = self.mixture_or_task.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task)
@@ -568,7 +572,7 @@ class SeqIOInput(base_input.BaseInput):
     # "Left-join" using targets constructed since outputs may have been padded.
     for k in targets:
       ans = answers[k]
-      answer = ans['decoded_substr']
+      answer = ans[_LM_DECODER_OUT_KEY]
 
       # postprocess model's decoder output
       prediction = self.mixture_or_task.postprocess_fn(
@@ -590,7 +594,7 @@ class SeqIOInput(base_input.BaseInput):
       k = next(it)
       ans = answers[k]
       e = targets[k]
-      answer = ans['decoded_substr']
+      answer = ans[_LM_DECODER_OUT_KEY]
       answer_processed = self.mixture_or_task.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task)
@@ -635,7 +639,7 @@ class SeqIOInput(base_input.BaseInput):
     answers = dict()
     for element in eval_outputs:
       labels = np.asarray(element['labels'])
-      scores = np.asarray(element['scores'])
+      scores = np.asarray(element[_LM_SCORE_KEY])
       if len(labels.shape) > 2:
         labels = np.reshape(labels, [-1, labels.shape[-1]])
       if len(scores.shape) > 1:
@@ -697,7 +701,7 @@ class SeqIOInput(base_input.BaseInput):
         key = py_utils.get_enumeration_id(eval_example)
         if not key:
           raise ValueError('key should not be None when enum-matching')
-        answers[key] = float(eval_example['scores'])
+        answers[key] = float(eval_example[_LM_SCORE_KEY])
 
     # Construct (scoring output, seqio target) lists by joining on enum ID
     targets_list = []
@@ -776,9 +780,20 @@ class SeqIOInput(base_input.BaseInput):
 
     # If there are no seqio decode/predict metrics to compute return empty list
     if not task.predict_metric_fns:
+      logging.info('no predict_metric_fns defined on task: %s',
+                   self.mixture_or_task.name)
       return []
 
     self._validate_compute_metrics_config(raise_exception=True)
+
+    if not decoder_outputs:
+      return []
+    if _LM_DECODER_OUT_KEY not in decoder_outputs[0][1]:
+      logging.warning(
+          ('LanguageModel output format with "%s" key is expected, but '
+           'the key was not found in decoder_outputs (b/244434890)'),
+          _LM_DECODER_OUT_KEY)
+      return []
 
     answers = dict(decoder_outputs)
     if p.use_enumeration:
@@ -843,9 +858,20 @@ class SeqIOInput(base_input.BaseInput):
           'compute_metrics_eval() is only supported for seqio.Tasks, '
           f'got {type(self.mixture_or_task)} for {p.name}.')
     if not task.score_metric_fns:
+      logging.info('no score_metric_fns defined on task: %s',
+                   self.mixture_or_task.name)
       return []
 
     self._validate_compute_metrics_config(raise_exception=True)
+
+    if not eval_outputs:
+      return []
+    if _LM_SCORE_KEY not in eval_outputs[0]:
+      logging.warning(
+          ('LanguageModel output format with "%s" key is expected, but '
+           'the key was not found in eval_outputs (b/244434890)'),
+          _LM_SCORE_KEY)
+      return []
 
     if p.use_enumeration:
       scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(

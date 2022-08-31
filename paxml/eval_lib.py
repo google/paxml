@@ -71,12 +71,13 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 
-def _is_vectorized(train_states: train_states.TrainState) -> bool:
+def _is_vectorized(states: train_states.TrainState) -> bool:
   """Determines whether it is a vectorized model."""
-  if len(train_states.opt_states) == 0:
+  if not states.opt_states:
     raise ValueError(
         'cannot decide if it is vectorized model without opt_states')
-  return NO_PREFIX_KEY in train_states.opt_states[0]
+  return NO_PREFIX_KEY in states.opt_states[0]
+
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
   """Determines whether ema is used or not."""
@@ -1029,8 +1030,6 @@ def decode_pmap_model(
       jax_task.model.abstract_init_with_metadata(prng_key, inputs_sample),
       os.path.join(job_log_dir, 'decoder_out'))
 
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
   (replicated_model_states, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(
        jax_task,
