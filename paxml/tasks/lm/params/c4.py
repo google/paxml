@@ -14,10 +14,12 @@
 # limitations under the License.
 
 """Language Model configurations on the T5/C4 dataset."""
+
 import functools
-import math
+import time
 from typing import List, Optional
 
+from absl import logging
 import jax
 from jax import numpy as jnp
 from paxml import base_experiment
@@ -35,14 +37,17 @@ import seqio
 import t5.data
 from t5.data import preprocessors as t5_preprocessors
 
+
 WeightInit = base_layer.WeightInit
 
 GPT_SPM_PATH = 'gs://mlperf-llm-public2/vocab/c4_en_301_5Mexp2_spm.model'
+GPT_EOS_ID = 1
 GPT_VOCABULARY = t5.data.SentencePieceVocabulary(GPT_SPM_PATH)
 C4_GPT_OUTPUT_FEATURES_LM = {
     'targets': t5.data.Feature(vocabulary=GPT_VOCABULARY, add_eos=True)
 }
 C4_TFDS_DATADIR = 'gs://mlperf-llm-public2'
+C4_EVAL_DATADIR = 'gs://mlperf-llm-public2'
 
 
 class TaskRegistry(t5.data.TaskRegistry):
@@ -109,6 +114,29 @@ TaskRegistry.add_versioned_tfds_task(
     shuffle_buffer_size=100000,
 )
 
+TaskRegistry.add_versioned_tfds_task(
+    'c4_lm_v301_gpt_eval',
+    versions=['3.0.1'],
+    pinned_version='3.0.1',
+    tfds_name='c4/en',
+    tfds_data_dir=C4_EVAL_DATADIR,
+    preprocessors=[
+        functools.partial(
+            t5_preprocessors.rekey,
+            key_map={
+                'inputs': None,
+                'targets': 'text',
+            }),
+        seqio.preprocessors.tokenize,
+        t5_preprocessors.reduce_concat_tokens,
+        t5_preprocessors.split_tokens_to_targets_length,
+        seqio.preprocessors.append_eos_after_trim,
+    ],
+    output_features=C4_GPT_OUTPUT_FEATURES_LM,
+    metric_fns=[],
+    shuffle_buffer_size=100000,
+)
+
 
 class C4UnsupervisedDataset(base_experiment.BaseExperiment):
   """Used for training Baseline ULM."""
@@ -131,10 +159,17 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         batch_size_per_process = int(self.PERCORE_BATCH_SIZE *
                                      num_local_devices)
         num_infeed_hosts = 1
+    seed = None
+    if is_training:
+      seed = jnp.int32(time.time())
+      # TODO(sgpyc): enable sync of seeds across hosts, currently the
+      # following failed because of "sync_global_devices name mismatch"
+      # seed = jnp.int32(multihost_utils.broadcast_one_to_all(seed))
+      logging.info('Train input seed: %d', seed)
     p = seqio_input.SeqIOInput.HParams(
         name='C4Train' if is_training else 'C4Validation',
-        mixture_name='c4_lm_v301_gpt',
-        split_name='train' if is_training else 'validation',
+        mixture_name='c4_lm_v301_gpt' if is_training else 'c4_lm_v301_gpt_eval',
+        split_name='train' if is_training else 'validation_24567exp',
         task_feature_lengths={'targets': self.MAX_SEQ_LEN},
         use_cached=True,
         repeat=True if is_training else False,
@@ -142,8 +177,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
             pack=True if is_training else False,
             use_custom_packing_ops=False),
         is_training=is_training,
-        input_random_seed=(None if is_training else 4321),
-        # eval_loop_num_batches=(1 if is_training else 5),
+        input_random_seed=(seed if is_training else 4321),
         batch_size=batch_size_per_process,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True)
@@ -155,6 +189,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         self._dataset_common(is_training=True),
         self._dataset_common(is_training=False)
     ]
+
 
 class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   """Base SPMD Transformer LM configuration using Adam.
@@ -174,6 +209,7 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   LEARNING_RATE = 1e-3
   ADAM_BETA1 = 0.9
   ADAM_BETA2 = 0.99
+  ADAM_CLIP_THRESHOLD = 1.0
   ADAM_EPSILON = 1e-6
   ADAM_EPSILON_ROOT = 0.0
 
@@ -195,7 +231,7 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
-    model_p.lm.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error
+    model_p.lm.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
 
     if self.USE_REPEATED_LAYER:
       stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl.block  # pytype: disable=attribute-error
@@ -212,7 +248,8 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
         weight_decay=self.WEIGHT_DECAY,
         epsilon=self.ADAM_EPSILON,
         epsilon_root=self.ADAM_EPSILON_ROOT,
-        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE)
+        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+        clip_threshold=self.ADAM_CLIP_THRESHOLD)
     lp.optimizer.learning_rate = self.LEARNING_RATE
 
     if self.LR_SCHEDULE == 'linear_rampup_exponential_decay':
@@ -278,6 +315,15 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   # Sub-class has to specify a mesh.
   ICI_MESH_SHAPE = [1, 4, 2]
 
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.decoder.eos_id = GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.decoder.seqlen = self.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+
+    return task_p
+
 
 @experiment_registry.register
 class C4SpmdGpt3Adam(C4SpmdAdam):
@@ -326,46 +372,50 @@ class C4SpmdGpt3AdamHP(C4SpmdGpt3Adam):
   # pad vocab to TPU-friendly size
   VOCAB_SIZE = 50304
 
-  # 1536 replicas with 1536 global batch size using fp32
+  # 1536 replicas with 1536 global batch size
   PERCORE_BATCH_SIZE = 1
   ICI_MESH_SHAPE = [1, 192, 8]
-  # FPROP_DTYPE = jnp.float32
   FPROP_DTYPE = jnp.bfloat16
-
-  # 512 replicas with 1536 global batch size using bf16
-  # PERCORE_BATCH_SIZE = 3
-  # ICI_MESH_SHAPE = [1, 128, 4]
-  # FPROP_DTYPE = jnp.bfloat16
 
   # HPs
   ACTIVATION_CLS = layers.GELU
   USE_GATED_ACTIVATION = False
   LR_SCHEDULE = 'linear_rampup_exponential_decay'
-  ADAM_CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
 
   CHECKPOINT_MAX_TO_KEEP = 10
 
 
 class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
-  r"""GPT-3 config with original HPs from the paper."""
+  r"""GPT-3 config with original HPs.
+
+  From the paper & after convergence matching with
+  NVIDIA's Megatron-LM framework.
+  """
   NUM_LAYERS = 96
   USE_REPEATED_LAYER = True
 
   # HPs
   ACTIVATION_CLS = layers.GELU
   USE_GATED_ACTIVATION = False
+  SEPARATE_EMBEDDING = False
+  TRAINABLE_POSITION_EMB = True
+  TRAINABLE_PE_MAX_SEQ_LEN = 16384
+  ATTEN_LOGIT_CAP = -1.0  # Disable logits cap in atten
+
   LEARNING_RATE = 6e-5
   WEIGHT_DECAY = 0.1
-
   ADAM_BETA1 = 0.9
   ADAM_BETA2 = 0.95
   ADAM_EPSILON = 1e-8
-  ADAM_CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  ADAM_CLIP_THRESHOLD = -1.0  # Disable Adam clip_threshold
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  LAYERNORM_EPSILON = 1e-5
 
   LR_SCHEDULE = 'linear_rampup_cosine_decay'
   LR_COS_WARMUP = 265
   LR_COS_DECAY_START = 266
-  LR_COS_DECAY_END = 108599
+  LR_COS_DECAY_END = 108600
   LR_COS_MAX = 1.0
   LR_COS_MIN_RATIO = 0.1
 
@@ -378,17 +428,35 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
-    model_p = task_p.model
 
-    model_p.params_init = WeightInit.Gaussian(0.02)
-    if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl.block
+    task_p.model.params_init = WeightInit.Gaussian(0.006)
+
+    softmax_init = WeightInit.Gaussian(0.006)
+    task_p.model.lm.softmax_tpl.params_init = softmax_init
+    task_p.model.lm.softmax_tpl.feed_forward_tpl.has_bias = False
+
+    if self.SEPARATE_EMBEDDING:
+      task_p.model.lm.separate_embedding_tpl.scale_sqrt_depth = False
+      task_p.model.lm.separate_embedding_tpl.lookup_style = 'index'
     else:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl
+      task_p.model.lm.softmax_tpl.scale_sqrt_depth = False
+      task_p.model.lm.softmax_tpl.lookup_style = 'index'
+    if self.TRAINABLE_POSITION_EMB:
+      task_p.model.lm.position_emb_tpl.lookup_style = 'index'
+
+    if self.USE_REPEATED_LAYER:
+      stacked_transformer_tpl = task_p.model.lm.stacked_transformer_tpl.block
+    else:
+      stacked_transformer_tpl = task_p.model.lm.stacked_transformer_tpl
     transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
-    residual_dropout_p = transformer_layer_p.tr_fflayer_tpl.residual_dropout_tpl
-    residual_dropout_p.params_init = WeightInit.Gaussian(
-        1 / math.sqrt(self.NUM_LAYERS))
+
+    transformer_layer_p.ln_tpl.epsilon = self.LAYERNORM_EPSILON
+    transformer_layer_p.tr_fflayer_tpl.ln_tpl.epsilon = self.LAYERNORM_EPSILON
+    task_p.model.lm.final_ln_tpl.epsilon = self.LAYERNORM_EPSILON
+    transformer_layer_p.tr_atten_tpl.internal_enable_per_dim_scale = False
+    transformer_layer_p.tr_atten_tpl.use_bias = True
+
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl.approximate = True
 
     return task_p
 
@@ -397,8 +465,10 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
 class C4SpmdGpt3AdamOrgHP1536Replicas(C4SpmdGpt3AdamOrgHP):
   r"""GPT-3 config in fp32 for 1536 replicas with 1536 global batch size."""
   PERCORE_BATCH_SIZE = 1
-  ICI_MESH_SHAPE = [1, 192, 8]
+  ICI_MESH_SHAPE = [1, 64, 24]
   FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 25
 
 
 @experiment_registry.register
@@ -410,11 +480,73 @@ class C4SpmdGpt3AdamOrgHP512Replicas(C4SpmdGpt3AdamOrgHP):
 
 
 @experiment_registry.register
+class C4SpmdGpt3AdamOrgHP768Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""GPT-3 config in bf16 for 768 replicas with 1536 global batch size."""
+  PERCORE_BATCH_SIZE = 2
+  ICI_MESH_SHAPE = [1, 64, 12]
+  FPROP_DTYPE = jnp.bfloat16
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 25
+
+
+@experiment_registry.register
+class C4SpmdGpt3AdamOrgHP512Replicas2(C4SpmdGpt3AdamOrgHP):
+  r"""GPT-3 config in bf16 for 512 replicas with 1536 global batch size."""
+  PERCORE_BATCH_SIZE = 3
+  ICI_MESH_SHAPE = [1, 32, 16]
+  FPROP_DTYPE = jnp.bfloat16
+
+
+@experiment_registry.register
+class C4SpmdGpt3AdamOrgHPBS4k2048Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""GPT-3 config in bf16 for 1024 replicas with 4k global batch size."""
+  PERCORE_BATCH_SIZE = 2
+  ICI_MESH_SHAPE = [1, 128, 16]
+  FPROP_DTYPE = jnp.bfloat16
+
+
+@experiment_registry.register
 class C4SpmdGpt3L16AdamOrgHP(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config for a decoder only transformer."""
+  r"""Small GPT-3 config in bf16 for 64 replicas with 192 global batch size."""
 
   NUM_LAYERS = 16
-  # 64 replicas with 256 global batch size using fp32
-  FPROP_DTYPE = jnp.float32
+  FPROP_DTYPE = jnp.bfloat16
   PERCORE_BATCH_SIZE = 3
   ICI_MESH_SHAPE = [1, 16, 4]
+
+
+@experiment_registry.register
+class C4SpmdGpt3L16AdamOrgHP128Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""Small GPT-3 config in bf16 for 128 replicas with 256 global batch size."""
+  NUM_LAYERS = 16
+  FPROP_DTYPE = jnp.bfloat16
+  PERCORE_BATCH_SIZE = 2
+  ICI_MESH_SHAPE = [1, 8, 16]
+
+
+@experiment_registry.register
+class C4SpmdGpt3L16AdamOrgHP96Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""Small GPT-3 config in bf16 for 96 replicas with 192 global batch size."""
+
+  NUM_LAYERS = 16
+  FPROP_DTYPE = jnp.bfloat16
+  PERCORE_BATCH_SIZE = 2
+  ICI_MESH_SHAPE = [1, 6, 16]
+
+
+@experiment_registry.register
+class C4SpmdGpt3L16AdamOrgHP64Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""Small GPT-3 config in bf16 for 64 replicas with 256 global batch size."""
+  NUM_LAYERS = 16
+  FPROP_DTYPE = jnp.bfloat16
+  PERCORE_BATCH_SIZE = 4
+  ICI_MESH_SHAPE = [1, 4, 16]
+
+
+@experiment_registry.register
+class C4SpmdGpt3L16AdamOrgHP32Replicas(C4SpmdGpt3AdamOrgHP):
+  r"""Small GPT-3 config in bf16 for 32 replicas with 128 global batch size."""
+  NUM_LAYERS = 16
+  FPROP_DTYPE = jnp.bfloat16
+  PERCORE_BATCH_SIZE = 8
+  ICI_MESH_SHAPE = [1, 2, 16]
