@@ -20,7 +20,7 @@ import datetime
 import itertools
 import os
 import typing
-from typing import Optional, Sequence
+from typing import Optional, List
 
 from absl import logging
 from etils import epath
@@ -39,6 +39,7 @@ CheckpointType = checkpoint_pb2.CheckpointType
 CHECKPOINT_PREFIX = 'checkpoint_'
 CHECKPOINT_BASENAME = 'checkpoints.pb'
 TRAIN_STATE_KEY = 'train_state'
+METRIC_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METRIC_ITEM_NAME
 
 
 def to_timestamp(datetime_instance: datetime.datetime) -> int:
@@ -427,17 +428,49 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
   All public APIs may be called by all processes.
   """
 
-  def all_steps(self) -> Sequence[int]:
-    """See superclass documentation."""
+  def _create_checkpoints(
+      self) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
+    """Create a list of CheckpointInfo for existing checkpoints.
+
+    If none are present, returns empty list.
+
+    This method is copied from the superclass, except for the logic reading
+    existing checkpoint steps.
+
+    Returns:
+      a list of CheckpointInfo, sorted by increasing step.
+    """
     checkpoint_dirnames = tf.io.gfile.listdir(self.directory)
     dirnames = [
         x for x in checkpoint_dirnames if checkpoints.is_checkpoint_asset(x)
     ]
-    steps = [
+    steps = sorted([
         int(os.path.basename(x).replace(checkpoints.CHECKPOINT_PREFIX, ''))
         for x in dirnames
+    ])
+    if not steps:
+      return []
+
+    times = [
+        datetime.datetime.fromtimestamp(
+            os.stat(os.fspath(self._get_save_directory(
+                step, self.directory))).st_ctime) for step in steps
     ]
-    return steps
+
+    def get_metrics(step):
+      if self._track_best:
+        restored = self._restore_impl(step, {METRIC_ITEM_NAME: None}, {})
+        if METRIC_ITEM_NAME in restored:
+          return restored[METRIC_ITEM_NAME]
+      return None
+
+    metrics = [get_metrics(step) for step in steps]
+
+    return [
+        orbax.checkpoint.checkpoint_manager.CheckpointInfo(
+            step=s, time=t, metrics=m)
+        for s, t, m in zip(steps, times, metrics)
+    ]
 
   def _get_save_directory(self,
                           step: int,
