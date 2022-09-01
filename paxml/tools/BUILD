@@ -35,7 +35,19 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "dump_experiments_info_lib",
+    srcs = ["dump_experiments_info.py"],
+    deps = [
+        # Implicit absl.app dependency.
+        # Implicit absl.flags dependency.
+        "//paxml:experiment_registry",
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
 exports_files([
     "dump_hparams.py",
+    "dump_experiments_info.py",
     "dump_input_specs.py",
 ])

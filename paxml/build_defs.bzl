@@ -205,6 +205,25 @@ def pax_targets(
         exp_sources = exp_sources,
     )
 
+    dump_experiments_info_name = "dump_experiments_info"
+    dump_experiments_info_name = dump_experiments_info_name if not prefix_name else "%s_%s" % (
+        prefix_name,
+        dump_experiments_info_name,
+    )
+    export_binary(
+        name = dump_experiments_info_name,
+        main = "//paxml/tools:dump_experiments_info.py",
+        py_binary_rule = pytype_strict_binary,
+        deps = [
+            # Implicit absl.app dependency.
+            # Implicit absl.flags dependency.
+            "//paxml:experiment_registry",
+            "//paxml/tools:dump_experiments_info_lib",
+            # Implicit tensorflow_no_contrib dependency.
+        ] + extra_deps,
+        exp_sources = exp_sources,
+    )
+
 def _export_test(
         name,
         test_src,
