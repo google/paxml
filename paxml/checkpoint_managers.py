@@ -32,6 +32,8 @@ from paxml import checkpoints
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
+from google.protobuf import message
+
 CheckpointType = checkpoint_pb2.CheckpointType
 
 CHECKPOINT_PREFIX = 'checkpoint_'
@@ -226,7 +228,21 @@ class CheckpointManager:
       return
 
     # Read the previous checkpoints file and performs a sanity check.
-    self._checkpoint_history = self._read_checkpoint_file()
+    try:
+      self._checkpoint_history = self._read_checkpoint_file()
+    except message.DecodeError:
+      logging.error(
+          'Checkpoints file `%s` is corrupted. Initializing a new file.',
+          self.checkpoint_filename)
+      self._checkpoint_history = self._create_checkpoint_history()
+      return
+    else:
+      if not self._checkpoint_history.checkpoints:
+        logging.warning(
+            'Checkpoints file `%s` is empty. Initializing a new file.',
+            self.checkpoint_filename)
+        self._checkpoint_history = self._create_checkpoint_history()
+        return
 
     last_saved_timestamp = (
         self._checkpoint_history.checkpoints[-1].timestamp_sec)

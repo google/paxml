@@ -97,7 +97,6 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertEqual(checkpoint_history, expected_proto)
 
   def test_extract_latest_checkpoint_id(self):
-
     config_name = 'test.test_module.ConfigName'
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test1')
     steps = [100, 300, 700]
@@ -111,6 +110,37 @@ class CheckpointManagerTest(parameterized.TestCase):
     latest_checkpoint_id = checkpoint_managers.extract_latest_checkpoint_id(
         checkpoint_history)
     self.assertEqual(latest_checkpoint_id, steps[-1])
+
+  def test_initialize_with_corrupted_checkpointspb(self):
+    config_name = 'test.test_module.ConfigName'
+    root_dir = os.path.join(FLAGS.test_tmpdir, 'test_corrupted')
+    checkpoint_history = 'Not a checkpoints.proto file.'
+    tf.io.gfile.makedirs(root_dir)
+    filename = os.path.join(root_dir, checkpoint_managers.CHECKPOINT_BASENAME)
+    with tf.io.gfile.GFile(filename, 'wb') as writer:
+      writer.write(checkpoint_history)
+    _ = checkpoint_managers.CheckpointManager(
+        config_name=config_name,
+        root_dir=root_dir,
+        checkpoint_type=CheckpointType.CHECKPOINT_FLAX,
+        max_to_keep=3)
+
+  def test_initialize_with_empty_checkpointspb(self):
+    config_name = 'test.test_module.ConfigName'
+    root_dir = os.path.join(FLAGS.test_tmpdir, 'test_empty')
+    checkpoint_history = checkpoint_pb2.CheckpointHistory(
+        config_name=config_name,
+        root_directory=root_dir,
+        checkpoint_type=CheckpointType.CHECKPOINT_FLAX)
+    tf.io.gfile.makedirs(root_dir)
+    filename = os.path.join(root_dir, checkpoint_managers.CHECKPOINT_BASENAME)
+    with tf.io.gfile.GFile(filename, 'wb') as writer:
+      writer.write(checkpoint_history.SerializeToString())
+    _ = checkpoint_managers.CheckpointManager(
+        config_name=config_name,
+        root_dir=root_dir,
+        checkpoint_type=CheckpointType.CHECKPOINT_FLAX,
+        max_to_keep=3)
 
   @parameterized.named_parameters(
       {

@@ -68,6 +68,7 @@ pytype_strict_library(
     deps = [
         ":checkpoint_py_pb2",
         ":checkpoints",
+        # Implicit python proto dependency.
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
