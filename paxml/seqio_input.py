@@ -19,13 +19,17 @@ from __future__ import annotations
 
 import collections
 import enum
-from typing import Any, Dict, Mapping, Optional, Sequence, TextIO, Tuple, Union
+import io
+import os
+import typing
+from typing import Any, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
+from paxml import metric_utils
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import py_utils
@@ -37,10 +41,13 @@ sub_config_field = base_hyperparams.sub_config_field
 NestedMap = py_utils.NestedMap
 NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
+SummaryWriter = tf.summary.SummaryWriter
 
 SHARD_INDEX_KEY = py_utils.SHARD_INDEX_KEY
 NUM_SHARDS_KEY = py_utils.NUM_SHARDS_KEY
 INDEX_WITHIN_SHARD_KEY = py_utils.INDEX_WITHIN_SHARD_KEY
+EVAL_METRICS_PREFIX = 'scoring_eval'
+DECODE_METRICS_PREFIX = 'decoder'
 
 # TODO(b/244434890): enable computing SeqIO task-defined metrics on model
 # outputs other than models.LanguageModel.
@@ -96,6 +103,63 @@ def _log_plain_text_output(
     if 'seqio_targets' in ans:
       print('REF', file=plain_text_output)
       print(ans['seqio_targets'], file=plain_text_output)
+
+
+def should_process_outputs(inp: base_input.BaseInput) -> bool:
+  """Whether the current (input, process_index) pair should process outputs."""
+  return (inp.hparams.reset_for_eval and isinstance(inp, SeqIOInput)
+          and jax.process_index() == 0)
+
+
+def process_outputs(
+    inp: base_input.BaseInput,
+    model_outputs: Union[List[Dict[str, Any]], List[Tuple[str, Any]]],
+    summary_writer: SummaryWriter,
+    metric_type: MetricType,
+    step: int,
+    verbose_entries: int = 1,
+    plain_text_output_fname: Optional[str] = None) -> Dict[str, float]:
+  """Computes SeqIO task-defined metric, write to TB, and returns mapping."""
+  inp = typing.cast(SeqIOInput, inp)
+  logging.info('Computing %s metrics', metric_type.name)
+  if metric_type is MetricType.SCORE:
+    metric_name_prefix = EVAL_METRICS_PREFIX
+    # model_outputs = typing.cast(List[Mapping[str, Any]], model_outputs)
+    seqio_metrics = inp.compute_metrics_eval(
+        model_outputs, verbose_entries=verbose_entries)
+    logging.info('Eval metrics from seqio: %s.', seqio_metrics)
+
+  elif metric_type is MetricType.PREDICT:
+    metric_name_prefix = DECODE_METRICS_PREFIX
+    plain_text_output = io.StringIO()
+    seqio_metrics = inp.compute_metrics(
+        model_outputs, verbose_entries=verbose_entries,
+        plain_text_output=plain_text_output)
+
+    logging.info('Writing plain decoder output to %s', plain_text_output_fname)
+    dirname = os.path.dirname(plain_text_output_fname)
+    if not tf.io.gfile.exists(dirname):
+      tf.io.gfile.makedirs(dirname)
+    with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
+      f.write(plain_text_output.getvalue())
+
+  else:
+    raise ValueError(f'unsupported metric type: {metric_type}')
+
+  # write metrics to tensorboard
+  with summary_writer.as_default():
+    metric_utils.write_seqio_metric_summaries(
+        seqio_metrics, metric_name_prefix, step)
+
+  # convert metrics to {string: float} mapping
+  metrics = {}
+  for sm in seqio_metrics:
+    # TODO(b/244579359): add `metric_name_prefix` to key names when
+    # consolidating seqio vs non-seqio metrics in AutoML.
+    metrics = metric_utils.update_float_dict(
+        metrics, metric_utils.as_float_dict(sm))
+
+  return metrics
 
 
 class SeqIOInput(base_input.BaseInput):

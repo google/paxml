@@ -607,6 +607,7 @@ pytype_strict_library(
     srcs = ["seqio_input.py"],
     srcs_version = "PY3",
     deps = [
+        ":metric_utils",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental dependency.

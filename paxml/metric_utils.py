@@ -17,7 +17,7 @@
 
 import numbers
 import typing
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 from absl import logging
 
 import clu.values as clu_values
@@ -40,8 +40,7 @@ WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 
 NestedMap = py_utils.NestedMap
-SummaryValueTypes = Union[
-    clu_values.Scalar, clu_values.Image, clu_values.Text]
+SummaryValueTypes = Union[clu_values.Scalar, clu_values.Image, clu_values.Text]
 
 
 _VALUES_TO_SUMMARY_TYPE = {
@@ -123,7 +122,7 @@ def write_clu_metric_summaries(
         step_i, metric_name, metric_value.value, summary_type)
 
 
-def write_seqio_metric_summaries(seqio_metrics: Sequence[Dict[str, Union[
+def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
     seqio.metrics.MetricValue, float]]], metric_name_prefix: str,
                                  step: int) -> None:
   """Write seqio metric as tensorboard summaries.
@@ -195,8 +194,11 @@ def as_float(
 
 
 def as_float_dict(
-    metric_output: Union[Dict[str, SummaryValueTypes], WeightedScalars,
-                         WeightedScalarsList],
+    metric_output: Union[
+        Dict[str, Union[SummaryValueTypes]],
+        WeightedScalars,
+        WeightedScalarsList,
+        Mapping[str, Union[seqio.metrics.MetricValue, float]]],
     raise_on_non_float_convertible: bool = False) -> Dict[str, float]:
   """Returns a float dict from heterogeneous metric output."""
   results = {}

@@ -18,7 +18,6 @@
 import collections
 import contextlib
 import functools
-import io
 import os
 import sys
 import time
@@ -242,19 +241,10 @@ def run_eval_loop_over_test_splits(
         metrics[k].append(eval_metrics[k])
 
     eval_scoring_metrics = None
-    if (model_inputs[split].hparams.reset_for_eval and
-        isinstance(model_inputs[split], seqio_input.SeqIOInput) and
-        jax.process_index() == 0):
-      seqio_metrics = model_inputs[split].compute_metrics_eval(
-          per_example_scores, verbose_entries=1)
-      logging.info('Eval metrics from seqio: %s.', seqio_metrics)
-      with summary_writers[split].as_default():
-        metric_utils.write_seqio_metric_summaries(seqio_metrics, 'scoring_eval',
-                                                  step)
-      eval_scoring_metrics = {}
-      for sm in seqio_metrics:
-        eval_scoring_metrics = metric_utils.update_float_dict(
-            eval_scoring_metrics, metric_utils.as_float_dict(sm))
+    if seqio_input.should_process_outputs(model_inputs[split]):
+      eval_scoring_metrics = seqio_input.process_outputs(
+          model_inputs[split], per_example_scores, summary_writers[split],
+          seqio_input.MetricType.SCORE, step)
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -1308,25 +1298,13 @@ def decode_once_pmap_model(
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
+    logging.info('Finished processing all %d examples.', len(processed_decodes))
     seqio_metric_values = None
-    plain_text_output = None
-    if (inputs[split].hparams.reset_for_eval
-        and isinstance(inputs[split], seqio_input.SeqIOInput)
-        and jax.process_index() == 0):
-      logging.info('Finished processing all %d examples.',
-                   len(processed_decodes))
-      logging.info('Computing metrics.')
-      plain_text_output = io.StringIO()
-      seqio_metrics = inputs[split].compute_metrics(
-          processed_decodes, verbose_entries=1,
-          plain_text_output=plain_text_output)
-      with summary_writers[split].as_default():
-        metric_utils.write_seqio_metric_summaries(
-            seqio_metrics, 'decoder', step_i)
-      seqio_metric_values = {}
-      for sm in seqio_metrics:
-        seqio_metric_values = metric_utils.update_float_dict(
-            seqio_metric_values, metric_utils.as_float_dict(sm))
+    if seqio_input.should_process_outputs(inputs[split]):
+      seqio_metric_values = seqio_input.process_outputs(
+          inputs[split], processed_decodes, summary_writers[split],
+          seqio_input.MetricType.PREDICT, step_i,
+          plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
@@ -1369,12 +1347,6 @@ def decode_once_pmap_model(
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
-
-    if plain_text_output is not None:
-      plain_text_output_file = filenames[split] + '.txt'
-      logging.info('Writing decoder output to %s', plain_text_output_file)
-      with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
-        f.write(plain_text_output.getvalue())
 
     decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
     processed_decode_metrics_list.append(
@@ -1720,25 +1692,13 @@ def decode_once_spmd_model(
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
+    logging.info('Finished processing all %d examples.', len(processed_decodes))
     seqio_metric_values = None
-    plain_text_output = None
-    if (inputs[split].hparams.reset_for_eval
-        and isinstance(inputs[split], seqio_input.SeqIOInput)
-        and jax.process_index() == 0):
-      logging.info('Finished processing all %d examples.',
-                   len(processed_decodes))
-      logging.info('Computing metrics.')
-      plain_text_output = io.StringIO()
-      seqio_metrics = inputs[split].compute_metrics(
-          processed_decodes, verbose_entries=1,
-          plain_text_output=plain_text_output)
-      with summary_writers[split].as_default():
-        metric_utils.write_seqio_metric_summaries(
-            seqio_metrics, 'decoder', step_i)
-      seqio_metric_values = {}
-      for sm in seqio_metrics:
-        seqio_metric_values = metric_utils.update_float_dict(
-            seqio_metric_values, metric_utils.as_float_dict(sm))
+    if seqio_input.should_process_outputs(inputs[split]):
+      seqio_metric_values = seqio_input.process_outputs(
+          inputs[split], processed_decodes, summary_writers[split],
+          seqio_input.MetricType.PREDICT, step_i,
+          plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
@@ -1775,12 +1735,6 @@ def decode_once_spmd_model(
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
-
-      if plain_text_output is not None:
-        plain_text_output_file = filenames[split] + '.txt'
-        logging.info('Writing decoder output to %s', plain_text_output_file)
-        with tf.io.gfile.GFile(plain_text_output_file, 'w') as f:
-          f.write(plain_text_output.getvalue())
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_p[split].name}')
