@@ -231,7 +231,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       partitioned_train_state = None
     else:
       partitioned_train_state = self.checkpoint_manager.restore(
-          step, items=items, restore_kwargs=restore_kwargs)
+          step, items=items, restore_kwargs=restore_kwargs)[TRAIN_STATE_KEY]
     return partitioned_train_state
 
 
@@ -333,7 +333,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       if step is None:
         train_state = None
       else:
-        train_state = self.checkpoint_manager.restore(step, items=items)
+        train_state = self.checkpoint_manager.restore(
+            step, items=items)[TRAIN_STATE_KEY]
     return train_state
 
   def save(self, step_i, partitioned_train_state, is_final=False):
