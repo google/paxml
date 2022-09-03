@@ -1017,7 +1017,8 @@ def decode_pmap_model(
   eval_runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, eval_key)
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
-      jax_task.model.abstract_init_with_metadata(prng_key, inputs_sample),
+      jax_task.model.abstract_init_with_metadata(
+          prng_key, inputs_sample, do_eval=True),
       os.path.join(job_log_dir, 'decoder_out'))
 
   (replicated_model_states, train_state_global_shapes,
