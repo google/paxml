@@ -453,8 +453,8 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
 
     times = [
         datetime.datetime.fromtimestamp(
-            os.stat(os.fspath(self._get_save_directory(
-                step, self.directory))).st_ctime) for step in steps
+            self._get_save_directory(
+                step, self.directory).stat().mtime) for step in steps
     ]
 
     def get_metrics(step):
