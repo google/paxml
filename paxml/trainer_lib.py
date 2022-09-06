@@ -80,11 +80,8 @@ class RunningMode(enum.Flag):
   DECODE = enum.auto()
 
   @classmethod
-  def detect(
-      cls,
-      has_train_metrics: bool,
-      has_eval_metrics: bool,
-      has_decode_metrics: bool) -> 'RunningMode':
+  def detect(cls, has_train_metrics: bool, has_eval_metrics: bool,
+             has_decode_metrics: bool) -> 'RunningMode':
     """Detects running mode from generated metrics."""
     mode = RunningMode.UNKNOWN
     if has_train_metrics:
@@ -265,7 +262,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
   init_key = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
   vars_weight_params = model.abstract_init_with_metadata(
-      init_key, sample_inputs)
+      init_key, sample_inputs, do_eval=is_eval)
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('vars_weight_params: %s', vars_weight_params)
 
@@ -750,7 +747,7 @@ def _eval_step_single_learner_with_model(
 
   parent_model = jax_task.model
   var_weight_hparams = parent_model.abstract_init_with_metadata(
-      prng_key, inputs)
+      prng_key, inputs, do_eval=True)
 
   if fprop_dtype == jnp.float32:
     pass
@@ -838,7 +835,8 @@ def decode_step(
   prng_key = jax.random.fold_in(prng_key, states.step)
   mdl_vars = states.mdl_vars
 
-  var_weight_hparams = model.abstract_init_with_metadata(prng_key, inputs)
+  var_weight_hparams = model.abstract_init_with_metadata(
+      prng_key, inputs, do_eval=True)
   assert not states.opt_states
 
   if fprop_dtype == jnp.bfloat16:

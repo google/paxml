@@ -274,16 +274,15 @@ def evaluate(
   """Runs the evaluation loop on the entire eval data set.
 
   Args:
-    experiment_config: an instance of BaseExperiment for the experiment
-      to evaluate.
+    experiment_config: an instance of BaseExperiment for the experiment to
+      evaluate.
     job_log_dir: The directory for the job logs.
     maybe_use_persistence_checkpointing: If set, it will try to use
       persistence-based checkpointing if suitable.
     early_stopping_fn: An optional callable object for reporting eval metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
-
+      and determining whether to early stop current training. The callable
+      object has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -351,7 +350,7 @@ class _PmapEvalRunner:
 
     # Restore flax checkpoints still required bak variables in TrainState
     vars_weight_params = jax_task.model.abstract_init_with_metadata(
-        init_key, sample_inputs)
+        init_key, sample_inputs, do_eval=True)
     # Note: `discard_opt_states` is not supported when restoring pmap
     # checkpoints. We must restore the entire checkpoint and then trim the
     # unrelevant states.
@@ -366,7 +365,11 @@ class _PmapEvalRunner:
           global_shapes, checkpoint_dir, step=checkpoint_step)
     if model_states is None:
       model_states = trainer_lib.initialize_model_state(
-          jax_task, init_key, sample_inputs, discard_opt_states=not use_ema)
+          jax_task,
+          init_key,
+          sample_inputs,
+          discard_opt_states=not use_ema,
+          is_eval=True)
     elif not use_ema and not track_metric:
       model_states = trim_opt_states(model_states)
     if use_ema:
@@ -402,8 +405,7 @@ class _PmapEvalRunner:
     logging.info('eval prng_seed: %s', self._eval_prng_seed)
 
     self._pmap_eval_step = jax.pmap(
-        eval_step,
-        axis_name=PMAP_PARALLEL_AXIS_NAME)
+        eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
 
   def run_one_step(
       self,
@@ -446,10 +448,10 @@ def evaluate_pmap_model(
     task_p: Params for the task encapsulating the data parallel model.
     eval_input_p: List of params for the eval data input pipelines.
     job_log_dir: Directory for the job logs.
-    early_stopping_fn: An optional callable object for reporting metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+    early_stopping_fn: An optional callable object for reporting metrics and
+      determining whether to early stop current training. The callable object
+      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
 
@@ -502,7 +504,9 @@ def evaluate_pmap_model(
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if tuning_lib.should_early_stop(
-            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+            early_stopping_fn,
+            last_checkpoint_step,
+            is_last_ckpt,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
             eval_scoring_metrics_list=eval_scoring_metrics_list,
@@ -612,7 +616,7 @@ class _SpmdEvalRunner:
     """Gets a partitioned model states and the step function."""
     with global_mesh:
       vars_weight_params = jax_task.model.abstract_init_with_metadata(
-          init_key, sample_inputs)
+          init_key, sample_inputs, do_eval=True)
       train_state_global_shapes = (
           jax_task.create_train_state_padded_shapes(
               vars_weight_params, discard_opt_states=not use_ema))
@@ -730,10 +734,10 @@ def evaluate_spmd_model(
     eval_input_p: List of Params for the eval data pipelines.
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
-    early_stopping_fn: An optional callable object for reporting metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+    early_stopping_fn: An optional callable object for reporting metrics and
+      determining whether to early stop current training. The callable object
+      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   logging.info('Using SPMD sharding for model parallelism.')
 
@@ -812,7 +816,9 @@ def evaluate_spmd_model(
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if tuning_lib.should_early_stop(
-            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+            early_stopping_fn,
+            last_checkpoint_step,
+            is_last_ckpt,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
             eval_scoring_metrics_list=eval_scoring_metrics_list,
@@ -858,8 +864,8 @@ def decode(
   """Runs decoding on the decoder datasets.
 
   Args:
-    experiment_config: an instance of BaseExperiment for the experiment
-      to decode.
+    experiment_config: an instance of BaseExperiment for the experiment to
+      decode.
     job_log_dir: The directory for the job logs.
     maybe_use_persistence_checkpointing: If set, it will try to use
       persistence-based checkpointing if suitable.
@@ -869,10 +875,10 @@ def decode(
     continuous_decode: whether to continuously decode on the latest ckpt.
     run_eval: whether to run evaluate() (i.e. to obtain scoring based metrics)
       as well.
-    early_stopping_fn: An optional callable object for reporting metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+    early_stopping_fn: An optional callable object for reporting metrics and
+      determining whether to early stop current training. The callable object
+      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   if continuous_decode and restore_checkpoint_dir:
     raise ValueError('restore_checkpoint_{dir,step} only supported with '
@@ -981,10 +987,10 @@ def decode_pmap_model(
     restore_checkpoint_step: The checkpoint step to restore. If unset, the
       decoded model will be randomly initialized.
     continuous_decode: whether to continuously decode on the latest ckpt.
-    early_stopping_fn: An optional callable object for reporting metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+    early_stopping_fn: An optional callable object for reporting metrics and
+      determining whether to early stop current training. The callable object
+      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
@@ -1074,7 +1080,9 @@ def decode_pmap_model(
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
         if tuning_lib.should_early_stop(
-            early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+            early_stopping_fn,
+            last_checkpoint_step,
+            is_last_ckpt,
             eval_input_p=eval_input_p,
             eval_metrics_list=eval_metrics_list,
             eval_scoring_metrics_list=eval_scoring_metrics_list,
@@ -1304,8 +1312,11 @@ def decode_once_pmap_model(
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       seqio_metric_values = seqio_input.process_outputs(
-          inputs[split], processed_decodes, summary_writers[split],
-          seqio_input.MetricType.PREDICT, step_i,
+          inputs[split],
+          processed_decodes,
+          summary_writers[split],
+          seqio_input.MetricType.PREDICT,
+          step_i,
           plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
@@ -1330,15 +1341,14 @@ def decode_once_pmap_model(
     track_metric = task_p.track_decoder_metric
     if track_metric and track_metric in processed_metric_dict:
       (m_value, _) = processed_metric_dict[track_metric]
-      tracker_dir_path = os.path.join(
-          basedir, dirnames[split], track_metric + '_min_tracker')
-      maybe_update_min_tracked_metric(m_value, step_i,
-                                      tracker_dir_path, track_metric,
-                                      input_p[split].name,
+      tracker_dir_path = os.path.join(basedir, dirnames[split],
+                                      track_metric + '_min_tracker')
+      maybe_update_min_tracked_metric(m_value, step_i, tracker_dir_path,
+                                      track_metric, input_p[split].name,
                                       replicated_model_states)
     elif track_metric:
-      logging.info('Cannot track metric %s on input %s.',
-                   track_metric, input_p[split].name)
+      logging.info('Cannot track metric %s on input %s.', track_metric,
+                   input_p[split].name)
 
     if (jax.process_index() == 0 and
         not flags.FLAGS.pax_only_aggregate_summaries):
@@ -1381,10 +1391,10 @@ def decode_spmd_model(
     restore_checkpoint_step: The checkpoint step to restore. If unset, the
       decoded model will be randomly initialized.
     continuous_decode: whether to continuously decode on the latest ckpt.
-    early_stopping_fn: An optional callable object for reporting metrics
-      and determining whether to early stop current training.
-      The callable object has signature:
-      (metrics, running_mode, ckpt_step, is_final_ckpt) -> should_stop_early.
+    early_stopping_fn: An optional callable object for reporting metrics and
+      determining whether to early stop current training. The callable object
+      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
+      should_stop_early.
   """
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
@@ -1444,7 +1454,8 @@ def decode_spmd_model(
                                   init_key, partitioned_specs)
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model,
-        jax_task.model.abstract_init_with_metadata(init_key, inputs_sample),
+        jax_task.model.abstract_init_with_metadata(
+            init_key, inputs_sample, do_eval=True),
         os.path.join(job_log_dir, 'decoder_out'))
     summary_base_dir = os.path.join(job_log_dir, 'summaries')
     summary_decode_dirs = [
@@ -1486,7 +1497,9 @@ def decode_spmd_model(
           exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
           is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
           if tuning_lib.should_early_stop(
-              early_stopping_fn, last_checkpoint_step, is_last_ckpt,
+              early_stopping_fn,
+              last_checkpoint_step,
+              is_last_ckpt,
               eval_input_p=eval_input_p,
               eval_metrics_list=eval_metrics_list,
               eval_scoring_metrics_list=eval_scoring_metrics_list,
@@ -1495,12 +1508,12 @@ def decode_spmd_model(
               processed_decode_metrics_list=processed_decode_metrics_list,
               decode_seqio_metrics_list=decode_seqio_metrics_list,
               eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-              decode_steps_per_sec=sum(
-                  num_decode_steps) / decode_period.elapsed):
+              decode_steps_per_sec=sum(num_decode_steps) /
+              decode_period.elapsed):
             logging.info(
                 'Decoding is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d',
-                last_checkpoint_step, task_p.train.num_train_steps)
+                'tuner, while the num_train_steps is %d', last_checkpoint_step,
+                task_p.train.num_train_steps)
             break
           if is_last_ckpt:
             break
@@ -1545,7 +1558,6 @@ def decode_once_spmd_model(
            List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
            List[int]  # performed decode steps.
           ]:
-
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
@@ -1699,8 +1711,11 @@ def decode_once_spmd_model(
       logging.info('Finished processing all %d examples.',
                    len(processed_decodes))
       seqio_metric_values = seqio_input.process_outputs(
-          inputs[split], processed_decodes, summary_writers[split],
-          seqio_input.MetricType.PREDICT, step_i,
+          inputs[split],
+          processed_decodes,
+          summary_writers[split],
+          seqio_input.MetricType.PREDICT,
+          step_i,
           plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
@@ -1727,8 +1742,8 @@ def decode_once_spmd_model(
       logging.warn('Decoder metric tracking is not implemented yet for pjit '
                    'models. Ignoring metric tracking.')
     elif track_metric:
-      logging.info('Cannot track metric %s on input %s.',
-                   track_metric, input_p[split].name)
+      logging.info('Cannot track metric %s on input %s.', track_metric,
+                   input_p[split].name)
 
     if jax.process_index() == 0:
       dir_path = os.path.join(basedir, dirnames[split])
@@ -1752,9 +1767,7 @@ def decode_once_spmd_model(
 
 
 def maybe_update_min_tracked_metric(
-    m_value: float, step: int,
-    tracker_dir_path: str,
-    track_metric: str,
+    m_value: float, step: int, tracker_dir_path: str, track_metric: str,
     data_partition_name: str,
     replicated_model_states: train_states.TrainState) -> None:
   """Update tracked metric if new value (m_value) is lower that the stored one.
@@ -1798,18 +1811,16 @@ def maybe_update_min_tracked_metric(
       # checkpointing.
       unreplicated_model_states = jax.tree_map(lambda x: x[0],
                                                replicated_model_states)
-      checkpoints.save_checkpoint(unreplicated_model_states,
-                                  tracker_dir_path)
+      checkpoints.save_checkpoint(unreplicated_model_states, tracker_dir_path)
 
 
-def infer_and_write(
-    experiment_config: base_experiment.BaseExperiment,
-    job_log_dir: Optional[str]) -> None:
+def infer_and_write(experiment_config: base_experiment.BaseExperiment,
+                    job_log_dir: Optional[str]) -> None:
   """Generates output from a model and writes it out.
 
   Args:
-    experiment_config: an instance of BaseExperiment for the experiment
-      with output generators configured.
+    experiment_config: an instance of BaseExperiment for the experiment with
+      output generators configured.
     job_log_dir: The base directory for writing the outputs.
   """
   task_p = experiment_config.task()
@@ -1829,10 +1840,9 @@ def infer_and_write(
     infer_and_write_pmap(task_p, inputs_p, job_log_dir)
 
 
-def infer_and_write_pmap(
-    task_p: tasks_lib.SingleTask.HParams,
-    inputs_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str) -> None:
+def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
+                         inputs_p: Sequence[base_input.BaseInput.HParams],
+                         job_log_dir: str) -> None:
   """Runs the infer_and_write for each of the inputs given task in pmap."""
   task = instantiate(task_p)
   track_metric = bool(task_p.track_decoder_metric)
@@ -1900,7 +1910,8 @@ def infer_and_write_pmap(
       ).save_metadata(dirname)
 
       writer = io_utils.ShardedParallelWriter(
-          fq_filename, infer_writer_p.output_num_shards,
+          fq_filename,
+          infer_writer_p.output_num_shards,
           output_format=infer_writer_p.output_format)
 
     step = 0
@@ -1914,8 +1925,8 @@ def infer_and_write_pmap(
         break
 
       pmap_batch = jax.tree_map(py_utils.reshard, batch)
-      outputs = infer_pmap_step(
-          replicated_model_states, output_seeds, pmap_batch)
+      outputs = infer_pmap_step(replicated_model_states, output_seeds,
+                                pmap_batch)
       # Get first device's output since it's been replicated by all-gather
       outputs = py_utils.maybe_unreplicate_for_fully_replicated(outputs)
       outputs_cpu = jax.tree_map(np.asarray, outputs)
