@@ -25,7 +25,8 @@ import tensorflow.compat.v2 as tf
 
 def setup_jax(globally_use_hardware_rng: bool,
               jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
-              jax_enable_checks: bool) -> None:
+              jax_enable_checks: bool,
+              should_initialize_jax_distributed: bool = False) -> None:
   """Setups JAX and logs information about this job."""
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
   # it unavailable to JAX.
@@ -50,6 +51,10 @@ def setup_jax(globally_use_hardware_rng: bool,
     logging.info('Using JAX backend target %s', jax_backend_target)
     jax_xla_backend = 'None' if jax_xla_backend is None else jax_xla_backend
     logging.info('Using JAX XLA backend %s', jax_xla_backend)
+
+if should_initialize_jax_distributed:
+  jax.distributed.initialize()
+
 
   logging.info('JAX process: %d / %d', jax.process_index(), jax.process_count())
   logging.info('JAX devices: %r', jax.devices())

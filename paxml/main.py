@@ -342,7 +342,8 @@ def main(argv: Sequence[str]) -> None:
     raise app.UsageError('Too many command-line arguments.')
 
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
-                      FLAGS.jax_xla_backend, FLAGS.jax_enable_checks)
+                      FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
+                      FLAGS.jax_fully_async_checkpoint)
 
   if FLAGS.exp is not None:
     experiment_config = _get_experiment(FLAGS.exp)()
