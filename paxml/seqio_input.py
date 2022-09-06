@@ -549,13 +549,17 @@ class SeqIOInput(base_input.BaseInput):
     for k in targets:
       ans = answers[k]
       answer = ans[_LM_DECODER_OUT_KEY]
-      # this line mutates 'decoder_outputs' which is written to disk afterwards
-      ans['seqio_targets'] = targets[k]
+      seqio_postprocessed_predictions = []
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
         prediction = self.mixture_or_task.postprocess_fn(
             answer, example=e, is_target=False)
         predictions_list.append(prediction)
+        seqio_postprocessed_predictions.append(prediction)
+
+      # Mutate 'ans' dictionary which is written to disk afterwards
+      ans['seqio_targets'] = targets[k]
+      ans['seqio_postprocessed_predictions'] = seqio_postprocessed_predictions
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
@@ -649,8 +653,9 @@ class SeqIOInput(base_input.BaseInput):
           t, example=targets[k], is_target=True)
       targets_list.append(seqio_target)
 
-      # this line mutates 'decoder_outputs' which is written to disk afterwards
+      # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = seqio_target
+      ans['seqio_postprocessed_predictions'] = prediction
 
     # Log a few examples for inspection and sanity check.
     it = iter(targets)

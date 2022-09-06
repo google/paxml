@@ -1299,9 +1299,10 @@ def decode_once_pmap_model(
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
-    logging.info('Finished processing all %d examples.', len(processed_decodes))
     seqio_metric_values = None
     if seqio_input.should_process_outputs(inputs[split]):
+      logging.info('Finished processing all %d examples.',
+                   len(processed_decodes))
       seqio_metric_values = seqio_input.process_outputs(
           inputs[split], processed_decodes, summary_writers[split],
           seqio_input.MetricType.PREDICT, step_i,
@@ -1693,9 +1694,10 @@ def decode_once_spmd_model(
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
-    logging.info('Finished processing all %d examples.', len(processed_decodes))
     seqio_metric_values = None
     if seqio_input.should_process_outputs(inputs[split]):
+      logging.info('Finished processing all %d examples.',
+                   len(processed_decodes))
       seqio_metric_values = seqio_input.process_outputs(
           inputs[split], processed_decodes, summary_writers[split],
           seqio_input.MetricType.PREDICT, step_i,

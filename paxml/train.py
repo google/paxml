@@ -725,7 +725,6 @@ def train_and_evaluate_pmap(
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
 
-
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
 
   # Get shape and dtype of model_inputs.
