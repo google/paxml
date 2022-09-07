@@ -16,7 +16,7 @@
 """Tuning loop for PAX."""
 
 import os
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Union
 from absl import logging
 from clu import platform
 import jax
@@ -233,27 +233,32 @@ def _write_file_once(file_path, content):
           'So any successful write will achieve this purpose.', file_path)
 
 
-def should_early_stop(
-    early_stop_fn: trainer_lib.EarlyStoppingFn,
-    global_step: int,
-    is_last_ckpt: bool,
-    train_weighted_scalars: Optional[Union[pytypes.WeightedScalars,
-                                           pytypes.WeightedScalarsList]] = None,
-    eval_train_metrics: Optional[Dict[str, float]] = None,
-    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
-    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
-    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
-    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
-        str, float]]]] = None,
-    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
-    num_params: Optional[float] = None,
-    train_steps_per_sec: Optional[float] = None,
-    eval_steps_per_sec: Optional[float] = None,
-    decode_steps_per_sec: Optional[float] = None) -> bool:
+class EvalMetrics(NamedTuple):
+  input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None
+  metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
+  scoring_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
+  steps_per_sec: Optional[float] = None
+
+
+class DecodeMetrics(NamedTuple):
+  input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None
+  metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
+  processed_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
+  seqio_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
+  steps_per_sec: Optional[float] = None
+
+
+def should_early_stop(early_stop_fn: trainer_lib.EarlyStoppingFn,
+                      global_step: int,
+                      is_last_ckpt: bool,
+                      train_weighted_scalars: Optional[
+                          Union[pytypes.WeightedScalars,
+                                pytypes.WeightedScalarsList]] = None,
+                      eval_train_metrics: Optional[Dict[str, float]] = None,
+                      eval_metrics: Optional[EvalMetrics] = None,
+                      decode_metrics: Optional[DecodeMetrics] = None,
+                      num_params: Optional[float] = None,
+                      train_steps_per_sec: Optional[float] = None) -> bool:
   """Returns True if the training process should stop early."""
   if early_stop_fn is None:
     return False
@@ -261,8 +266,8 @@ def should_early_stop(
   # Detect running mode.
   running_mode = trainer_lib.RunningMode.detect(
       has_train_metrics=train_steps_per_sec is not None,
-      has_eval_metrics=bool(eval_metrics_list),
-      has_decode_metrics=bool(decode_metrics_list))
+      has_eval_metrics=bool(eval_metrics),
+      has_decode_metrics=bool(decode_metrics))
 
   # Since train metrics will be produced at each step, for performance reasons,
   # we only aggregate the metrics at the last checkpoint or at the step when
@@ -277,32 +282,19 @@ def should_early_stop(
           train_metrics, train_weighted_scalars)
 
   # Aggregate metrics for tuning.
-  tuning_metrics = _aggregate_metrics(
-      train_metrics, eval_train_metrics, eval_input_p,
-      eval_metrics_list, eval_scoring_metrics_list,
-      decode_input_p, decode_metrics_list, processed_decode_metrics_list,
-      decode_seqio_metrics_list, num_params, train_steps_per_sec,
-      eval_steps_per_sec, decode_steps_per_sec)
+  tuning_metrics = _aggregate_metrics(train_metrics, eval_train_metrics,
+                                      eval_metrics, decode_metrics, num_params,
+                                      train_steps_per_sec)
   return early_stop_fn(tuning_metrics, running_mode, global_step, is_last_ckpt)
 
 
 def _aggregate_metrics(
     train_metrics: Optional[Dict[str, float]] = None,
     eval_train_metrics: Optional[Dict[str, float]] = None,
-    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    eval_metrics_list: Optional[Sequence[Dict[str, float]]] = None,
-    eval_scoring_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
-    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-    decode_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None,
-    processed_decode_metrics_list: Optional[Sequence[Optional[Dict[
-        str, float]]]] = None,
-    decode_seqio_metrics_list: Optional[Sequence[Optional[Dict[str,
-                                                               float]]]] = None,
+    eval_metrics: Optional[EvalMetrics] = None,
+    decode_metrics: Optional[DecodeMetrics] = None,
     num_params: Optional[float] = None,
-    train_steps_per_sec: Optional[float] = None,
-    eval_steps_per_sec: Optional[float] = None,
-    decode_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
+    train_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
   """Aggregate metrics from training, evaluation and decoding for tuning."""
   metrics = {}
   if train_metrics is not None:
@@ -331,15 +323,21 @@ def _aggregate_metrics(
         metric_utils.update_float_dict(merged, m, prefix)
     metric_utils.update_float_dict(metrics, merged)
 
-  _add_input_based_metrics(eval_input_p, eval_metrics_list, 'eval_test',
-                           'metrics')
-  _add_input_based_metrics(eval_input_p, eval_scoring_metrics_list, 'eval_test',
-                           'scoring_eval')
-  _add_input_based_metrics(decode_input_p, decode_metrics_list, 'decode_test')
-  _add_input_based_metrics(decode_input_p, processed_decode_metrics_list,
-                           'decode_test')
-  _add_input_based_metrics(decode_input_p, decode_seqio_metrics_list,
-                           'decode_test')
+  if eval_metrics:
+    eval_input_p = eval_metrics.input_p
+    _add_input_based_metrics(eval_input_p, eval_metrics.metrics_list,
+                             'eval_test', 'metrics')
+    _add_input_based_metrics(eval_input_p, eval_metrics.scoring_metrics_list,
+                             'eval_test', 'scoring_eval')
+  if decode_metrics:
+    decode_input_p = decode_metrics.input_p
+    _add_input_based_metrics(decode_input_p, decode_metrics.metrics_list,
+                             'decode_test')
+    _add_input_based_metrics(decode_input_p,
+                             decode_metrics.processed_metrics_list,
+                             'decode_test')
+    _add_input_based_metrics(decode_input_p, decode_metrics.seqio_metrics_list,
+                             'decode_test')
 
   # Add training metrics.
   def _add_metric_if_not_none(name: str, value: Optional[float]):
@@ -347,8 +345,10 @@ def _aggregate_metrics(
       metrics[name] = value
 
   _add_metric_if_not_none('train_steps_per_sec', train_steps_per_sec)
-  _add_metric_if_not_none('eval_steps_per_sec', eval_steps_per_sec)
-  _add_metric_if_not_none('decode_steps_per_sec', decode_steps_per_sec)
+  if eval_metrics is not None:
+    metrics['eval_steps_per_sec'] = eval_metrics.steps_per_sec
+  if decode_metrics is not None:
+    metrics['decode_steps_per_sec'] = decode_metrics.steps_per_sec
   _add_metric_if_not_none('num_params', num_params)
   return metrics
 

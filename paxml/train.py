@@ -830,12 +830,10 @@ def train_and_evaluate_pmap(
   inputs_shape_dtype = None
   is_vars_replicated = True
 
-  def decode_once_fn(partitioned_train_state, decode_summary_writers):
-    return eval_lib.decode_once_pmap_model(jax_task, task_p,
-                                           decode_input_pipelines,
-                                           decode_input_p, decode_prng_seed,
-                                           job_log_dir, partitioned_train_state,
-                                           decode_summary_writers)
+  if decode_input_p:
+    decode_once_fn = eval_lib.partition_decode_once_pmap_model(
+        jax_task, task_p, decode_input_pipelines, decode_input_p,
+        decode_prng_seed, job_log_dir)
 
   logging.info('Training loop starting...')
   if eval_input_p:
@@ -954,10 +952,8 @@ def train_and_evaluate_pmap(
                 partitioned_train_state.step))
       logging.debug('  Wrote summaries (attempted).')
 
-      eval_metrics_list = None
-      eval_scoring_metrics_list = None
-      eval_steps_per_sec = None
       eval_train_metrics = None
+      eval_metrics: Optional[tuning_lib.EvalMetrics] = None
       # Run eval at regular step interval.
       if (train_p.eval_interval_steps and
           step_i % train_p.eval_interval_steps == 0):
@@ -984,6 +980,11 @@ def train_and_evaluate_pmap(
                     reshard_inputs=reshard_inputs,
                     create_gda_for_inputs=create_gda_for_inputs))
           eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+          eval_metrics = tuning_lib.EvalMetrics(
+              input_p=eval_input_p,
+              metrics_list=eval_metrics_list,
+              scoring_metrics_list=eval_scoring_metrics_list,
+              steps_per_sec=eval_steps_per_sec)
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
               eval_period.elapsed)
@@ -1017,28 +1018,23 @@ def train_and_evaluate_pmap(
               logging.debug('  Wrote eval summaries.')
             eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
-      decode_metrics_list = None
-      processed_decode_metrics_list = None
-      decode_seqio_metrics_list = None
-      decode_steps_per_sec = None
+      decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
       if (decode_input_p and train_p.decode_interval_steps and
           step_i % train_p.decode_interval_steps == 0):
-        with py_utils.timeit() as decode_period:
-          (decode_metrics_list, processed_decode_metrics_list,
-           decode_seqio_metrics_list, num_decode_steps) = (
-               decode_once_fn(partitioned_train_state, decode_summary_writers))
-        decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+        decode_metrics = decode_once_fn(partitioned_train_state,
+                                        decode_summary_writers)
 
       logging.debug('step=`%d`: End', step_i - 1)
 
       if early_stopping_fn is not None:
         if tuning_lib.should_early_stop(
-            early_stopping_fn, step_i,
+            early_stopping_fn,
+            step_i,
             is_last_ckpt=tuning_lib.is_last_checkpoint(
                 trainer_lib.RunningMode.detect(
                     has_train_metrics=True,
-                    has_eval_metrics=bool(eval_metrics_list),
-                    has_decode_metrics=bool(decode_metrics_list)),
+                    has_eval_metrics=bool(eval_metrics),
+                    has_decode_metrics=bool(decode_metrics)),
                 step_i,
                 task_p.train.num_train_steps,
                 task_p.train.eval_interval_steps,
@@ -1046,16 +1042,9 @@ def train_and_evaluate_pmap(
                 task_p.train.save_interval_steps),
             train_weighted_scalars=train_weighted_scalars,
             eval_train_metrics=eval_train_metrics,
-            eval_input_p=eval_input_p,
-            eval_metrics_list=eval_metrics_list,
-            eval_scoring_metrics_list=eval_scoring_metrics_list,
-            decode_input_p=decode_input_p,
-            decode_metrics_list=decode_metrics_list,
-            processed_decode_metrics_list=processed_decode_metrics_list,
-            decode_seqio_metrics_list=decode_seqio_metrics_list,
+            eval_metrics=eval_metrics,
+            decode_metrics=decode_metrics,
             train_steps_per_sec=steps_per_sec,
-            eval_steps_per_sec=eval_steps_per_sec,
-            decode_steps_per_sec=decode_steps_per_sec,
             num_params=total_num_params):
           logging.info(
               'Training loop is early stopped at step `%d` by the '
@@ -1317,11 +1306,10 @@ def train_and_evaluate_spmd_model(
     reshard_inputs = False
     is_vars_replicated = False
 
-    def decode_once_fn(partitioned_train_state, decode_summary_writers):
-      return eval_lib.decode_once_spmd_model(
+    if decode_input_p:
+      decode_once_fn = eval_lib.partition_decode_once_spmd_model(
           jax_task, task_p, decode_input_pipelines, decode_input_p, job_log_dir,
-          partitioned_train_state, decode_summary_writers, decode_key,
-          global_mesh, decode_step_fn, create_gda_for_inputs,
+          decode_key, global_mesh, decode_step_fn, create_gda_for_inputs,
           decode_inputs_shape_dtype, decode_inputs_partition_spec)
 
     logging.info('Training loop starting...')
@@ -1442,10 +1430,8 @@ def train_and_evaluate_spmd_model(
           step_i += 1
         logging.debug('  Wrote summaries (attempted).')
 
-        eval_metrics_list = None
-        eval_scoring_metrics_list = None
-        eval_steps_per_sec = None
         eval_train_metrics = None
+        eval_metrics: Optional[tuning_lib.EvalMetrics] = None
         # Run eval at regular step interval.
         if (train_p.eval_interval_steps and
             step_i % train_p.eval_interval_steps == 0):
@@ -1472,6 +1458,11 @@ def train_and_evaluate_spmd_model(
                       reshard_inputs=reshard_inputs,
                       create_gda_for_inputs=create_gda_for_inputs))
             eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+            eval_metrics = tuning_lib.EvalMetrics(
+                input_p=eval_input_p,
+                metrics_list=eval_metrics_list,
+                scoring_metrics_list=eval_scoring_metrics_list,
+                steps_per_sec=eval_steps_per_sec)
             logging.debug(
                 '  Completed eval_step() runs on test splits in %f seconds.',
                 eval_period.elapsed)
@@ -1509,29 +1500,23 @@ def train_and_evaluate_spmd_model(
                 logging.debug('  Wrote eval summaries.')
               eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
-        decode_metrics_list = None
-        processed_decode_metrics_list = None
-        decode_seqio_metrics_list = None
-        decode_steps_per_sec = None
+        decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
         if (decode_input_p and train_p.decode_interval_steps and
             step_i % train_p.decode_interval_steps == 0):
-          with py_utils.timeit() as decode_period:
-            (decode_metrics_list, processed_decode_metrics_list,
-             decode_seqio_metrics_list, num_decode_steps) = (
-                 decode_once_fn(partitioned_train_state,
-                                decode_summary_writers))
-          decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+          decode_metrics = decode_once_fn(partitioned_train_state,
+                                          decode_summary_writers)
 
         logging.debug('step=`%d`: End', step_i - 1)
 
         if early_stopping_fn is not None:
           if tuning_lib.should_early_stop(
-              early_stopping_fn, step_i,
+              early_stopping_fn,
+              step_i,
               is_last_ckpt=tuning_lib.is_last_checkpoint(
                   trainer_lib.RunningMode.detect(
                       has_train_metrics=True,
-                      has_eval_metrics=bool(eval_metrics_list),
-                      has_decode_metrics=bool(decode_metrics_list)),
+                      has_eval_metrics=bool(eval_metrics),
+                      has_decode_metrics=bool(decode_metrics)),
                   step_i,
                   task_p.train.num_train_steps,
                   task_p.train.eval_interval_steps,
@@ -1539,16 +1524,9 @@ def train_and_evaluate_spmd_model(
                   task_p.train.save_interval_steps),
               train_weighted_scalars=train_weighted_scalars,
               eval_train_metrics=eval_train_metrics,
-              eval_input_p=eval_input_p,
-              eval_metrics_list=eval_metrics_list,
-              eval_scoring_metrics_list=eval_scoring_metrics_list,
-              decode_input_p=decode_input_p,
-              decode_metrics_list=decode_metrics_list,
-              processed_decode_metrics_list=processed_decode_metrics_list,
-              decode_seqio_metrics_list=decode_seqio_metrics_list,
+              eval_metrics=eval_metrics,
+              decode_metrics=decode_metrics,
               train_steps_per_sec=steps_per_sec,
-              eval_steps_per_sec=eval_steps_per_sec,
-              decode_steps_per_sec=decode_steps_per_sec,
               num_params=total_num_params):
             logging.info(
                 'Training loop is early stopped at step `%d` by the '

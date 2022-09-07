@@ -499,6 +499,12 @@ def evaluate_pmap_model(
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(replicated_model_states, eval_summary_writers))
 
+      eval_metrics = tuning_lib.EvalMetrics(
+          input_p=eval_input_p,
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+
       # If the last check point evaluated matches max train steps, exit.
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
@@ -507,10 +513,7 @@ def evaluate_pmap_model(
             early_stopping_fn,
             last_checkpoint_step,
             is_last_ckpt,
-            eval_input_p=eval_input_p,
-            eval_metrics_list=eval_metrics_list,
-            eval_scoring_metrics_list=eval_scoring_metrics_list,
-            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
+            eval_metrics=eval_metrics):
           logging.info(
               'Evaluation is early stopped at checkpoint step %d by the'
               'tuner, while the num_train_steps is %d', last_checkpoint_step,
@@ -811,6 +814,13 @@ def evaluate_spmd_model(
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(partitioned_train_state, eval_summary_writers,
                                 eval_key, create_gda_for_inputs))
+
+      eval_metrics = tuning_lib.EvalMetrics(
+          input_p=eval_input_p,
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+
       # If the last check point evaluated matches max train steps, exit.
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
@@ -819,10 +829,7 @@ def evaluate_spmd_model(
             early_stopping_fn,
             last_checkpoint_step,
             is_last_ckpt,
-            eval_input_p=eval_input_p,
-            eval_metrics_list=eval_metrics_list,
-            eval_scoring_metrics_list=eval_scoring_metrics_list,
-            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed):
+            eval_metrics=eval_metrics):
           logging.info(
               'Evaluation is early stopped at checkpoint step %d by the'
               'tuner, while the num_train_steps is %d', last_checkpoint_step,
@@ -1062,17 +1069,23 @@ def decode_pmap_model(
     last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
         restore_checkpoint_dir)
 
+    decode_once_fn = partition_decode_once_pmap_model(jax_task, task_p, inputs,
+                                                      input_p, prng_seed,
+                                                      job_log_dir)
+
     while True:
-      with py_utils.timeit() as decode_period:
-        (decode_metrics_list, processed_decode_metrics_list,
-         decode_seqio_metrics_list, num_decode_steps) = decode_once_pmap_model(
-             jax_task, task_p, inputs, input_p, prng_seed, job_log_dir,
-             replicated_model_states, summary_writers)
+      decode_metrics = decode_once_fn(replicated_model_states, summary_writers)
 
       with py_utils.timeit() as eval_period:
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             eval_runner.run_one_step(replicated_model_states,
                                      eval_summary_writers))
+
+      eval_metrics = tuning_lib.EvalMetrics(
+          input_p=eval_input_p,
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
 
       if not continuous_decode:
         break
@@ -1083,15 +1096,8 @@ def decode_pmap_model(
             early_stopping_fn,
             last_checkpoint_step,
             is_last_ckpt,
-            eval_input_p=eval_input_p,
-            eval_metrics_list=eval_metrics_list,
-            eval_scoring_metrics_list=eval_scoring_metrics_list,
-            decode_input_p=input_p,
-            decode_metrics_list=decode_metrics_list,
-            processed_decode_metrics_list=processed_decode_metrics_list,
-            decode_seqio_metrics_list=decode_seqio_metrics_list,
-            eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-            decode_steps_per_sec=sum(num_decode_steps) / decode_period.elapsed):
+            eval_metrics=eval_metrics,
+            decode_metrics=decode_metrics):
           logging.info(
               'Decoding is early stopped at checkpoint step %d by the'
               'tuner, while the num_train_steps is %d', last_checkpoint_step,
@@ -1125,6 +1131,32 @@ def decode_pmap_model(
         model_states = trim_opt_states(model_states)
       replicated_model_states = trainer_lib.replicate_model_state(model_states)
       last_checkpoint_step = new_checkpoint_step
+
+
+def partition_decode_once_pmap_model(
+    jax_task: tasks_lib.SingleTask, task_p: tasks_lib.SingleTask.HParams,
+    inputs: List[base_input.BaseInput],
+    input_p: Sequence[base_input.BaseInput.HParams], prng_seed: JTensor,
+    job_log_dir: str
+) -> Callable[[train_states.TrainState, List[SummaryWriter]],
+              tuning_lib.DecodeMetrics]:
+
+  def decode_once_fn(partitioned_train_state, summary_writers):
+    with py_utils.timeit() as decode_period:
+      (decode_metrics_list, processed_decode_metrics_list,
+       decode_seqio_metrics_list, num_decode_steps) = (
+           decode_once_pmap_model(jax_task, task_p, inputs, input_p, prng_seed,
+                                  job_log_dir, partitioned_train_state,
+                                  summary_writers))
+    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+    return tuning_lib.DecodeMetrics(
+        input_p=input_p,
+        metrics_list=decode_metrics_list,
+        processed_metrics_list=processed_decode_metrics_list,
+        seqio_metrics_list=decode_seqio_metrics_list,
+        steps_per_sec=decode_steps_per_sec)
+
+  return decode_once_fn
 
 
 def decode_once_pmap_model(
@@ -1477,19 +1509,24 @@ def decode_spmd_model(
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_eval_dirs
       ]
+      decode_once_fn = partition_decode_once_spmd_model(
+          jax_task, task_p, inputs, input_p, job_log_dir, prng_key, global_mesh,
+          decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
       while True:
-        with py_utils.timeit() as decode_period:
-          (decode_metrics_list, processed_decode_metrics_list,
-           decode_seqio_metrics_list,
-           num_decode_steps) = decode_once_spmd_model(
-               jax_task, task_p, inputs, input_p, job_log_dir,
-               partitioned_train_state, summary_writers, prng_key, global_mesh,
-               decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
+        decode_metrics = decode_once_fn(partitioned_train_state,
+                                        summary_writers)
+
         with py_utils.timeit() as eval_period:
           (eval_metrics_list, eval_scoring_metrics_list,
            num_eval_steps) = eval_runner.run_one_step(partitioned_train_state,
                                                       eval_summary_writers,
                                                       eval_key, use_gda)
+
+        eval_metrics = tuning_lib.EvalMetrics(
+            input_p=eval_input_p,
+            metrics_list=eval_metrics_list,
+            scoring_metrics_list=eval_scoring_metrics_list,
+            steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
 
         if not continuous_decode:
           break
@@ -1500,16 +1537,8 @@ def decode_spmd_model(
               early_stopping_fn,
               last_checkpoint_step,
               is_last_ckpt,
-              eval_input_p=eval_input_p,
-              eval_metrics_list=eval_metrics_list,
-              eval_scoring_metrics_list=eval_scoring_metrics_list,
-              decode_input_p=input_p,
-              decode_metrics_list=decode_metrics_list,
-              processed_decode_metrics_list=processed_decode_metrics_list,
-              decode_seqio_metrics_list=decode_seqio_metrics_list,
-              eval_steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-              decode_steps_per_sec=sum(num_decode_steps) /
-              decode_period.elapsed):
+              eval_metrics=eval_metrics,
+              decode_metrics=decode_metrics):
             logging.info(
                 'Decoding is early stopped at checkpoint step %d by the'
                 'tuner, while the num_train_steps is %d', last_checkpoint_step,
@@ -1536,6 +1565,40 @@ def decode_spmd_model(
         else:
           partitioned_train_state = trim_opt_states(partitioned_train_state)
         last_checkpoint_step = new_checkpoint_step
+
+
+def partition_decode_once_spmd_model(
+    jax_task: tasks_lib.SingleTask,
+    task_p: tasks_lib.SingleTask.HParams,
+    inputs: List[base_input.BaseInput],
+    input_p: Sequence[base_input.BaseInput.HParams],
+    job_log_dir: str,
+    prng_key: JTensor,
+    global_mesh: maps.Mesh,
+    decode_step_fn: Callable[[NestedJTensor, JTensor, NestedJTensor],
+                             Tuple[Tuple[NestedMap, NestedMap], NestedMap]],
+    use_gda: bool,
+    inputs_shape: pytypes.NestedShapeDtypeStruct,
+    inputs_partition_spec: NestedPartitionSpec,
+) -> Callable[[train_states.TrainState, List[SummaryWriter]],
+              tuning_lib.DecodeMetrics]:
+
+  def decode_once_fn(partitioned_train_state, summary_writers):
+    with py_utils.timeit() as decode_period:
+      (decode_metrics_list, processed_decode_metrics_list,
+       decode_seqio_metrics_list, num_decode_steps) = decode_once_spmd_model(
+           jax_task, task_p, inputs, input_p, job_log_dir,
+           partitioned_train_state, summary_writers, prng_key, global_mesh,
+           decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
+    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+    return tuning_lib.DecodeMetrics(
+        input_p=input_p,
+        metrics_list=decode_metrics_list,
+        processed_metrics_list=processed_decode_metrics_list,
+        seqio_metrics_list=decode_seqio_metrics_list,
+        steps_per_sec=decode_steps_per_sec)
+
+  return decode_once_fn
 
 
 def decode_once_spmd_model(
