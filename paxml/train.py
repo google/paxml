@@ -60,7 +60,6 @@ CheckpointManager = Union[checkpoint_managers.CheckpointManager,
                           checkpoint_managers.OrbaxCheckpointManager]
 Checkpointer = checkpoints.Checkpointer
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
-TRAIN_STATE_KEY = checkpoint_managers.TRAIN_STATE_KEY
 
 _N_STEPS_WARMUP_LOGGING = 5
 
@@ -205,33 +204,41 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager):
+               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+               checkpoint_type: CheckpointType):
     self.checkpoint_manager = checkpoint_manager
+    self._checkpoint_type = checkpoint_type
+    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      raise ValueError('FLAX checkpointing not supported for pjit models.')
+
+  def _save_with_args(self, step_i, partitioned_train_state):
+    self.checkpoint_manager.save(step_i, partitioned_train_state)
+
+  def _restore_with_args(self, step_i, train_state_global_shapes, global_mesh,
+                         train_state_pspecs):
+    restore_args = {}
+    if self._checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+      restore_args = {'specs': train_state_pspecs, 'mesh': global_mesh}
+    elif self._checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+      restore_args = {'state_specs': train_state_pspecs}
+    return self.checkpoint_manager.restore(
+        step_i, items=train_state_global_shapes, restore_kwargs=restore_args)
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     logging.info('Saving a ckpt at final step: %d', step_i)
-    self.checkpoint_manager.save(step_i,
-                                 {TRAIN_STATE_KEY: partitioned_train_state})
+    self._save_with_args(step_i, partitioned_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
-    self.checkpoint_manager.save(step_i,
-                                 {TRAIN_STATE_KEY: partitioned_train_state})
+    self._save_with_args(step_i, partitioned_train_state)
     self.checkpoint_manager.check_for_errors()
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
-    items = {TRAIN_STATE_KEY: train_state_global_shapes}
-    restore_kwargs = {
-        TRAIN_STATE_KEY: {
-            'specs': train_state_pspecs,
-            'mesh': global_mesh,
-        }
-    }
     step = self.checkpoint_manager.latest_step()
     if step is None:
       partitioned_train_state = None
     else:
-      partitioned_train_state = self.checkpoint_manager.restore(
-          step, items=items, restore_kwargs=restore_kwargs)[TRAIN_STATE_KEY]
+      partitioned_train_state = self._restore_with_args(
+          step, train_state_global_shapes, global_mesh, train_state_pspecs)
     return partitioned_train_state
 
 
@@ -310,10 +317,12 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self, job_log_dir,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager):
+               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+               checkpoint_type: CheckpointType):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
+    self._checkpoint_type = checkpoint_type
 
   def restore_from_tensorstore(self, train_state_global_shapes):
     # TODO(cpgaffney): Use Orbax APIs.
@@ -329,13 +338,18 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       return self.restore_from_tensorstore(train_state_global_shapes)
     else:
       step = self.checkpoint_manager.latest_step()
-      items = {TRAIN_STATE_KEY: train_state_global_shapes}
       if step is None:
         train_state = None
       else:
         train_state = self.checkpoint_manager.restore(
-            step, items=items)[TRAIN_STATE_KEY]
+            step, items=train_state_global_shapes)
     return train_state
+
+  def _save_with_args(self, step_i, train_state):
+    save_args = {}
+    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      save_args = {'step': step_i}
+    self.checkpoint_manager.save(step_i, train_state, save_kwargs=save_args)
 
   def save(self, step_i, partitioned_train_state, is_final=False):
     if py_utils.pmap_use_tensorstore():
@@ -345,8 +359,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
           f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
       fully_replicated_gda_train_state = jax.tree_map(
           py_utils.convert_fully_replicated_sda_to_gda, partitioned_train_state)
-      self.checkpoint_manager.save(
-          step_i, {TRAIN_STATE_KEY: fully_replicated_gda_train_state})
+      self._save_with_args(step_i, fully_replicated_gda_train_state)
       py_utils.sync_global_devices(
           f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
     else:
@@ -354,12 +367,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         # We just need to save the first model replica.
         unreplicated_train_state = jax.tree_map(lambda x: x[0],
                                                 partitioned_train_state)
-        self.checkpoint_manager.save(
-            step_i, {TRAIN_STATE_KEY: unreplicated_train_state})
+        self._save_with_args(step_i, unreplicated_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     self.save(step_i, partitioned_train_state)
-
     self.checkpoint_manager.check_for_errors()
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
@@ -388,9 +399,19 @@ def _create_checkpoint_manager(
         todelete_subdir=todelete_subdir)
     checkpointer = async_checkpointer
     if checkpointer is None:
-      checkpointer = Checkpointer(PaxCheckpointHandler(enable_flax=False))
-    return checkpoint_managers.OrbaxCheckpointManager(
-        checkpoint_dir, {TRAIN_STATE_KEY: checkpointer}, options)
+      if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+        checkpointer = checkpoints.FlaxCheckpointer()
+      elif checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+        checkpointer = Checkpointer(PaxCheckpointHandler(enable_flax=False))
+      elif checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+        raise ValueError(
+            'Persistence checkpointing requires checkpoint to already be initialized.'
+        )
+      else:
+        raise ValueError(
+            f'Unsupported Orbax checkpoint type: {checkpoint_type}')
+    return checkpoint_managers.OrbaxCheckpointManager(checkpoint_dir,
+                                                      checkpointer, options)
   else:
     return checkpoint_managers.CheckpointManager(
         config_name='',
@@ -562,11 +583,13 @@ def train_and_evaluate(
       job_log_dir,
       checkpoint_type,
       checkpoint_todelete_subdir,
-      use_orbax=use_orbax)
+      use_orbax=use_orbax,
+      async_checkpointer=async_checkpointer)
 
   if task_p.model.ici_mesh_shape is not None:
     if use_orbax:
-      checkpointer = _OrbaxPjitTrainingCheckpointer(checkpoint_manager)
+      checkpointer = _OrbaxPjitTrainingCheckpointer(checkpoint_manager,
+                                                    checkpoint_type)
     else:
       checkpointer = _PjitTrainingCheckpointer(checkpoint_manager,
                                                checkpoint_type,
@@ -585,7 +608,8 @@ def train_and_evaluate(
   else:
     if use_orbax:
       checkpointer = _OrbaxPmapTrainingCheckpointer(job_log_dir,
-                                                    checkpoint_manager)
+                                                    checkpoint_manager,
+                                                    checkpoint_type)
     else:
       checkpointer = _PmapTrainingCheckpointer(job_log_dir, checkpoint_manager,
                                                async_ckpt_manager,

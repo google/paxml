@@ -38,7 +38,7 @@ CheckpointType = checkpoint_pb2.CheckpointType
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 CHECKPOINT_BASENAME = 'checkpoints.pb'
-TRAIN_STATE_KEY = 'train_state'
+DEFAULT_ITEM_NAME = orbax.checkpoint.checkpoint_manager.DEFAULT_ITEM_NAME
 METRIC_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METRIC_ITEM_NAME
 
 
@@ -477,7 +477,7 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
                           directory: epath.Path,
                           key_name: Optional[str] = None) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
-    if key_name is None or key_name == TRAIN_STATE_KEY:
+    if key_name is None or key_name == DEFAULT_ITEM_NAME:
       return epath.Path(
           checkpoints._make_checkpoint_step_dir(os.fspath(directory), step))  # pylint: disable=protected-access
     else:

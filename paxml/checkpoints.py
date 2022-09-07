@@ -20,7 +20,7 @@ import datetime
 import functools
 import os
 import re
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -181,7 +181,11 @@ def save_checkpoint(
       _save_checkpoint_gda(train_state, checkpoint_dir, overwrite, step,
                            async_ckpt_manager)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-    _save_checkpoint_flax(train_state, checkpoint_dir, overwrite, step)
+    if use_orbax:
+      checkpointer = FlaxCheckpointer()
+      checkpointer.save(checkpoint_dir, train_state, force=overwrite, step=step)
+    else:
+      _save_checkpoint_flax(train_state, checkpoint_dir, overwrite, step)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
@@ -286,7 +290,12 @@ def restore_checkpoint(
       return _restore_checkpoint_gda(state_global_shapes, checkpoint_dir,
                                      global_mesh, state_specs, step)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-    return _restore_checkpoint_flax(state_global_shapes, checkpoint_dir, step)
+    if use_orbax:
+      checkpointer = FlaxCheckpointer()
+      return checkpointer.restore(
+          checkpoint_dir, item=state_global_shapes, step=step)
+    else:
+      return _restore_checkpoint_flax(state_global_shapes, checkpoint_dir, step)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
@@ -568,6 +577,43 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
         jax.tree_map(epath.Path, self._param_names))
 
 
+class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
+  """Thin Orbax-compatible wrapper around flax_checkpoints.
+
+  Since Flax-checkpoint support in Pax will eventually be deprecated, we do not
+  plan to provide a more well-integrated interface.
+  """
+
+  def save(self,
+           directory: Union[str, epath.Path],
+           item: Any,
+           force: bool = False,
+           step: Optional[int] = None):
+    if not isinstance(directory, str):
+      directory = os.fspath(directory)
+    if step is None:
+      raise ValueError('Required argument `step` for `FlaxCheckpointer.save`')
+    _save_checkpoint_flax(item, directory, force, step)
+
+  def restore(self,
+              directory: Union[str, epath.Path],
+              *args: Any,
+              item: Optional[Any] = None,
+              step: Optional[int] = None) -> Any:
+    if not isinstance(directory, str):
+      directory = os.fspath(directory)
+    if item is None:
+      raise ValueError(
+          'Required argument `item` for `FlaxCheckpointer.restore`')
+    if step is None:
+      raise ValueError(
+          'Required argument `step` for `FlaxCheckpointer.restore`')
+    return _restore_checkpoint_flax(item, directory, step)
+
+  def structure(self, directory: Union[str, epath.Path]) -> Optional[Any]:
+    return NotImplementedError
+
+
 def on_commit_callback(temp_ckpt_dir, final_ckpt_dir):
   if temp_ckpt_dir == final_ckpt_dir:
     with tf.io.gfile.GFile(
@@ -600,10 +646,6 @@ def _save_checkpoint_gda(
     step: Step to save checkpoint for.
     async_ckpt_manager: Asynchronous checkpoint manager which manages
       serialization and deserialization of GDA arrays. This manager allows
-      training to continue when checkpointing is going on as checkpointing
-      happens in a different thread.
-    use_orbax: Use Orbax for checkpointing.
-    async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
   """

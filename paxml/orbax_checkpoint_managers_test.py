@@ -65,11 +65,8 @@ class CheckpointManagerTest(parameterized.TestCase):
   ) -> checkpoint_managers.OrbaxCheckpointManager:
     return checkpoint_managers.OrbaxCheckpointManager(
         directory=self.directory,
-        checkpointers={
-            checkpoint_managers.TRAIN_STATE_KEY:
-                orbax.checkpoint.Checkpointer(
-                    orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False))
-        },
+        checkpointers=orbax.checkpoint.Checkpointer(
+            orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
         options=options)
 
   @parameterized.parameters((None,), (2,))
@@ -79,8 +76,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_manager = self.create_checkpoint_manager(options)
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      checkpoint_manager.save(
-          step, items={checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+      checkpoint_manager.save(step, self.train_state)
 
     if max_to_keep is None:
       expected_steps = steps
@@ -104,12 +100,8 @@ class CheckpointManagerTest(parameterized.TestCase):
           keep_time_interval=datetime.timedelta(hours=2))
       checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
           directory=self.directory,
-          checkpointers={
-              checkpoint_managers.TRAIN_STATE_KEY:
-                  orbax.checkpoint.Checkpointer(
-                      orbax.checkpoint.PyTreeCheckpointHandler(
-                          enable_flax=False))
-          },
+          checkpointers=orbax.checkpoint.Checkpointer(
+              orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
           options=options)
 
     steps = list(range(0, 10000, 1000))
@@ -118,8 +110,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.utcnow.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        checkpoint_manager.save(
-            step, items={checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+        checkpoint_manager.save(step, self.train_state)
         checkpoint_datetimes.append(current_datetime)
         current_datetime += datetime.timedelta(hours=1)
 
@@ -140,8 +131,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      checkpoint_manager.save(
-          step, {checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = [2000, 4000, 6000, 8000]
 
@@ -160,12 +150,8 @@ class CheckpointManagerTest(parameterized.TestCase):
           keep_time_interval=datetime.timedelta(hours=3))
       checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
           directory=self.directory,
-          checkpointers={
-              checkpoint_managers.TRAIN_STATE_KEY:
-                  orbax.checkpoint.Checkpointer(
-                      orbax.checkpoint.PyTreeCheckpointHandler(
-                          enable_flax=False))
-          },
+          checkpointers=orbax.checkpoint.Checkpointer(
+              orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
           options=options)
 
     saved_steps_2_init = [2000, 4000, 6000, 8000]
@@ -180,8 +166,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.utcnow.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        checkpoint_manager.save(
-            step, {checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+        checkpoint_manager.save(step, self.train_state)
         current_datetime += datetime.timedelta(hours=1)
 
     # expect saved steps at multipliers of 3000.
@@ -199,8 +184,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      checkpoint_manager.save(
-          step, {checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = steps
 
@@ -217,8 +201,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     step = 10000
     steps.append(step)
-    checkpoint_manager.save(
-        step, {checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+    checkpoint_manager.save(step, self.train_state)
 
     saved_steps_2 = steps[-max_to_keep:]
 
@@ -238,8 +221,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         lambda step_id: step_id == save_step)
 
     for step in range(save_step + 1):
-      checkpoint_manager.save(
-          step, items={checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = [0, save_step]
 
@@ -254,8 +236,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_manager = self.create_checkpoint_manager(options)
 
     for step in range(4):
-      checkpoint_manager.save(
-          step, items={checkpoint_managers.TRAIN_STATE_KEY: self.train_state})
+      checkpoint_manager.save(step, self.train_state)
 
     self.assertSameElements(
         _expected_checkpoint_filenames(os.path.join(self.directory, 'archive')),
