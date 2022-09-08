@@ -237,7 +237,7 @@ class SearchAlgorithmsTest(absltest.TestCase):
     self.assertTrue(
         pg.eq(
             algorithm(),
-            pg.generators.RegularizedEvolution(
+            pg.evolution.regularized_evolution(
                 mutator=pg.evolution.mutators.Uniform(),
                 population_size=10,
                 tournament_size=5)))
