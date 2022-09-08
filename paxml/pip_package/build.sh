@@ -85,7 +85,7 @@ write_action_env_to_bazelrc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 bazel clean
 bazel build ...
 # Todo: add bazel test for the purposes of the pip package.
-blaze test paxml/... --test_output=all
+bazel test paxml/... --test_output=all
 
 DST_DIR="/tmp/paxml_pip_package_build"
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
