@@ -35,7 +35,7 @@ setup(
     url='https://github.com/google/paxml',
     license='Apache-2.0',
     classifiers=[
-        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.10',
     ],
     zip_safe=False,
 )
