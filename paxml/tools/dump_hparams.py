@@ -27,14 +27,21 @@ To examine post-init model params, specify one more parameter:
   --post_init_params_ofile=/tmp/lm_post.txt
 """
 
+import contextlib
+import os
+from typing import Optional
+
 from absl import app
 from absl import flags
 from absl import logging
 import jax
+from jax.experimental import maps
+import numpy as np
 from paxml import base_experiment
 from paxml import experiment_registry
 from praxis import base_hyperparams
 from praxis import base_layer
+from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
 
@@ -88,11 +95,49 @@ def _write_post_init_model_hparams_file(model_param, filepath,
     fout.write(params_inits_text)
 
 
+def _extract_num_cores(model_p) -> Optional[int]:
+  """Extracts the number of cores used by the experiment.
+
+  Returns:
+    The number of cores across all TPU slices for pjit experiments or None for
+    pmap ones.
+  """
+
+  if model_p.ici_mesh_shape is None:
+    return None
+
+  def _compute_num_cores(mesh_shape) -> int:
+    if mesh_shape is None:
+      # Default to 1 if unset.
+      return 1
+    return np.prod(mesh_shape).item()
+
+  ici_num_cores = _compute_num_cores(model_p.ici_mesh_shape)
+  dcn_num_cores = _compute_num_cores(model_p.dcn_mesh_shape)
+  return ici_num_cores * dcn_num_cores
+
+
 def main(argv) -> None:
   del argv  # unused.
 
+  # We use xmap only with SPMD.
+  jax.config.update('experimental_xmap_spmd_lowering', True)
+  # Use the manual partitioning lowering of xmap to avoid vectorization.
+  jax.config.update('experimental_xmap_spmd_lowering_manual', True)
+
   logging.info('Dumping out params for experiment: %s', FLAGS.exp)
   experiment_config = _get_experiment(FLAGS.exp)()
+  task_p = experiment_config.task()
+
+  num_cores = _extract_num_cores(task_p.model)
+
+  prev_xla_flags = os.getenv('XLA_FLAGS')
+  flags_str = prev_xla_flags or ''
+  # Don't override user-specified device count, or other XLA flags.
+  if (num_cores is not None and
+      'xla_force_host_platform_device_count' not in flags_str):
+    os.environ['XLA_FLAGS'] = (
+        flags_str + f'--xla_force_host_platform_device_count={num_cores}')
 
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
@@ -107,16 +152,27 @@ def main(argv) -> None:
       params_file.write(dataset.to_text())
       params_file.write('\n\n')
 
-    params_file.write(experiment_config.task().to_text())
+    params_file.write(task_p.to_text())
     # TODO(b/236417790): Dump input specs for model weight initialization.
 
   if FLAGS.post_init_params_ofile:
     input_specs_provider = instantiate(
         experiment_config.get_input_specs_provider_params())
     input_specs = input_specs_provider.get_input_specs()
-    _write_post_init_model_hparams_file(experiment_config.task().model,
-                                        FLAGS.post_init_params_ofile,
-                                        input_specs)
+    input_samples = jax.tree_map(lambda x: np.zeros(x.shape, x.dtype),
+                                 input_specs)
+
+    if task_p.model.dcn_mesh_shape is not None:
+      device_mesh = py_utils.create_device_mesh(task_p.model.ici_mesh_shape,
+                                                task_p.model.dcn_mesh_shape)
+      context_manager = maps.Mesh(device_mesh, task_p.model.mesh_axis_names)
+    else:
+      context_manager = contextlib.nullcontext()
+
+    with context_manager:
+      _write_post_init_model_hparams_file(task_p.model,
+                                          FLAGS.post_init_params_ofile,
+                                          input_samples)
 
 
 if __name__ == '__main__':

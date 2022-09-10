@@ -177,10 +177,12 @@ def pax_targets(
             # Implicit absl.flags dependency.
             # Implicit absl.logging dependency.
             # Implicit jax dependency.
+            # Implicit numpy dependency.
             "//paxml:base_experiment",
             "//paxml:experiment_registry",
             "//praxis:base_hyperparams",
             "//praxis:base_layer",
+            "//praxis:py_utils",
             # Implicit tensorflow_no_contrib dependency.
         ] + extra_deps,
         exp_sources = exp_sources,
