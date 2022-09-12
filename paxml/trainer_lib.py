@@ -394,7 +394,8 @@ def _maybe_aggregate_metrics_summaries(
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_dict)
     per_example_out = jax.tree_map(
-        lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
+        lambda x: jax.lax.all_gather(  # pylint: disable=g-long-lambda
+            x, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True),
         per_example_out)
   else:
     # No aggregation of weighted scalars is needed.
@@ -738,7 +739,8 @@ def _eval_step_single_learner_with_model(
     summary_tensors - A nested map or dict of summary tensors computed in
       forward as well as backward pass.
   """
-  context_p = base_layer.JaxContext.HParams(do_eval=True)
+  context_p = base_layer.JaxContext.HParams(
+      do_eval=True, summary_verbosity=base_layer.SummaryVerbosity.INFO)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)
@@ -829,7 +831,8 @@ def decode_step(
     A tuple of (weighted_scalars, results, eval_metrics) as computed
       by model.decode() and the updated weights.
   """
-  context_p = base_layer.JaxContext.HParams(do_eval=True)
+  context_p = base_layer.JaxContext.HParams(
+      do_eval=True, summary_verbosity=base_layer.SummaryVerbosity.INFO)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)

@@ -761,11 +761,6 @@ class SeqIOInput(base_input.BaseInput):
     for batch in eval_outputs:
       # transfer to cpu
       batch = jax.tree_map(np.asarray, batch)
-
-      # unlike decoder outputs which are tiled into the first dimension, for
-      # eval output first two dimensions are batch, so we fold them into one.
-      batch = jax.tree_map(lambda x: np.reshape(x, (-1,) + x.shape[2:]), batch)
-
       for eval_example in py_utils.tree_unstack(batch, 0):
         key = py_utils.get_enumeration_id(eval_example)
         if not key:

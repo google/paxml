@@ -52,8 +52,8 @@ def setup_jax(globally_use_hardware_rng: bool,
     jax_xla_backend = 'None' if jax_xla_backend is None else jax_xla_backend
     logging.info('Using JAX XLA backend %s', jax_xla_backend)
 
-if should_initialize_jax_distributed:
-  jax.distributed.initialize()
+  if should_initialize_jax_distributed:
+    jax.distributed.initialize()
 
 
   logging.info('JAX process: %d / %d', jax.process_index(), jax.process_count())
