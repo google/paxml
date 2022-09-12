@@ -188,8 +188,8 @@ def run_eval_loop_over_test_splits(
   eval_scoring_metrics_list = []
   num_eval_steps = []
   for split, num_split_steps in enumerate(num_steps):
-    logging.info('Starting eval data split=%d with num_steps=%d', split,
-                 num_split_steps)
+    logging.info('Starting eval data split=%d (%s) with num_steps=%d',
+                 split, model_inputs[split].hparams.name, num_split_steps)
     # Reset loss and summary tensors for each test split.
     loss = []
     summary_tensors = {}

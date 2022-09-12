@@ -394,7 +394,8 @@ def _maybe_aggregate_metrics_summaries(
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_dict)
     per_example_out = jax.tree_map(
-        lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
+        lambda x: jax.lax.all_gather(  # pylint: disable=g-long-lambda
+            x, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True),
         per_example_out)
   else:
     # No aggregation of weighted scalars is needed.
