@@ -1358,7 +1358,7 @@ def decode_once_pmap_model(
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
-      decode_metrics.summarize(step_i, 'decode_metrics')
+      decode_metric_dict = decode_metrics.summarize(step_i, 'decode_metrics')
       logging.info('Summarizing of process_decode_metrics.')
       processed_metric_dict = process_decode_metrics.summarize(
           step_i, 'process_decode_metrics')
@@ -1392,9 +1392,14 @@ def decode_once_pmap_model(
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
 
-    decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
+    decode_metrics_list.append(
+        metric_utils.update_float_dict(
+            metric_utils.as_float_dict(decode_metric_dict),
+            metric_utils.as_float_dict(metric_values)))
     processed_decode_metrics_list.append(
-        metric_utils.as_float_dict(process_metric_values))
+        metric_utils.update_float_dict(
+            metric_utils.as_float_dict(processed_metric_dict),
+            metric_utils.as_float_dict(process_metric_values)))
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
   return (decode_metrics_list, processed_decode_metrics_list,
@@ -1788,7 +1793,7 @@ def decode_once_spmd_model(
 
     with summary_writers[split].as_default():
       logging.info('Summarizing of decode_metrics.')
-      decode_metrics.summarize(step_i, 'decode_metrics')
+      decode_metric_dict = decode_metrics.summarize(step_i, 'decode_metrics')
       logging.info('Summarizing of process_decode_metrics.')
       processed_metric_dict = process_decode_metrics.summarize(
           step_i, 'process_decode_metrics')
@@ -1820,9 +1825,14 @@ def decode_once_spmd_model(
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_p[split].name}')
 
-    decode_metrics_list.append(metric_utils.as_float_dict(metric_values))
+    decode_metrics_list.append(
+        metric_utils.update_float_dict(
+            metric_utils.as_float_dict(decode_metric_dict),
+            metric_utils.as_float_dict(metric_values)))
     processed_decode_metrics_list.append(
-        metric_utils.as_float_dict(process_metric_values))
+        metric_utils.update_float_dict(
+            metric_utils.as_float_dict(processed_metric_dict),
+            metric_utils.as_float_dict(process_metric_values)))
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
   return (decode_metrics_list, processed_decode_metrics_list,
