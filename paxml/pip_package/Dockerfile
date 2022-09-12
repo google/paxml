@@ -78,7 +78,9 @@ RUN cd flaxformer && pip3 install .
 
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
-RUN cd praxis && bash praxis/pip_package/build_pip_pkg.sh
+RUN cd praxis && bazel test praxis/... --test_output=all --test_verbose_timeout_warnings
+RUN bash praxis/pip_package/build_pip_pkg.sh
+#RUN cd praxis && bash praxis/pip_package/build_pip_pkg.sh
 
 WORKDIR /
 
