@@ -139,7 +139,7 @@ flags.DEFINE_integer(
 # --jax_xla_backend, --jax_enable_checks are available through JAX.
 
 
-def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
+def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   """Retrieves an experiment config from the global registry."""
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
@@ -346,7 +346,7 @@ def main(argv: Sequence[str]) -> None:
                       FLAGS.jax_fully_async_checkpoint)
 
   if FLAGS.exp is not None:
-    experiment_config = _get_experiment(FLAGS.exp)()
+    experiment_config = get_experiment(FLAGS.exp)()
   else:
     cfg = absl_flags.create_buildable_from_flags(
         module=None, allow_imports=True)

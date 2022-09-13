@@ -71,7 +71,8 @@ def pax_targets(
         name = "",
         add_main_gpu_target = True,
         smoke_test_exclude_regexes = "",
-        smoke_test_kwargs = None):
+        smoke_test_kwargs = None,
+        main_src = "//paxml:main.py"):
     """Macro to define a collection of Pax targets with custom dependencies.
 
     It currently defines the following targets:
@@ -98,6 +99,7 @@ def pax_targets(
           be disabled from the smoke test.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
+      main_src: The src file for the ":main" target created.
     """
     if not experiments:
         fail("pax_targets() expects a non-empty list of deps that defines " +
@@ -116,7 +118,7 @@ def pax_targets(
     main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
     export_binary(
         name = main_name,
-        main = "//paxml:main.py",
+        main = main_src,
         py_binary_rule = pytype_binary,
         deps = [
             "//paxml:main_lib",
@@ -130,7 +132,7 @@ def pax_targets(
         main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
         export_binary(
             name = main_name,
-            main = "//paxml:main.py",
+            main = main_src,
             py_binary_rule = pytype_binary,
             deps = [
                 "//paxml:main_lib",
