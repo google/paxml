@@ -18,7 +18,7 @@
 import collections
 import concurrent
 import enum
-import numpy
+import json
 import os
 import pickle
 import re
@@ -26,6 +26,8 @@ import threading
 from typing import Any, List, Optional, Sequence, Tuple
 
 from absl import logging
+import jax
+import numpy as np
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
@@ -131,28 +133,51 @@ class ShardedParallelWriter:
       writer.close()
 
 
+def _to_ndarray(x: Any) -> Any:
+  # Values in key_value_pairs may contain numpy ndarrays, but may also
+  # contain DeviceArray types -- which are equivalent to ndarray in all
+  # respects, except one: they require additional dependencies in code
+  # that attempts to load the .pickle file.
+  # For such types the _value property returns a proper np.ndarray.
+  if hasattr(x, '_value') and isinstance(x._value, np.ndarray):  # pylint: disable=protected-access
+    x = x._value  # pylint: disable=protected-access
+
+  return x
+
+
+class JnpEncoder(json.JSONEncoder):
+  """jax.numpy compatible encoder: https://github.com/mpld3/mpld3/issues/434."""
+
+  def default(self, o: Any) -> Any:
+    if isinstance(o, jax.numpy.DeviceArray):
+      return _to_ndarray(o)
+    elif isinstance(o, np.integer):
+      return int(o)
+    elif isinstance(o, np.floating):
+      return float(o)
+    elif isinstance(o, np.ndarray):
+      return o.tolist()
+
+    return super().default(o)
+
+
 def write_key_value_pairs(filename: str,
                           key_value_pairs: Sequence[Tuple[str, Any]],
                           cast_to_ndarray: bool = True) -> None:
-  """Writes `key_value_pairs` to file."""
-  if not filename.endswith('.pickle'):
-    filename += '.pickle'
+  """Writes `key_value_pairs` to pkl and jsonl files."""
+  root = os.path.splitext(filename)[0]
+  jsonl_filename = root + '.jsonl'
+  pkl_filename = root + '.pickle'
 
   if cast_to_ndarray:
-    # Values in key_value_pairs may contain numpy ndarrays, but may also
-    # contain DeviceArray types -- which are equivalent to ndarray in all
-    # respects, except one: they require additional dependencies in code
-    # that attempts to load the .pickle file.
-    # For such types the _value property returns a proper numpy.ndarray.
-    def _to_ndarray(x):
-      if hasattr(x, '_value') and isinstance(x._value, numpy.ndarray):
-        x = x._value
-      return x
+    key_value_pairs = jax.tree_map(_to_ndarray, key_value_pairs)
 
-    key_value_pairs = tf.nest.map_structure(_to_ndarray, key_value_pairs)
+  with tf.io.gfile.GFile(pkl_filename, 'wb') as pkl_f:
+    pickle.dump(key_value_pairs, pkl_f, protocol=pickle.HIGHEST_PROTOCOL)
 
-  with tf.io.gfile.GFile(filename, 'wb') as f:
-    pickle.dump(key_value_pairs, f, protocol=pickle.HIGHEST_PROTOCOL)
+  with tf.io.gfile.GFile(jsonl_filename, 'w') as jsonl_f:
+    for _, v in key_value_pairs:
+      jsonl_f.write(json.dumps(v, cls=JnpEncoder) + '\n')
 
 
 def _validate_filenames(filenames: Sequence[str],

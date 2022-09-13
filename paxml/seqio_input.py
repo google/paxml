@@ -105,6 +105,17 @@ def _log_plain_text_output(
       print(ans['seqio_targets'], file=plain_text_output)
 
 
+def _convert_bytes_to_str(tree: Any) -> Any:
+  """Converts any bytes leafs to strings in a pytree."""
+  def _convert_fn(leaf: Any) -> Any:
+    if not isinstance(leaf, bytes):
+      return leaf
+
+    return leaf.decode('utf-8')
+
+  return jax.tree_map(_convert_fn, tree)
+
+
 def should_process_outputs(inp: base_input.BaseInput) -> bool:
   """Whether the current (input, process_index) pair should process outputs."""
   return (inp.hparams.reset_for_eval and isinstance(inp, SeqIOInput)
@@ -559,7 +570,8 @@ class SeqIOInput(base_input.BaseInput):
 
       # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = targets[k]
-      ans['seqio_postprocessed_predictions'] = seqio_postprocessed_predictions
+      ans['seqio_postprocessed_predictions'] = (
+          _convert_bytes_to_str(seqio_postprocessed_predictions))
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
@@ -655,7 +667,8 @@ class SeqIOInput(base_input.BaseInput):
 
       # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = seqio_target
-      ans['seqio_postprocessed_predictions'] = prediction
+      ans['seqio_postprocessed_predictions'] = (
+          _convert_bytes_to_str(prediction))
 
     # Log a few examples for inspection and sanity check.
     it = iter(targets)
