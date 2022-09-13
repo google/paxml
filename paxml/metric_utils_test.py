@@ -204,6 +204,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(
         metric_utils.as_float([(np.array([1.0]), np.array([0.1])),
                                (np.array([3.0]), np.array([0.1]))]), 2.0)
+    self.assertEqual(metric_utils.as_float((0.2, 1.0)), 0.2)
 
   def test_as_float_dict(self):
     self.assertEqual(metric_utils.as_float_dict({'x': 0.2}), {'x': 0.2})

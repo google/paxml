@@ -152,15 +152,15 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
                                          summary_utils.SummaryType.SCALAR)
 
 
-def _is_nparray_like(v: Any) -> bool:
-  """Returns True if input is a NumPy array-like instance."""
-  return isinstance(v, (np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray))
+def is_scalar(v: Any) -> bool:
+  """Returns True if input is a scalar."""
+  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray))
 
 
 def is_weighted_scalar(v: Any) -> bool:
   """Returns True if input is a weighted scalar."""
-  return (isinstance(v, tuple) and len(v) == 2 and _is_nparray_like(v[0]) and
-          _is_nparray_like(v[1]))
+  return (isinstance(v, tuple) and len(v) == 2 and is_scalar(v[0]) and
+          is_scalar(v[1]))
 
 
 def is_float_convertible(metric_value: Union[numbers.Number, clu_values.Value,

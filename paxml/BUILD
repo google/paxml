@@ -210,6 +210,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         # Implicit absl.logging dependency.
+        # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.

@@ -15,16 +15,17 @@
 
 """Tests for io_utils."""
 
+import json
 import os
 import pathlib
+import pickle
 import random
 import string
-from typing import Sequence
-import numpy
-import pickle
+from typing import Any, Sequence
 
 from absl import flags
 from absl.testing import absltest
+import numpy
 from paxml import io_utils
 import tensorflow.compat.v2 as tf
 
@@ -32,11 +33,20 @@ import tensorflow.compat.v2 as tf
 FLAGS = flags.FLAGS
 
 
+def _read_jsonl_file(filename: str) -> Sequence[Any]:
+  contents = []
+  with tf.io.gfile.GFile(filename, 'r') as f:
+    for line in f:
+      contents.append(json.loads(line))
+
+  return contents
+
+
 class IoUtilsTest(absltest.TestCase):
 
   def test_write_key_value_pairs(self):
     filename = os.path.join(FLAGS.test_tmpdir, 'kv.pickle')
-    kv = {'word1': 7, 'word2': 4, 'word3': 5}
+    kv = [('word1', 7), ('word2', 4), ('word3', 5)]
     io_utils.write_key_value_pairs(filename, kv)
     self.assertTrue(pathlib.Path(filename).exists())
 
@@ -54,16 +64,16 @@ class IoUtilsTest(absltest.TestCase):
         return self._ndarray_value
 
     filename = os.path.join(FLAGS.test_tmpdir, 'kvd.pickle')
-    kv = {
-        'word1': MockDeviceArray(numpy.asarray([7])),
-        'word2': MockDeviceArray(numpy.asarray([4])),
-        'word3': MockDeviceArray(numpy.asarray([5])),
-    }
+    kv = [
+        ('word1', MockDeviceArray(numpy.asarray([7]))),
+        ('word2', MockDeviceArray(numpy.asarray([4]))),
+        ('word3', MockDeviceArray(numpy.asarray([5]))),
+    ]
     io_utils.write_key_value_pairs(filename, kv, cast_to_ndarray=True)
     kv_reload = pickle.load(open(filename, 'rb'))
-    self.assertEqual(numpy.ndarray, type(kv_reload['word1']))
-    self.assertEqual(numpy.ndarray, type(kv_reload['word2']))
-    self.assertEqual(numpy.ndarray, type(kv_reload['word3']))
+    self.assertEqual(numpy.ndarray, type(kv_reload[0][1]))
+    self.assertEqual(numpy.ndarray, type(kv_reload[1][1]))
+    self.assertEqual(numpy.ndarray, type(kv_reload[2][1]))
 
   def test_validate_none_step_invalid(self):
     fnames = [f'decoder_out_200_shard_{x}.pickle' for x in range(3)]
@@ -92,6 +102,13 @@ class IoUtilsTest(absltest.TestCase):
     del fnames[1]
     with self.assertRaises(ValueError):
       io_utils._validate_filenames(fnames)
+
+  def test_write_key_value_pairs_jsonl(self):
+    filename = os.path.join(FLAGS.test_tmpdir, 'kv.jsonl')
+    kv = [('key1', {'out1': 1}), ('key2', {'out2': 2}), ('key3', {'out3': 3})]
+    io_utils.write_key_value_pairs(filename, kv)
+    self.assertTrue(pathlib.Path(filename).exists())
+    self.assertEqual(_read_jsonl_file(filename), [v for (_, v) in kv])
 
 
 class ShardedParallelWriterTest(absltest.TestCase):

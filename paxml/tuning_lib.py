@@ -275,6 +275,8 @@ def should_early_stop(early_stop_fn: trainer_lib.EarlyStoppingFn,
   train_metrics = None
   if train_weighted_scalars is not None:
     if is_last_ckpt or running_mode.has_eval or running_mode.has_decode:
+      train_weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+          train_weighted_scalars)
       train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
       logging.info(
           ('Aggregate train weighted scalars as tuning metrics. '

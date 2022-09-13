@@ -105,6 +105,17 @@ def _log_plain_text_output(
       print(ans['seqio_targets'], file=plain_text_output)
 
 
+def _convert_bytes_to_str(tree: Any) -> Any:
+  """Converts any bytes leafs to strings in a pytree."""
+  def _convert_fn(leaf: Any) -> Any:
+    if not isinstance(leaf, bytes):
+      return leaf
+
+    return leaf.decode('utf-8')
+
+  return jax.tree_map(_convert_fn, tree)
+
+
 def should_process_outputs(inp: base_input.BaseInput) -> bool:
   """Whether the current (input, process_index) pair should process outputs."""
   return (inp.hparams.reset_for_eval and isinstance(inp, SeqIOInput)
@@ -122,6 +133,7 @@ def process_outputs(
   """Computes SeqIO task-defined metric, write to TB, and returns mapping."""
   inp = typing.cast(SeqIOInput, inp)
   logging.info('Computing %s metrics', metric_type.name)
+
   if metric_type is MetricType.SCORE:
     metric_name_prefix = EVAL_METRICS_PREFIX
     # model_outputs = typing.cast(List[Mapping[str, Any]], model_outputs)
@@ -142,6 +154,16 @@ def process_outputs(
       tf.io.gfile.makedirs(dirname)
     with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
       f.write(plain_text_output.getvalue())
+
+    # Write out seqio metrics with JSON logger to JSONL file
+    logger = seqio.loggers.JSONLogger(dirname)
+    merged_seqio_metrics = {}
+    for sm in seqio_metrics:
+      merged_seqio_metrics.update(sm)
+
+    logger(task_name=inp.mixture_or_task.name, step=step,
+           metrics=merged_seqio_metrics, dataset=None, inferences=None,
+           targets=None)
 
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
@@ -559,7 +581,8 @@ class SeqIOInput(base_input.BaseInput):
 
       # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = targets[k]
-      ans['seqio_postprocessed_predictions'] = seqio_postprocessed_predictions
+      ans['seqio_postprocessed_predictions'] = (
+          _convert_bytes_to_str(seqio_postprocessed_predictions))
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
@@ -655,7 +678,8 @@ class SeqIOInput(base_input.BaseInput):
 
       # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = seqio_target
-      ans['seqio_postprocessed_predictions'] = prediction
+      ans['seqio_postprocessed_predictions'] = (
+          _convert_bytes_to_str(prediction))
 
     # Log a few examples for inspection and sanity check.
     it = iter(targets)
