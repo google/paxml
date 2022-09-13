@@ -133,6 +133,7 @@ def process_outputs(
   """Computes SeqIO task-defined metric, write to TB, and returns mapping."""
   inp = typing.cast(SeqIOInput, inp)
   logging.info('Computing %s metrics', metric_type.name)
+
   if metric_type is MetricType.SCORE:
     metric_name_prefix = EVAL_METRICS_PREFIX
     # model_outputs = typing.cast(List[Mapping[str, Any]], model_outputs)
@@ -153,6 +154,16 @@ def process_outputs(
       tf.io.gfile.makedirs(dirname)
     with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
       f.write(plain_text_output.getvalue())
+
+    # Write out seqio metrics with JSON logger to JSONL file
+    logger = seqio.loggers.JSONLogger(dirname)
+    merged_seqio_metrics = {}
+    for sm in seqio_metrics:
+      merged_seqio_metrics.update(sm)
+
+    logger(task_name=inp.mixture_or_task.name, step=step,
+           metrics=merged_seqio_metrics, dataset=None, inferences=None,
+           targets=None)
 
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
