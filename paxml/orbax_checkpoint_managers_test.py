@@ -17,6 +17,7 @@
 
 import datetime
 import os
+from typing import List
 from unittest import mock
 
 from absl import flags
@@ -35,7 +36,7 @@ FLAGS = flags.FLAGS
 CHECKPOINT_PREFIX = checkpoint_managers.CHECKPOINT_PREFIX
 
 
-def _base_checkpoint_filenames(steps: list[int]):
+def _base_checkpoint_filenames(steps: List[int]):
   """Returns checkpoint basenames corresponding to all the `steps`."""
   results = []
   for step in steps:
@@ -43,7 +44,7 @@ def _base_checkpoint_filenames(steps: list[int]):
   return results
 
 
-def _expected_checkpoint_filenames(directory: str) -> list[str]:
+def _expected_checkpoint_filenames(directory: str) -> List[str]:
   return [
       os.path.basename(v) for v in tf.io.gfile.glob(
           os.path.join(directory, f'{CHECKPOINT_PREFIX}*'))

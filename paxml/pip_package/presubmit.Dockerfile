@@ -10,6 +10,8 @@ RUN pip install /paxml/praxis/pip_package
 RUN pip install /paxml/paxml/pip_package
 RUN cd /paxml && bazel build ...
 
+RUN cd /paxml && bazel test paxml/... --test_output=all --test_verbose_timeout_warnings
+
 WORKDIR /
 
 CMD ["/bin/bash"]
