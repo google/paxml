@@ -1,0 +1,16 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+          'build',
+          '--build-arg', 'image_name=${_IMAGE_NAME}',
+          '-f', 'paxml/pip_package/postsubmit.Dockerfile', '.'
+        ]
+
+substitutions:
+    _PYTHON_VERSION: '3.8'
+    _RELEASE_VERSION: 'nightly'  # or rX.Y
+    _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
+options:
+    dynamic_substitutions: true
+    substitution_option: 'ALLOW_LOOSE'
+timeout: 1200s
