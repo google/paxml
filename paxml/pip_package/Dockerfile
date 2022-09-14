@@ -78,9 +78,8 @@ RUN cd flaxformer && pip3 install .
 
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
-RUN cd praxis && bazel test praxis/... --test_output=all --test_verbose_timeout_warnings
+RUN cd praxis && bazel test --test_output=all --test_verbose_timeout_warnings -- praxis/... -praxis/layers:transformer_models_test -praxis/layers:flaxformer_models_test -praxis/layers:ngrammer_test -praxis/layers:attentions_test -praxis/layers:transformers_test -praxis/layers:models_test -praxis/layers:convolutions_test -praxis/layers:embedding_softmax_test -praxis/layers:ctc_objectives_test -praxis/layers:normalizations_test
 RUN bash praxis/pip_package/build_pip_pkg.sh
-#RUN cd praxis && bash praxis/pip_package/build_pip_pkg.sh
 
 WORKDIR /
 
