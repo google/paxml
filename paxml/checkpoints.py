@@ -747,8 +747,7 @@ def _restore_checkpoint_gda(
     sorted_dirnames = sorted(
         [x for x in checkpoint_dirnames if is_checkpoint_asset(x)])
     if not sorted_dirnames:
-      logging.info(
-          f'No checkpoint found for restore in {checkpoint_dir}')
+      logging.info('No checkpoint found for restore in %r', checkpoint_dir)
       return None
     latest_checkpoint_dirname = sorted_dirnames[-1]
     step = get_step_from_checkpoint_asset(latest_checkpoint_dirname)
