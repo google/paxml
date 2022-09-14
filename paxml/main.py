@@ -238,6 +238,11 @@ def run_experiment(
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         use_orbax=FLAGS.use_orbax,
         async_checkpointer=async_checkpointer)
+
+    if async_checkpointer is not None:
+      async_checkpointer.wait_until_finished()
+    if async_ckpt_manager is not None:
+      async_ckpt_manager.wait_until_finished()
   elif FLAGS.mode == 'eval':
     work_unit.set_task_status(f'Eval experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
