@@ -19,7 +19,7 @@ import abc
 import dataclasses
 import enum
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Type, Union
 from praxis import base_hyperparams
 import pyglove as pg
 
@@ -52,10 +52,18 @@ class SearchHParams(BaseHyperParams):
     search_reward: Hyperparameters for search reward.
     max_num_trials: Max number of trials for the search. If None, there is no
       limit.
+    errors_to_skip: An optional field to specify on what errors the trial
+      should be skipped. It's in the form of a list of (ExceptionType) or
+      (ExceptionType, regexForError). For example, if users specify:
+      `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
+      RuntimeError or errors that match 'XLACompilation.*' will be treated as
+      to skip.
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
   max_num_trials: int = None
+  errors_to_skip: Optional[List[
+      Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
 
 
 class MetricType(enum.Enum):

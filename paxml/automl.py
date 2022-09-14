@@ -17,7 +17,8 @@
 
 import abc
 import inspect
-from typing import Any, Dict, Optional, Sequence, Type, Union
+import math
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 from paxml import automl_interfaces
 # Placeholder for importing Google-internal tuning modules.
 from praxis import base_hyperparams
@@ -42,15 +43,28 @@ Metric = automl_interfaces.Metric
 #
 
 
-def hyperparameter_tuning(metric: Metric,
-                          max_num_trials: int = 100,
-                          goal: str = 'maximize') -> SearchHParams:
+def hyperparameter_tuning(
+    metric: Metric,
+    max_num_trials: int = 100,
+    goal: str = 'maximize',
+    errors_to_skip: Optional[List[
+        Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
+    reward_for_nan: Optional[float] = None) -> SearchHParams:
   """Returns a common search HParams for hyper-parameter tuning.
 
   Args:
     metric: The metric to optimize.
     max_num_trials: Max number of trials for tuning.
     goal: 'maximize' or 'minimize'.
+    errors_to_skip: An optional field to specify on what errors the trial
+      should be skipped. It's in the form of a list of (ExceptionType) or
+      (ExceptionType, regexForError). For example, if users specify:
+      `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
+      RuntimeError or errors that match 'XLACompilation.*' will be treated as
+      to skip.
+    reward_for_nan: An optional float used as the reward when metric value is
+      NaN. If not specified, the reward will remain NaN so the trial will be
+      skipped by the search algorithm.
 
   Returns:
     A search HParams object.
@@ -58,22 +72,30 @@ def hyperparameter_tuning(metric: Metric,
   return SearchHParams(
       # Use Sweeping for hyperparameter tuning.
       search_algorithm=Sweeping.HParams(),
-      search_reward=SingleObjective.HParams(metric=metric, goal=goal),
-      max_num_trials=max_num_trials)
+      search_reward=SingleObjective.HParams(
+          metric=metric, goal=goal, reward_for_nan=reward_for_nan),
+      max_num_trials=max_num_trials,
+      errors_to_skip=errors_to_skip)
 
 
-def neural_architecture_search(metrics: Union[Metric, Sequence[Metric]],
-                               cost_objective: Optional[float] = None,
-                               reward_type: str = 'tunas',
-                               exponent: float = -0.07,
-                               max_num_trials: int = 10000) -> SearchHParams:
+def neural_architecture_search(
+    metrics: Union[Metric, Sequence[Metric]],
+    cost_objective: Optional[float] = None,
+    reward_type: str = 'tunas',
+    exponent: float = -0.07,
+    max_num_trials: int = 10000,
+    errors_to_skip: Optional[List[
+        Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
+    reward_for_nan: Optional[float] = None
+    ) -> SearchHParams:
   """Search params for Neural Architecture Search."""
 
   if isinstance(metrics, Metric):
     metrics = [metrics]
 
   if len(metrics) == 1:
-    reward = SingleObjective.HParams(metric=metrics[0])
+    reward = SingleObjective.HParams(
+        metric=metrics[0], reward_for_nan=reward_for_nan)
   elif len(metrics) == 2:
     if cost_objective is None:
       raise ValueError('cost objective must be provided.')
@@ -89,14 +111,16 @@ def neural_architecture_search(metrics: Union[Metric, Sequence[Metric]],
     reward = MultiObjective.HParams(
         metrics=metrics,
         aggregator=aggregator_cls.HParams(
-            cost_objective=cost_objective, exponent=exponent))
+            cost_objective=cost_objective, exponent=exponent),
+        reward_for_nan=reward_for_nan)
   else:
     raise ValueError('Only 1 or 2 metrics are supported.')
 
   return SearchHParams(
       search_algorithm=RegularizedEvolution.HParams(),
       search_reward=reward,
-      max_num_trials=max_num_trials)
+      max_num_trials=max_num_trials,
+      errors_to_skip=errors_to_skip)
 
 
 #
@@ -179,9 +203,13 @@ class SingleObjective(BaseReward):
       metric_key: The key of metric whose value will be used as reward.
       goal: Defines how the metric should be optimized. Acceptable values are
         'maximize' or 'minimize'.
+      reward_for_nan: An optional float used as the reward when metric value is
+        NaN. If not specified, the reward will remain NaN so the trial will be
+        skipped by the search algorithm.
     """
     metric: Optional[Metric] = None
     goal: str = 'maximize'
+    reward_for_nan: Optional[float] = None
 
     def __post_init__(self):
       super().__post_init__()
@@ -194,8 +222,11 @@ class SingleObjective(BaseReward):
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     del global_step
     reward = self._hparams.metric.get_value(metrics_dict)
+
     if self._hparams.goal == 'minimize':
       reward *= -1
+    if self._hparams.reward_for_nan is not None and math.isnan(reward):
+      reward = self._hparams.reward_for_nan
     return reward
 
 
@@ -220,9 +251,13 @@ class MultiObjective(BaseReward):
       metric_keys: The keys of metric whose value will be used as reward.
       aggregator: Multi-objective aggregator for coupling multiple values into a
         single float value.
+      reward_for_nan: An optional float used as the reward when metric value is
+        NaN. If not specified, the reward will remain NaN so the trial will be
+        skipped by the search algorithm.
     """
     metrics: Optional[Sequence[Metric]] = None
     aggregator: Optional[MultiObjectiveAggregator.HParams] = None
+    reward_for_nan: Optional[float] = None
 
     def __post_init__(self):
       super().__post_init__()
@@ -240,6 +275,9 @@ class MultiObjective(BaseReward):
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     del global_step
     metric_values = [m.get_value(metrics_dict) for m in self._hparams.metrics]
+    if (self._hparams.reward_for_nan is not None
+        and any(math.isnan(m) for m in metric_values)):
+      return self._hparams.reward_for_nan
     if len(metric_values) == 1:
       return metric_values[0]
     assert self._aggregator is not None

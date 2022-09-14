@@ -15,6 +15,7 @@
 
 """Tuning loop for PAX."""
 
+import math
 import os
 from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Union
 from absl import logging
@@ -123,6 +124,7 @@ def tune(trial_fn: TrialFn,
   search_algorithm = search_hparams.search_algorithm.Instantiate()()
   reward_fn = search_hparams.search_reward.Instantiate()
   max_num_trials = max_num_trials or search_hparams.max_num_trials
+  errors_to_skip = search_hparams.errors_to_skip or []
 
   search_space = get_search_space(experiment_config)
   if search_space.dna_spec.is_constant:
@@ -160,6 +162,8 @@ def tune(trial_fn: TrialFn,
                running_mode & trainer_lib.RunningMode.DECODE)):
             # Computing reward and report back to the tuning service.
             reward = reward_fn(metrics, global_step)
+            if math.isnan(reward):
+              raise FloatingPointError('Reward is NaN.')
             feedback.add_measurement(reward, metrics=metrics, step=global_step)
             logging.info(
                 'Measurement is reported to trial %d at step %d '
@@ -188,8 +192,9 @@ def tune(trial_fn: TrialFn,
     # Context manager to deliver different program hyperparameters
     # in each trial.
     with example():
-      # Mark trial as infeasible on NaN. PAX user can add more error types here.
-      with feedback.skip_on_exceptions((FloatingPointError,)):
+      # Mark trial as infeasible on NaN. PAX user can add more error
+      # through `SearchHParams.errors_to_skip`.
+      with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
         try:
           trial_fn(experiment_config, work_unit,
                    os.path.join(job_log_dir, str(feedback.id)),

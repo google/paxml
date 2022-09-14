@@ -15,6 +15,7 @@
 
 """Tests for automl."""
 
+import math
 from absl.testing import absltest
 from clu import platform
 from paxml import automl
@@ -85,6 +86,8 @@ class TuningLibTest(absltest.TestCase):
       _ = experiment_config.datasets()
       _ = experiment_config.decoder_datasets()
       reward = task_p['learning_rate'] * task_p['batch_size']
+      if reward > 5:
+        reward = math.nan
       early_stopping_fn({'eval_test_abc/metrics/reward': reward},
                         trainer_lib.RunningMode.EVAL, 0, True)
 
@@ -93,8 +96,10 @@ class TuningLibTest(absltest.TestCase):
                     platform.work_unit(), job_log_dir, max_num_trials=5)
     result = pg.tuning.poll_result('local')
     self.assertLen(result.trials, 5)
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, False, False, False, False])
     self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     [6.4, 0.32, 3.2, 0.32, 1.6])
+                     [0.0, 0.32, 3.2, 0.32, 1.6])
 
 
 if __name__ == '__main__':

@@ -15,6 +15,7 @@
 
 """Tests for automl."""
 
+import math
 from typing import Optional
 from absl.testing import absltest
 from paxml import automl
@@ -164,14 +165,18 @@ class SearchHParamsTest(absltest.TestCase):
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
     self.assertEqual(p.search_reward.metric, automl.Metric.eval('accuracy'))
     self.assertEqual(p.search_reward.goal, 'maximize')
+    self.assertIsNone(p.search_reward.reward_for_nan)
     self.assertEqual(p.max_num_trials, 100)
+    self.assertIsNone(p.errors_to_skip)
 
   def test_neural_architecture_search_single_objective(self):
     p = automl.neural_architecture_search(automl.Metric.eval('accuracy'))
     self.assertIs(p.search_algorithm.cls, automl.RegularizedEvolution)
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
     self.assertEqual(p.search_reward.metric, automl.Metric.eval('accuracy'))
+    self.assertIsNone(p.search_reward.reward_for_nan)
     self.assertEqual(p.max_num_trials, 10000)
+    self.assertIsNone(p.errors_to_skip)
 
   def test_neural_architecture_search_multi_objective(self):
     p = automl.neural_architecture_search([
@@ -251,12 +256,18 @@ class RewardsTest(absltest.TestCase):
         metric=automl.Metric.eval('accuracy')).Instantiate()
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
+    self.assertTrue(math.isnan(
+        reward_fn({'eval_test_abc/metrics/accuracy': math.nan}, 0)))
 
     reward_fn = automl.SingleObjective.HParams(
-        metric=automl.Metric.eval('accuracy'), goal='minimize').Instantiate()
+        metric=automl.Metric.eval('accuracy'),
+        goal='minimize',
+        reward_for_nan=-1.0).Instantiate()
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(
         reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), -0.9)
+    self.assertEqual(
+        reward_fn({'eval_test_abc/metrics/accuracy': math.nan}, 0), -1.0)
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metric` should not be None'):
@@ -282,7 +293,8 @@ class RewardsTest(absltest.TestCase):
             automl.Metric.eval('accuracy'),
             automl.Metric.train_steps_per_second()
         ],
-        aggregator=automl.MnasHard.HParams(cost_objective=150)).Instantiate()
+        aggregator=automl.MnasHard.HParams(cost_objective=150),
+        reward_for_nan=-1.0).Instantiate()
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(
         reward_fn(
@@ -290,6 +302,12 @@ class RewardsTest(absltest.TestCase):
                 'eval_test_abc/metrics/accuracy': 0.9,
                 'train_steps_per_sec': 140
             }, 0), 0.9)
+    self.assertEqual(
+        reward_fn(
+            {
+                'eval_test_abc/metrics/accuracy': math.nan,
+                'train_steps_per_sec': 140
+            }, 0), -1.0)
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metrics` must be provided.'):
