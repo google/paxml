@@ -330,6 +330,7 @@ py_strict_test(
         ":summary_utils",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.

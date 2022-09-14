@@ -20,6 +20,7 @@ import os
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax.numpy as jnp
 import numpy as np
 from paxml import summary_utils
@@ -52,14 +53,19 @@ class MatcherArrayAlmostEqual:
     return not self == other
 
 
-class SummaryUtilsTest(absltest.TestCase):
+class SummaryUtilsTest(parameterized.TestCase):
 
-  def test_process_no_accumulation(self):
+  @parameterized.named_parameters(
+      ('', False),
+      ('_async', True),
+  )
+  def test_process_no_accumulation(self, is_async):
     summary_writer = tf.summary.create_file_writer(
         os.path.join(absltest.get_default_test_tmpdir(), 'summary'))
     write_interval_steps = 2
     summary_handler = summary_utils.SummaryHandler(summary_writer,
-                                                   write_interval_steps)
+                                                   write_interval_steps,
+                                                   is_async=is_async)
 
     # We accumulate modulo N, so step 0 is special in a sense that there won't
     # be any accumulation.
@@ -101,6 +107,7 @@ class SummaryUtilsTest(absltest.TestCase):
             weighted_scalars=weighted_scalars_2,
             summary_tensors=summary_tensors_2,
             steps_per_sec=steps_per_sec_2)
+        summary_handler.close()
     # In this test all summaries use the latest values from step 2.
     expected_loss = jnp.mean(loss_2)
     mock_tf_summary_scalar.assert_any_call('loss',
@@ -136,14 +143,19 @@ class SummaryUtilsTest(absltest.TestCase):
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_b_image'])),
         2)
 
-  def test_process_with_accumulation(self):
+  @parameterized.named_parameters(
+      ('', False),
+      ('_async', True),
+  )
+  def test_process_with_accumulation(self, is_async):
     summary_writer = tf.summary.create_file_writer(
         os.path.join(absltest.get_default_test_tmpdir(), 'summary'))
     write_interval_steps = 2
     accumulate_interval_steps = 1
     summary_handler = summary_utils.SummaryHandler(summary_writer,
                                                    write_interval_steps,
-                                                   accumulate_interval_steps)
+                                                   accumulate_interval_steps,
+                                                   is_async)
 
     # We accumulate modulo N, so step 0 is special in a sense that there won't
     # be any accumulation.
@@ -185,6 +197,7 @@ class SummaryUtilsTest(absltest.TestCase):
             weighted_scalars=weighted_scalars_2,
             summary_tensors=summary_tensors_2,
             steps_per_sec=steps_per_sec_2)
+        summary_handler.close()
     # In this test all summaries use accumulated values over steps 1 and 2.
     expected_loss = np.mean([np.array(l) for l in [loss_1, loss_2]])
     mock_tf_summary_scalar.assert_any_call('loss',
@@ -199,7 +212,8 @@ class SummaryUtilsTest(absltest.TestCase):
         weighted_scalars_2['output_0'][0] *
         weighted_scalars_2['output_0'][1]) / expected_metrics_output_0_weight
     mock_tf_summary_scalar.assert_any_call(
-        'Metrics/output_0', MatcherAlmostEqual(expected_metrics_output_0), 2)
+        'Metrics/output_0', MatcherAlmostEqual(expected_metrics_output_0, 1e-6),
+        2)
     mock_tf_summary_scalar.assert_any_call(
         'Metrics/output_0-weight',
         MatcherAlmostEqual(expected_metrics_output_0_weight), 2)
@@ -210,7 +224,8 @@ class SummaryUtilsTest(absltest.TestCase):
         weighted_scalars_2['output_1'][0] *
         weighted_scalars_2['output_1'][1]) / expected_metrics_output_1_weight
     mock_tf_summary_scalar.assert_any_call(
-        'Metrics/output_1', MatcherAlmostEqual(expected_metrics_output_1), 2)
+        'Metrics/output_1', MatcherAlmostEqual(expected_metrics_output_1, 1e-6),
+        2)
     mock_tf_summary_scalar.assert_any_call(
         'Metrics/output_1-weight',
         MatcherAlmostEqual(expected_metrics_output_1_weight), 2)

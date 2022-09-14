@@ -238,6 +238,7 @@ class SingleTask(base_task.BaseTask):
       save_max_to_keep: The maximum number of recent checkpoints to keep.
       summary_interval_steps: How frequently to generate summaries in terms of
         the number of training steps.
+      async_summary_writing: Whether to write train summaries asynchronously.
       log_train_output_interval_steps:  How frequently to log training output to
         the INFO stream. If set to None, use the same value as for
         `summary_interval_steps`.
@@ -272,6 +273,7 @@ class SingleTask(base_task.BaseTask):
     save_keep_interval_duration: str = '12h'
     save_max_to_keep: int = 10
     summary_interval_steps: int = 100
+    async_summary_writing: bool = False
     log_train_output_interval_steps: Optional[int] = None
     summary_accumulate_interval_steps: Optional[int] = None
     variable_norm_summary: bool = True

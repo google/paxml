@@ -889,7 +889,8 @@ def train_and_evaluate_pmap(
     train_summary_handler = summary_utils.SummaryHandler(
         train_summary_writer,
         train_p.summary_interval_steps,
-        accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+        accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
+        is_async=train_p.async_summary_writing)
     eval_summary_handler = summary_utils.SummaryHandler(
         eval_summary_writer,
         train_p.summary_interval_steps,
@@ -1365,8 +1366,10 @@ def train_and_evaluate_spmd_model(
                                             train_unpadded_global_batch_size)
 
       train_summary_handler = summary_utils.SummaryHandler(
-          train_summary_writer, train_p.summary_interval_steps,
-          accumulate_interval_steps=train_p.summary_accumulate_interval_steps)
+          train_summary_writer,
+          train_p.summary_interval_steps,
+          accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
+          is_async=train_p.async_summary_writing)
       eval_summary_handler = summary_utils.SummaryHandler(
           eval_summary_writer, train_p.summary_interval_steps,
           accumulate_interval_steps=train_p.summary_accumulate_interval_steps)

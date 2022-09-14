@@ -17,6 +17,7 @@
 
 import collections
 import collections.abc
+import concurrent
 import contextlib
 import operator
 import textwrap
@@ -413,7 +414,8 @@ class SummaryHandler:
   def __init__(self,
                summary_writer: SummaryWriter,
                write_interval_steps: int,
-               accumulate_interval_steps: Optional[int] = None) -> None:
+               accumulate_interval_steps: Optional[int] = None,
+               is_async: bool = False) -> None:
     """Constructor.
 
     Args:
@@ -423,15 +425,32 @@ class SummaryHandler:
       accumulate_interval_steps: The frequency at which to accumulate summaries
         across steps. If unset, do not accumulate and only use the values at a
         specific set.
+      is_async: Whether to process summaries asynchronously.
     """
     self._summary_writer = summary_writer
     self._write_interval_steps = write_interval_steps
     self._accumulate_interval_steps = accumulate_interval_steps
+    # When is_async is true, only update the following fields in the
+    # SummaryHandler thread to make sure that they are thread safe.
     self._latest_step = -1
     self._losses = []
     self._weighted_scalars_list = collections.defaultdict(list)
     self._summary_tensors = collections.defaultdict(list)
     self._steps_per_sec = []
+
+    if is_async:
+      self._summary_pool = concurrent.futures.ThreadPoolExecutor(
+          max_workers=1, thread_name_prefix='SummaryHandler')
+    else:
+      self._summary_pool = None
+
+  def __del__(self):
+    self.close()
+
+  def close(self):
+    """Shutdown the thread pool if processing summaries asynchronously."""
+    if self._summary_pool:
+      self._summary_pool.shutdown(wait=True)
 
   @property
   def accumulate_over_steps(self) -> bool:
@@ -467,11 +486,37 @@ class SummaryHandler:
     Returns:
       True if the summaries were written, False otherwise.
     """
+    if self._summary_pool:
+
+      def process_fn():
+        # Copy the values from device to host first.
+        loss_copy = jax.device_get(loss)
+        weighted_scalars_copy = jax.tree_util.tree_map(jax.device_get,
+                                                       weighted_scalars)
+        summary_tensors_copy = jax.tree_util.tree_map(jax.device_get,
+                                                      summary_tensors)
+        self._process(step, loss_copy, weighted_scalars_copy,
+                      summary_tensors_copy, steps_per_sec)
+
+      self._summary_pool.submit(process_fn)
+    else:
+      self._process(step, loss, weighted_scalars, summary_tensors,
+                    steps_per_sec)
+
+    return self.should_write(step)
+
+  def _process(self,
+               step: int,
+               loss: JTensor,
+               weighted_scalars: WeightedScalars,
+               summary_tensors: NestedJTensor,
+               steps_per_sec: Optional[float] = None) -> bool:
+    """Adds summaries for a given step."""
     if self.should_accumulate(step):
       self._add(step, loss, weighted_scalars, summary_tensors, steps_per_sec)
 
     if not self.should_write(step):
-      return False
+      return
 
     # No accumulation. Add at least the latest value.
     if not self.accumulate_over_steps:
@@ -479,7 +524,6 @@ class SummaryHandler:
 
     self._write()
     self._clear()
-    return True
 
   def _add(self,
            step: int,
