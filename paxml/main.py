@@ -251,7 +251,8 @@ def run_experiment(
         job_log_dir=job_log_dir,
         maybe_use_persistence_checkpointing=FLAGS
         .maybe_use_persistence_checkpointing,
-        early_stopping_fn=early_stopping_fn)
+        early_stopping_fn=early_stopping_fn,
+        use_orbax=FLAGS.use_orbax)
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -264,7 +265,8 @@ def run_experiment(
         restore_checkpoint_step=None,
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
-        early_stopping_fn=early_stopping_fn)
+        early_stopping_fn=early_stopping_fn,
+        use_orbax=FLAGS.use_orbax)
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -277,11 +279,14 @@ def run_experiment(
         restore_checkpoint_step=FLAGS.restore_checkpoint_step,
         continuous_decode=False,
         run_eval=FLAGS.eval_during_decode,
-        early_stopping_fn=early_stopping_fn)
+        early_stopping_fn=early_stopping_fn,
+        use_orbax=FLAGS.use_orbax)
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
-        experiment_config=experiment_config, job_log_dir=job_log_dir)
+        experiment_config=experiment_config,
+        job_log_dir=job_log_dir,
+        use_orbax=FLAGS.use_orbax)
 
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a

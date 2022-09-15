@@ -68,6 +68,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         directory=self.directory,
         checkpointers=orbax.checkpoint.Checkpointer(
             orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
+        checkpoint_type=CheckpointType.CHECKPOINT_GDA,
         options=options)
 
   @parameterized.parameters((None,), (2,))
@@ -103,6 +104,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           directory=self.directory,
           checkpointers=orbax.checkpoint.Checkpointer(
               orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
+          checkpoint_type=CheckpointType.CHECKPOINT_GDA,
           options=options)
 
     steps = list(range(0, 10000, 1000))
@@ -153,6 +155,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           directory=self.directory,
           checkpointers=orbax.checkpoint.Checkpointer(
               orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False)),
+          checkpoint_type=CheckpointType.CHECKPOINT_GDA,
           options=options)
 
     saved_steps_2_init = [2000, 4000, 6000, 8000]

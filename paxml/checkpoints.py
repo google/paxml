@@ -591,6 +591,7 @@ class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
            step: Optional[int] = None):
     if not isinstance(directory, str):
       directory = os.fspath(directory)
+
     if step is None:
       raise ValueError('Required argument `step` for `FlaxCheckpointer.save`')
     _save_checkpoint_flax(item, directory, force, step)
@@ -605,10 +606,7 @@ class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
     if item is None:
       raise ValueError(
           'Required argument `item` for `FlaxCheckpointer.restore`')
-    if step is None:
-      raise ValueError(
-          'Required argument `step` for `FlaxCheckpointer.restore`')
-    return _restore_checkpoint_flax(item, directory, step)
+    return _restore_checkpoint_flax(item, directory, step=step)
 
   def structure(self, directory: Union[str, epath.Path]) -> Optional[Any]:
     return NotImplementedError

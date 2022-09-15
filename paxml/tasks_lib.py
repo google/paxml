@@ -75,7 +75,8 @@ LOAD_ALL = ('(.*)', '{}')
 def restore_pmap_from_tensorstore(global_shapes,
                                   checkpoint_dir,
                                   step=None,
-                                  global_mesh=None):
+                                  global_mesh=None,
+                                  use_orbax=False):
   """Restores pmap checkpoints from tensorstore.
 
   The model_states returned are of type `DeviceArray`. They are later converted
@@ -90,6 +91,7 @@ def restore_pmap_from_tensorstore(global_shapes,
        the checkpoint is restored as part of an init_checkpoint_rules() call for
        a pjit model) and return a GDA. If unset, use a dummy mesh and return
        a regular `DeviceArray` to be used with pmap.
+    use_orbax: Enables checkpointing backed by Orbax.
 
   Returns:
     Restored model states of type `DeviceArray` or `GlobalDeviceArray`.
@@ -106,7 +108,8 @@ def restore_pmap_from_tensorstore(global_shapes,
       global_mesh=restore_global_mesh,
       checkpoint_type=CheckpointType.CHECKPOINT_GDA,
       state_specs=fully_replicated_state_specs,
-      step=step)
+      step=step,
+      use_orbax=use_orbax)
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   # model_states is GDA; we convert back to DA for pmap.

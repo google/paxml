@@ -325,13 +325,12 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._checkpoint_type = checkpoint_type
 
   def restore_from_tensorstore(self, train_state_global_shapes):
-    # TODO(cpgaffney): Use Orbax APIs.
     _make_checkpoint_dir(self.job_log_dir)
     checkpoints.delete_temp_directories(self.checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
-    return tasks_lib.restore_pmap_from_tensorstore(train_state_global_shapes,
-                                                   self.checkpoint_dir)
+    return tasks_lib.restore_pmap_from_tensorstore(
+        train_state_global_shapes, self.checkpoint_dir, use_orbax=True)
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
     if py_utils.pmap_use_tensorstore():
@@ -410,8 +409,11 @@ def _create_checkpoint_manager(
       else:
         raise ValueError(
             f'Unsupported Orbax checkpoint type: {checkpoint_type}')
-    return checkpoint_managers.OrbaxCheckpointManager(checkpoint_dir,
-                                                      checkpointer, options)
+    return checkpoint_managers.OrbaxCheckpointManager(
+        checkpoint_dir,
+        checkpointer,
+        options=options,
+        checkpoint_type=checkpoint_type)
   else:
     return checkpoint_managers.CheckpointManager(
         config_name='',

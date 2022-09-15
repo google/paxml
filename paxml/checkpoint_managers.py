@@ -428,6 +428,16 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
   All public APIs may be called by all processes.
   """
 
+  def __init__(
+      self,
+      *args,
+      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+      **kwargs):
+    if checkpoint_type == CheckpointType.CHECKPOINT_UNSPECIFIED:
+      raise ValueError('Must specify checkpoint type.')
+    self._checkpoint_type = checkpoint_type
+    super().__init__(*args, **kwargs)
+
   def _create_checkpoints(
       self) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
     """Create a list of CheckpointInfo for existing checkpoints.
@@ -478,8 +488,11 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
                           key_name: Optional[str] = None) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
     if key_name is None or key_name == DEFAULT_ITEM_NAME:
-      return epath.Path(
-          checkpoints._make_checkpoint_step_dir(os.fspath(directory), step))  # pylint: disable=protected-access
+      if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+        return directory
+      else:
+        return epath.Path(
+            checkpoints._make_checkpoint_step_dir(os.fspath(directory), step))  # pylint: disable=protected-access
     else:
       raise ValueError(
           f'Unrecognized item {key_name} is not currently supported.')
