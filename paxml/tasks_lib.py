@@ -28,6 +28,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 from absl import logging
 import jax
 from jax import numpy as jnp
+from jax.experimental import global_device_array
 from jax.experimental import maps
 from jax.experimental import pjit
 import numpy as np
@@ -726,6 +727,7 @@ class SingleTask(base_task.BaseTask):
     ]
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
+    already_matched = set()
     for varname, unused_val in model_vars.FlattenItems():
       varname_orig = varname
       varname = varname.replace('.', '/')  # dot is reserved for regex
@@ -755,7 +757,16 @@ class SingleTask(base_task.BaseTask):
         logging.info(
             'Initialization by external checkpoint: '
             '%s is overwritten by %s in %s', varname, refname, ckpt_path)
-        model_vars.Set(varname_orig, loaded_vars[refname])
+        loaded_var = loaded_vars[refname]
+        if refname in already_matched:
+          if isinstance(loaded_vars[refname],
+                        global_device_array.GlobalDeviceArray):
+            loaded_var = py_utils.copy_gda(loaded_var)
+          else:
+            loaded_var = jnp.copy(loaded_var)
+        else:
+          already_matched.add(refname)
+        model_vars.Set(varname_orig, loaded_var)
     train_state = train_state.replace(mdl_vars=model_vars)
 
     if rules.load_step:
