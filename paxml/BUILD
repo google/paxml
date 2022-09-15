@@ -306,6 +306,14 @@ py_strict_test(
 )
 
 pytype_strict_library(
+    name = "profiling",
+    srcs = ["profiling.py"],
+    deps = [
+        # Implicit absl.logging dependency.
+    ],
+)
+
+pytype_strict_library(
     name = "summary_utils",
     srcs = ["summary_utils.py"],
     srcs_version = "PY3",
@@ -393,6 +401,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         "//paxml:checkpoints",
+        "//paxml:profiling",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",

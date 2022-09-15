@@ -48,6 +48,7 @@ from praxis import train_states
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
+from paxml import profiling  # mapped to internal
 
 CheckpointType = checkpoint_pb2.CheckpointType
 instantiate = base_hyperparams.instantiate
@@ -906,6 +907,10 @@ def train_and_evaluate_pmap(
             partitioned_train_state.step))
     initial_step = step_i
 
+    profiler = profiling.Profiler(
+        num_steps=train_p.profiler_num_steps,
+        min_duration_sec=train_p.profiler_min_duration_sec)
+
     # Start the train loop. Make sure all at the same step.
     py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
     while True:
@@ -931,6 +936,10 @@ def train_and_evaluate_pmap(
       model_inputs = prepare_model_inputs(model_inputs, step_i - initial_step)
       logging.debug('  Retrieved inputs.')
 
+      do_profile = train_p.profiler_capture_step is not None
+      if do_profile and step_i - initial_step == train_p.profiler_capture_step:
+        profiler.capture_async()
+
       logging.debug('  Performing train_step().')
       with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
         with py_utils.timeit() as train_period:
@@ -939,6 +948,9 @@ def train_and_evaluate_pmap(
                                            train_prng_seed, model_inputs)
       logging.debug('  Completed train_step() in %f seconds.',
                     train_period.elapsed)
+
+      if do_profile and step_i - initial_step < train_p.profiler_capture_step:
+        profiler.update_step_moving_mean(train_period.elapsed)
 
       logging.debug('  Writing summaries (attempt).')
       step_i += 1
@@ -1379,6 +1391,10 @@ def train_and_evaluate_spmd_model(
       summary_last_time = time.time()
       summary_last_step = None
 
+      profiler = profiling.Profiler(
+          num_steps=train_p.profiler_num_steps,
+          min_duration_sec=train_p.profiler_min_duration_sec)
+
       step_i = int(
           py_utils.maybe_unreplicate_for_fully_replicated(
               partitioned_train_state.step))
@@ -1409,6 +1425,11 @@ def train_and_evaluate_spmd_model(
         model_inputs = prepare_model_inputs(model_inputs, step_i - initial_step)
         logging.debug('  Retrieved inputs.')
 
+        do_profile = train_p.profiler_capture_step is not None
+        if (do_profile and
+            step_i - initial_step == train_p.profiler_capture_step):
+          profiler.capture_async()
+
         logging.debug('  Performing train_step().')
         with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
           with py_utils.timeit() as train_period:
@@ -1417,6 +1438,9 @@ def train_and_evaluate_spmd_model(
                                              train_prng_seed, model_inputs)
         logging.debug('  Completed train_step() in %f seconds.',
                       train_period.elapsed)
+
+        if do_profile and step_i - initial_step < train_p.profiler_capture_step:
+          profiler.update_step_moving_mean(train_period.elapsed)
 
         logging.debug('  Writing summaries (attempt).')
         should_accumulate = train_summary_handler.should_accumulate(step_i)
