@@ -639,7 +639,9 @@ class SeqIOInput(base_input.BaseInput):
       targets_ds = self._enumerate(targets_ds, shard_info)
 
       for e in targets_ds.as_numpy_iterator():
-        key = py_utils.get_enumeration_id(e)
+        # remove enum related fields from example as seqio metric_fns API
+        # expects the output from the task dataset directly.
+        key = py_utils.get_enumeration_id(e, pop=True)
         assert key is not None and key not in targets
         targets[key] = e
 
