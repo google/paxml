@@ -756,17 +756,17 @@ def train_and_evaluate_pmap(
 
   # Get shape and dtype of model_inputs.
   sample_inputs = train_input_pipeline.peek_padded()
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(
+  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
       init_key, sample_inputs)
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(jax_task.model,
-                                                   vars_weight_params,
+                                                   var_weight_hparams,
                                                    job_log_dir)
 
   train_state_global_shapes = jax_task.create_train_state_unpadded_shapes(
-      vars_weight_params)
+      var_weight_hparams)
   train_state_pspecs = None  # For consistency with the spmd path.
 
   # TODO(zhangqiaorjc): Memory optimization by restoring to local_devices()[0]
@@ -1213,16 +1213,16 @@ def train_and_evaluate_spmd_model(
 
   with global_mesh:
     jax_task = instantiate(task_p)
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
         init_key, inputs_shape_dtype)
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(jax_task.model,
-                                                   vars_weight_params,
+                                                   var_weight_hparams,
                                                    job_log_dir)
     train_state_global_shapes = jax_task.create_train_state_padded_shapes(
-        vars_weight_params)
+        var_weight_hparams)
     train_state_pspecs = jax_task.create_train_state_partition_specs(
-        vars_weight_params)
+        var_weight_hparams)
 
     # We do not fold in jax.process_index in contrast to the pmap version and
     # use a single global key instead to rely on pjit to split for different
@@ -1254,7 +1254,7 @@ def train_and_evaluate_spmd_model(
       # uneven-sharding padding. When enable_auto_sharding is False,
       # train_state_pspecs correspond to padded train_states.
       abstract_train_state = jax_task.create_train_state_unpadded_shapes(
-          vars_weight_params,
+          var_weight_hparams,
           # TODO(pax-dev): set discard_opt_states according to is_eval.
           discard_opt_states=False)
       p_train_step, input_shardings = compile_for_auto_sharding(

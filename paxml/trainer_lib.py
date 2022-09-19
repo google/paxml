@@ -111,7 +111,7 @@ class RunningMode(enum.Flag):
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 
-def write_post_init_model_hparams_file(model, vars_weight_params,
+def write_post_init_model_hparams_file(model, var_weight_hparams,
                                        job_log_dir: str) -> None:
   """Writes a post-init params file into the root `job_log_dir`.
 
@@ -122,7 +122,7 @@ def write_post_init_model_hparams_file(model, vars_weight_params,
 
   Args:
     model: A BaseModel
-    vars_weight_params: A pytree of WeightHParams
+    var_weight_hparams: A pytree of WeightHParams
     job_log_dir: The root dir for the training job.
   """
   if jax.process_index() == 0:
@@ -151,9 +151,9 @@ def write_post_init_model_hparams_file(model, vars_weight_params,
       params_file.write(hyper_params_dump)
       params_file.write('\n\n')
 
-      if vars_weight_params:
+      if var_weight_hparams:
         params_inits_text = base_hyperparams.nested_struct_to_text(
-            vars_weight_params)
+            var_weight_hparams)
         params_file.write(params_inits_text)
 
 
@@ -261,10 +261,10 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   model = jax_task.model
   prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
   init_key = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-  vars_weight_params = model.abstract_init_with_metadata(
+  var_weight_hparams = model.abstract_init_with_metadata(
       init_key, sample_inputs, do_eval=is_eval)
   logging.info('init_var prng_seed: %s', init_key)
-  logging.info('vars_weight_params: %s', vars_weight_params)
+  logging.info('var_weight_hparams: %s', var_weight_hparams)
 
   # Use jax.jit to reduce model.init memory usage. Required by a few tests after
   # migrating to shape inference.
@@ -281,7 +281,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   # variable collection.
   if 'params_axes' in initial_vars:
     del initial_vars['params_axes']
-  train_state = jax_task.create_train_state(initial_vars, vars_weight_params,
+  train_state = jax_task.create_train_state(initial_vars, var_weight_hparams,
                                             discard_opt_states)
   # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
@@ -296,7 +296,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
     if update_opt_states:
       # Re-compute opt_states after the model variables are updated.
       opt_states = jax_task.create_opt_states(train_state.mdl_vars,
-                                              vars_weight_params)
+                                              var_weight_hparams)
       train_state = train_state.replace(opt_states=opt_states)
   return train_state
 
@@ -915,18 +915,18 @@ def initialize_partitioned_model_states(
     The partitioned specs and the partitioned vars themselves.
   """
   model = jax_task.model
-  vars_weight_params = model.abstract_init_with_metadata(
+  var_weight_hparams = model.abstract_init_with_metadata(
       prng_key, sample_inputs)
 
   if state_specs is None:
     train_state_partition_specs = jax_task.create_train_state_partition_specs(
-        vars_weight_params, discard_opt_states)
+        var_weight_hparams, discard_opt_states)
   else:
     train_state_partition_specs = state_specs
 
   train_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
-      jax_task.create_train_state_unpadded_shapes(vars_weight_params,
+      jax_task.create_train_state_unpadded_shapes(var_weight_hparams,
                                                   discard_opt_states))
   assert train_state_partition_specs is not None
 
@@ -1097,12 +1097,12 @@ def get_partitioned_spmd_model_step_fn(
   inputs_partition_spec = get_input_partition_specs(mesh_names,
                                                     inputs_shape_dtype)
 
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(
+  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
       init_key, inputs_shape_dtype)
   state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
       jax_task.create_train_state_unpadded_shapes(
-          vars_weight_params, discard_opt_states=is_eval))
+          var_weight_hparams, discard_opt_states=is_eval))
 
   # TODO(bf-jax): prng_key is replicated. Would this be a problem?
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
@@ -1341,12 +1341,12 @@ def get_partitioned_spmd_model_decode_fn(
                                               model_p.mesh_shape,
                                               model_p.mesh_axis_names)
 
-  vars_weight_params = jax_task.model.abstract_init_with_metadata(
+  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
       init_key, inputs_shape_dtype)
   model_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
       jax_task.create_train_state_unpadded_shapes(
-          vars_weight_params, discard_opt_states=True))
+          var_weight_hparams, discard_opt_states=True))
 
   def _decode_step(states, prng_key, inputs):
     inputs = jax.tree_map(reshard_inputs_fn, inputs)

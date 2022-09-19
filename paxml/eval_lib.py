@@ -366,13 +366,13 @@ class _PmapEvalRunner:
     prng_key, init_key = jax.random.split(prng_key)
 
     # Restore flax checkpoints still required bak variables in TrainState
-    vars_weight_params = jax_task.model.abstract_init_with_metadata(
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
         init_key, sample_inputs, do_eval=True)
     # Note: `discard_opt_states` is not supported when restoring pmap
     # checkpoints. We must restore the entire checkpoint and then trim the
     # unrelevant states.
     global_shapes = jax_task.create_train_state_unpadded_shapes(
-        vars_weight_params)
+        var_weight_hparams)
     # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
     if py_utils.pmap_use_tensorstore():
       model_states = tasks_lib.restore_pmap_from_tensorstore(
@@ -651,13 +651,13 @@ class _SpmdEvalRunner:
              train_states.TrainState, Any, NestedPartitionSpec, NestedJTensor]:
     """Gets a partitioned model states and the step function."""
     with global_mesh:
-      vars_weight_params = jax_task.model.abstract_init_with_metadata(
+      var_weight_hparams = jax_task.model.abstract_init_with_metadata(
           init_key, sample_inputs, do_eval=True)
       train_state_global_shapes = (
           jax_task.create_train_state_padded_shapes(
-              vars_weight_params, discard_opt_states=not use_ema))
+              var_weight_hparams, discard_opt_states=not use_ema))
       partitioned_specs = jax_task.create_train_state_partition_specs(
-          vars_weight_params, discard_opt_states=not use_ema)
+          var_weight_hparams, discard_opt_states=not use_ema)
       partitioned_train_state = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           checkpoint_dir,

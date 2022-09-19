@@ -667,12 +667,12 @@ class SingleTask(base_task.BaseTask):
     input_specs_provider = instantiate(input_specs_provider_p)
     inputs_shape_dtype = input_specs_provider.get_input_specs()
     # Initialize with a dummy seed
-    vars_weight_params = ckpt_task.model.abstract_init_with_metadata(
+    var_weight_hparams = ckpt_task.model.abstract_init_with_metadata(
         jax.random.PRNGKey(0), inputs_shape_dtype)
     ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
-        vars_weight_params)
+        var_weight_hparams)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
-        vars_weight_params)
+        var_weight_hparams)
 
     load_ema_state = (
         hasattr(rules.task_p, 'train') and
