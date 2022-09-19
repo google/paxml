@@ -739,8 +739,7 @@ def _eval_step_single_learner_with_model(
     summary_tensors - A nested map or dict of summary tensors computed in
       forward as well as backward pass.
   """
-  context_p = base_layer.JaxContext.HParams(
-      do_eval=True, summary_verbosity=base_layer.SummaryVerbosity.INFO)
+  context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)
@@ -831,8 +830,7 @@ def decode_step(
     A tuple of (weighted_scalars, results, eval_metrics) as computed
       by model.decode() and the updated weights.
   """
-  context_p = base_layer.JaxContext.HParams(
-      do_eval=True, summary_verbosity=base_layer.SummaryVerbosity.INFO)
+  context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)
