@@ -221,6 +221,10 @@ def run_eval_loop_over_test_splits(
       (eval_loss, eval_metrics, per_example_output,
        eval_summary_tensors) = run_eval_one_step(
            eval_inputs, eval_step, reshard_inputs=reshard_inputs)
+
+      logging.info('Finished eval step on input batch %d for %s',
+                   step_num, model_inputs[split].hparams.name)
+
       eval_loss = py_utils.maybe_unreplicate_for_fully_replicated(eval_loss)
       eval_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
           eval_metrics)
@@ -239,6 +243,8 @@ def run_eval_loop_over_test_splits(
           summary_tensors[k] = [v]
       for k in eval_metrics:
         metrics[k].append(eval_metrics[k])
+
+    logging.info('Finished eval on input %s', model_inputs[split].hparams.name)
 
     eval_scoring_metrics = None
     if seqio_input.should_process_outputs(model_inputs[split]):
@@ -1369,7 +1375,8 @@ def decode_once_pmap_model(
       # we store the metric directly as it has already been aggregated in
       # side decode_step_fun
       decode_metrics.store(batch_metrics)
-      logging.info('Finished decoding input batch %d', step_num)
+      logging.info('Finished decoding input batch %d for %s',
+                   step_num, input_p[split].name)
 
       # Merge clu.metrics to update for each minibatch.
       metrics = _merge_clu_metrics(metrics, updated_metrics)
@@ -1391,8 +1398,11 @@ def decode_once_pmap_model(
                                                  processed_metric_updates)
 
         logging.info('Finished processing decoded input batch %d', step_num)
-      work_unit.set_task_status(f'Finished decoding input batch {step_num} '
-                                f'on {input_p[split].name}')
+
+      work_unit.set_task_status(
+          f'Finished decoding on {input_p[split].name} (batches={step_num})')
+      logging.info('Finished decoding on %s (batches=%s)',
+                   input_p[split].name, step_num)
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
@@ -1807,7 +1817,8 @@ def decode_once_spmd_model(
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
 
-      logging.info('Finished decoding input batch %d', step_num)
+      logging.info('Finished decoding input batch %d for %s',
+                   step_num, input_p[split].name)
       if jax.process_index() != 0:
         continue
       weighted_scalars = jax.tree_map(np.array, weighted_scalars)
@@ -1831,6 +1842,9 @@ def decode_once_spmd_model(
                                                processed_metric_updates)
 
       logging.info('Finished processing decoded input batch %d', step_num)
+
+    logging.info('Finished decoding on %s (batches=%s)',
+                 input_p[split].name, step_num)
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
