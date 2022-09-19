@@ -326,14 +326,27 @@ class SeqIOInput(base_input.BaseInput):
     else:
       logging.info(message)
 
+  def _validate_eval_task(self):
+    assert isinstance(self.mixture_or_task, seqio.Task)
+    p = self.hparams
+
+    # weights_on_targets_only must be true if computing scoring metric fns and
+    # using LanguageModelFeatures as feature converter.
+    if (self.mixture_or_task.score_metric_fns
+        and isinstance(p.feature_converter, LanguageModelFeatures)
+        and not p.feature_converter.weights_on_targets_only):
+      raise ValueError(
+          'All language modeling scoring evals must set '
+          'LanguageModelFeatures.weights_on_targets_only=True')
+
   def _validate_hparams(self):
     p = self.hparams
     if not p.mixture_name and not p.mixture_or_task:
       raise ValueError("One of 'mixture_name' and 'task' must be set.")
     if p.mixture_name and p.mixture_or_task:
       raise ValueError(
-          "Only one of 'mixture_name' and 'mixture_or_task' can be set. Got %s and %s."
-          % (p.mixture_name, p.mixture_or_task))
+          "Only one of 'mixture_name' and 'mixture_or_task' can be set."
+          " Got %s and %s." % (p.mixture_name, p.mixture_or_task))
     if p.is_training and p.split_name != 'train':
       logging.warn(
           'SeqIO input hparams p.is_training=True but p.split_name is '
@@ -350,6 +363,9 @@ class SeqIOInput(base_input.BaseInput):
                  shard_info.num_shards)
     self._shard_info = shard_info
     self._validate_deterministic()
+
+    if not p.is_training and isinstance(self.mixture_or_task, seqio.Task):
+      self._validate_eval_task()
 
   @property
   def is_deterministic(self) -> bool:
@@ -1050,6 +1066,10 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
         use_custom_packing_ops=use_custom_packing_ops,
         apply_length_check=apply_length_check)
 
+  @property
+  def weights_on_targets_only(self) -> bool:
+    return self._weights_on_targets_only
+
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax LanguageModel."""
     b = py_utils.NestedMap.FromNestedDict(b)
@@ -1074,12 +1094,12 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
       pos = tf.range(ret.segment_ids.shape[0])
       ret.segment_pos = ret.segment_ids * pos
 
-    if self._weights_on_targets_only is None or self._weights_on_targets_only:
+    if self.weights_on_targets_only is None or self.weights_on_targets_only:
       # Process negative ids, which some datasets use to denote input positions
       # that ought to be ignored.
       non_negative_positions = tf.cast(ret.labels >= 0, dtype=tf.float32)
       ret.weights *= non_negative_positions
-    if self._weights_on_targets_only:
+    if self.weights_on_targets_only:
       non_negative_positions = tf.cast(
           b.decoder_loss_weights > 0, dtype=tf.float32)
       ret.weights *= non_negative_positions
