@@ -589,6 +589,8 @@ class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
            item: Any,
            force: bool = False,
            step: Optional[int] = None):
+    if not py_utils.pmap_use_tensorstore() and jax.process_index() != 0:
+      return
     if not isinstance(directory, str):
       directory = os.fspath(directory)
 

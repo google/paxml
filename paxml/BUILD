@@ -522,6 +522,7 @@ py_strict_test(
     deps = [
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
+        ":checkpoints",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.

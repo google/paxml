@@ -363,11 +363,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       py_utils.sync_global_devices(
           f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
     else:
-      if jax.process_index() == 0:
-        # We just need to save the first model replica.
-        unreplicated_train_state = jax.tree_map(lambda x: x[0],
-                                                partitioned_train_state)
-        self._save_with_args(step_i, unreplicated_train_state)
+      unreplicated_train_state = jax.tree_map(lambda x: x[0],
+                                              partitioned_train_state)
+      self._save_with_args(step_i, unreplicated_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     self.save(step_i, partitioned_train_state)
@@ -376,6 +374,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     if self.checkpoint_manager.latest_step() < step_i:
       self.save(step_i, partitioned_train_state, is_final=True)
+
 
 def _create_checkpoint_manager(
     task_p: tasks_lib.SingleTask.HParams,
@@ -398,15 +397,13 @@ def _create_checkpoint_manager(
         keep_time_interval=keep_interval_timedelta,
         todelete_subdir=todelete_subdir)
     checkpointer = async_checkpointer
+    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      checkpointer = checkpoints.FlaxCheckpointer()
     if checkpointer is None:
-      if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-        checkpointer = checkpoints.FlaxCheckpointer()
-      elif checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+      if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
         checkpointer = Checkpointer(PaxCheckpointHandler(enable_flax=False))
       elif checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
-        raise ValueError(
-            'Persistence checkpointing requires checkpoint to already be initialized.'
-        )
+        raise ValueError('Checkpointer must already be initialized.')
       else:
         raise ValueError(
             f'Unsupported Orbax checkpoint type: {checkpoint_type}')

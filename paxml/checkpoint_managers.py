@@ -20,7 +20,7 @@ import datetime
 import itertools
 import os
 import typing
-from typing import Optional, List
+from typing import Any, Optional, List, Union, Mapping
 
 from absl import logging
 from etils import epath
@@ -438,6 +438,12 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     self._checkpoint_type = checkpoint_type
     super().__init__(*args, **kwargs)
 
+  def _checkpoint_name(self, step: Union[int, str]) -> str:
+    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      return f'{CHECKPOINT_PREFIX}{step}'
+    else:
+      return checkpoints.checkpoint_name(step)
+
   def _create_checkpoints(
       self) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
     """Create a list of CheckpointInfo for existing checkpoints.
@@ -463,8 +469,8 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
 
     times = [
         datetime.datetime.fromtimestamp(
-            self._get_save_directory(
-                step, self.directory).stat().mtime) for step in steps
+            (self.directory / self._checkpoint_name(step)).stat().mtime)
+        for step in steps
     ]
 
     def get_metrics(step):
@@ -497,13 +503,29 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       raise ValueError(
           f'Unrecognized item {key_name} is not currently supported.')
 
+  def _cleanup_tmp_directories(self):
+    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      if jax.process_index() == 0:
+        tmp_files = self.directory.glob(self._checkpoint_name('tmp'))
+        for tmp_file in tmp_files:
+          if tmp_file.is_file():
+            tmp_file.unlink()
+          else:
+            msg = ('Unrecognized directory matching tmp file pattern. Skipping '
+                   'deletion.')
+            logging.warning(msg)
+      multihost_utils.sync_global_devices('cleanup_tmp_dirs')
+    else:
+      super()._cleanup_tmp_directories()
+
   def _delete_directory(self, step: int):
     if jax.process_index() != 0:
       return
     options = typing.cast(CheckpointManagerOptions, self._options)
     todelete_subdir = options.todelete_subdir
+    checkpoint_name = self._checkpoint_name(step)
+
     if todelete_subdir:
-      checkpoint_name = checkpoints.checkpoint_name(step)
       rename_dir = self.directory / todelete_subdir
       if not rename_dir.exists():
         rename_dir.mkdir(parents=True)
@@ -512,4 +534,15 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       # TODO(pax-team): Check if dst already exists?
       tf.io.gfile.rename(src, dst)
     else:
-      super()._delete_directory(step)
+      if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX and jax.process_index(
+      ) == 0:
+        delete_path = self.directory / checkpoint_name
+        assert delete_path.is_file()
+        delete_path.unlink()
+      else:
+        super()._delete_directory(step)
+
+  def structure(self) -> Union[Any, Mapping[str, Any]]:
+    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+      raise ValueError('`structure` not supported for Flax format checkpoints.')
+    return super().structure()
