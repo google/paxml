@@ -672,9 +672,6 @@ class SeqIOInput(base_input.BaseInput):
 
     targets = self._get_targets_with_enum_key()
 
-    logging.warning('targets=%s', targets.keys())
-    logging.warning('answers=%s', answers.keys())
-
     predictions_list = []
     targets_list = []
     # Construct (decode output, seqio target) lists by joining on enum IDs.
