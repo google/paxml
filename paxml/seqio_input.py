@@ -621,7 +621,7 @@ class SeqIOInput(base_input.BaseInput):
       target_processed = self.mixture_or_task.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
-          'Example %d:\nPROMPT=%s\nMODEL=%s FROM %s\nLABEL=%s FROM %s.', i, k,
+          'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
           answer_processed, answer, target_processed, target)
 
     # Optionally log all examples for inspection in text format
@@ -709,8 +709,8 @@ class SeqIOInput(base_input.BaseInput):
       target_processed = self.mixture_or_task.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
-          'Example %d:\nPROMPT=%s\nMODEL=%s FROM %s\nLABEL=%s FROM %s.', i, k,
-          answer_processed, answer, target_processed, target)
+          'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
+          i, ans['prefix'], answer_processed, answer, target_processed, target)
 
     # Optionally log all examples for inspection in text format
     if plain_text_output is not None:
