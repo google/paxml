@@ -37,19 +37,21 @@ class TuningExperiment(base_experiment.BaseExperiment):
   def task(self):
     return {
         'learning_rate': self.LEARNING_RATE,
-        'batch_size': pg.oneof([16, 32, 64], 'batch_size')
+        'batch_size': pg.oneof([16, 32, 64], name='batch_size')
     }
 
   def datasets(self):
     return [{
         'dataset_param1': self.DATASET_PARAM1,
-        'dataset_param2': pg.oneof(range(3), 'dataset_param2')
+        'dataset_param2': pg.oneof(range(3), name='dataset_param2')
     }]
 
   def decoder_datasets(self):
     return [{
-        'decoder_dataset_param1': self.DECODER_DATASET_PARAM1,
-        'decoder_dataset_param2': pg.oneof(range(3), 'decoder_dataset_param2')
+        'decoder_dataset_param1':
+            self.DECODER_DATASET_PARAM1,
+        'decoder_dataset_param2':
+            pg.oneof(range(3), name='decoder_dataset_param2')
     }]
 
   def search(self):
