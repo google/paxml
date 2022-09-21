@@ -573,8 +573,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     return restored_train_state
 
   def structure(self, directory: epath.Path) -> PyTreeDef:
-    return flax.serialization.to_state_dict(
-        jax.tree_map(epath.Path, self._param_names))
+    return flax.serialization.to_state_dict(self._param_names)
 
 
 class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
