@@ -28,6 +28,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union
 from absl import logging
 import jax
 from jax.experimental import maps
+from jax.experimental import pjit
 from jax.experimental.gda_serialization import serialization as gda_serialization
 import jax.numpy as jnp
 from paxml import base_experiment
@@ -1221,6 +1222,18 @@ def train_and_evaluate_spmd_model(
     train_state_pspecs = jax_task.create_train_state_partition_specs(
         var_weight_hparams)
 
+    # The prng keys are already created on device with jax.random.split. We
+    # broadcast it with an identity pjit function to avoid doing it in the loop
+    # where a multi-slice program could be generated.
+    def _broadcast_key(k):
+
+      def _identity(x):
+        return x
+
+      return pjit.pjit(
+          _identity, in_axis_resources=None, out_axis_resources=None)(
+              k)
+
     # We do not fold in jax.process_index in contrast to the pmap version and
     # use a single global key instead to rely on pjit to split for different
     # replicas.
@@ -1228,9 +1241,12 @@ def train_and_evaluate_spmd_model(
     prng_key, train_prng_seed, eval_prng_seed = jax.random.split(prng_key, 3)
     logging.info('train prng_key: %s', train_prng_seed)
     logging.info('eval prng_key: %s', eval_prng_seed)
+    train_prng_seed = _broadcast_key(train_prng_seed)
+    eval_prng_seed = _broadcast_key(eval_prng_seed)
     if decode_input_p:
       prng_key, decode_key = jax.random.split(prng_key, 2)
       logging.info('decode prng_key: %s', decode_key)
+      decode_key = _broadcast_key(decode_key)
 
     if enable_auto_sharding:
       if train_input_p.num_infeed_hosts < jax.process_count() or (
