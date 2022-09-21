@@ -52,7 +52,7 @@ function main() {
 
   cp ${PIP_FILE_PREFIX}setup.py "${TMPDIR}"
   cp LICENSE "${TMPDIR}"
-  rsync -avm -L --exclude="*_test.py" paxml "${TMPDIR}"
+  rsync -avm -L paxml "${TMPDIR}"
   rsync -avm -L  --include="*.so" --include="*_pb2.py" \
     --exclude="*.runfiles" --exclude="*_obj" --include="*/" --exclude="*" \
     bazel-bin/paxml "${TMPDIR}"
