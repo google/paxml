@@ -66,9 +66,9 @@ def set_sharding_annotations_v1(
       map_1d=((replica_axis, data_axis),),
       map_2d=((replica_axis, data_axis), None))
   model_p.mesh_axis_names = mesh_axis_names
-  if hasattr(model_p, 'lm'):
-    model_p.lm = model_p.lm.cls.set_sharding_params_v1(
-        model_p.lm,
+  if hasattr(model_p, 'lm_tpl'):
+    model_p.lm_tpl = model_p.lm_tpl.cls.set_sharding_params_v1(
+        model_p.lm_tpl,
         replica_axis=replica_axis,
         data_axis=data_axis,
         mdl_axis=mdl_axis,
@@ -256,13 +256,13 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     task_p = tasks_lib.SingleTask.HParams(name='bert_task')
     task_p.model = models.BertModel.HParams(name='bert_lm')
     model_p = task_p.model
-    model_p.lm.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
-    model_p.lm.packed_input = True
-    model_p.lm.model_dims = self.MODEL_DIMS
-    model_p.lm.vocab_size = self.VOCAB_SIZE
+    model_p.lm_tpl.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
+    model_p.lm_tpl.packed_input = True
+    model_p.lm_tpl.model_dims = self.MODEL_DIMS
+    model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
     # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.softmax_tpl.scale_sqrt_depth = True
-    model_p.lm.softmax_tpl.soft_cap_logits = 30.0
+    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
+    model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
     stacked_transformer_tpl = layers.StackedTransformer.HParams()
 
@@ -280,18 +280,18 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm.stacked_transformer_tpl = (
+      model_p.lm_tpl.stacked_transformer_tpl = (
           layers.StackedTransformerRepeated.HParams())
       stacked_transformer_tpl.num_layers = 1
-      model_p.lm.stacked_transformer_tpl.block = stacked_transformer_tpl
-      model_p.lm.stacked_transformer_tpl.x_times = self.NUM_LAYERS
-      model_p.lm.stacked_transformer_tpl.checkpoint_policy = (
+      model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
+      model_p.lm_tpl.stacked_transformer_tpl.checkpoint_policy = (
           self.CHECKPOINT_POLICY)
     else:
-      model_p.lm.stacked_transformer_tpl = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
-    model_p.lm.softmax_tpl.params_init = softmax_init
+    model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     # pytype: enable=attribute-error  # enable-nested-classes
 
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
@@ -299,7 +299,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     if self.ENABLE_BFLOAT16:
       model_p.fprop_dtype = jnp.bfloat16
 
-    maybe_setup_moe_params(model_p.lm.stacked_transformer_tpl)
+    maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
 
     set_default_adam(
         task_p, self.LEARNING_RATE, self.WEIGHT_DECAY, decay_end=self.DECAY_END)
@@ -341,13 +341,13 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.model = models.BertModel.HParams(name='bert_lm')
     model_p = task_p.model
     model_p.mask_token_id = self.MASK_TOKEN_ID
-    model_p.lm.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
-    model_p.lm.packed_input = True
-    model_p.lm.model_dims = self.MODEL_DIMS
-    model_p.lm.vocab_size = self.VOCAB_SIZE
+    model_p.lm_tpl.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
+    model_p.lm_tpl.packed_input = True
+    model_p.lm_tpl.model_dims = self.MODEL_DIMS
+    model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
     # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.softmax_tpl.scale_sqrt_depth = True
-    model_p.lm.softmax_tpl.soft_cap_logits = 30.0
+    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
+    model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
     stacked_transformer_tpl = layers.StackedTransformer.HParams()
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
@@ -365,18 +365,18 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm.stacked_transformer_tpl = (
+      model_p.lm_tpl.stacked_transformer_tpl = (
           layers.StackedTransformerRepeated.HParams())
       stacked_transformer_tpl.num_layers = 1
-      model_p.lm.stacked_transformer_tpl.block = stacked_transformer_tpl
-      model_p.lm.stacked_transformer_tpl.x_times = self.NUM_LAYERS
-      model_p.lm.stacked_transformer_tpl.checkpoint_policy = (
+      model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
+      model_p.lm_tpl.stacked_transformer_tpl.checkpoint_policy = (
           self.CHECKPOINT_POLICY)
     else:
-      model_p.lm.stacked_transformer_tpl = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
-    model_p.lm.softmax_tpl.params_init = softmax_init
+    model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     # pytype: enable=attribute-error  # enable-nested-classes
 
     if self.ENABLE_BFLOAT16:
@@ -389,7 +389,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
 
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
 
-    maybe_setup_moe_params(model_p.lm.stacked_transformer_tpl)
+    maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
     set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
                                 self.MESH_SHAPE)
 
@@ -421,11 +421,11 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
     task_p.model = models.LanguageModel.HParams(name='xformer_lm')
     model_p = task_p.model
-    model_p.lm.packed_input = self.PACKED_INPUT
-    model_p.lm.model_dims = self.MODEL_DIMS
-    model_p.lm.vocab_size = self.VOCAB_SIZE
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT
+    model_p.lm_tpl.model_dims = self.MODEL_DIMS
+    model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
     # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.softmax_tpl.scale_sqrt_depth = True
+    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
 
     stacked_transformer_tpl = layers.StackedTransformer.HParams()
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
@@ -443,19 +443,19 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm.stacked_transformer_tpl = (
+      model_p.lm_tpl.stacked_transformer_tpl = (
           layers.StackedTransformerRepeated.HParams())
       stacked_transformer_tpl.num_layers = 1
-      model_p.lm.stacked_transformer_tpl.block = (stacked_transformer_tpl)
-      model_p.lm.stacked_transformer_tpl.x_times = self.NUM_LAYERS
+      model_p.lm_tpl.stacked_transformer_tpl.block = (stacked_transformer_tpl)
+      model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
     else:
-      model_p.lm.stacked_transformer_tpl = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
-    model_p.lm.softmax_tpl.params_init = softmax_init
+    model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     # pytype: enable=attribute-error  # enable-nested-classes
 
-    maybe_setup_moe_params(model_p.lm.stacked_transformer_tpl)
+    maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
     set_default_adam(
         task_p, self.LEARNING_RATE, self.WEIGHT_DECAY, decay_end=self.DECAY_END)
 
@@ -525,27 +525,25 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
     task_p.model = models.LanguageModel.HParams(name='xformer_lm')
     model_p = task_p.model
-    model_p.lm.packed_input = self.PACKED_INPUT
-    model_p.lm.model_dims = self.MODEL_DIMS
-    model_p.lm.vocab_size = self.VOCAB_SIZE
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT
+    model_p.lm_tpl.model_dims = self.MODEL_DIMS
+    model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
 
     if self.SEPARATE_EMBEDDING:
-      model_p.lm.separate_embedding_tpl = (
-          layers.Embedding.HParams())
-      model_p.lm.softmax_tpl = (
-          layers.FullSoftmax.HParams())
+      model_p.lm_tpl.separate_embedding_tpl = (layers.Embedding.HParams())
+      model_p.lm_tpl.softmax_tpl = (layers.FullSoftmax.HParams())
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.softmax_tpl.params_init = softmax_init
+    model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     if self.SEPARATE_EMBEDDING:
-      model_p.lm.separate_embedding_tpl.scale_sqrt_depth = True
+      model_p.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = True
     else:
-      model_p.lm.softmax_tpl.scale_sqrt_depth = True
-    model_p.lm.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
+      model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
+    model_p.lm_tpl.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
-      model_p.lm.position_emb_tpl = (
+      model_p.lm_tpl.position_emb_tpl = (
           layers.TrainablePositionalEmbedding.HParams(
               max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN))
 
@@ -578,15 +576,15 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
       transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm.stacked_transformer_tpl = (
+      model_p.lm_tpl.stacked_transformer_tpl = (
           layers.StackedTransformerRepeated.HParams())
       stacked_transformer_tpl.num_layers = 1
-      model_p.lm.stacked_transformer_tpl.block = stacked_transformer_tpl
-      model_p.lm.stacked_transformer_tpl.x_times = self.NUM_LAYERS
-      model_p.lm.stacked_transformer_tpl.checkpoint_policy = (
+      model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
+      model_p.lm_tpl.stacked_transformer_tpl.checkpoint_policy = (
           self.CHECKPOINT_POLICY)
     else:
-      model_p.lm.stacked_transformer_tpl = stacked_transformer_tpl
+      model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
 
     # Enable bf16.
     model_p.fprop_dtype = self.FPROP_DTYPE
@@ -606,7 +604,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     if self.ICI_MESH_SHAPE is not None:
       set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
                                   self.ICI_MESH_SHAPE, self.DCN_MESH_SHAPE)
-    maybe_setup_moe_params(model_p.lm.stacked_transformer_tpl)
+    maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
 
     return task_p
 
@@ -693,18 +691,18 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
     task_p.model = models.LanguageModel.HParams(name='xformer_lm')
     model_p = task_p.model
-    model_p.lm.packed_input = True
-    model_p.lm.model_dims = self.MODEL_DIMS
-    model_p.lm.vocab_size = self.VOCAB_SIZE
+    model_p.lm_tpl.packed_input = True
+    model_p.lm_tpl.model_dims = self.MODEL_DIMS
+    model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.lm.softmax_tpl.params_init = softmax_init
-    model_p.lm.softmax_tpl.scale_sqrt_depth = True
-    model_p.lm.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
+    model_p.lm_tpl.softmax_tpl.params_init = softmax_init
+    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
+    model_p.lm_tpl.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
-      model_p.lm.position_emb_tpl = (
+      model_p.lm_tpl.position_emb_tpl = (
           layers.TrainablePositionalEmbedding.HParams(
               max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN))
 
@@ -746,7 +744,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
       stacked_transformer_tpl.checkpoint_policy = self.CHECKPOINT_POLICY
 
     # Wrap it with a pipeline layer.
-    model_p.lm.stacked_transformer_tpl = layers.PipelinedTransformer.HParams(
+    model_p.lm_tpl.stacked_transformer_tpl = layers.PipelinedTransformer.HParams(
         pipeline_stage=stacked_transformer_tpl,
         num_pipeline_stages=self.NUM_STAGES,
         circular_repeat=self.CIRCULAR_REPEAT,
@@ -768,7 +766,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
     task_p.train.save_max_to_keep = self.CHECKPOINT_MAX_TO_KEEP
-    maybe_setup_moe_params(model_p.lm.stacked_transformer_tpl.pipeline_stage)
+    maybe_setup_moe_params(
+        model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage)
 
     # Set up the sharding specifications.
     model_p.ici_mesh_shape = self.ICI_MESH_SHAPE
@@ -781,8 +780,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     model_p.mesh_axis_names = mesh_axis_names
 
     # Set in-stage layer shardings.
-    model_p.lm = model_p.lm.cls.set_sharding_params_v1(
-        model_p.lm,
+    model_p.lm_tpl = model_p.lm_tpl.cls.set_sharding_params_v1(
+        model_p.lm_tpl,
         replica_axis=replica_axis,
         data_axis=data_axis,
         mdl_axis=mdl_axis,
@@ -798,7 +797,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         map_1d=(batch_dims,), map_2d=(batch_dims, None))
 
     # Run softmax/embedding in data parallelism across all cores.
-    softmax_p = model_p.lm.softmax_tpl
+    softmax_p = model_p.lm_tpl.softmax_tpl
     softmax_p.activation_split_dims_mapping.emb_out_split_dims_mapping = [
         batch_dims, None, mdl_axis
     ]
@@ -812,7 +811,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     else:
       raise NotImplementedError(f'softmax class {softmax_p.cls} not supported')
 
-    pipeline_layer_p = model_p.lm.stacked_transformer_tpl
+    pipeline_layer_p = model_p.lm_tpl.stacked_transformer_tpl
     pipeline_layer_p.weight_split_dims_mapping.stages = [stage_axis]
     # Match the final output sharding to softmax input sharding.
     pipeline_layer_p.activation_split_dims_mapping.final_out = [

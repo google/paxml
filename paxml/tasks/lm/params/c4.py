@@ -231,12 +231,12 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
-    model_p.lm.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
 
     if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl.block  # pytype: disable=attribute-error
+      stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl.block  # pytype: disable=attribute-error
     else:
-      stacked_transformer_tpl = model_p.lm.stacked_transformer_tpl  # pytype: disable=attribute-error
+      stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error
     transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
 
@@ -432,27 +432,27 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
     task_p.model.params_init = WeightInit.Gaussian(0.006)
 
     softmax_init = WeightInit.Gaussian(0.006)
-    task_p.model.lm.softmax_tpl.params_init = softmax_init
-    task_p.model.lm.softmax_tpl.feed_forward_tpl.has_bias = False
+    task_p.model.lm_tpl.softmax_tpl.params_init = softmax_init
+    task_p.model.lm_tpl.softmax_tpl.feed_forward_tpl.has_bias = False
 
     if self.SEPARATE_EMBEDDING:
       task_p.model.lm.separate_embedding_tpl.scale_sqrt_depth = False
       task_p.model.lm.separate_embedding_tpl.lookup_style = 'index'
     else:
-      task_p.model.lm.softmax_tpl.scale_sqrt_depth = False
-      task_p.model.lm.softmax_tpl.lookup_style = 'index'
+      task_p.model.lm_tpl.softmax_tpl.scale_sqrt_depth = False
+      task_p.model.lm_tpl.softmax_tpl.lookup_style = 'index'
     if self.TRAINABLE_POSITION_EMB:
-      task_p.model.lm.position_emb_tpl.lookup_style = 'index'
+      task_p.model.lm_tpl.position_emb_tpl.lookup_style = 'index'
 
     if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = task_p.model.lm.stacked_transformer_tpl.block
+      stacked_transformer_tpl = task_p.model.lm_tpl.stacked_transformer_tpl.block
     else:
       stacked_transformer_tpl = task_p.model.lm.stacked_transformer_tpl
     transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
 
     transformer_layer_p.ln_tpl.epsilon = self.LAYERNORM_EPSILON
     transformer_layer_p.tr_fflayer_tpl.ln_tpl.epsilon = self.LAYERNORM_EPSILON
-    task_p.model.lm.final_ln_tpl.epsilon = self.LAYERNORM_EPSILON
+    task_p.model.lm_tpl.final_ln_tpl.epsilon = self.LAYERNORM_EPSILON
     transformer_layer_p.tr_atten_tpl.internal_enable_per_dim_scale = False
     transformer_layer_p.tr_atten_tpl.use_bias = True
 
