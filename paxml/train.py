@@ -1197,6 +1197,10 @@ def train_and_evaluate_spmd_model(
     eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
         model_p.mesh_axis_names, eval_test_inputs_shape_dtype)
   if decode_input_p:
+    decode_input_p_0 = decode_input_p[0]
+    decode_unpadded_global_batch_size = (
+        decode_input_p_0.cls.get_batch_size(decode_input_p_0) *
+        decode_input_p_0.num_infeed_hosts)
     decode_input_p = [
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
         for input_p in decode_input_p
@@ -1325,7 +1329,8 @@ def train_and_evaluate_spmd_model(
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task, init_key,
               trainer_lib.train_state_for_eval_step(train_state_pspecs),
-              decode_inputs_shape_dtype))
+              decode_inputs_shape_dtype,
+              unpadded_global_batch_size=decode_unpadded_global_batch_size))
 
     logging.info(
         'partitioned_train_state shapes '

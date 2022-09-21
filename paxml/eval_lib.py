@@ -597,7 +597,7 @@ class _SpmdEvalRunner:
             checkpoint_type))
     runner = _SpmdEvalRunner(
         task_p, sample_input_params, jax_task, global_mesh,
-        init_key, partitioned_specs)
+        init_key, partitioned_specs, unpadded_global_batch_size)
     eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
         runner.run_one_step(partitioned_train_state, eval_summary_writers,
                             eval_key, create_gda_for_inputs))
@@ -610,7 +610,8 @@ class _SpmdEvalRunner:
                global_mesh: maps.Mesh,
                init_key: PRNGKey,
                partitioned_specs: train_states.TrainState,
-               use_ema: bool = False):
+               use_ema: bool = False,
+               unpadded_global_batch_size: Optional[int] = None):
     self._eval_input_p = eval_input_p
     if not self._eval_input_p:
       return
@@ -638,7 +639,7 @@ class _SpmdEvalRunner:
     self._inputs_partition_specs = None
     if use_ema:
       partitioned_specs = trim_opt_states(partitioned_specs)
-    self._run_pjit(init_key, partitioned_specs)
+    self._run_pjit(init_key, partitioned_specs, unpadded_global_batch_size)
 
   @classmethod
   def get_model_states_and_step_fn(
@@ -653,6 +654,7 @@ class _SpmdEvalRunner:
       use_ema: bool = False,
       is_decode: bool = False,
       use_orbax: bool = False,
+      unpadded_global_batch_size: Optional[int] = None,
   ) -> Tuple[train_states.TrainState, Optional[train_states.TrainState],
              train_states.TrainState, Any, NestedPartitionSpec, NestedJTensor]:
     """Gets a partitioned model states and the step function."""
@@ -681,7 +683,8 @@ class _SpmdEvalRunner:
         step_fn, inputs_partition_specs = (
             trainer_lib.get_partitioned_spmd_model_decode_fn(
                 jax_task, init_key, trim_opt_states(partitioned_specs),
-                inputs_shape))
+                inputs_shape,
+                unpadded_global_batch_size=unpadded_global_batch_size))
       else:
         step_fn, inputs_partition_specs = (
             trainer_lib.get_partitioned_spmd_model_step_fn(
@@ -689,7 +692,8 @@ class _SpmdEvalRunner:
                 step_key,
                 trainer_lib.train_state_for_eval_step(partitioned_specs),
                 sample_inputs,
-                is_eval=True))
+                is_eval=True,
+                unpadded_global_batch_size=unpadded_global_batch_size))
 
       if (jax.config.jax_parallel_functions_output_gda and
           checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE):
@@ -716,7 +720,8 @@ class _SpmdEvalRunner:
             sample_inputs)
 
   def _run_pjit(self, init_key: PRNGKey,
-                partitioned_specs: train_states.TrainState) -> None:
+                partitioned_specs: train_states.TrainState,
+                unpadded_global_batch_size: Optional[int] = None) -> None:
     """Run pjit on the single step evaluation function."""
     if not self._eval_input_p:
       return
@@ -727,7 +732,8 @@ class _SpmdEvalRunner:
               init_key,
               trainer_lib.train_state_for_eval_step(partitioned_specs),
               self._inputs_shape,
-              is_eval=True))
+              is_eval=True,
+              unpadded_global_batch_size=unpadded_global_batch_size))
       self._eval_step = eval_step
       self._inputs_partition_specs = inputs_partition_specs
 
@@ -811,6 +817,15 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   _, eval_key = jax.random.split(prng_key)
   logging.info('eval prng_key: %s', eval_key)
 
+  eval_input_p_0 = eval_input_p[0]
+  eval_unpadded_global_batch_size = (
+      eval_input_p_0.cls.get_batch_size(eval_input_p_0) *
+      eval_input_p_0.num_infeed_hosts)
+  eval_input_p = [
+      trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
+      for inp in eval_input_p
+  ]
+
   # TODO(pax-dev): Investigate if we can use model input specs
   # instead of instantiating this input pipeline.
   sample_inputs = instantiate(eval_input_p[0]).get_next_padded()
@@ -829,13 +844,9 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
-  eval_input_p = [
-      trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
-      for inp in eval_input_p
-  ]
-
   runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                           init_key, partitioned_specs)
+                           init_key, partitioned_specs,
+                           eval_unpadded_global_batch_size)
   logging.info('Evaluation loop starting...')
   summary_base_dir = os.path.join(job_log_dir, 'summaries')
   summary_eval_dirs = [
@@ -1513,10 +1524,21 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
                                             model_p.dcn_mesh_shape)
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
 
+  unpadded_global_batch_size = None
+  if input_p:
+    input_p_0 = input_p[0]
+    unpadded_global_batch_size = (
+        input_p_0.cls.get_batch_size(input_p_0) * input_p_0.num_infeed_hosts)
   input_p = [
       trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
       for inp in input_p
   ]
+  eval_unpadded_global_batch_size = None
+  if eval_input_p:
+    eval_input_p_0 = eval_input_p[0]
+    eval_unpadded_global_batch_size = (
+        eval_input_p_0.cls.get_batch_size(eval_input_p_0) *
+        eval_input_p_0.num_infeed_hosts)
   eval_input_p = [
       trainer_lib.adjust_input_params_for_small_batch(inp, global_mesh)
       for inp in eval_input_p
@@ -1555,9 +1577,11 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
          checkpoint_type,
          checkpoint_step=restore_checkpoint_step,
          is_decode=True,
-         use_ema=use_ema)
+         use_ema=use_ema,
+         unpadded_global_batch_size=unpadded_global_batch_size)
     eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                                  init_key, partitioned_specs)
+                                  init_key, partitioned_specs,
+                                  eval_unpadded_global_batch_size)
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model,
         jax_task.model.abstract_init_with_metadata(
