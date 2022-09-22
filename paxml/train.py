@@ -277,8 +277,14 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
       logging.info('Pmap saving a TensorStore ckpt at step: %d', step_i)
       py_utils.sync_global_devices(
           f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
-      fully_replicated_gda_model_states = jax.tree_map(
-          py_utils.convert_fully_replicated_sda_to_gda, partitioned_train_state)
+      if jax.config.jax_array:
+        fully_replicated_gda_model_states = jax.tree_map(
+            py_utils.convert_host_local_array_to_global_array,
+            partitioned_train_state)
+      else:
+        fully_replicated_gda_model_states = jax.tree_map(
+            py_utils.convert_fully_replicated_sda_to_gda,
+            partitioned_train_state)
       checkpoints.save_checkpoint(
           fully_replicated_gda_model_states,
           self.checkpoint_dir,
@@ -358,8 +364,14 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
                    step_i)
       py_utils.sync_global_devices(
           f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
-      fully_replicated_gda_train_state = jax.tree_map(
-          py_utils.convert_fully_replicated_sda_to_gda, partitioned_train_state)
+      if jax.config.jax_array:
+        fully_replicated_gda_train_state = jax.tree_map(
+            py_utils.convert_host_local_array_to_global_array,
+            partitioned_train_state)
+      else:
+        fully_replicated_gda_train_state = jax.tree_map(
+            py_utils.convert_fully_replicated_sda_to_gda,
+            partitioned_train_state)
       self._save_with_args(step_i, fully_replicated_gda_train_state)
       py_utils.sync_global_devices(
           f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
@@ -735,6 +747,8 @@ def train_and_evaluate_pmap(
   logging.info('Using pmap for data parallelism.')
   if jax.config.jax_parallel_functions_output_gda:
     logging.warning('--jax_use_gda is set to True but ignored for pmap.')
+  if jax.config.jax_array:
+    logging.warning('--jax_array is set to True')
   jax_task = instantiate(task_p)
 
   if eval_input_p:
@@ -1145,7 +1159,7 @@ def train_and_evaluate_spmd_model(
   prng_key = jax.random.PRNGKey(1234)
   prng_key, init_key = jax.random.split(prng_key)
 
-  assert jax.config.jax_parallel_functions_output_gda, 'GDA must be enabled'
+  assert py_utils.gda_or_jax_array(), 'GDA or jax.Array must be enabled'
 
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
                                             model_p.dcn_mesh_shape)
@@ -1155,7 +1169,7 @@ def train_and_evaluate_spmd_model(
 
   logging.info('Retrieving model inputs for shape info.')
   create_gda_for_inputs = (
-      jax.config.jax_parallel_functions_output_gda and
+      py_utils.gda_or_jax_array() and
       checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
   train_unpadded_global_batch_size = (
       train_input_p.cls.get_batch_size(train_input_p) *

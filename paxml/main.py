@@ -88,6 +88,9 @@ flags.DEFINE_bool(
     'Enables fully asynchronous checkpointing via GDA and TensorStore. This '
     'means that the training can continue ahead when checkpointing is '
     'happening.')
+flags.DEFINE_bool(
+    'jax_array_in_pax', False,
+    'Use jax.Array globally in PAX which replaces DA, SDA and GDA.')
 flags.DEFINE_bool('use_orbax', False, 'Enables Orbax for checkpointing.')
 flags.DEFINE_string(
     'checkpoint_todelete_subdir', None,
@@ -360,7 +363,7 @@ def main(argv: Sequence[str]) -> None:
 
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
-                      FLAGS.jax_fully_async_checkpoint)
+                      FLAGS.jax_array_in_pax, FLAGS.jax_fully_async_checkpoint)
 
   if FLAGS.exp is not None:
     experiment_config = get_experiment(FLAGS.exp)()

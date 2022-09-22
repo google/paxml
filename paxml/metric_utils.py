@@ -18,13 +18,13 @@
 import numbers
 import typing
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
-from absl import logging
 
+from absl import logging
 import clu.values as clu_values
 from jax import numpy as jnp
+from jax.experimental import array
 from jax.experimental import global_device_array
 import numpy as np
-
 from paxml import summary_utils
 from praxis import py_utils
 from praxis import pytypes
@@ -154,7 +154,7 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
 
 def is_scalar(v: Any) -> bool:
   """Returns True if input is a scalar."""
-  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray))
+  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray, array.Array))
 
 
 def is_weighted_scalar(v: Any) -> bool:

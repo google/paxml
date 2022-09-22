@@ -26,6 +26,7 @@ import tensorflow.compat.v2 as tf
 def setup_jax(globally_use_hardware_rng: bool,
               jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
               jax_enable_checks: bool,
+              jax_array: bool = False,
               should_initialize_jax_distributed: bool = False) -> None:
   """Setups JAX and logs information about this job."""
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
@@ -39,9 +40,17 @@ def setup_jax(globally_use_hardware_rng: bool,
   # Use the manual partitioning lowering of xmap to avoid vectorization.
   jax.config.update('experimental_xmap_spmd_lowering_manual', True)
 
-  # Always default to GDA.
-  jax.config.update('jax_parallel_functions_output_gda', True)
-  logging.info('Using JAX GDA for pjit and checkpointing')
+  if jax_array:
+    # Always default to Array.
+    jax.config.update('jax_array', True)
+    jax.config.update('jax_parallel_functions_output_gda', False)
+    logging.info('Using JAX Array for pjit, pmap, checkpointing and everywhere '
+                 'else.')
+  else:
+    # Always default to GDA.
+    jax.config.update('jax_parallel_functions_output_gda', True)
+    jax.config.update('jax_array', False)
+    logging.info('Using JAX GDA for pjit and checkpointing')
 
   if jax_enable_checks:
     jax.config.update('jax_enable_checks', True)
@@ -54,7 +63,6 @@ def setup_jax(globally_use_hardware_rng: bool,
 
   if should_initialize_jax_distributed:
     jax.distributed.initialize()
-
 
   logging.info('JAX process: %d / %d', jax.process_index(), jax.process_count())
   logging.info('JAX devices: %r', jax.devices())

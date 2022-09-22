@@ -116,7 +116,7 @@ def retrieve_checkpoint_type(
   """Retrieves the CheckpointType given the input arguments."""
   using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
   if using_pjit:
-    assert jax.config.jax_parallel_functions_output_gda, 'pjit requires GDA'
+    assert py_utils.gda_or_jax_array(), 'pjit requires GDA or jax.Array'
     if maybe_use_persistence_checkpointing:
       return CheckpointType.CHECKPOINT_PERSISTENCE
     else:

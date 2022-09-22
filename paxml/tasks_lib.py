@@ -113,9 +113,14 @@ def restore_pmap_from_tensorstore(global_shapes,
       use_orbax=use_orbax)
   if global_mesh is not None:
     return fully_replicated_gda_model_states
-  # model_states is GDA; we convert back to DA for pmap.
-  model_states = jax.tree_map(lambda x: x.local_data(0),
-                              fully_replicated_gda_model_states)
+  # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
+  # single device sharding for pmap.
+  if jax.config.jax_array:
+    model_states = jax.tree_map(lambda x: x.addressable_data(0),
+                                fully_replicated_gda_model_states)
+  else:
+    model_states = jax.tree_map(lambda x: x.local_data(0),
+                                fully_replicated_gda_model_states)
   return model_states
 
 

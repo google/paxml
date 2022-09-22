@@ -695,7 +695,7 @@ class _SpmdEvalRunner:
                 is_eval=True,
                 unpadded_global_batch_size=unpadded_global_batch_size))
 
-      if (jax.config.jax_parallel_functions_output_gda and
+      if (py_utils.gda_or_jax_array() and
           checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE):
         sample_inputs = py_utils.create_gda(sample_inputs, inputs_shape,
                                             global_mesh, inputs_partition_specs)
@@ -857,7 +857,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
       checkpoint_dir)
 
   create_gda_for_inputs = (
-      jax.config.jax_parallel_functions_output_gda and
+      py_utils.gda_or_jax_array() and
       checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
   with contextlib.ExitStack() as exit_stack:
     eval_summary_writers = [
@@ -1557,7 +1557,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
 
   with global_mesh:
     use_gda = (
-        jax.config.jax_parallel_functions_output_gda and
+        py_utils.gda_or_jax_array() and
         checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
 
     # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
