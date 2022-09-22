@@ -175,6 +175,12 @@ class CheckpointLoadingRules(NamedTuple):
       with name `source.format(*match_object.groups())` in the external
       checkpoint. In particular, the constant tuple LOAD_ALL is one rule that
       load everything as is.
+    safe_load: Boolean controlling safety checks on whether all load_rules
+      patterns are in fact used. Typos, or wrong variable names in the pattern
+      result on those variables being initialized randomly when the intent was
+      probably different. Turning safe_load = True checks that all patterns in
+      the set of load_rules were used for matching model parameters, trainable
+      or not. Warning: safe_load only applies to load_rules, not ignore_rules.
     ignore_rules: If the variable name matches with one of the regexs in the
       list, the checkpoint variables are not used even if the name matches with
       `load_rules`.
@@ -188,6 +194,7 @@ class CheckpointLoadingRules(NamedTuple):
   """
   task_p: SingleTask.HParams
   load_rules: Sequence[Tuple[RegexStr, str]]
+  safe_load: bool = False
   ignore_rules: Optional[Sequence[RegexStr]] = None
   step: Optional[int] = None
   load_step: bool = False
@@ -737,10 +744,15 @@ class SingleTask(base_task.BaseTask):
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
     already_matched = set()
+    if rules.safe_load:
+      all_dest_patterns_in_loading_rules = set()
+      matched_dest_patterns_in_loading_rules = set()
     for varname, unused_val in model_vars.FlattenItems():
       varname_orig = varname
       varname = varname.replace('.', '/')  # dot is reserved for regex
       for pattern, refname in loading_rules:
+        if rules.safe_load:
+          all_dest_patterns_in_loading_rules.add(pattern.pattern)
         mo = pattern.match(varname)
         if mo is None:
           logging.info(
@@ -760,6 +772,8 @@ class SingleTask(base_task.BaseTask):
           continue
         refname = refname.format(*mo.groups())
         refname = refname.replace('/', '.')
+        if rules.safe_load:
+          matched_dest_patterns_in_loading_rules.add(pattern.pattern)
 
         # Only for logging, keep name of ckpt that initialized the variable
         is_initialized[varname] = ckpt_path + '/' + refname
@@ -776,6 +790,18 @@ class SingleTask(base_task.BaseTask):
         else:
           already_matched.add(refname)
         model_vars.Set(varname_orig, loaded_var)
+    if rules.safe_load:
+      # Check that all source names have been matched; if they have not then the
+      # loading rules do not serve the intended purpose.
+      diff = all_dest_patterns_in_loading_rules.difference(
+          matched_dest_patterns_in_loading_rules)
+      if len(diff):
+        logging.info('Difference all-matched load_rule patterns=%r', diff)
+        raise ValueError(f'The checkpoint loading rule(s) {rules.load_rules} '
+                         'do not serve the intended purpose; some model '
+                         'variables that were meant to be loaded from '
+                         'checkpoint are left to their initial (random) values '
+                         f'due to wrong pattern(s): {diff}.')
     train_state = train_state.replace(mdl_vars=model_vars)
 
     if rules.load_step:

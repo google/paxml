@@ -313,6 +313,60 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
                             v.ema['params']['var01'][0])
 
+  def test_load_with_incorrect_loading_rules(self):
+    input_dims = 3
+    output_dims = 5
+
+    # Initialize external task and save checkpoint
+    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p.model = TestModel01.HParams(
+        name='mdl_ext', input_dims=input_dims, output_dims=output_dims)
+    lp = ext_task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+
+    # Enable ema
+    lp.optimizer.ema_decay = 0.9999
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_train_state = trainer_lib.initialize_replicate_model_state(
+        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+
+    # Modify var01 to be random
+    var_shape = ext_train_state.mdl_vars['params']['var01'].shape
+    random_var = jnp.array(np.random.normal(size=var_shape))
+    ext_train_state.mdl_vars['params']['var01'] = random_var
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+
+    # Create task with incorrect load_rules and safe_load=True.
+    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p.model = TestModel01.HParams(
+        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.train.learner = lp.clone()
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path:
+            tasks_lib.CheckpointLoadingRules(
+                task_p=ext_task_p,
+                load_rules=[(r'params/_(.*)', 'params/{}')],
+                safe_load=True,
+                input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                    input_dims=input_dims)),
+    }
+    task = instantiate(task_p)
+
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        'The checkpoint loading rule(s) [(\'params/_(.*)\', \'params/{}\')] '
+        'do not serve the intended purpose; some model variables that were '
+        'meant to be loaded from checkpoint are left to their initial (random) '
+        'values due to wrong pattern(s): {\'params/_(.*)\'}.'):
+      another_train_state = trainer_lib.initialize_replicate_model_state(
+          task, jax.random.PRNGKey(1), sample_inputs)
+
   def test_load_ema(self):
     input_dims = 3
     output_dims = 5
