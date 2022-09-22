@@ -242,6 +242,7 @@ pytype_strict_library(
         ":eval_lib",
         ":experiment_registry",
         ":setup_jax",
+        ":tasks_lib",
         ":train",
         ":trainer_lib",
         ":tuning_lib",

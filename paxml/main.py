@@ -26,6 +26,7 @@ import os
 import random
 import re
 import time
+import typing
 from typing import Dict, Optional, Sequence
 
 from absl import app
@@ -41,6 +42,7 @@ from paxml import checkpoints
 from paxml import eval_lib
 from paxml import experiment_registry
 from paxml import setup_jax
+from paxml import tasks_lib
 from paxml import train
 from paxml import trainer_lib
 from paxml import tuning_lib
@@ -205,13 +207,18 @@ def run_experiment(
   """
   train.write_hparams_file(experiment_config, job_log_dir,
                            '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
+
+  task_p = experiment_config.task()
+  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  use_orbax = FLAGS.use_orbax or task_p.use_orbax
+
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
     async_checkpointer = None
     async_ckpt_manager = None
     if FLAGS.jax_fully_async_checkpoint:
-      if FLAGS.use_orbax:
+      if use_orbax:
         if FLAGS.maybe_use_persistence_checkpointing:
           async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
         else:
@@ -236,7 +243,7 @@ def run_experiment(
         async_ckpt_manager=async_ckpt_manager,
         run_decode=FLAGS.decode_during_train,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
-        use_orbax=FLAGS.use_orbax,
+        use_orbax=use_orbax,
         async_checkpointer=async_checkpointer)
 
     if async_checkpointer is not None:
@@ -252,7 +259,7 @@ def run_experiment(
         maybe_use_persistence_checkpointing=FLAGS
         .maybe_use_persistence_checkpointing,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=FLAGS.use_orbax)
+        use_orbax=use_orbax)
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -266,7 +273,7 @@ def run_experiment(
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=FLAGS.use_orbax)
+        use_orbax=use_orbax)
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -280,13 +287,13 @@ def run_experiment(
         continuous_decode=False,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=FLAGS.use_orbax)
+        use_orbax=use_orbax)
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
-        use_orbax=FLAGS.use_orbax)
+        use_orbax=use_orbax)
 
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a

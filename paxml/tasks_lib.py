@@ -314,6 +314,7 @@ class SingleTask(base_task.BaseTask):
       vn: HParams to control variational noise.
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
       infer_writer: specifies how to generate and write some output with a model
+      use_orbax: if True, enables checkpointing with Orbax.
     """
     model: Optional[base_model.BaseModel.HParams] = None
 
@@ -328,6 +329,7 @@ class SingleTask(base_task.BaseTask):
         lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
     track_decoder_metric: Optional[str] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
+    use_orbax: bool = False
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)
