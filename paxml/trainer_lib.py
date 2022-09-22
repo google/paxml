@@ -254,6 +254,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
     sample_inputs: Sample inputs for shape inference.
     discard_opt_states: Whether to discard optimizer states.
     do_init_checkpoint_rules: Whether to apply init checkpoint rules or not.
+    is_eval: whether to initialize in under eval context.
 
   Returns:
     TrainStates - training states.
@@ -758,6 +759,8 @@ def _eval_step_single_learner_with_model(
   else:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
+  enum_keys, inputs = py_utils.filter_by_matching_keys(
+      inputs, [py_utils.PROVENANCE_PREFIX])
   with base_layer.JaxContext.new_context(hparams=context_p):
     prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
@@ -772,6 +775,8 @@ def _eval_step_single_learner_with_model(
     # TODO(yonghui): Add aux-loss to summaries.
     summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
 
+    # merge back, if any, enum keys for eval matching
+    per_example_out.update(enum_keys)
     (_, mean_loss, aggregated_scalars, aggregated_summaries,
      per_example_out) = _maybe_aggregate_metrics_summaries(
          jax_task.loss_aggregator, weighted_scalars, summary_tensors,
@@ -846,6 +851,8 @@ def decode_step(
   elif fprop_dtype != jnp.float32:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
+  enum_keys, inputs = py_utils.filter_by_matching_keys(
+      inputs, [py_utils.PROVENANCE_PREFIX])
   with base_layer.JaxContext.new_context(hparams=context_p):
     k1, k2, k3 = jax.random.split(prng_key, 3)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
@@ -870,6 +877,10 @@ def decode_step(
     if len(outputs) == 2:
       weighted_scalars, per_example_out = outputs
       outputs = (weighted_scalars, per_example_out, {})
+
+    # merge back, if any, enum keys for eval matching
+    per_example_out = outputs[1]
+    per_example_out.update(enum_keys)
 
     summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
     if summary_tensors:
