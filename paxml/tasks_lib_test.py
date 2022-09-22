@@ -23,7 +23,6 @@ from absl.testing import absltest
 import jax
 import jax.numpy as jnp
 import numpy as np
-from paxml import base_experiment
 from paxml import checkpoints
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -58,10 +57,14 @@ class CustomInputSpecsProvider(base_input.BaseInputSpecsProvider):
   class HParams(base_input.BaseInputSpecsProvider.HParams):
     input_dims: int = 0
 
-  def get_input_specs(self):
+  def get_input_specs(self) -> pytypes.NestedShapeDtypeStruct:
     p = self.hparams
     batch_size = 1
-    return jax.ShapeDtypeStruct((batch_size, p.input_dims), dtype=jnp.float32)
+
+    return NestedMap(
+        inputs=jax.ShapeDtypeStruct(
+            (batch_size, p.input_dims), dtype=jnp.float32)
+        )
 
 
 class TestModel01(base_model.BaseModel):
@@ -82,12 +85,12 @@ class TestModel01(base_model.BaseModel):
     self.create_variable(
         'var01', base_layer.WeightHParams(shape=[p.input_dims, p.output_dims]))
 
-  def compute_predictions(self, inputs: JTensor) -> JTensor:
-    return jnp.einsum('bi,io->bo', inputs, self.theta.var01)
+  def compute_predictions(self, input_batch: NestedMap) -> JTensor:
+    return jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01)
 
   def compute_loss(self, predictions: JTensor,
-                   inputs: JTensor) -> Tuple[NestedMap, NestedMap]:
-    del inputs
+                   input_batch: NestedMap) -> Tuple[NestedMap, NestedMap]:
+    del input_batch
     loss = jnp.sum(predictions)
     loss02 = jnp.max(jnp.abs(self.theta.var01))
     # Here loss is the main loss to back-prop into, and loss02 is an eval
@@ -142,7 +145,8 @@ class BaseTaskTest(test_utils.TestCase):
     jax_task = instantiate(task_p)
     prng_key = jax.random.PRNGKey(12345)
     prng_key, init_key = jax.random.split(prng_key)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
         jax_task, init_key, sample_inputs)
 
@@ -157,8 +161,8 @@ class BaseTaskTest(test_utils.TestCase):
 
     num_devices = jax.local_device_count()
     batch_size = 4
-    mdl_inputs = np.random.normal(
-        size=[num_devices, batch_size, input_dims]).astype(np.float32)
+    mdl_inputs = NestedMap(inputs=np.random.normal(
+        size=[num_devices, batch_size, input_dims]).astype(np.float32))
     prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
     train_prng_key = jax.random.split(train_key, num=num_devices)
     eval_prng_key = jax.random.split(eval_key, num=num_devices)
@@ -210,7 +214,8 @@ class BaseTaskTest(test_utils.TestCase):
     jax_task = instantiate(task_p)
     prng_key = jax.random.PRNGKey(12345)
     prng_key, init_key = jax.random.split(prng_key)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
         jax_task, init_key, sample_inputs)
 
@@ -226,8 +231,8 @@ class BaseTaskTest(test_utils.TestCase):
 
     num_devices = jax.local_device_count()
     batch_size = 4
-    mdl_inputs = np.random.normal(
-        size=[num_devices, batch_size, input_dims]).astype(np.float32)
+    mdl_inputs = NestedMap(inputs=np.random.normal(
+        size=[num_devices, batch_size, input_dims]).astype(np.float32))
     prng_key, train_key = jax.random.split(prng_key, 2)
     train_prng_key = jax.random.split(train_key, num=num_devices)
 
@@ -268,7 +273,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
 
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_train_state = trainer_lib.initialize_replicate_model_state(
         instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
 
@@ -323,7 +329,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
 
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_train_state = trainer_lib.initialize_replicate_model_state(
         instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
 
@@ -354,7 +361,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ext_ema = v.ema
 
     # Now initialize also includes warm start (loading from ckpt)
-    sample_inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     train_state = trainer_lib.initialize_replicate_model_state(
         task, jax.random.PRNGKey(1), sample_inputs)
 
