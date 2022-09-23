@@ -659,6 +659,13 @@ class _PeekableInput:
         self._peek = None
     return self._peek
 
+  def reshard_for_pmap(self, arrays):
+    return self._inp.reshard_for_pmap(arrays)
+
+  def reshard_for_spmd(self, arrays, global_shapes, global_mesh, pspecs):
+    return self._inp.reshard_for_spmd(arrays, global_shapes, global_mesh,
+                                      pspecs)
+
 
 class _SummaryContextManager(contextlib.ExitStack):
   """Manage summary writers."""
@@ -833,9 +840,9 @@ def train_and_evaluate_pmap(
         inputs,
         fprop_dtype=fprop_dtype)
 
-  def prepare_model_inputs(model_inputs, step_counter):
+  def prepare_model_inputs(train_input_pipeline, model_inputs, step_counter):
     del step_counter  # Unused in pmap flow
-    return tf.nest.map_structure(py_utils.reshard, model_inputs)
+    return train_input_pipeline.reshard_for_pmap(model_inputs)
 
   num_devices = jax.local_device_count()
   prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
@@ -948,7 +955,8 @@ def train_and_evaluate_pmap(
         logging.info('step=`%d`: Retrieving model inputs.', step_i)
       logging.debug('  Retrieving inputs.')
       model_inputs = train_input_pipeline.get_next_padded()
-      model_inputs = prepare_model_inputs(model_inputs, step_i - initial_step)
+      model_inputs = prepare_model_inputs(train_input_pipeline, model_inputs,
+                                          step_i - initial_step)
       logging.debug('  Retrieved inputs.')
 
       do_profile = train_p.profiler_capture_step is not None
@@ -1046,9 +1054,9 @@ def train_and_evaluate_pmap(
           else:
             logging.debug('  Retrieved eval model_inputs.')
             logging.debug('  Performing eval_step() runs on training split.')
+            eval_inputs = train_input_pipeline.reshard_for_pmap(eval_inputs)
             loss, weighted_scalars, _, summary_tensors = (
-                eval_lib.run_eval_one_step(
-                    eval_inputs, eval_step_fn, reshard_inputs=reshard_inputs))
+                eval_lib.run_eval_one_step(eval_inputs, eval_step_fn))
             logging.debug('  Completed eval_step() runs on training split.')
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):
@@ -1181,16 +1189,13 @@ def train_and_evaluate_spmd_model(
   inputs_shape_dtype = tf.nest.map_structure(
       py_utils.get_global_input_shape_dtype, sample_inputs)
 
-  def prepare_model_inputs(model_inputs, step_counter):
+  def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if create_gda_for_inputs:
       if step_counter <= _N_STEPS_WARMUP_LOGGING:
         start = time.time()
-      py_utils.assert_same_shape_and_dtype(
-          inputs_shape_dtype,
-          tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                model_inputs))
-      model_inputs = py_utils.create_gda(model_inputs, inputs_shape_dtype,
-                                         global_mesh, inputs_pspecs)
+      model_inputs = input_pipeline.reshard_for_spmd(model_inputs,
+                                                     inputs_shape_dtype,
+                                                     global_mesh, inputs_pspecs)
       if step_counter <= _N_STEPS_WARMUP_LOGGING:
         logging.info('GDA train batch input creation time %s',
                      time.time() - start)
@@ -1312,8 +1317,8 @@ def train_and_evaluate_spmd_model(
     if partitioned_train_state is None:
       if create_gda_for_inputs:
         # pjit(model.init) requires a GDA input.
-        sample_inputs = py_utils.create_gda(sample_inputs, inputs_shape_dtype,
-                                            global_mesh, inputs_pspecs)
+        sample_inputs = train_input_for_shape.reshard_for_spmd(
+            sample_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
       _, partitioned_train_state = (
           trainer_lib.initialize_partitioned_model_states(
               jax_task,
@@ -1444,7 +1449,8 @@ def train_and_evaluate_spmd_model(
           logging.info('step=`%d`: Retrieving model inputs.', step_i)
         logging.debug('  Retrieving inputs.')
         model_inputs = train_input_pipeline.get_next_padded()
-        model_inputs = prepare_model_inputs(model_inputs, step_i - initial_step)
+        model_inputs = prepare_model_inputs(train_input_pipeline, model_inputs,
+                                            step_i - initial_step)
         logging.debug('  Retrieved inputs.')
 
         do_profile = train_p.profiler_capture_step is not None
@@ -1545,14 +1551,12 @@ def train_and_evaluate_spmd_model(
               logging.debug('  eval_inputs is None. Skipping eval_train.')
             else:
               if create_gda_for_inputs:
-                eval_inputs = py_utils.create_gda(eval_inputs,
-                                                  inputs_shape_dtype,
-                                                  global_mesh, inputs_pspecs)
+                eval_inputs = train_input_pipeline.reshard_for_spmd(
+                    eval_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
               logging.debug('  Retrieved eval model_inputs.')
               logging.debug('  Performing eval_step() runs on training split.')
               loss, weighted_scalars, _, summary_tensors = (
-                  eval_lib.run_eval_one_step(
-                      eval_inputs, eval_step_fn, reshard_inputs=reshard_inputs))
+                  eval_lib.run_eval_one_step(eval_inputs, eval_step_fn))
               logging.debug('  Completed eval_step() runs on training split.')
               if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                               summary_tensors):

@@ -128,20 +128,16 @@ def trim_opt_states(
 
 
 def run_eval_one_step(eval_inputs: NestedJTensor,
-                      eval_step: Callable[[NestedJTensor], Any],
-                      reshard_inputs: Optional[bool] = False):
+                      eval_step: Callable[[NestedJTensor], Any]):
   """Runs eval on entire batch of eval inputs or for one step.
 
   Args:
     eval_inputs: `NestedJTensor` of eval inputs.
     eval_step: The eval step which evaluates the model on eval inputs.
-    reshard_inputs: Whether to reshard inputs (in pmap) or not.
 
   Returns:
     Tuple of eval loss, mean metrics and eval summaries.
   """
-  if reshard_inputs:
-    eval_inputs = tf.nest.map_structure(py_utils.reshard, eval_inputs)
   _, loss, weighted_scalars, per_example_output, summary_tensors = eval_step(
       eval_inputs)
   return loss, weighted_scalars, per_example_output, summary_tensors
@@ -211,16 +207,13 @@ def run_eval_loop_over_test_splits(
         break
 
       if global_mesh and create_gda_for_inputs:
-        py_utils.assert_same_shape_and_dtype(
-            eval_inputs_shape,
-            tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                  eval_inputs))
-        eval_inputs = py_utils.create_gda(eval_inputs, eval_inputs_shape,
-                                          global_mesh, eval_inputs_pspecs)
+        eval_inputs = model_inputs[split].reshard_for_spmd(
+            eval_inputs, eval_inputs_shape, global_mesh, eval_inputs_pspecs)
+      elif reshard_inputs:
+        eval_inputs = model_inputs[split].reshard_for_pmap(eval_inputs)
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
       (eval_loss, eval_metrics, per_example_output,
-       eval_summary_tensors) = run_eval_one_step(
-           eval_inputs, eval_step, reshard_inputs=reshard_inputs)
+       eval_summary_tensors) = run_eval_one_step(eval_inputs, eval_step)
 
       logging.info('Finished eval step on input batch %d for %s',
                    step_num, model_inputs[split].hparams.name)
@@ -647,6 +640,7 @@ class _SpmdEvalRunner:
       jax_task: tasks_lib.SingleTask,
       global_mesh: maps.Mesh,
       init_key: PRNGKey,
+      sample_input_p: base_input.BaseInput.HParams,
       sample_inputs: NestedJTensor,
       checkpoint_dir: str,
       checkpoint_type: CheckpointType,
@@ -697,8 +691,8 @@ class _SpmdEvalRunner:
 
       if (py_utils.gda_or_jax_array() and
           checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE):
-        sample_inputs = py_utils.create_gda(sample_inputs, inputs_shape,
-                                            global_mesh, inputs_partition_specs)
+        sample_inputs = sample_input_p.cls.reshard_for_spmd(
+            sample_inputs, inputs_shape, global_mesh, inputs_partition_specs)
 
       if partitioned_train_state is None:
         _, partitioned_train_state = (
@@ -835,6 +829,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
        jax_task,
        global_mesh,
        init_key,
+       eval_input_p[0],
        sample_inputs,
        checkpoint_dir,
        checkpoint_type,
@@ -1378,7 +1373,7 @@ def decode_once_pmap_model(
       except (tf.errors.OutOfRangeError, StopIteration):
         inputs[split].reset()
         break
-      batch = tf.nest.map_structure(py_utils.reshard, batch)
+      batch = inputs[split].reshard_for_pmap(batch)
       (batch_metrics, out, summary_tensors,
        updated_metrics) = decode_step_func(batch)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
@@ -1572,6 +1567,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
          jax_task,
          global_mesh,
          init_key,
+         sample_input_p,
          inputs_sample,
          restore_checkpoint_dir,
          checkpoint_type,
@@ -1807,8 +1803,8 @@ def decode_once_spmd_model(
         inputs[split].reset()
         break
       if use_gda:
-        batch = py_utils.create_gda(batch, inputs_shape, global_mesh,
-                                    inputs_partition_spec)
+        batch = inputs[split].reshard_for_spmd(batch, inputs_shape, global_mesh,
+                                               inputs_partition_spec)
       (weighted_scalars, out,
        updated_metrics), updated_vars = spmd_decode_step_fn(batch)
 
@@ -2110,7 +2106,7 @@ def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
         input_gen.reset()
         break
 
-      pmap_batch = jax.tree_map(py_utils.reshard, batch)
+      pmap_batch = input_gen.reshard_for_pmap(batch)
       outputs = infer_pmap_step(replicated_model_states, output_seeds,
                                 pmap_batch)
       # Get first device's output since it's been replicated by all-gather
