@@ -77,6 +77,7 @@ class SummaryUtilsTest(parameterized.TestCase):
     summary_tensors_1 = {
         'summary_a_scalar': jnp.array([9., 8.]),
         'summary_b_image': jnp.ones(shape=[1, 4, 4], dtype=jnp.float32),
+        'summary_c_audio': jnp.zeros(shape=[10, 3], dtype=jnp.float32),
     }
     steps_per_sec_1 = 37.
 
@@ -88,6 +89,7 @@ class SummaryUtilsTest(parameterized.TestCase):
     summary_tensors_2 = {
         'summary_a_scalar': jnp.array([7., 6.]),
         'summary_b_image': 10 * jnp.ones(shape=[2, 3, 4], dtype=jnp.float32),
+        'summary_c_audio': jnp.zeros(shape=[12, 1], dtype=jnp.float32),
     }
     steps_per_sec_2 = 35.
 
@@ -95,19 +97,21 @@ class SummaryUtilsTest(parameterized.TestCase):
         tf.summary, 'scalar', return_value=None) as mock_tf_summary_scalar:
       with mock.patch.object(
           tf.summary, 'image', return_value=None) as mock_tf_summary_image:
-        summary_handler.process(
-            step=1,
-            loss=loss_1,
-            weighted_scalars=weighted_scalars_1,
-            summary_tensors=summary_tensors_1,
-            steps_per_sec=steps_per_sec_1)
-        summary_handler.process(
-            step=2,
-            loss=loss_2,
-            weighted_scalars=weighted_scalars_2,
-            summary_tensors=summary_tensors_2,
-            steps_per_sec=steps_per_sec_2)
-        summary_handler.close()
+        with mock.patch.object(
+            tf.summary, 'audio', return_value=None) as mock_tf_summary_audio:
+          summary_handler.process(
+              step=1,
+              loss=loss_1,
+              weighted_scalars=weighted_scalars_1,
+              summary_tensors=summary_tensors_1,
+              steps_per_sec=steps_per_sec_1)
+          summary_handler.process(
+              step=2,
+              loss=loss_2,
+              weighted_scalars=weighted_scalars_2,
+              summary_tensors=summary_tensors_2,
+              steps_per_sec=steps_per_sec_2)
+          summary_handler.close()
     # In this test all summaries use the latest values from step 2.
     expected_loss = jnp.mean(loss_2)
     mock_tf_summary_scalar.assert_any_call('loss',
@@ -142,6 +146,10 @@ class SummaryUtilsTest(parameterized.TestCase):
         'summary_b_image/0',
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_b_image'])),
         2)
+    mock_tf_summary_audio.assert_any_call(
+        'summary_c_audio/0',
+        MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_c_audio'])),
+        44000, 2)
 
   @parameterized.named_parameters(
       ('', False),
@@ -167,6 +175,7 @@ class SummaryUtilsTest(parameterized.TestCase):
     summary_tensors_1 = {
         'summary_a_scalar': jnp.array([9., 8.]),
         'summary_b_image': jnp.ones(shape=[2, 3, 4], dtype=jnp.float32),
+        'summary_c_audio': jnp.zeros(shape=[10, 3], dtype=jnp.float32),
     }
     steps_per_sec_1 = 37.
 
@@ -178,6 +187,7 @@ class SummaryUtilsTest(parameterized.TestCase):
     summary_tensors_2 = {
         'summary_a_scalar': jnp.array([7., 6.]),
         'summary_b_image': 10 * jnp.ones(shape=[2, 3, 4], dtype=jnp.float32),
+        'summary_c_audio': 5 * jnp.zeros(shape=[10, 3], dtype=jnp.float32),
     }
     steps_per_sec_2 = 35.
 
@@ -185,19 +195,21 @@ class SummaryUtilsTest(parameterized.TestCase):
         tf.summary, 'scalar', return_value=None) as mock_tf_summary_scalar:
       with mock.patch.object(
           tf.summary, 'image', return_value=None) as mock_tf_summary_image:
-        summary_handler.process(
-            step=1,
-            loss=loss_1,
-            weighted_scalars=weighted_scalars_1,
-            summary_tensors=summary_tensors_1,
-            steps_per_sec=steps_per_sec_1)
-        summary_handler.process(
-            step=2,
-            loss=loss_2,
-            weighted_scalars=weighted_scalars_2,
-            summary_tensors=summary_tensors_2,
-            steps_per_sec=steps_per_sec_2)
-        summary_handler.close()
+        with mock.patch.object(
+            tf.summary, 'audio', return_value=None) as mock_tf_summary_audio:
+          summary_handler.process(
+              step=1,
+              loss=loss_1,
+              weighted_scalars=weighted_scalars_1,
+              summary_tensors=summary_tensors_1,
+              steps_per_sec=steps_per_sec_1)
+          summary_handler.process(
+              step=2,
+              loss=loss_2,
+              weighted_scalars=weighted_scalars_2,
+              summary_tensors=summary_tensors_2,
+              steps_per_sec=steps_per_sec_2)
+          summary_handler.close()
     # In this test all summaries use accumulated values over steps 1 and 2.
     expected_loss = np.mean([np.array(l) for l in [loss_1, loss_2]])
     mock_tf_summary_scalar.assert_any_call('loss',
@@ -245,6 +257,14 @@ class SummaryUtilsTest(parameterized.TestCase):
         'summary_b_image/0',
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_b_image'])),
         2)
+    mock_tf_summary_audio.assert_any_call(
+        'summary_c_audio/0',
+        MatcherArrayAlmostEqual(np.array(summary_tensors_1['summary_c_audio'])),
+        44000, 2)
+    mock_tf_summary_audio.assert_any_call(
+        'summary_c_audio/0',
+        MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_c_audio'])),
+        44000, 2)
 
 
 if __name__ == '__main__':

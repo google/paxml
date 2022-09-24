@@ -56,6 +56,7 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 # Maximum number of images written to a single summary entry.
 MAX_IMAGES_PER_SUMMARY = 64
+MAX_AUDIOS_PER_SUMMARY = 64
 MAX_TEXTS_PER_SUMMARY = 64
 
 
@@ -208,12 +209,15 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   """Aggregates summaries from different replicas in pmap."""
   scalar_summaries = {}
   image_summaries = {}
+  audio_summaries = {}
   for k, v in summary_tensors.items():
     summary_type = base_layer.get_summary_type_from_key(k)
     if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
       scalar_summaries[k] = v
     elif base_layer.get_summary_base_type(summary_type) == SummaryType.IMAGE:
       image_summaries[k] = v
+    elif base_layer.get_summary_base_type(summary_type) == SummaryType.AUDIO:
+      audio_summaries[k] = v
 
   # Compute the mean of scalars.
   scalar_summaries = jax.lax.pmean(
@@ -226,12 +230,18 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   image_summaries = jax.tree_map(
       lambda x: jnp.reshape(x, [-1] + list(x.shape)[-3:])[:max_entries],
       image_summaries)
+  audio_summaries = jax.tree_map(
+      lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
+      audio_summaries)
+  max_entries = MAX_AUDIOS_PER_SUMMARY
+  audio_summaries = jax.tree_map(
+      lambda x: jnp.reshape(x, [-1] + list(x.shape[-2:]))[:max_entries],
+      audio_summaries)
 
   summary_tensors = summary_tensors.copy()
-  for k, v in scalar_summaries.items():
-    summary_tensors[k] = v
-  for k, v in image_summaries.items():
-    summary_tensors[k] = v
+  for summary_dict in (scalar_summaries, image_summaries, audio_summaries):
+    for k, v in summary_dict.items():
+      summary_tensors[k] = v
   return summary_tensors
 
 
@@ -277,7 +287,9 @@ def write_summary_tensor(step_i: int, key: str,
                          summary_type: SummaryType) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
-    if summary_type == SummaryType.SCALAR or summary_type == SummaryType.IMAGE:
+    if summary_type in {
+        SummaryType.SCALAR, SummaryType.IMAGE, SummaryType.AUDIO
+    }:
       return
   if isinstance(tensor, (list, tuple)):
     tensors = tensor
@@ -304,6 +316,16 @@ def write_summary_tensor(step_i: int, key: str,
       for i in range(min(tensor.shape[0], remaining_max_images)):
         tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
       remaining_max_images -= tensor.shape[0]
+  elif base_layer.get_summary_base_type(summary_type) == SummaryType.AUDIO:
+    remaining_max_audios = MAX_AUDIOS_PER_SUMMARY
+    for tensor in tensors_it:
+      if remaining_max_audios <= 0:
+        break
+      tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))
+      # TODO(nanxinchen): Make the sampling rate configurable
+      for i in range(min(tensor.shape[0], remaining_max_audios)):
+        tf_summary.audio(f'{key}/{i}', tensor[i:i + 1], 44000, step_i)
+      remaining_max_audios -= tensor.shape[0]
   elif base_layer.get_summary_base_type(summary_type) == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
     for tensor in tensors_it:
