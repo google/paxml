@@ -774,8 +774,9 @@ class SeqIOInput(base_input.BaseInput):
           logging.info(
               'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
               'is_correct=%s\ntarget=%s\nscore=%s\n\n',
-              e['inputs_pretokenized'], e['targets_pretokenized'],
-              e.get('is_correct', 'N/A'), target_post, score)
+              e.get('inputs_pretokenized', 'None'),
+              e.get('targets_pretokenized', 'None'), e.get('is_correct', 'N/A'),
+              target_post, score)
           verbose_entries_idx += 1
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
@@ -823,7 +824,8 @@ class SeqIOInput(base_input.BaseInput):
         logging.info(
             'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
             'is_correct=%s\ntarget=%s\nscore=%s\n\n',
-            example['inputs_pretokenized'], example['targets_pretokenized'],
+            example.get('inputs_pretokenized', 'None'),
+            example.get('targets_pretokenized', 'None'),
             example.get('is_correct', 'N/A'), target_post, score)
         verbose_entries_idx += 1
 
