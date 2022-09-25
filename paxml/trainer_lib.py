@@ -426,7 +426,7 @@ def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
   def _maybe_zero_out_grad_fn(var_grad, var_learnable):
     if var_learnable:
       return var_grad
-    elif var_grad.dtype is jax.dtypes.float0:
+    elif var_grad.dtype == jax.dtypes.float0:
       # Gradient of an integer-valued input cannot be consumed by jnp operation.
       # Zerso dtype should be int32 same as the original input that produced
       # float0.
