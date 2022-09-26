@@ -206,7 +206,9 @@ def run_eval_loop_over_test_splits(
         model_inputs[split].reset()
         break
 
-      if global_mesh and create_gda_for_inputs:
+      if (global_mesh and
+          (create_gda_for_inputs or
+           model_inputs[split].hparams.experimental_remote_input)):
         eval_inputs = model_inputs[split].reshard_for_spmd(
             eval_inputs, eval_inputs_shape, global_mesh, eval_inputs_pspecs)
       elif reshard_inputs:
@@ -669,6 +671,9 @@ class _SpmdEvalRunner:
           state_specs=partitioned_specs,
           use_orbax=use_orbax)
       py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
+      create_gda_for_inputs = (
+          py_utils.gda_or_jax_array() and
+          checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
 
       inputs_shape = tf.nest.map_structure(
           py_utils.get_global_input_shape_dtype, sample_inputs)
@@ -689,8 +694,7 @@ class _SpmdEvalRunner:
                 is_eval=True,
                 unpadded_global_batch_size=unpadded_global_batch_size))
 
-      if (py_utils.gda_or_jax_array() and
-          checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE):
+      if (create_gda_for_inputs or sample_input_p.experimental_remote_input):
         sample_inputs = sample_input_p.cls.reshard_for_spmd(
             sample_inputs, inputs_shape, global_mesh, inputs_partition_specs)
 
@@ -1808,7 +1812,7 @@ def decode_once_spmd_model(
       except (tf.errors.OutOfRangeError, StopIteration):
         inputs[split].reset()
         break
-      if use_gda:
+      if use_gda or inputs[split].hparams.experimental_remote_input:
         batch = inputs[split].reshard_for_spmd(batch, inputs_shape, global_mesh,
                                                inputs_partition_spec)
       (weighted_scalars, out,

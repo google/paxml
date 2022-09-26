@@ -644,6 +644,10 @@ class _PeekableInput:
     self._inp = inp
     self._peek = None
 
+  @property
+  def hparams(self):
+    return self._inp.hparams
+
   def get_next_padded(self):
     if self._peek is None:
       return self._inp.get_next_padded()
@@ -1190,7 +1194,8 @@ def train_and_evaluate_spmd_model(
       py_utils.get_global_input_shape_dtype, sample_inputs)
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
-    if create_gda_for_inputs:
+    if (create_gda_for_inputs or
+        input_pipeline.hparams.experimental_remote_input):
       if step_counter <= _N_STEPS_WARMUP_LOGGING:
         start = time.time()
       model_inputs = input_pipeline.reshard_for_spmd(model_inputs,
@@ -1315,7 +1320,8 @@ def train_and_evaluate_spmd_model(
 
     # Randomly initialized variables if no files in checkpoint dir.
     if partitioned_train_state is None:
-      if create_gda_for_inputs:
+      if (create_gda_for_inputs or
+          train_input_for_shape.hparams.experimental_remote_input):
         # pjit(model.init) requires a GDA input.
         sample_inputs = train_input_for_shape.reshard_for_spmd(
             sample_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
@@ -1550,7 +1556,8 @@ def train_and_evaluate_spmd_model(
             if eval_inputs is None:
               logging.debug('  eval_inputs is None. Skipping eval_train.')
             else:
-              if create_gda_for_inputs:
+              if (create_gda_for_inputs or
+                  train_input_pipeline.hparams.experimental_remote_input):
                 eval_inputs = train_input_pipeline.reshard_for_spmd(
                     eval_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
               logging.debug('  Retrieved eval model_inputs.')
