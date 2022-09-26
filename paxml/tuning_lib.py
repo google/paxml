@@ -125,6 +125,9 @@ def tune(trial_fn: TrialFn,
   reward_fn = search_hparams.search_reward.Instantiate()
   max_num_trials = max_num_trials or search_hparams.max_num_trials
   errors_to_skip = search_hparams.errors_to_skip or []
+  metric_aggregator = (
+      search_hparams.metric_aggregator
+      or automl.LastReportedMetricValues.HParams()).Instantiate()
 
   search_space = get_search_space(experiment_config)
   if search_space.dna_spec.is_constant:
@@ -175,6 +178,8 @@ def tune(trial_fn: TrialFn,
                 f'Trial termination at step {global_step} started.')
             # `feedback.done` should be called just once per trial.
             if jax.process_index() == 0:
+              _add_final_measurement(
+                  feedback, metric_aggregator, reward_fn, global_step + 1)
               feedback.done()
             py_utils.sync_global_devices(
                 f'Trial termination at step {global_step} completed.')
@@ -236,6 +241,29 @@ def _write_file_once(file_path, content):
           'file. This is not an issue as the file is only created for '
           'debugging purpose and has the same content among all the workers. '
           'So any successful write will achieve this purpose.', file_path)
+
+
+def _add_final_measurement(
+    feedback: pg.tuning.Feedback,
+    metric_aggregator: automl.MetricAggregator,
+    reward_fn: automl.BaseReward,
+    global_step: int):
+  """Adds final measurement to trial based on metric aggregator."""
+  # Poll the metrics across steps for aggregation.
+  metrics_across_steps = []
+  for m in feedback.get_trial().measurements:
+    metrics = dict(m.metrics)
+    metrics['reward'] = m.reward
+    metrics_across_steps.append((m.step, metrics))
+
+  final_metrics = metric_aggregator(metrics_across_steps)
+  final_metrics.pop('reward', None)
+  final_reward = reward_fn(final_metrics, global_step)
+  feedback.add_measurement(final_reward, final_metrics, step=global_step)
+  logging.info(
+      'Final measurement is reported to trial %d at step %d '
+      'with reward value %f and metrics %s.',
+      feedback.id, global_step, final_reward, final_metrics)
 
 
 class EvalMetrics(NamedTuple):

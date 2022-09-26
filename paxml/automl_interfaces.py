@@ -19,7 +19,7 @@ import abc
 import dataclasses
 import enum
 import re
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Type, Union
 from praxis import base_hyperparams
 import pyglove as pg
 
@@ -44,12 +44,32 @@ class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
     """Returns a float value as reward from a dict of metrics."""
 
 
+class MetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
+  """Aggregator for gathering metrics from multiple steps."""
+
+  @abc.abstractmethod
+  def __call__(
+      self,
+      metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Returns an aggregated metric dict from metrics from multiple steps.
+
+    Args:
+      metrics_across_steps: A sequence of tuple (step, metrics).
+
+    Returns:
+      A metric dict used for final reward computing.
+    """
+
+
 class SearchHParams(BaseHyperParams):
   """Hyperparameters for an AutoML search.
 
   Attributes:
     search_algorithm: Hyperparameters for search algorithm.
     search_reward: Hyperparameters for search reward.
+    metric_aggregator: Hyperparameters for metric aggregator. If None,
+      `automl.LastReportedValues` will be used.
     max_num_trials: Max number of trials for the search. If None, there is no
       limit.
     errors_to_skip: An optional field to specify on what errors the trial
@@ -61,6 +81,7 @@ class SearchHParams(BaseHyperParams):
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
+  metric_aggregator: Optional[MetricAggregator.HParams] = None
   max_num_trials: int = None
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None

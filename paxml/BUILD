@@ -463,6 +463,7 @@ py_strict_test(
         ":base_experiment",
         ":base_task",
         # Implicit absl.testing.absltest.absltest dependency.
+        "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
     ],
 )

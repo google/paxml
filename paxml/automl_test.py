@@ -21,7 +21,11 @@ from absl.testing import absltest
 from paxml import automl
 from paxml import base_experiment
 from paxml import base_task
+from praxis import base_hyperparams
 import pyglove as pg
+
+
+instantiate = base_hyperparams.instantiate
 
 
 class MetricTest(absltest.TestCase):
@@ -229,16 +233,17 @@ class SearchAlgorithmsTest(absltest.TestCase):
   """Tests for search algorithms."""
 
   def test_random_search(self):
-    algorithm = automl.RandomSearch.HParams(seed=1).Instantiate()
+    algorithm = instantiate(automl.RandomSearch.HParams(seed=1))
     self.assertTrue(pg.eq(algorithm(), pg.geno.Random(seed=1)))
 
   def test_sweeping(self):
-    algorithm = automl.Sweeping.HParams().Instantiate()
+    algorithm = instantiate(automl.Sweeping.HParams())
     self.assertTrue(pg.eq(algorithm(), pg.geno.Sweeping()))
 
   def test_regularized_evolution(self):
-    algorithm = automl.RegularizedEvolution.HParams(
-        population_size=10, tournament_size=5).Instantiate()
+    algorithm = instantiate(
+        automl.RegularizedEvolution.HParams(
+            population_size=10, tournament_size=5))
     self.assertTrue(
         pg.eq(
             algorithm(),
@@ -252,17 +257,18 @@ class RewardsTest(absltest.TestCase):
   """Tests for common reward functions."""
 
   def test_single_objective(self):
-    reward_fn = automl.SingleObjective.HParams(
-        metric=automl.Metric.eval('accuracy')).Instantiate()
+    reward_fn = instantiate(automl.SingleObjective.HParams(
+        metric=automl.Metric.eval('accuracy')))
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
     self.assertTrue(math.isnan(
         reward_fn({'eval_test_abc/metrics/accuracy': math.nan}, 0)))
 
-    reward_fn = automl.SingleObjective.HParams(
-        metric=automl.Metric.eval('accuracy'),
-        goal='minimize',
-        reward_for_nan=-1.0).Instantiate()
+    reward_fn = instantiate(
+        automl.SingleObjective.HParams(
+            metric=automl.Metric.eval('accuracy'),
+            goal='minimize',
+            reward_for_nan=-1.0))
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(
         reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), -0.9)
@@ -283,18 +289,18 @@ class RewardsTest(absltest.TestCase):
       _ = reward_fn({'eval_test_abc/log_pplx': 0.1}, 0)
 
   def test_multi_objective(self):
-    reward_fn = automl.MultiObjective.HParams(
-        metrics=[automl.Metric.eval('accuracy')]).Instantiate()
+    reward_fn = instantiate(automl.MultiObjective.HParams(
+        metrics=[automl.Metric.eval('accuracy')]))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
 
-    reward_fn = automl.MultiObjective.HParams(
+    reward_fn = instantiate(automl.MultiObjective.HParams(
         metrics=[
             automl.Metric.eval('accuracy'),
             automl.Metric.train_steps_per_second()
         ],
         aggregator=automl.MnasHard.HParams(cost_objective=150),
-        reward_for_nan=-1.0).Instantiate()
+        reward_for_nan=-1.0))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(
         reward_fn(
@@ -329,7 +335,7 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
   """Tests for multi-objective aggregators."""
 
   def test_tunas_abs(self):
-    aggregator = automl.TunasAbsolute.HParams(cost_objective=1).Instantiate()
+    aggregator = instantiate(automl.TunasAbsolute.HParams(cost_objective=1))
     self.assertEqual(aggregator([2., 2.]), 1.93)
 
     with self.assertRaisesRegex(ValueError,
@@ -341,12 +347,75 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
       _ = automl.TunasAbsolute.HParams()
 
   def test_mnas_hard(self):
-    aggregator = automl.MnasHard.HParams(cost_objective=1).Instantiate()
+    aggregator = instantiate(automl.MnasHard.HParams(cost_objective=1))
     self.assertEqual(aggregator([2., 2.]), 1.9052759960878747)
 
   def test_mnas_soft(self):
-    aggregator = automl.MnasSoft.HParams(cost_objective=2.).Instantiate()
+    aggregator = instantiate(automl.MnasSoft.HParams(cost_objective=2.))
     self.assertEqual(aggregator([2., 1.]), 2.0994333672461347)
+
+
+class MetricAggregatorTest(absltest.TestCase):
+  """Tests for metric aggregators."""
+
+  def test_last_reported_metric_values(self):
+    aggregator = instantiate(automl.LastReportedMetricValues.HParams())
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.3}),
+            (300, {'reward': 0.4, 'eval_test_abc/metrics/total_loss': 0.4}),
+        ]),
+        {'reward': 0.4, 'eval_test_abc/metrics/total_loss': 0.4})
+
+  def test_average_metric_values(self):
+    aggregator = instantiate(automl.AverageMetricValues.HParams())
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.3}),
+        ]),
+        {'reward': 0.25, 'eval_test_abc/metrics/total_loss': 0.25})
+
+  def test_metrics_with_max_value(self):
+    aggregator = instantiate(automl.MetricsWithMaxValue.HParams())
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+        ]),
+        {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2})
+
+    aggregator = instantiate(automl.MetricsWithMaxValue.HParams(
+        metric=automl.Metric.eval('total_loss')))
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+        ]),
+        {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
+
+  def test_metrics_with_min_value(self):
+    aggregator = instantiate(automl.MetricsWithMinValue.HParams())
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+        ]),
+        {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
+
+    aggregator = instantiate(automl.MetricsWithMinValue.HParams(
+        metric=automl.Metric.eval('total_loss')))
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+        ]),
+        {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1})
 
 
 class EarlyStoppingErrorTest(absltest.TestCase):

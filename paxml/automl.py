@@ -16,6 +16,7 @@
 """AutoML utility library for PAX."""
 
 import abc
+import collections
 import inspect
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
@@ -30,6 +31,7 @@ InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 
 BaseAlgorithm = automl_interfaces.BaseAlgorithm
 BaseReward = automl_interfaces.BaseReward
+MetricAggregator = automl_interfaces.MetricAggregator
 SearchHParams = automl_interfaces.SearchHParams
 MetricType = automl_interfaces.MetricType
 Metric = automl_interfaces.Metric
@@ -49,6 +51,7 @@ def hyperparameter_tuning(
     goal: str = 'maximize',
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
+    metric_aggregator: Optional[MetricAggregator.HParams] = None,
     reward_for_nan: Optional[float] = None) -> SearchHParams:
   """Returns a common search HParams for hyper-parameter tuning.
 
@@ -62,6 +65,9 @@ def hyperparameter_tuning(
       `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
       RuntimeError or errors that match 'XLACompilation.*' will be treated as
       to skip.
+    metric_aggregator: An optional metric aggregator hparams indicating how
+      metrics will be aggregated at the end of the search for computing the
+      reward. If None, the last reported metrics will be used.
     reward_for_nan: An optional float used as the reward when metric value is
       NaN. If not specified, the reward will remain NaN so the trial will be
       skipped by the search algorithm.
@@ -75,7 +81,8 @@ def hyperparameter_tuning(
       search_reward=SingleObjective.HParams(
           metric=metric, goal=goal, reward_for_nan=reward_for_nan),
       max_num_trials=max_num_trials,
-      errors_to_skip=errors_to_skip)
+      errors_to_skip=errors_to_skip,
+      metric_aggregator=metric_aggregator)
 
 
 def neural_architecture_search(
@@ -86,6 +93,7 @@ def neural_architecture_search(
     max_num_trials: int = 10000,
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
+    metric_aggregator: Optional[MetricAggregator.HParams] = None,
     reward_for_nan: Optional[float] = None
     ) -> SearchHParams:
   """Search params for Neural Architecture Search."""
@@ -120,7 +128,8 @@ def neural_architecture_search(
       search_algorithm=RegularizedEvolution.HParams(),
       search_reward=reward,
       max_num_trials=max_num_trials,
-      errors_to_skip=errors_to_skip)
+      errors_to_skip=errors_to_skip,
+      metric_aggregator=metric_aggregator)
 
 
 #
@@ -367,6 +376,98 @@ class MnasSoft(TwoObjectiveAggregator):
     cost_ratio = cost / self._hparams.cost_objective
     cost_adjustment = pow(cost_ratio, self._hparams.exponent)
     return quality * cost_adjustment
+
+
+#
+# Common metric aggregators across multiple steps.
+#
+
+
+class LastReportedMetricValues(MetricAggregator):
+  """Returns the last reported metrics."""
+
+  def __call__(
+      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Returns an aggregated metric dict from metrics from multiple steps."""
+    return metrics_across_steps[-1][1]
+
+
+class AverageMetricValues(MetricAggregator):
+  """Returns the average values of per-step metrics."""
+
+  def __call__(
+      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Returns an aggregated metric dict from metrics from multiple steps."""
+    accumulated_metrics = collections.defaultdict(list)
+    for _, step_metrics in metrics_across_steps:
+      for k, v in step_metrics.items():
+        accumulated_metrics[k].append(v)
+
+    metrics = {}
+    for k, v in accumulated_metrics.items():
+      metrics[k] = sum(v) / len(v)
+    return metrics
+
+
+class MetricsWithMaxValue(MetricAggregator):
+  """Returns the step metrics which has the max value on a metric."""
+
+  class HParams(MetricAggregator.HParams):
+    """Hyperparameters for ValueWithMax.
+
+    Attributes:
+      metric: An optional metric against whom to choose the max value.
+        If None, the comparison is against the reward.
+    """
+    metric: Optional[Metric] = None
+
+  def __call__(
+      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Returns an aggregated metric dict from metrics from multiple steps."""
+    metric = self._hparams.metric or Metric('reward')
+    max_i, max_value = None, None
+    # TODO(daiyip): current code assumes that all metrics are reported at
+    # the same step, which might not be the case if we allow multiple processes
+    # to report the measurement. We may need to revisit the implementation once
+    # multi-role reporting is supported.
+    for i, (_, step_metrics) in enumerate(metrics_across_steps):
+      v = metric.get_value(step_metrics)
+      if max_value is None or v >= max_value:
+        max_i, max_value = i, v
+    return metrics_across_steps[max_i][1]
+
+
+class MetricsWithMinValue(MetricAggregator):
+  """Returns the step metrics which has the min value on an metric."""
+
+  class HParams(MetricAggregator.HParams):
+    """Hyperparameters for ValueWithMax.
+
+    Attributes:
+      metric: An optional metric against whom to choose the max value.
+        If None, the comparison is against the reward.
+    """
+    metric: Optional[Metric] = None
+
+  def __call__(
+      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Returns an aggregated metric dict from metrics from multiple steps."""
+    metric = self._hparams.metric or Metric('reward')
+    min_i, min_value = None, None
+    for i, (_, step_metrics) in enumerate(metrics_across_steps):
+      v = metric.get_value(step_metrics)
+      if min_value is None or v <= min_value:
+        min_i, min_value = i, v
+    return metrics_across_steps[min_i][1]
+
+
+#
+# Exception used to early stop a trial.
+#
 
 
 class EarlyStoppingError(BaseException):

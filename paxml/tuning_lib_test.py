@@ -59,6 +59,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
         search_algorithm=automl.RandomSearch.HParams(seed=1),
         search_reward=automl.SingleObjective.HParams(
             metric=automl.Metric.eval('reward')),
+        metric_aggregator=automl.AverageMetricValues.HParams(),
         max_num_trials=10)
 
 
@@ -87,11 +88,14 @@ class TuningLibTest(absltest.TestCase):
       task_p = experiment_config.task()
       _ = experiment_config.datasets()
       _ = experiment_config.decoder_datasets()
-      reward = task_p['learning_rate'] * task_p['batch_size']
+      reward = task_p['learning_rate'] * task_p['batch_size'] * 1
       if reward > 5:
         reward = math.nan
+      # Report measurements at step 1 and step 2.
       early_stopping_fn({'eval_test_abc/metrics/reward': reward},
-                        trainer_lib.RunningMode.EVAL, 0, True)
+                        trainer_lib.RunningMode.EVAL, 1, False)
+      early_stopping_fn({'eval_test_abc/metrics/reward': reward * 3},
+                        trainer_lib.RunningMode.EVAL, 2, True)
 
     job_log_dir = absltest.get_default_test_tmpdir()
     tuning_lib.tune(run_experiment, TuningExperiment(),
@@ -100,8 +104,12 @@ class TuningLibTest(absltest.TestCase):
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, False, False, False])
+    # We use the average of the metrics across steps as the final measurement.
     self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     [0.0, 0.32, 3.2, 0.32, 1.6])
+                     [0.0, 0.32 * 2, 3.2 * 2, 0.32 * 2, 1.6 * 2])
+    # We added an extra measurement for the final report, with final step + 1.
+    self.assertEqual([t.final_measurement.step for t in result.trials],
+                     [0, 3, 3, 3, 3])
 
 
 if __name__ == '__main__':
