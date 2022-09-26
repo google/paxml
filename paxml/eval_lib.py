@@ -138,7 +138,7 @@ def run_eval_one_step(eval_inputs: NestedJTensor,
   Returns:
     Tuple of eval loss, mean metrics and eval summaries.
   """
-  _, loss, weighted_scalars, per_example_output, summary_tensors = eval_step(
+  loss, weighted_scalars, per_example_output, summary_tensors = eval_step(
       eval_inputs)
   return loss, weighted_scalars, per_example_output, summary_tensors
 

@@ -186,8 +186,8 @@ class BaseTaskTest(test_utils.TestCase):
       param = replicated_mdl_states.mdl_vars[PARAMS]['var01'][0]
       self.assertAllClose(param, np.zeros((input_dims, output_dims)), atol=1e-5)
 
-    _, _, mean_metrics, _, _ = p_eval_step(replicated_mdl_states, eval_prng_key,
-                                           mdl_inputs)
+    _, mean_metrics, _, _ = p_eval_step(replicated_mdl_states, eval_prng_key,
+                                        mdl_inputs)
 
     # The VN is not applied for eval
     self.assertEqual(np.array(mean_metrics['loss02'])[0], 0.0)

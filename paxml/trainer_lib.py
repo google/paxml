@@ -717,8 +717,7 @@ def _eval_step_single_learner_with_model(
     states: TrainState,
     prng_key: PRNGKey,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32
-) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
+    fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[Any, Any, Any, SummaryDict]:
   """Evaluates a model for a single step.
 
   This utility is specialized for the single learner case.
@@ -794,11 +793,7 @@ def _eval_step_single_learner_with_model(
 
   aggregated_summaries = NestedMap(fwd_summary_tensors=aggregated_summaries)
 
-  # Adding the unchanged state to the return list so that both
-  # eval_step_single_learner and train_step_single_learner have the same api to
-  # facilitate some down-stream code.
-  return (states, mean_loss, aggregated_scalars, per_example_out,
-          aggregated_summaries)
+  return mean_loss, aggregated_scalars, per_example_out, aggregated_summaries
 
 
 def eval_step_single_learner(
@@ -806,8 +801,7 @@ def eval_step_single_learner(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32
-) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
+    fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[Any, Any, Any, SummaryDict]:
   """Evaluates a model (or submodel)."""
   # default model is the base model in jax_task
   model = jax_task.model
@@ -1190,12 +1184,13 @@ def get_partitioned_spmd_model_step_fn(
     # Reshard inputs.
     inputs = jax.tree_map(reshard_inputs_fn, inputs)
 
-    fn = eval_step_single_learner if is_eval else train_step_single_learner
-    fn_out = fn(
+    if is_eval:
+      return eval_step_single_learner(
+          jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
+
+    fn_out = train_step_single_learner(
         jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
-
     assert len(fn_out) > 1
-
     new_states = jax.tree_map(
         _maybe_pad,
         fn_out[0],
@@ -1230,9 +1225,9 @@ def get_partitioned_spmd_model_step_fn(
   # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
   fn_out_partition_specs = tf.nest.map_structure(lambda _: None,
                                                  out_padded_shapes)
-
-  fn_out_partition_specs = tuple([model_state_partition_specs] +
-                                 list(fn_out_partition_specs[1:]))
+  if not is_eval:
+    fn_out_partition_specs = tuple([model_state_partition_specs] +
+                                   list(fn_out_partition_specs[1:]))
 
   tf.nest.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
 
@@ -1298,7 +1293,8 @@ def get_partitioned_spmd_model_step_fn_auto_shard(
     fn_out = fn(
         jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
 
-    assert len(fn_out) > 1
+    if not is_eval:
+      assert len(fn_out) > 1
     return fn_out
 
   # pjit-ed step function.
