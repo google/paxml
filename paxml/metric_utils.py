@@ -143,6 +143,17 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
                      metric_str)
         tf_summary.text(metric_name, metric_str, step=step)
         continue
+
+      if isinstance(v, seqio.metrics.Audio):
+        logging.info('Writing summary of %s with audio.', metric_name)
+        tf_summary.audio(
+            metric_name,
+            v.audiodata,
+            v.sample_rate,
+            step=step,
+            max_outputs=v.max_outputs)
+        continue
+
       if isinstance(v, seqio.metrics.Scalar):
         v = float(v.value)
       else:
