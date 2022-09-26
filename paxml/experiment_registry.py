@@ -35,6 +35,14 @@ class _ExperimentRegistryHelper:
   # A mapping from a secondary key to all matching canonical keys.
   _secondary_keys = collections.defaultdict(list)
 
+  # If to allow exp param override. This is convenient for colab debugging
+  # where reloading a exp params module would otherwise trigger duplicated
+  # exp registration error.
+  # e.g.
+  # from paxml import experiment_registry
+  # experiment_registry._ExperimentRegistryHelper._allow_overwrite = True
+  _allow_overwrite = False
+
   @classmethod
   def custom_secondary_keys(cls, canonical_key) -> List[str]:
     """Returns the list of custom secondary keys."""
@@ -91,7 +99,7 @@ class _ExperimentRegistryHelper:
     canonical_key = (
         experiment_class.__module__ + '.' + experiment_class.__name__)
     preexisting = canonical_key in cls._registry
-    if preexisting and not allow_overwrite:
+    if preexisting and not (cls._allow_overwrite or allow_overwrite):
       raise ValueError(f'Experiment already registered: {canonical_key}')
     cls._registry[canonical_key] = experiment_class
     logging.info('Registered experiment `%s`%s', canonical_key,
