@@ -21,8 +21,8 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from absl import logging
 import clu.values as clu_values
+import jax
 from jax import numpy as jnp
-from jax.experimental import array
 from jax.experimental import global_device_array
 import numpy as np
 from paxml import summary_utils
@@ -165,7 +165,7 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
 
 def is_scalar(v: Any) -> bool:
   """Returns True if input is a scalar."""
-  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray, array.Array))
+  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray, jax.Array))
 
 
 def is_weighted_scalar(v: Any) -> bool:
