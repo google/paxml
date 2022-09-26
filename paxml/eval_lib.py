@@ -1387,8 +1387,14 @@ def decode_once_pmap_model(
       # Merge clu.metrics to update for each minibatch.
       metrics = _merge_clu_metrics(metrics, updated_metrics)
 
+      # Run `process_decode_out` on CPU device as its implementation is not
+      # expected to be JIT friendly. Since we keep track of its outputs, we also
+      # don't want on-device allocation as would eventually lead to HBM OOM.
       if jax.process_index() == 0:
-        process_decode_output = model.process_decode_out(inputs[split], out)
+        with jax.default_device(jax.devices('cpu')[0]):
+          process_decode_output = model.process_decode_out(
+              inputs[split], jax.tree_map(np.asarray, out))
+
         # The process_decode_out API allows either two or three returns, so we
         # handle that here.
         if len(process_decode_output) == 2:
@@ -1844,8 +1850,13 @@ def decode_once_spmd_model(
       weighted_scalars = jax.tree_map(np.array, weighted_scalars)
       decode_metrics.store(weighted_scalars)
 
-      process_decode_output = jax_task.model.process_decode_out(
-          inputs[split], out)
+      # Run `process_decode_out` on CPU device as its implementation is not
+      # expected to be JIT friendly. Since we keep track of its outputs, we also
+      # don't want on-device allocation as would eventually lead to HBM OOM.
+      with jax.default_device(jax.devices('cpu')[0]):
+        process_decode_output = jax_task.model.process_decode_out(
+            inputs[split], jax.tree_map(np.asarray, out))
+
       # The process_decode_out API allows either two or three returns, so we
       # handle that here.
       if len(process_decode_output) == 2:
