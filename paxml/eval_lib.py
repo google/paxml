@@ -900,6 +900,8 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
             checkpoint_dir)
       # There must be a new checkpoint here.
       logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
+      # Release old partitioned_train_state.
+      del partitioned_train_state
       partitioned_train_state = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           checkpoint_dir,
@@ -1658,6 +1660,8 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
           new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
               restore_checkpoint_dir)
         logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
+        # Release old partitioned_train_state.
+        del partitioned_train_state
         partitioned_train_state = checkpoints.restore_checkpoint(
             train_state_global_shapes,
             restore_checkpoint_dir,
