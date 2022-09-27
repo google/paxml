@@ -250,6 +250,7 @@ pytype_strict_library(
         # Implicit Jax software support dependency.  # BC internal suffix.
         # Implicit absl.app dependency.
         # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit fiddle dependency.
         # Implicit fiddle.absl_flags dependency.

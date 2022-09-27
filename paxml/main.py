@@ -31,6 +31,7 @@ from typing import Dict, Optional, Sequence
 
 from absl import app
 from absl import flags
+from absl import logging
 # Required import to setup work units when running through XManager.
 from clu import platform
 import fiddle as fdl
@@ -214,6 +215,8 @@ def run_experiment(
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   use_orbax = FLAGS.use_orbax or task_p.use_orbax
+  if use_orbax:
+    logging.info('Checkpointing with Orbax enabled.')
 
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
