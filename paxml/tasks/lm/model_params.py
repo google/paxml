@@ -404,6 +404,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   NUM_HEADS = 16
   MODEL_DIMS = 1024
   HIDDEN_DIMS = MODEL_DIMS * 4
+  INPUT_DROPOUT_PROB = 0.0
   DROPOUT_PROB = 0.0
   LEARNING_RATE = 1e-3
   WEIGHT_DECAY = 1e-3
@@ -433,6 +434,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     stacked_transformer_tpl.num_layers = self.NUM_LAYERS
     stacked_transformer_tpl.num_heads = self.NUM_HEADS
 
+    stacked_transformer_tpl.input_dropout_prob = self.INPUT_DROPOUT_PROB
     stacked_transformer_tpl.dropout_prob = self.DROPOUT_PROB
     transformer_layer_p = (stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
