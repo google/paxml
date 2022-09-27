@@ -436,8 +436,8 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
     task_p.model.lm_tpl.softmax_tpl.feed_forward_tpl.has_bias = False
 
     if self.SEPARATE_EMBEDDING:
-      task_p.model.lm.separate_embedding_tpl.scale_sqrt_depth = False
-      task_p.model.lm.separate_embedding_tpl.lookup_style = 'index'
+      task_p.model.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = False
+      task_p.model.lm_tpl.separate_embedding_tpl.lookup_style = 'index'
     else:
       task_p.model.lm_tpl.softmax_tpl.scale_sqrt_depth = False
       task_p.model.lm_tpl.softmax_tpl.lookup_style = 'index'
@@ -447,7 +447,7 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
     if self.USE_REPEATED_LAYER:
       stacked_transformer_tpl = task_p.model.lm_tpl.stacked_transformer_tpl.block
     else:
-      stacked_transformer_tpl = task_p.model.lm.stacked_transformer_tpl
+      stacked_transformer_tpl = task_p.model.lm_tpl.stacked_transformer_tpl
     transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
 
     transformer_layer_p.ln_tpl.epsilon = self.LAYERNORM_EPSILON
