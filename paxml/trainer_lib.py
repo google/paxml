@@ -271,7 +271,8 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   # migrating to shape inference.
   @jax.jit
   def init_fn(init_key, inputs):
-    with base_layer.JaxContext.new_context():
+    context_p = base_layer.JaxContext.HParams(do_eval=is_eval)
+    with base_layer.JaxContext.new_context(hparams=context_p):
       if model.hparams.fprop_dtype == jnp.bfloat16:
         inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
