@@ -272,6 +272,8 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   @jax.jit
   def init_fn(init_key, inputs):
     with base_layer.JaxContext.new_context():
+      if model.hparams.fprop_dtype == jnp.bfloat16:
+        inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
 
   initial_vars = init_fn(init_key, sample_inputs)
