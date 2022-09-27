@@ -774,6 +774,8 @@ def _restore_checkpoint_gda(
 
   flattened_global_shapes = jax.tree_map(lambda x: x.shape,
                                          flattened_train_state)
+  flattened_global_dtypes = jax.tree_map(lambda x: x.dtype,
+                                         flattened_train_state)
 
   ckpt_paths = [
       os.path.join(checkpoint_step_dir, x).rstrip('/')
@@ -791,6 +793,8 @@ def _restore_checkpoint_gda(
       [global_mesh] * len(tspecs),
       flattened_state_specs,
       tspecs,
+      concurrent_gb=96,
+      dtypes=flattened_global_dtypes,
       global_shapes=flattened_global_shapes)
 
   # We add back the MaskedNode entries into the pytree.
