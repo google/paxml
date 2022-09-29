@@ -439,10 +439,15 @@ class SeqIOInput(base_input.BaseInput):
   def _enumerate(self, ds: tf.data.Dataset,
                  shard_info: seqio.ShardInfo) -> tf.data.Dataset:
     """Adds provenance enumeration fields."""
+    p = self.hparams
 
     def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
-      ex[SHARD_INDEX_KEY] = shard_info.index
-      ex[NUM_SHARDS_KEY] = shard_info.num_shards
+      shard_idx, num_shards = -1, -1
+      if not p.is_training:
+        shard_idx, num_shards = shard_info.index, shard_info.num_shards
+
+      ex[SHARD_INDEX_KEY] = shard_idx
+      ex[NUM_SHARDS_KEY] = num_shards
       return ex
 
     def _fold_in_local_enumeration(index_within_shard: int,
@@ -450,9 +455,17 @@ class SeqIOInput(base_input.BaseInput):
       ex[INDEX_WITHIN_SHARD_KEY] = index_within_shard
       return ex
 
+    def _fake_local_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
+      ex[INDEX_WITHIN_SHARD_KEY] = -1
+      return ex
+
     ds = ds.map(_add_shard_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.enumerate()
-    ds = ds.map(_fold_in_local_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+    if not p.is_training:
+      ds = ds.enumerate()
+      ds = ds.map(_fold_in_local_enumeration,
+                  num_parallel_calls=tf.data.AUTOTUNE)
+    else:
+      ds = ds.map(_fake_local_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
 
     return ds
 
@@ -472,7 +485,11 @@ class SeqIOInput(base_input.BaseInput):
         trim_output_features=p.trim_output_features)
 
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
-    if p.use_enumeration and not p.is_training:
+
+    # TODO(b/249192219): revert to only turn on enum in is_training=False.
+    # Currently we do this to workaround the issue where the eval during train
+    # with pjit uses same input partition specs.
+    if p.use_enumeration:
       # We want to add enumeration provenance fields *after* applying all
       # feature converters since feature converters don't pass through
       # unrecognized fields by default
