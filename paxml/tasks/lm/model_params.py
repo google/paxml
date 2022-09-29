@@ -412,6 +412,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   ACTIVATION_CLS = activations.ReLU
   USE_GATED_ACTIVATION = False
   DECAY_END = 300000
+  REL_POS_EMB_DIM = None
 
   PACKED_INPUT = True
   ATTEN_LOGIT_CAP = 50.0
@@ -443,6 +444,12 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
         getattr(self.ACTIVATION_CLS, 'HParams')())
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
+
+    if self.REL_POS_EMB_DIM is not None:
+      atten_xl_p = layers.DotProductAttentionXL.HParams()
+      atten_xl_p.copy_fields_from(transformer_layer_p.tr_atten_tpl)
+      atten_xl_p.set(rel_pos_emb_dim=self.REL_POS_EMB_DIM)
+      transformer_layer_p.tr_atten_tpl = atten_xl_p
 
     if self.USE_REPEATED_LAYER:
       model_p.lm_tpl.stacked_transformer_tpl = (
