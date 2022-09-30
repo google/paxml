@@ -17,7 +17,6 @@
 
 import os
 import re
-import sys
 
 from absl import logging
 
@@ -44,6 +43,7 @@ class MetricTracker:
       previous best checkpoint when the new best metric value is updated).
     global_step: int specifying the training step at which the current best
       value was recorded.
+    metric_filename: filename (full absolute path) where metric value is stored.
   """
 
   def __init__(self,
@@ -56,9 +56,9 @@ class MetricTracker:
     self._metric_name: str = metric_name
     self._metric_partition: str = metric_partition
     self._metric_value: float = initial_metric_value
-    self._init()
+    self._init(initial_metric_value)
 
-  def _init(self, default_value: float = sys.float_info.max) -> None:
+  def _init(self, default_value: float) -> None:
     """Read metric value from file on disk.
 
     Args:

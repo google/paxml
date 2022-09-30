@@ -21,6 +21,7 @@ the `tasks` Python submodule.
 from __future__ import annotations
 
 import dataclasses
+import enum
 import itertools
 import re
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
@@ -33,7 +34,6 @@ from jax.experimental import maps
 from jax.experimental import pjit
 import numpy as np
 import optax
-from paxml import base_experiment
 from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
@@ -312,6 +312,12 @@ class SingleTask(base_task.BaseTask):
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None
 
+  @enum.unique
+  class TrackDecoderMetricMode(str, enum.Enum):
+    """Two different modes for tracking a metric: min or max."""
+    MAX = 'max'
+    MIN = 'min'
+
   class HParams(base_task.BaseTask.HParams):
     """Task parameters.
 
@@ -325,6 +331,7 @@ class SingleTask(base_task.BaseTask):
         losses are aggregated (e.g single or MultiLoss)
       vn: HParams to control variational noise.
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
+      track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
       use_orbax: if True, enables checkpointing with Orbax.
     """
@@ -340,6 +347,8 @@ class SingleTask(base_task.BaseTask):
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
     track_decoder_metric: Optional[str] = None
+    track_decoder_metric_min_or_max: Optional[
+        SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
     use_orbax: bool = False
 
@@ -795,7 +804,7 @@ class SingleTask(base_task.BaseTask):
       # loading rules do not serve the intended purpose.
       diff = all_dest_patterns_in_loading_rules.difference(
           matched_dest_patterns_in_loading_rules)
-      if len(diff):
+      if diff:
         logging.info('Difference all-matched load_rule patterns=%r', diff)
         raise ValueError(f'The checkpoint loading rule(s) {rules.load_rules} '
                          'do not serve the intended purpose; some model '

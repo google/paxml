@@ -782,7 +782,6 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     eval_input_p: List of Params for the eval data pipelines.
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
-    early_stopping_fn: An optional callable object for reporting metrics
     early_stopping_fn: An optional callable object for reporting metrics and
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
@@ -1454,19 +1453,6 @@ def decode_once_pmap_model(
       metric_utils.write_clu_metric_summaries(metric_values, step_i)
       metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
-    # Track metric specified by task_p.track_decoder_metric.
-    track_metric = task_p.track_decoder_metric
-    if track_metric and track_metric in processed_metric_dict:
-      (m_value, _) = processed_metric_dict[track_metric]
-      tracker_dir_path = os.path.join(basedir, dirnames[split],
-                                      track_metric + '_min_tracker')
-      maybe_update_min_tracked_metric(m_value, step_i, tracker_dir_path,
-                                      track_metric, input_p[split].name,
-                                      replicated_model_states)
-    elif track_metric:
-      logging.info('Cannot track metric %s on input %s.', track_metric,
-                   input_p[split].name)
-
     if (jax.process_index() == 0 and
         not flags.FLAGS.pax_only_aggregate_summaries):
       dir_path = os.path.join(basedir, dirnames[split])
@@ -1477,16 +1463,24 @@ def decode_once_pmap_model(
                    len(processed_decodes))
       io_utils.write_key_value_pairs(output_file, processed_decodes)
 
-    decode_metrics_list.append(
-        metric_utils.update_float_dict(
-            metric_utils.as_float_dict(decode_metric_dict),
-            metric_utils.as_float_dict(metric_values)))
-    processed_decode_metrics_list.append(
-        metric_utils.update_float_dict(
-            metric_utils.as_float_dict(processed_metric_dict),
-            metric_utils.as_float_dict(process_metric_values)))
+    merged_decode_metrics = metric_utils.update_float_dict(
+        metric_utils.as_float_dict(decode_metric_dict),
+        metric_utils.as_float_dict(metric_values))
+    decode_metrics_list.append(merged_decode_metrics)
+
+    merged_processed_decode_metrics = metric_utils.update_float_dict(
+        metric_utils.as_float_dict(processed_metric_dict),
+        metric_utils.as_float_dict(process_metric_values))
+    processed_decode_metrics_list.append(merged_processed_decode_metrics)
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
+
+    # Track metric specified by task_p.track_decoder_metric.
+    if task_p.track_decoder_metric:
+      _find_and_maybe_update_tracked_metric(
+          basedir, split, dirnames, step_i, input_p, replicated_model_states,
+          task_p, [merged_decode_metrics, merged_processed_decode_metrics])
+
   return (decode_metrics_list, processed_decode_metrics_list,
           seqio_metrics_list, num_decode_steps)
 
@@ -1917,15 +1911,6 @@ def decode_once_spmd_model(
       metric_utils.write_clu_metric_summaries(metric_values, step_i)
       metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
-    # Track metric specified by task_p.track_decoder_metric.
-    track_metric = task_p.track_decoder_metric
-    if track_metric and track_metric in processed_metric_dict:
-      logging.warn('Decoder metric tracking is not implemented yet for pjit '
-                   'models. Ignoring metric tracking.')
-    elif track_metric:
-      logging.info('Cannot track metric %s on input %s.', track_metric,
-                   input_p[split].name)
-
     if jax.process_index() == 0:
       dir_path = os.path.join(basedir, dirnames[split])
       if not tf.io.gfile.exists(dir_path):
@@ -1948,15 +1933,22 @@ def decode_once_spmd_model(
             metric_utils.as_float_dict(process_metric_values)))
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
+
+    # Track metric specified by task_p.track_decoder_metric.
+    if task_p.track_decoder_metric:
+      logging.warn('Decoder metric tracking is not implemented yet for pjit '
+                   'models. Ignoring metric tracking.')
+
   return (decode_metrics_list, processed_decode_metrics_list,
           seqio_metrics_list, num_decode_steps)
 
 
-def maybe_update_min_tracked_metric(
+def _maybe_update_tracked_metric(
     m_value: float,
     step: int,
     tracker_dir_path: str,
-    track_metric: str,
+    tracked_metric: str,
+    min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
     data_partition_name: str,
     replicated_model_states: train_states.TrainState,
     use_orbax: bool = False) -> None:
@@ -1970,24 +1962,30 @@ def maybe_update_min_tracked_metric(
     step: current training step.
     tracker_dir_path: directory where the tracker should store the status file
       and also write and garbage collect checkpoint assets.
-    track_metric: name of metric being tracked, e.g. 'wer'.
+    tracked_metric: name of metric being tracked, e.g. 'wer'.
+    min_or_max: min or max tracker.
     data_partition_name: data partition on which the value of the metric is
       being tracked.
     replicated_model_states: replicated model states used to save the best
       checkpoint.
     use_orbax: Enables checkpointing backed by Orbax.
   """
-
   if jax.process_index() == 0:
     if not tf.io.gfile.exists(tracker_dir_path):
       tf.io.gfile.makedirs(tracker_dir_path)
+    initial_value = sys.float_info.max
+    if min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MAX:
+      initial_value = -sys.float_info.max
     tracker = trk_utils.MetricTracker(
         dir_name=tracker_dir_path,
-        metric_name=track_metric,
+        metric_name=tracked_metric,
         metric_partition=data_partition_name,
-        initial_metric_value=sys.float_info.max)
-    if m_value < tracker.metric_value:
-      logging.info('Updating tracked wer value and checkpoint.')
+        initial_metric_value=initial_value)
+    if ((min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MIN and
+         m_value < tracker.metric_value) or
+        (min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MAX and
+         m_value > tracker.metric_value)):
+      logging.info('Updating tracked %s value and checkpoint.', tracked_metric)
       tracker.update(value=m_value, global_step=step)
       # Also save checkpoint; we just need to save the first model replica.
       # WARNING: the checkpoint saved here will not contain optimizer state
@@ -2004,6 +2002,40 @@ def maybe_update_min_tracked_metric(
                                                replicated_model_states)
       checkpoints.save_checkpoint(
           unreplicated_model_states, tracker_dir_path, use_orbax=use_orbax)
+
+
+def _find_and_maybe_update_tracked_metric(
+    basedir: str,
+    split: int,
+    dirnames: Sequence[str],
+    step_i: int,
+    input_p: Sequence[base_input.BaseInput.HParams],
+    replicated_model_states: train_states.TrainState,
+    task_p: tasks_lib.SingleTask.HParams,
+    decode_metrics_list: List[Dict[str, float]]) -> None:
+  tracked_metric = task_p.track_decoder_metric
+  track_min_or_max = task_p.track_decoder_metric_min_or_max
+  if not track_min_or_max:
+    raise ValueError(
+        'Must also set track_decoder_metric_min_or_max when '
+        f'enabling metric tracking: {task_p}')
+  m_value = None
+  for d in decode_metrics_list:
+    if tracked_metric in d:
+      m_value = d[tracked_metric]
+      break
+
+  if m_value:
+    tracker_dir_path = os.path.join(basedir, dirnames[split],
+                                    tracked_metric +
+                                    f'_{track_min_or_max}_tracker')
+    _maybe_update_tracked_metric(m_value, step_i, tracker_dir_path,
+                                 tracked_metric, track_min_or_max,
+                                 input_p[split].name,
+                                 replicated_model_states)
+  else:
+    logging.info('Cannot track metric %s on input %s.', tracked_metric,
+                 input_p[split].name)
 
 
 def infer_and_write(experiment_config: base_experiment.BaseExperiment,
