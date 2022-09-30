@@ -1083,13 +1083,6 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
   # TODO(shafey): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
   prng_key, eval_key = jax.random.split(prng_key, 2)
-  # _PmapEvalRunner requires drawing a sample input for restoring checkpoints.
-  # We assume that either eval_input or decoder_input can be used to retrieve
-  # all the model variable shapes.
-  # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-  # same regardless of which eval_input or decoder_input we use to draw the
-  # sample inputs, we need to revisit the design here.
-  sample_input_p = input_p[0] if input_p else eval_input_p[0]
 
   # Either decoder or eval inputs is not empty.
   assert list(input_p) + list(eval_input_p)
