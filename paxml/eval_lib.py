@@ -485,7 +485,8 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     return
 
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
-  checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+  checkpoint_step = io_utils.get_checkpoint_step(
+      job_log_dir, checkpoint_dir, io_utils.EvaluationMode.EVAL)
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
 
@@ -522,7 +523,8 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     ]
 
     while True:
-      with py_utils.timeit() as eval_period:
+      with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
+          job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.EVAL):
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(replicated_model_states, eval_summary_writers))
 
@@ -794,7 +796,8 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     return
 
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
-  checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+  checkpoint_step = io_utils.get_checkpoint_step(
+      job_log_dir, checkpoint_dir, io_utils.EvaluationMode.EVAL)
 
   model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
@@ -863,7 +866,8 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
         for d in summary_eval_dirs
     ]
     while True:
-      with py_utils.timeit() as eval_period:
+      with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
+          job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.EVAL):
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(partitioned_train_state, eval_summary_writers,
                                 eval_key, create_gda_for_inputs))
@@ -957,8 +961,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     logging.info('running decode_once restored from %s', restore_checkpoint_dir)
 
   if restore_checkpoint_step is None:
-    restore_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
-        restore_checkpoint_dir)
+    restore_checkpoint_step = io_utils.get_checkpoint_step(
+        job_log_dir, restore_checkpoint_dir, io_utils.EvaluationMode.DECODE)
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
@@ -1147,12 +1151,15 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
                                                       job_log_dir)
 
     while True:
-      decode_metrics = decode_once_fn(replicated_model_states, summary_writers)
+      with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
+                                        io_utils.EvaluationMode.DECODE):
+        decode_metrics = decode_once_fn(
+            replicated_model_states, summary_writers)
 
-      with py_utils.timeit() as eval_period:
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            eval_runner.run_one_step(replicated_model_states,
-                                     eval_summary_writers))
+        with py_utils.timeit() as eval_period:
+          eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+              eval_runner.run_one_step(replicated_model_states,
+                                       eval_summary_writers))
 
       eval_metrics = tuning_lib.EvalMetrics(
           input_p=eval_input_p,
@@ -1613,14 +1620,16 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
           jax_task, task_p, inputs, input_p, job_log_dir, prng_key, global_mesh,
           decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
       while True:
-        decode_metrics = decode_once_fn(partitioned_train_state,
-                                        summary_writers)
+        with io_utils.checkpoint_progress(
+            job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.DECODE):
+          decode_metrics = decode_once_fn(partitioned_train_state,
+                                          summary_writers)
 
-        with py_utils.timeit() as eval_period:
-          (eval_metrics_list, eval_scoring_metrics_list,
-           num_eval_steps) = eval_runner.run_one_step(partitioned_train_state,
-                                                      eval_summary_writers,
-                                                      eval_key, use_gda)
+          with py_utils.timeit() as eval_period:
+            (eval_metrics_list, eval_scoring_metrics_list,
+             num_eval_steps) = eval_runner.run_one_step(partitioned_train_state,
+                                                        eval_summary_writers,
+                                                        eval_key, use_gda)
 
         eval_metrics = tuning_lib.EvalMetrics(
             input_p=eval_input_p,

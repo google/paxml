@@ -22,7 +22,7 @@ import contextlib
 import operator
 import textwrap
 import typing
-from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Generator, Iterator, List, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -246,7 +246,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
 
 
 @contextlib.contextmanager
-def get_summary_writer(summary_dir: str) -> SummaryWriter:
+def get_summary_writer(summary_dir: str) -> Iterator[SummaryWriter]:
   """Context manager around Tensorflow's SummaryWriter."""
   if jax.process_index() == 0:
     logging.info('Opening SummaryWriter `%s`...', summary_dir)

@@ -25,6 +25,7 @@ from typing import Any, Sequence
 
 from absl import flags
 from absl.testing import absltest
+from absl.testing import parameterized
 import numpy
 from paxml import io_utils
 import tensorflow.compat.v2 as tf
@@ -42,7 +43,7 @@ def _read_jsonl_file(filename: str) -> Sequence[Any]:
   return contents
 
 
-class IoUtilsTest(absltest.TestCase):
+class IoUtilsTest(parameterized.TestCase):
 
   def test_write_key_value_pairs(self):
     filename = os.path.join(FLAGS.test_tmpdir, 'kv.pickle')
@@ -109,6 +110,20 @@ class IoUtilsTest(absltest.TestCase):
     io_utils.write_key_value_pairs(filename, kv)
     self.assertTrue(pathlib.Path(filename).exists())
     self.assertEqual(_read_jsonl_file(filename), [v for (_, v) in kv])
+
+  @parameterized.named_parameters(
+      ('_eval', io_utils.EvaluationMode.EVAL),
+      ('_decode', io_utils.EvaluationMode.DECODE),
+  )
+  def test_eval_resume_from_same_step(self, mode):
+    job_log_dir = FLAGS.test_tmpdir
+    checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+    checkpoint_step = 1234
+
+    with io_utils.checkpoint_progress(job_log_dir, checkpoint_step, mode):
+      written_checkpoint_step = io_utils.get_checkpoint_step(
+          job_log_dir, checkpoint_dir, mode)
+      self.assertEqual(written_checkpoint_step, checkpoint_step)
 
 
 class ShardedParallelWriterTest(absltest.TestCase):

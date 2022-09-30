@@ -213,6 +213,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        "//paxml:checkpoints",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -559,6 +560,7 @@ py_strict_test(
         ":io_utils",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
         # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],

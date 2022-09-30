@@ -17,13 +17,14 @@
 
 import collections
 import concurrent
+import contextlib
 import enum
 import json
 import os
 import pickle
 import re
 import threading
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
 from absl import logging
 import jax
@@ -31,7 +32,20 @@ import numpy as np
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
+from paxml import checkpoints  # mapped to internal
+
 NestedMap = py_utils.NestedMap
+
+_PROGRESS_CKPT_STEP_KEY = 'restore_checkpoint_step'
+
+
+class EvaluationMode(str, enum.Enum):
+  EVAL = 'eval'
+  DECODE = 'decode'
+
+  @property
+  def progress_filename(self) -> str:
+    return f'_{self.value}_progress.json'
 
 
 class OutputFormatType(enum.Enum):
@@ -247,3 +261,77 @@ def load_outputs(basedir: str,
   logging.info('Loaded decoded outputs from "%s", from %d shards, step=%d',
                dirname, num_shards, step)
   return ret
+
+
+@contextlib.contextmanager
+def checkpoint_progress(job_log_dir: str, checkpoint_step: Optional[int],
+                        mode: EvaluationMode) -> Iterator[None]:
+  """Checkpoints eval/decode status by writing current step to job_log_dir.
+
+  If checkpoint_step is None, that means we haven't restored from a checkpoint
+  and using random weights. If using random weights, we skip checkpointing
+  eval progress since it's not based on a written checkpoint.
+
+  Args:
+    job_log_dir: the jobs log directory to write eval progress under.
+    checkpoint_step: current checkpoint step we're restoring weights from. If
+      None, it means we haven't restored from a checkpoint and using random
+      weights instead. If using random weights, we skip checkpointing eval
+      progress since it's not based on a written checkpoint.
+    mode: a EvaluationMode enum type indicating the mode in which the model is
+      being evaluated
+
+  Yields:
+    None, purely for context manager api purposes.
+  """
+  if checkpoint_step is None or jax.process_index() != 0:
+    # Do nothing for random weights or non-leader processes.
+    yield
+  else:
+    # If we're resuming after being preempted mid evaluation, don't overwrite.
+    fname = os.path.join(job_log_dir, mode.progress_filename)
+    if not tf.io.gfile.exists(fname):
+      logging.info('Writing %s progress to %s for step %d.',
+                   mode.value, fname, checkpoint_step)
+      with tf.io.gfile.GFile(fname, 'w') as f:
+        f.write(json.dumps({_PROGRESS_CKPT_STEP_KEY: checkpoint_step}))
+    else:
+      logging.info('Not writing %s progress to %s since resuming.',
+                   mode.value, fname)
+
+    try:
+      yield
+    finally:
+      logging.info('Completed %s for step %d.', mode.value, checkpoint_step)
+      tf.io.gfile.remove(fname)
+
+
+def get_checkpoint_step(job_log_dir: str, restore_checkpoint_dir: str,
+                        mode: EvaluationMode) -> Optional[int]:
+  """Gets the latest checkpoint step to eval/decode on.
+
+  Args:
+    job_log_dir: the jobs log directory to search for checkpoints and eval
+      progress under.
+    restore_checkpoint_dir: the directory from which we're reading checkpoints.
+      Note that this may not necessarily be the same as job_log_dir.
+    mode: a EvaluationMode enum type indicating the mode in which the model is
+      being evaluated
+
+  Returns:
+    Returns the step with partially completed eval/decode if a job was preempted
+    mid-way through a eval/decode on a checkpoint that is no longer the newest
+    written to the `job_log_dir/checkpoints`. Otherwise, returns the latest
+    checkpoint step written.
+  """
+  progress_fname = os.path.join(job_log_dir, mode.progress_filename)
+  if tf.io.gfile.exists(progress_fname):
+    with tf.io.gfile.GFile(progress_fname) as f:
+      progress_json = json.load(f)
+
+    step = progress_json[_PROGRESS_CKPT_STEP_KEY]
+    logging.info('Resuming %s from step %d.', mode.value, step)
+    return step
+
+  return checkpoints.retrieve_latest_checkpoint_step(
+      restore_checkpoint_dir)
