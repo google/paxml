@@ -27,6 +27,7 @@ def setup_jax(globally_use_hardware_rng: bool,
               jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
               jax_enable_checks: bool,
               jax_array: bool = False,
+              jax_traceback_filtering_option: str = 'auto',
               should_initialize_jax_distributed: bool = False) -> None:
   """Setups JAX and logs information about this job."""
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
@@ -39,6 +40,10 @@ def setup_jax(globally_use_hardware_rng: bool,
   jax.config.update('experimental_xmap_spmd_lowering', True)
   # Use the manual partitioning lowering of xmap to avoid vectorization.
   jax.config.update('experimental_xmap_spmd_lowering_manual', True)
+
+  # Allow users to configure JAX traceback filtering.
+  # https://github.com/google/jax/blob/main/jax/_src/config.py
+  jax.config.update('jax_traceback_filtering', jax_traceback_filtering_option)
 
   if jax_array:
     # Always default to Array.
