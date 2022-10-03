@@ -234,7 +234,8 @@ def run_experiment(
           async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
         else:
           async_checkpointer = checkpoints.AsyncCheckpointer(
-              checkpoints.PaxCheckpointHandler(enable_flax=False))
+              checkpoints.PaxCheckpointHandler(enable_flax=False),
+              timeout_secs=600)
       else:
         if FLAGS.maybe_use_persistence_checkpointing:
           async_ckpt_manager = persistence_gda_serialization.GlobalAsyncCheckpointManager(
