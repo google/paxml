@@ -106,8 +106,8 @@ flags.DEFINE_string(
     'consuming. By default, delete the checkpoint assets.')
 flags.DEFINE_string(
     'restore_checkpoint_dir', None,
-    'If set, the directory from which to restore checkpoint. '
-    'Only supported when --mode=decode_once.')
+    'If set, the directory from which to restore checkpoint. Only supported '
+    'for --mode=decode_once and --mode=decode.')
 flags.DEFINE_integer(
     'restore_checkpoint_step', None,
     'If set, the checkpoint step to restore. Only supported when '
@@ -280,7 +280,7 @@ def run_experiment(
         job_log_dir=job_log_dir,
         maybe_use_persistence_checkpointing=FLAGS
         .maybe_use_persistence_checkpointing,
-        restore_checkpoint_dir=None,
+        restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
         restore_checkpoint_step=None,
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
@@ -340,10 +340,11 @@ def run(experiment_config: base_experiment.BaseExperiment):
   if FLAGS.jax_profiler_port is not None:
     server = jax.profiler.start_server(FLAGS.jax_profiler_port)  # pylint:disable=unused-variable
 
-  if (FLAGS.restore_checkpoint_dir or
-      FLAGS.restore_checkpoint_step) and FLAGS.mode != 'decode_once':
-    raise ValueError('--restore_checkpoint_dir and --restore_checkpoint_step '
-                     'only supported with --mode=decode_once.')
+  if ((FLAGS.restore_checkpoint_dir or FLAGS.restore_checkpoint_step) and
+      FLAGS.mode not in {'decode_once', 'decode'}):
+    raise ValueError(
+        '--restore_checkpoint_dir and --restore_checkpoint_step only supported '
+        'with --mode=decode_once or --mode=decode.')
 
   if FLAGS.study is None:
     # TODO(b/241666951): disable default_early_stopping_fn since this

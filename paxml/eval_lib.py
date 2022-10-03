@@ -948,10 +948,6 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       should_stop_early.
     use_orbax: Enables checkpointing backed by Orbax.
   """
-  if continuous_decode and restore_checkpoint_dir:
-    raise ValueError('restore_checkpoint_{dir,step} only supported with '
-                     'decode once, i.e. it requires continuous_decode=False.')
-
   restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
       job_log_dir, 'checkpoints')
 
@@ -1104,6 +1100,8 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
           prng_key, inputs_sample, do_eval=True),
       os.path.join(job_log_dir, 'decoder_out'))
 
+  last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+      restore_checkpoint_dir)
   (replicated_model_states, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(
        jax_task,
@@ -1136,8 +1134,6 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         exit_stack.enter_context(summary_utils.get_summary_writer(d))
         for d in summary_eval_dirs
     ]
-    last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
-        restore_checkpoint_dir)
 
     decode_once_fn = partition_decode_once_pmap_model(jax_task, task_p, inputs,
                                                       input_p, prng_seed,
@@ -1560,6 +1556,8 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     use_gda = (
         py_utils.gda_or_jax_array() and
         checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
+    last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
+        restore_checkpoint_dir)
 
     # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
     # We assume that either eval_input or decoder_input can be used to retrieve
@@ -1598,8 +1596,6 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
         for p in eval_input_p
     ]
     partitioned_train_state = trim_opt_states(partitioned_train_state)
-    last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
-        restore_checkpoint_dir)
     with contextlib.ExitStack() as exit_stack:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
