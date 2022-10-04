@@ -15,6 +15,7 @@
 
 """Shared trainer lib utilities."""
 
+import dataclasses
 import enum
 import functools
 import os
@@ -48,6 +49,7 @@ ParamsT = pytypes.HParamsT
 PyTreeDef = pytypes.PyTreeDef
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeStruct
+NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
@@ -108,10 +110,61 @@ class RunningMode(enum.Flag):
     return bool(self & RunningMode.DECODE)
 
 
+@dataclasses.dataclass
+class TrainStateMetadata:
+  """Metadata around the TrainState.
+
+  Specifically, this encapsulates information relevant for model initialization
+  as well as train/eval/decode step creation.
+  """
+  sample_inputs: NestedJTensor
+  var_weight_hparams: NestedWeightHParams
+  padded_global_shapes: Optional[TrainState] = None
+  unpadded_global_shapes: Optional[TrainState] = None
+  partitioned_specs: Optional[TrainState] = None
+
+
+def create_train_state_metadata(
+    jax_task: tasks_lib.SingleTask,
+    prng_key: PRNGKey,
+    train_sample_inputs: NestedJTensor,
+    discard_opt_states: bool = False) -> TrainStateMetadata:
+  """Creates a TrainStateMetadata instance.
+
+  Args:
+    jax_task: The SingleTask instance.
+    prng_key: The PRNGKey instance to use for model abstract initialization.
+    train_sample_inputs: Sample training inputs to use for shape inference.
+    discard_opt_states: Whether to discard the part corresponding to the
+      optimizer states or not.
+
+  Returns:
+    A TrainStateMetadata instance.
+  """
+  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+      prng_key, train_sample_inputs)
+  padded_global_shapes = jax_task.create_train_state_padded_shapes(
+      var_weight_hparams, discard_opt_states=discard_opt_states)
+  unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
+      var_weight_hparams, discard_opt_states=discard_opt_states)
+  if jax_task.model.hparams.mesh_shape is not None:
+    partitioned_specs = jax_task.create_train_state_partition_specs(
+        var_weight_hparams, discard_opt_states=discard_opt_states)
+  else:
+    partitioned_specs = None
+  return TrainStateMetadata(
+      sample_inputs=train_sample_inputs,
+      var_weight_hparams=var_weight_hparams,
+      padded_global_shapes=padded_global_shapes,
+      unpadded_global_shapes=unpadded_global_shapes,
+      partitioned_specs=partitioned_specs)
+
+
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 
-def write_post_init_model_hparams_file(model, var_weight_hparams,
+def write_post_init_model_hparams_file(model: base_model.BaseModel,
+                                       var_weight_hparams: NestedWeightHParams,
                                        job_log_dir: str) -> None:
   """Writes a post-init params file into the root `job_log_dir`.
 
