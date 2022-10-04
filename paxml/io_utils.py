@@ -45,7 +45,7 @@ _INTERNAL_ARTIFACTS_SUBDIR = '_internal_artifacts'
 
 class EvaluationMode(str, enum.Enum):
   EVAL = 'eval'
-  DECODE = 'decode'
+  DECODE = 'decoder'
 
   @property
   def progress_filename(self) -> str:
@@ -206,24 +206,25 @@ def _validate_filenames(filenames: Sequence[str],
   """Validates the list of file names."""
   if not filenames:
     raise ValueError('Expecting at least one file. Found none.')
-  # filename format: decoder_out_400000_shard_0.pickle
-  shard_fname_regex = 'decoder_out_([0-9]*)_shard_([0-9]*).pickle'
+  # filename format: {eval,decoder}_out_400000_shard_0.pickle
+  shard_fname_regex = '(eval|decoder)_out_([0-9]*)_shard_([0-9]*).pickle'
   steps_to_shards = collections.defaultdict(set)
   for fname in filenames:
     filename = os.path.split(fname)[1]
     m = re.fullmatch(shard_fname_regex, filename)
     if m is None:
       raise ValueError(f'filename {filename} is not recognized as valid')
-    steps_to_shards[int(m.group(1))].add(int(m.group(2)))
+    steps_to_shards[int(m.group(2))].add(int(m.group(3)))
   available_steps = ', '.join([str(x) for x in steps_to_shards.keys()])
   if step is None and len(steps_to_shards) > 1:
-    raise ValueError('Requiring explicit step= argument, as decode outputs from'
-                     f' multiple steps are found: {available_steps}')
+    raise ValueError(
+        'Requiring explicit step= argument, as eval/decode outputs from'
+        f' multiple steps are found: {available_steps}')
   if step is None:
     step = list(steps_to_shards.keys())[0]
   if step not in steps_to_shards:
     raise ValueError(
-        f'step={step} not found in decode outputs. Available steps: '
+        f'step={step} not found in eval/decode outputs. Available steps: '
         f'{available_steps}')
   full_shards = set()
   num_shards = len(steps_to_shards[step])
@@ -235,38 +236,39 @@ def _validate_filenames(filenames: Sequence[str],
   return step, num_shards
 
 
-def load_outputs(basedir: str,
-                 pname: str,
+def load_outputs(basedir: str, pname: str, fname_prefix: str,
                  step: Optional[int] = None) -> List[Any]:
-  """Loads and returns the decode outputs.
+  """Loads and returns the eval/decode outputs.
 
   Args:
-    basedir: The job log dir used when running the decoder.
-    pname: name of the decoding dataset, usually `p.name` of the input param.
-    step: the model step at which the decoder ran. If there are results only for
+    basedir: The job log dir used when running the eval/decoder.
+    pname: name of the dataset, usually `p.name` of the input param.
+    fname_prefix: prefix of the filename ('eval' or 'decoder').
+    step: the model step at which the model ran. If there are results only for
       one step present, this argument can be omitted.
 
   Returns:
     A list of the decoder outputs.
   """
   if basedir.endswith('/1') or basedir.endswith('/1/'):
-    dirname = os.path.join(basedir, f'decoder_out/{pname}/')
+    dirname = os.path.join(basedir, f'{fname_prefix}_out/{pname}/')
   else:
-    dirname = os.path.join(basedir, f'1/decoder_out/{pname}/')
-  filenames = tf.io.gfile.glob(os.path.join(dirname, 'decoder_out_*.pickle'))
+    dirname = os.path.join(basedir, f'1/{fname_prefix}_out/{pname}/')
+  filenames = tf.io.gfile.glob(
+      os.path.join(dirname, f'{fname_prefix}_out_*.pickle'))
   try:
     step, num_shards = _validate_filenames(filenames, step)
   except ValueError as e:
-    raise ValueError(f'Failed to read decode outputs under "{basedir}"') from e
+    raise ValueError(f'Failed to read outputs under "{basedir}"') from e
   # load the data
   ret = list()
   for shard_idx in range(num_shards):
     fname = os.path.join(dirname,
-                         f'decoder_out_{step}_shard_{shard_idx}.pickle')
+                         f'{fname_prefix}_out_{step}_shard_{shard_idx}.pickle')
     with tf.io.gfile.GFile(fname, 'rb') as f:
       ret.extend(pickle.load(f))
-  logging.info('Loaded decoded outputs from "%s", from %d shards, step=%d',
-               dirname, num_shards, step)
+  logging.info('Loaded %s outputs from "%s", from %d shards, step=%d',
+               fname_prefix, dirname, num_shards, step)
   return ret
 
 

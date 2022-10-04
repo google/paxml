@@ -22,7 +22,7 @@ import os
 import sys
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -54,19 +54,20 @@ import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
 
+instantiate = base_hyperparams.instantiate
 CheckpointType = checkpoint_pb2.CheckpointType
-WeightedScalars = pytypes.WeightedScalars
-WeightedScalarsList = pytypes.WeightedScalarsList
+EvaluationMode = io_utils.EvaluationMode
+JTensor = pytypes.JTensor
 Metrics = pytypes.Metrics
 NestedMap = py_utils.NestedMap
-JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
-PRNGKey = pytypes.PRNGKey
-TrainState = train_states.TrainState
 SummaryWriter = tf.summary.SummaryWriter
-instantiate = base_hyperparams.instantiate
+TrainState = train_states.TrainState
+WeightedScalars = pytypes.WeightedScalars
+WeightedScalarsList = pytypes.WeightedScalarsList
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
+PRNGKey = pytypes.PRNGKey
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 
@@ -76,6 +77,61 @@ def _is_vectorized(states: train_states.TrainState) -> bool:
     raise ValueError(
         'cannot decide if it is vectorized model without opt_states')
   return NO_PREFIX_KEY in states.opt_states[0]
+
+
+def _get_dir_names(
+    input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[str]:
+  """Returns a list of same length for parent dir names for each dataset."""
+  return [p.name for p in input_p]
+
+
+def _get_filename(step: Union[base_layer.JTensorOrPartitionSpec, int],
+                  prefix: str) -> str:
+  """Returns a filename for the given step."""
+  step_num = py_utils.maybe_unreplicate_for_fully_replicated(step)
+  return f'{prefix}_out_{step_num}_shard_{jax.process_index()}'
+
+
+def _can_load_written_outputs(basedir: str, pname: str, mode: EvaluationMode,
+                              step: int) -> bool:
+  """Returns whether we can load the eval/decoder outputs already."""
+  success = np.array([0], dtype=np.int32)
+  if jax.process_index() == 0:
+    try:
+      outputs = io_utils.load_outputs(basedir, pname, mode.value, step)
+      success[0] = len(outputs)
+    except Exception:  # pylint: disable=broad-except
+      pass
+  out = multihost_utils.broadcast_one_to_all(success)
+  return out[0] > 0
+
+
+def _maybe_write_scoring_outputs(
+    job_log_dir: str, step: int, input_name: str,
+    scoring_outputs: Sequence[Dict[str, Any]]) -> None:
+  """Write model scoring outputs to disk from leader process."""
+  if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
+    return
+
+  mode_str = EvaluationMode.EVAL.value
+  basedir = os.path.join(job_log_dir, f'{mode_str}_out')
+  fname = _get_filename(step, mode_str)
+  fq_fname = os.path.join(basedir, input_name, fname)
+
+  dir_path = os.path.dirname(fq_fname)
+  if not tf.io.gfile.exists(dir_path):
+    tf.io.gfile.makedirs(dir_path)
+
+  # convert list of batches into list of example kv pairs
+  flat_scoring_outputs = []
+  for batch in scoring_outputs:
+    for ex in py_utils.tree_unstack(batch, 0):
+      flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
+
+  logging.info('Writing eval outputs to %s with %d entries',
+               fq_fname, len(scoring_outputs))
+
+  io_utils.write_key_value_pairs(fq_fname, flat_scoring_outputs)
 
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
@@ -149,15 +205,16 @@ def run_eval_loop_over_test_splits(
     summary_writers: List[SummaryWriter],
     step: int,
     model_inputs: List[base_input.BaseInput],
+    job_log_dir: str,
     eval_inputs_pspecs=None,
     eval_inputs_shape=None,
     global_mesh=None,
     reshard_inputs: Optional[bool] = False,
-    create_gda_for_inputs: bool = False
-) -> Tuple[List[Dict[str, float]],  # eval metrics.
+    create_gda_for_inputs: bool = False,
+) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics.
            List[Optional[Dict[str, float]]],  # eval scoring metrics.
            List[int]  # performed eval steps.
-          ]:
+           ]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -166,6 +223,7 @@ def run_eval_loop_over_test_splits(
     summary_writers: The summary writer objects to log summaries.
     step: The step at which we are evaling the model.
     model_inputs: List of BaseInput instances.
+    job_log_dir: Job's log directory in which scoring outputs will be written.
     eval_inputs_pspecs: PartitionSpec for eval inputs.
     eval_inputs_shape: Global shape of eval inputs
     global_mesh: Device mesh used by pjit.
@@ -184,6 +242,15 @@ def run_eval_loop_over_test_splits(
   eval_scoring_metrics_list = []
   num_eval_steps = []
   for split, num_split_steps in enumerate(num_steps):
+    if _can_load_written_outputs(job_log_dir, model_inputs[split].hparams.name,
+                                 EvaluationMode.EVAL, step):
+      logging.info('Eval on input %s at step %d already done, skipping.',
+                   model_inputs[split].hparams.name, step)
+      eval_metrics_list.append(None)
+      eval_scoring_metrics_list.append(None)
+      num_eval_steps.append(0)
+      continue
+
     logging.info('Starting eval data split=%d (%s) with num_steps=%d',
                  split, model_inputs[split].hparams.name, num_split_steps)
     # Reset loss and summary tensors for each test split.
@@ -227,7 +294,7 @@ def run_eval_loop_over_test_splits(
           per_example_output)
       eval_summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
           eval_summary_tensors)
-      per_example_scores.append(per_example_output)
+      per_example_scores.append(jax.tree_map(np.asarray, per_example_output))
       loss += [eval_loss]
       eval_summary_tensors = summary_utils.flatten_summary_dict(
           eval_summary_tensors)
@@ -264,6 +331,10 @@ def run_eval_loop_over_test_splits(
     eval_metrics_list.append(metric_utils.as_float_dict(metrics))
     eval_scoring_metrics_list.append(eval_scoring_metrics)
     num_eval_steps.append(step_num)
+
+    _maybe_write_scoring_outputs(
+        job_log_dir, step, model_inputs[split].hparams.name, per_example_scores)
+
   return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 
 
@@ -335,9 +406,11 @@ class _PmapEvalRunner:
 
   def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
-               jax_task: tasks_lib.SingleTask, pmap_prng_key: PRNGKey):
+               jax_task: tasks_lib.SingleTask, pmap_prng_key: PRNGKey,
+               job_log_dir: str):
     self._eval_input_p = eval_input_p
     self._task_p = task_p
+    self._job_log_dir = job_log_dir
     if not self._eval_input_p:
       return
     self._jax_task = jax_task
@@ -435,7 +508,7 @@ class _PmapEvalRunner:
       self,
       replicated_model_states: train_states.TrainState,
       eval_summary_writers: List[SummaryWriter],
-  ) -> Tuple[List[Dict[str, float]],  # eval metrics list.
+  ) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics list.
              List[Optional[Dict[str, float]]],  # seqio metrics list.
              List[int]  # actual eval steps.
             ]:
@@ -458,6 +531,7 @@ class _PmapEvalRunner:
         eval_summary_writers,
         step_i,
         self._eval_input_pipelines,
+        self._job_log_dir,
         reshard_inputs=True)
 
 
@@ -486,7 +560,7 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
   checkpoint_step = io_utils.get_checkpoint_step(
-      job_log_dir, checkpoint_dir, io_utils.EvaluationMode.EVAL)
+      job_log_dir, checkpoint_dir, EvaluationMode.EVAL)
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
 
@@ -506,7 +580,8 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
        track_metric=False,
        use_orbax=use_orbax)
 
-  runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, prng_key)
+  runner = _PmapEvalRunner(
+      task_p, eval_input_p, jax_task, prng_key, job_log_dir)
   logging.info('Evaluation loop starting...')
   summary_base_dir = os.path.join(job_log_dir, 'summaries')
   summary_eval_dirs = [
@@ -524,7 +599,7 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
     while True:
       with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
-          job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.EVAL):
+          job_log_dir, last_checkpoint_step, EvaluationMode.EVAL):
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(replicated_model_states, eval_summary_writers))
 
@@ -607,6 +682,7 @@ class _SpmdEvalRunner:
                global_mesh: maps.Mesh,
                init_key: PRNGKey,
                partitioned_specs: train_states.TrainState,
+               job_log_dir: str,
                use_ema: bool = False,
                unpadded_global_batch_size: Optional[int] = None):
     self._eval_input_p = eval_input_p
@@ -622,6 +698,7 @@ class _SpmdEvalRunner:
         for p in eval_input_p
     ]
     self._task_p = task_p
+    self._job_log_dir = job_log_dir
 
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
@@ -741,7 +818,7 @@ class _SpmdEvalRunner:
       self, partitioned_train_state: train_states.TrainState,
       eval_summary_writers: List[SummaryWriter], eval_key: PRNGKey,
       use_gda: bool
-  ) -> Tuple[List[Dict[str, float]],  # eval metrics list.
+  ) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics list.
              List[Optional[Dict[str, float]]],  # eval scoring metrics list.
              List[int]  # performed eval steps.
             ]:
@@ -763,6 +840,7 @@ class _SpmdEvalRunner:
           eval_summary_writers,
           step_i,
           self._eval_input_pipelines,
+          self._job_log_dir,
           self._inputs_partition_specs,
           self._inputs_shape,
           self.global_mesh,
@@ -797,7 +875,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
 
   checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
   checkpoint_step = io_utils.get_checkpoint_step(
-      job_log_dir, checkpoint_dir, io_utils.EvaluationMode.EVAL)
+      job_log_dir, checkpoint_dir, EvaluationMode.EVAL)
 
   model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
@@ -846,7 +924,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
   runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                           init_key, partitioned_specs,
+                           init_key, partitioned_specs, job_log_dir,
                            eval_unpadded_global_batch_size)
   logging.info('Evaluation loop starting...')
   summary_base_dir = os.path.join(job_log_dir, 'summaries')
@@ -867,7 +945,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     ]
     while True:
       with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
-          job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.EVAL):
+          job_log_dir, last_checkpoint_step, EvaluationMode.EVAL):
         eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
             runner.run_one_step(partitioned_train_state, eval_summary_writers,
                                 eval_key, create_gda_for_inputs))
@@ -958,7 +1036,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
 
   if restore_checkpoint_step is None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
-        job_log_dir, restore_checkpoint_dir, io_utils.EvaluationMode.DECODE)
+        job_log_dir, restore_checkpoint_dir, EvaluationMode.DECODE)
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
@@ -1003,31 +1081,6 @@ def decode(experiment_config: base_experiment.BaseExperiment,
         continuous_decode,
         early_stopping_fn,
         use_orbax=use_orbax)
-
-
-def _get_dir_names(
-    input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[str]:
-  """Returns a list of same length for parent dir names for each dataset."""
-  return [p.name for p in input_p]
-
-
-def _get_filename(step: base_layer.JTensorOrPartitionSpec) -> str:
-  """Returns a filename for the given step."""
-  step_num = py_utils.maybe_unreplicate_for_fully_replicated(step)
-  return f'decoder_out_{step_num}_shard_{jax.process_index()}'
-
-
-def _can_load_decode_outs(basedir: str, pname: str, step: int) -> bool:
-  """Returns whether we can load the decoder outputs already."""
-  success = np.array([0], dtype=np.int32)
-  if jax.process_index() == 0:
-    try:
-      outputs = io_utils.load_outputs(basedir, pname, step)
-      success[0] = len(outputs)
-    except Exception:  # pylint: disable=broad-except
-      pass
-  out = multihost_utils.broadcast_one_to_all(success)
-  return out[0] > 0
 
 
 def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
@@ -1093,7 +1146,8 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
   # instead of instantiating this input pipeline.
   inputs_sample = instantiate(sample_input_p).get_next_padded()
 
-  eval_runner = _PmapEvalRunner(task_p, eval_input_p, jax_task, eval_key)
+  eval_runner = _PmapEvalRunner(
+      task_p, eval_input_p, jax_task, eval_key, job_log_dir)
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
       jax_task.model.abstract_init_with_metadata(
@@ -1141,7 +1195,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
     while True:
       with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
-                                        io_utils.EvaluationMode.DECODE):
+                                        EvaluationMode.DECODE):
         decode_metrics = decode_once_fn(
             replicated_model_states, summary_writers)
 
@@ -1333,9 +1387,10 @@ def decode_once_pmap_model(
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
-  basedir = os.path.join(job_log_dir, 'decoder_out')
+  basedir = os.path.join(job_log_dir, f'{EvaluationMode.DECODE.value}_out')
   dirnames = _get_dir_names(input_p)
-  filename = _get_filename(replicated_model_states.step)
+  filename = _get_filename(
+      replicated_model_states.step, EvaluationMode.DECODE.value)
   filenames = [os.path.join(basedir, s, filename) for s in dirnames]
 
   decode_metrics_list = []
@@ -1344,7 +1399,8 @@ def decode_once_pmap_model(
   num_decode_steps = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
-    if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
+    if _can_load_written_outputs(job_log_dir, input_p[split].name,
+                                 EvaluationMode.DECODE, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
       decode_metrics_list.append(None)
@@ -1580,7 +1636,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
          use_ema=use_ema,
          unpadded_global_batch_size=unpadded_global_batch_size)
     eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                                  init_key, partitioned_specs,
+                                  init_key, partitioned_specs, job_log_dir,
                                   eval_unpadded_global_batch_size)
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model,
@@ -1610,7 +1666,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
           decode_step_fn, use_gda, inputs_shape, inputs_partition_spec)
       while True:
         with io_utils.checkpoint_progress(
-            job_log_dir, last_checkpoint_step, io_utils.EvaluationMode.DECODE):
+            job_log_dir, last_checkpoint_step, EvaluationMode.DECODE):
           decode_metrics = decode_once_fn(partitioned_train_state,
                                           summary_writers)
 
@@ -1753,10 +1809,12 @@ def decode_once_spmd_model(
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
-  basedir = os.path.join(job_log_dir, 'decoder_out')
+  basedir = os.path.join(job_log_dir, f'{EvaluationMode.DECODE.value}_out')
   dirnames = _get_dir_names(input_p)
   filenames = [
-      os.path.join(basedir, s, _get_filename(step_i)) for s in dirnames
+      os.path.join(basedir, s,
+                   _get_filename(step_i, EvaluationMode.DECODE.value))
+      for s in dirnames
   ]
 
   logging.info('partitioned_train_state: %s',
@@ -1778,7 +1836,8 @@ def decode_once_spmd_model(
   num_decode_steps = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
-    if _can_load_decode_outs(job_log_dir, input_p[split].name, step_i):
+    if _can_load_written_outputs(job_log_dir, input_p[split].name,
+                                 EvaluationMode.DECODE, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_p[split].name, step_i)
       decode_metrics_list.append(None)
