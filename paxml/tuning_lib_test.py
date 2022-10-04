@@ -59,8 +59,47 @@ class TuningExperiment(base_experiment.BaseExperiment):
         search_algorithm=automl.RandomSearch.HParams(seed=1),
         search_reward=automl.SingleObjective.HParams(
             metric=automl.Metric.eval('reward')),
-        metric_aggregator=automl.AverageMetricValues.HParams(),
+        cross_step_metric_aggregator=automl.AverageMetricValues.HParams(),
         max_num_trials=10)
+
+
+class TuningWithSubExperiments(TuningExperiment):
+  """A faked tuning experiment with multiple sub-experiments."""
+
+  def sub_experiments(self) -> dict[str, type[base_experiment.BaseExperiment]]:
+    def _scale_experiment(multiplier):
+      class ScaledExperiment(self.__class__):
+
+        @property
+        def LEARNING_RATE(self):
+          return super().LEARNING_RATE * multiplier
+      return ScaledExperiment
+    return {f'{i}x': _scale_experiment(i) for i in [1, 2, 4, 8]}
+
+  def search(self):
+    search_hparams = super().search()
+    # Use the sum metric across different sub-experiments as the reward.
+    search_hparams.search_reward.metric = automl.Metric.eval(
+        'reward', aggregator=automl.MetricAggregator.SUM)
+    return search_hparams
+
+
+def run_experiment(experiment_config: base_experiment.BaseExperiment,
+                   work_unit: platform.WorkUnit,
+                   job_log_dir: str,
+                   early_stopping_fn: trainer_lib.EarlyStoppingFn):
+  del work_unit, job_log_dir
+  task_p = experiment_config.task()
+  _ = experiment_config.datasets()
+  _ = experiment_config.decoder_datasets()
+  reward = task_p['learning_rate'] * task_p['batch_size'] * 1
+  if reward > 5:
+    reward = math.nan
+  # Report measurements at step 1 and step 2.
+  early_stopping_fn({'eval_test_abc/metrics/reward': reward},
+                    trainer_lib.RunningMode.EVAL, 1, False)
+  early_stopping_fn({'eval_test_abc/metrics/reward': reward * 3},
+                    trainer_lib.RunningMode.EVAL, 2, True)
 
 
 class TuningLibTest(absltest.TestCase):
@@ -80,27 +119,10 @@ class TuningLibTest(absltest.TestCase):
     }))
 
   def test_tune(self):
-    def run_experiment(experiment_config: base_experiment.BaseExperiment,
-                       work_unit: platform.WorkUnit,
-                       job_log_dir: str,
-                       early_stopping_fn: trainer_lib.EarlyStoppingFn):
-      del work_unit, job_log_dir
-      task_p = experiment_config.task()
-      _ = experiment_config.datasets()
-      _ = experiment_config.decoder_datasets()
-      reward = task_p['learning_rate'] * task_p['batch_size'] * 1
-      if reward > 5:
-        reward = math.nan
-      # Report measurements at step 1 and step 2.
-      early_stopping_fn({'eval_test_abc/metrics/reward': reward},
-                        trainer_lib.RunningMode.EVAL, 1, False)
-      early_stopping_fn({'eval_test_abc/metrics/reward': reward * 3},
-                        trainer_lib.RunningMode.EVAL, 2, True)
-
     job_log_dir = absltest.get_default_test_tmpdir()
-    tuning_lib.tune(run_experiment, TuningExperiment(),
-                    platform.work_unit(), job_log_dir, max_num_trials=5)
-    result = pg.tuning.poll_result('local')
+    tuning_lib.tune(run_experiment, TuningExperiment(), platform.work_unit(),
+                    job_log_dir, study='local1', max_num_trials=5)
+    result = pg.tuning.poll_result('local1')
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, False, False, False])
@@ -110,6 +132,33 @@ class TuningLibTest(absltest.TestCase):
     # We added an extra measurement for the final report, with final step + 1.
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 3, 3, 3, 3])
+
+  def test_tune_with_subexperiments(self):
+    job_log_dir = absltest.get_default_test_tmpdir()
+    tuning_lib.tune(run_experiment, TuningWithSubExperiments(),
+                    platform.work_unit(), job_log_dir,
+                    study='local2', max_num_trials=5)
+    result = pg.tuning.poll_result('local2')
+    self.assertLen(result.trials, 5)
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, False, True, False, True])
+    self.assertEqual(result.trials[1].final_measurement.metrics, {
+        'eval_test_abc/metrics/reward:1x': 0.64,
+        'eval_test_abc/metrics/reward:2x': 1.28,
+        'eval_test_abc/metrics/reward:4x': 2.56,
+        'eval_test_abc/metrics/reward:8x': 5.12
+    })
+    self.assertEqual(result.trials[3].final_measurement.metrics, {
+        'eval_test_abc/metrics/reward:1x': 0.64,
+        'eval_test_abc/metrics/reward:2x': 1.28,
+        'eval_test_abc/metrics/reward:4x': 2.56,
+        'eval_test_abc/metrics/reward:8x': 5.12
+    })
+    # We use the average of the metrics across steps as the final measurement.
+    self.assertEqual([t.final_measurement.reward for t in result.trials],
+                     # Used aggregator='max' for computing the reward.
+                     [0.0, 0.64 + 1.28 + 2.56 + 5.12,
+                      0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0])
 
 
 if __name__ == '__main__':

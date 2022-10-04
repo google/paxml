@@ -33,25 +33,25 @@ class MetricTest(absltest.TestCase):
 
   def test_custom_type_metrics(self):
     m = automl.Metric.train_steps_per_second()
-    self.assertEqual(m.pattern, '^train_steps_per_sec$')
+    self.assertEqual(m.pattern, '^train_steps_per_sec(:.+)?$')
     self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
 
-    m = automl.Metric.eval_steps_per_second()
-    self.assertEqual(m.pattern, '^eval_steps_per_sec$')
+    m = automl.Metric.eval_steps_per_second('sub-experiment1')
+    self.assertEqual(m.pattern, '^eval_steps_per_sec:sub-experiment1$')
     self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
 
     m = automl.Metric.decode_steps_per_second()
-    self.assertEqual(m.pattern, '^decode_steps_per_sec$')
+    self.assertEqual(m.pattern, '^decode_steps_per_sec(:.+)?$')
     self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
 
     m = automl.Metric.num_params()
-    self.assertEqual(m.pattern, '^num_params$')
+    self.assertEqual(m.pattern, '^num_params(:.+)?$')
     self.assertEqual(m.metric_type, automl.MetricType.CUSTOM)
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
@@ -62,7 +62,7 @@ class MetricTest(absltest.TestCase):
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertEqual(m.metric_name, 'loss')
     self.assertIsNone(m.dataset_name)
-    self.assertEqual(m.pattern, '^train/loss$')
+    self.assertEqual(m.pattern, '^train/loss(:.+)?$')
 
   def test_eval_train(self):
     m = automl.Metric.eval_train('log_pplx')
@@ -70,7 +70,7 @@ class MetricTest(absltest.TestCase):
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertEqual(m.metric_name, 'log_pplx')
     self.assertIsNone(m.dataset_name)
-    self.assertEqual(m.pattern, '^eval_train/metrics/log_pplx$')
+    self.assertEqual(m.pattern, '^eval_train/metrics/log_pplx(:.+)?$')
 
   def test_eval(self):
     m = automl.Metric.eval('total_loss')
@@ -78,20 +78,29 @@ class MetricTest(absltest.TestCase):
     self.assertTrue(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
     self.assertEqual(m.metric_name, 'total_loss')
-    self.assertEqual(m.pattern, '^eval_test_[^/]+/metrics/total_loss$')
+    self.assertEqual(m.pattern, '^eval_test_[^/]+/metrics/total_loss(:.+)?$')
     self.assertEqual(
         m.get_value({'eval_test_abc:xyz/metrics/total_loss': 0.1}), 0.1)
+    self.assertEqual(
+        m.get_value({'eval_test_abc:xyz/metrics/total_loss:x1': 0.1}), 0.1)
     self.assertEqual(
         m.get_values({
             'eval_test_abc:xyz/metrics/total_loss': 0.1,
             'eval_test_xyz:abc/metrics/total_loss': 0.2
         }), [0.1, 0.2])
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc:xyz/metrics/total_loss': 0.1,
+            'eval_test_abc:xyz/metrics/total_loss:x1': 0.2,
+            'eval_test_xyz:abc/metrics/total_loss': 0.3,
+            'eval_test_xyz:xyz/metrics/total_loss:x1': 0.4,
+        }), [0.1, 0.2, 0.3, 0.4])
 
     m = automl.Metric.eval('total_loss', 'xyz')
     self.assertEqual(m.metric_type, automl.MetricType.EVAL_METRICS)
     self.assertEqual(m.metric_name, 'total_loss')
     self.assertEqual(m.dataset_name, 'xyz')
-    self.assertEqual(m.pattern, '^eval_test_xyz/metrics/total_loss$')
+    self.assertEqual(m.pattern, '^eval_test_xyz/metrics/total_loss(:.+)?$')
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertEqual(
         m.get_values({
@@ -99,13 +108,25 @@ class MetricTest(absltest.TestCase):
             'eval_test_xyz/metrics/total_loss': 0.2
         }), [0.2])
 
+    m = automl.Metric.eval('total_loss', sub_experiment_id='x2')
+    self.assertEqual(m.metric_type, automl.MetricType.EVAL_METRICS)
+    self.assertEqual(m.metric_name, 'total_loss')
+    self.assertIsNone(m.dataset_name)
+    self.assertEqual(m.pattern, '^eval_test_[^/]+/metrics/total_loss:x2$')
+    self.assertTrue(m.applies_to_multiple_datasets)
+    self.assertEqual(
+        m.get_values({
+            'eval_test_abc/metrics/total_loss:x2': 0.1,
+            'eval_test_xyz/metrics/total_loss': 0.2
+        }), [0.1])
+
   def test_eval_scoring(self):
     m = automl.Metric.eval_scoring('blue')
     self.assertEqual(m.metric_type, automl.MetricType.EVAL_SCORING_METRICS)
     self.assertTrue(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
     self.assertEqual(m.metric_name, 'blue')
-    self.assertEqual(m.pattern, '^eval_test_[^/]+/scoring_eval/blue$')
+    self.assertEqual(m.pattern, '^eval_test_[^/]+/scoring_eval/blue(:.+)?$')
     self.assertEqual(
         m.get_value({'eval_test_abc:xyz/scoring_eval/blue': 0.1}), 0.1)
     self.assertEqual(
@@ -118,7 +139,7 @@ class MetricTest(absltest.TestCase):
     self.assertEqual(m.metric_type, automl.MetricType.EVAL_SCORING_METRICS)
     self.assertEqual(m.metric_name, 'blue')
     self.assertEqual(m.dataset_name, 'xyz')
-    self.assertEqual(m.pattern, '^eval_test_xyz/scoring_eval/blue$')
+    self.assertEqual(m.pattern, '^eval_test_xyz/scoring_eval/blue(:.+)?$')
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertEqual(
         m.get_values({
@@ -132,7 +153,7 @@ class MetricTest(absltest.TestCase):
     self.assertTrue(m.applies_to_multiple_datasets)
     self.assertIsNone(m.dataset_name)
     self.assertEqual(m.metric_name, 'num_decoded')
-    self.assertEqual(m.pattern, '^decode_test_[^/]+/num_decoded$')
+    self.assertEqual(m.pattern, '^decode_test_[^/]+/num_decoded(:.+)?$')
     self.assertEqual(m.get_value({'decode_test_abc:xyz/num_decoded': 1}), 1)
     self.assertEqual(
         m.get_values({
@@ -144,7 +165,7 @@ class MetricTest(absltest.TestCase):
     self.assertEqual(m.metric_type, automl.MetricType.DECODE_METRICS)
     self.assertEqual(m.metric_name, 'num_decoded')
     self.assertEqual(m.dataset_name, 'xyz')
-    self.assertEqual(m.pattern, '^decode_test_xyz/num_decoded$')
+    self.assertEqual(m.pattern, '^decode_test_xyz/num_decoded(:.+)?$')
     self.assertFalse(m.applies_to_multiple_datasets)
     self.assertEqual(
         m.get_values({
@@ -157,6 +178,45 @@ class MetricTest(absltest.TestCase):
     self.assertEqual(m.get_value({
         'decode_test_xyz.bcd/mAP/mAP': 1.,
     }), 1.)
+
+  def test_value_aggregation(self):
+    values = {
+        'eval_test_abc/metrics/accuracy': 0.1,
+        'eval_test_def/metrics/accuracy': 0.2,
+        'eval_test_xyz/metrics/accuracy': 0.3,
+    }
+    m = automl.Metric.eval('accuracy')
+    with self.assertRaisesRegex(
+        ValueError, 'Found multple metrics that match .*'):
+      m.get_value(values)
+
+    self.assertEqual(
+        automl.Metric.eval(
+            'accuracy',
+            aggregator=automl.MetricAggregator.MIN).get_value(values),
+        0.1)
+    self.assertEqual(
+        automl.Metric.eval(
+            'accuracy',
+            aggregator=automl.MetricAggregator.MAX).get_value(values),
+        0.3)
+    self.assertAlmostEqual(
+        automl.Metric.eval(
+            'accuracy',
+            aggregator=automl.MetricAggregator.AVERAGE).get_value(values),
+        0.2)
+    self.assertAlmostEqual(
+        automl.Metric.eval(
+            'accuracy',
+            aggregator=automl.MetricAggregator.SUM).get_value(values),
+        0.6)
+    self.assertEqual(
+        automl.Metric.eval(
+            'accuracy',
+            aggregator=lambda x: x[-1] - x[0] + x[1]).get_value(values), 0.4)
+    with self.assertRaisesRegex(
+        ValueError, 'Unsupported aggregator'):
+      automl.Metric.eval('accuracy', aggregator='abc')
 
 
 class SearchHParamsTest(absltest.TestCase):
@@ -355,8 +415,8 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
     self.assertEqual(aggregator([2., 1.]), 2.0994333672461347)
 
 
-class MetricAggregatorTest(absltest.TestCase):
-  """Tests for metric aggregators."""
+class CrossStepMetricAggregatorTest(absltest.TestCase):
+  """Tests for cross-step metric aggregators."""
 
   def test_last_reported_metric_values(self):
     aggregator = instantiate(automl.LastReportedMetricValues.HParams())
@@ -367,6 +427,21 @@ class MetricAggregatorTest(absltest.TestCase):
             (300, {'reward': 0.4, 'eval_test_abc/metrics/total_loss': 0.4}),
         ]),
         {'reward': 0.4, 'eval_test_abc/metrics/total_loss': 0.4})
+    self.assertEqual(
+        aggregator([
+            (100,
+             {'reward:1x': 0.1, 'eval_test_abc/metrics/total_loss:1x': 0.1}),
+            (200,
+             {'reward:1x': 0.2, 'eval_test_abc/metrics/total_loss:1x': 0.2}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 100,
+             {'reward:2x': 0.3, 'eval_test_abc/metrics/total_loss:2x': 0.3}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 200,
+             {'reward:2x': 0.4, 'eval_test_abc/metrics/total_loss:2x': 0.4}),
+        ]),
+        {
+            'reward:1x': 0.2, 'eval_test_abc/metrics/total_loss:1x': 0.2,
+            'reward:2x': 0.4, 'eval_test_abc/metrics/total_loss:2x': 0.4
+        })
 
   def test_average_metric_values(self):
     aggregator = instantiate(automl.AverageMetricValues.HParams())
@@ -376,6 +451,21 @@ class MetricAggregatorTest(absltest.TestCase):
             (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.3}),
         ]),
         {'reward': 0.25, 'eval_test_abc/metrics/total_loss': 0.25})
+    self.assertEqual(
+        aggregator([
+            (100,
+             {'reward:1x': 0.1, 'eval_test_abc/metrics/total_loss:1x': 0.1}),
+            (200,
+             {'reward:1x': 0.3, 'eval_test_abc/metrics/total_loss:1x': 0.3}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 100,
+             {'reward:2x': 0.5, 'eval_test_abc/metrics/total_loss:2x': 0.5}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 200,
+             {'reward:2x': 0.7, 'eval_test_abc/metrics/total_loss:2x': 0.7}),
+        ]),
+        {
+            'reward:1x': 0.2, 'eval_test_abc/metrics/total_loss:1x': 0.2,
+            'reward:2x': 0.6, 'eval_test_abc/metrics/total_loss:2x': 0.6
+        })
 
   def test_metrics_with_max_value(self):
     aggregator = instantiate(automl.MetricsWithMaxValue.HParams())
@@ -383,7 +473,7 @@ class MetricAggregatorTest(absltest.TestCase):
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
             (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
-            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+            (300, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
         ]),
         {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2})
 
@@ -393,7 +483,7 @@ class MetricAggregatorTest(absltest.TestCase):
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
             (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
-            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+            (300, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
         ]),
         {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
 
@@ -403,7 +493,7 @@ class MetricAggregatorTest(absltest.TestCase):
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
             (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
-            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+            (300, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
         ]),
         {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
 
@@ -413,7 +503,7 @@ class MetricAggregatorTest(absltest.TestCase):
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
             (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2}),
-            (200, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
+            (300, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1}),
         ]),
         {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.1})
 

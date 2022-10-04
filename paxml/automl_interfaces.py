@@ -19,13 +19,14 @@ import abc
 import dataclasses
 import enum
 import re
-from typing import Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
 from praxis import base_hyperparams
 import pyglove as pg
 
 
 BaseHyperParams = base_hyperparams.BaseHyperParams
 BaseParameterizable = base_hyperparams.BaseParameterizable
+MetricAggregationFn = Callable[[Sequence[float]], float]
 
 
 class BaseAlgorithm(BaseParameterizable, metaclass=abc.ABCMeta):
@@ -44,22 +45,27 @@ class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
     """Returns a float value as reward from a dict of metrics."""
 
 
-class MetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
-  """Aggregator for gathering metrics from multiple steps."""
+class CrossStepMetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
+  """Aggregator for gathering metrics across multiple steps."""
 
   @abc.abstractmethod
   def __call__(
       self,
       metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
-    """Returns an aggregated metric dict from metrics from multiple steps.
+    """Aggregates metrics across multiple steps.
 
     Args:
       metrics_across_steps: A sequence of tuple (step, metrics).
 
     Returns:
-      A metric dict used for final reward computing.
+      An aggregated metric dict used for final reward computing.
     """
+
+
+# To avoid introducing dependency on base_experiment,
+# we use Any as its PyType annotation for now.
+BaseExperiment = Any
 
 
 class SearchHParams(BaseHyperParams):
@@ -68,8 +74,8 @@ class SearchHParams(BaseHyperParams):
   Attributes:
     search_algorithm: Hyperparameters for search algorithm.
     search_reward: Hyperparameters for search reward.
-    metric_aggregator: Hyperparameters for metric aggregator. If None,
-      `automl.LastReportedValues` will be used.
+    cross_step_metric_aggregator: Hyperparameters for cross-step metric
+      aggregator. If None, `automl.LastReportedMetricValues` will be used.
     max_num_trials: Max number of trials for the search. If None, there is no
       limit.
     errors_to_skip: An optional field to specify on what errors the trial
@@ -81,7 +87,8 @@ class SearchHParams(BaseHyperParams):
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
-  metric_aggregator: Optional[MetricAggregator.HParams] = None
+  cross_step_metric_aggregator: Optional[
+      CrossStepMetricAggregator.HParams] = None
   max_num_trials: int = None
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
@@ -127,6 +134,14 @@ _MULTI_DATASET_METRIC_TYPES = frozenset([
 ])
 
 
+class MetricAggregator(str, enum.Enum):
+  """Builtin metric aggregator."""
+  MAX = 0
+  MIN = 1
+  AVERAGE = 2
+  SUM = 3
+
+
 @dataclasses.dataclass
 class Metric:
   """Representing a metric for tuning.
@@ -137,13 +152,41 @@ class Metric:
     dataset_name: Dataset name. If None, the metric is either not
       dataset-specific or there is only one dataset for that metric type so the
       name can be omitted.
+    sub_experiment_id: Sub-experiment ID. If None, the metric will match
+      all metrics from all sub-experiments.
+    aggregator: Optional metric aggregation at a single step, which
+      will be used to obtain a single value from multiple matched metric items
+      based on current Metric specification. It can be a value from enum
+      `MetricAggregator` or a callable object. If None, `Metric.get_value` will
+      raise error when there are multiple matched items.
   """
   metric_name: str
   metric_type: MetricType = MetricType.CUSTOM
   dataset_name: Optional[str] = None
+  sub_experiment_id: Optional[str] = None
+  aggregator: Optional[Union[
+      MetricAggregator,
+      Callable[[Sequence[float]], float]]] = None
 
   def __post_init__(self):
     self._metric_key_regex = re.compile(self.pattern, re.IGNORECASE)
+    if self.aggregator is None:
+      self._aggregator = None
+    elif self.aggregator == MetricAggregator.MAX:
+      self._aggregator = max
+    elif self.aggregator == MetricAggregator.MIN:
+      self._aggregator = min
+    elif self.aggregator == MetricAggregator.AVERAGE:
+      self._aggregator = lambda xs: sum(xs) / len(xs)
+    elif self.aggregator == MetricAggregator.SUM:
+      self._aggregator = sum
+    elif callable(self.aggregator):
+      self._aggregator = self.aggregator
+    else:
+      raise ValueError(
+          f'Unsupported aggregator {self.aggregator}. '
+          f'Expecting a value from `automl.MetricAggregator` enum'
+          f'or Callable[[Sequence[float]], float].')
 
   @property
   def pattern(self):
@@ -158,7 +201,12 @@ class Metric:
       prefix = f'{category}/'
     if section:
       prefix = f'{prefix}{section}/'
-    return f'^{prefix}{self.metric_name}$'
+
+    if self.sub_experiment_id is None:
+      suffix = '(:.+)?'
+    else:
+      suffix = f':{self.sub_experiment_id}'
+    return f'^{prefix}{self.metric_name}{suffix}$'
 
   @property
   def applies_to_multiple_datasets(self):
@@ -185,59 +233,119 @@ class Metric:
           f'Metric {self.pattern!r} does not match with any metrics. '
           f'Available metrics are: {list(metric_dict.keys())}.')
     if len(items) != 1:
+      if self._aggregator is not None:
+        return self._aggregator([m[1] for m in items])
       raise ValueError(
-          f'Found multple metrics that match {self.pattern!r}: {items}.')
+          f'Found multple metrics that match {self.pattern!r} while '
+          f'aggregator is not specified: {items}.')
     return items[0][1]
 
   # Class method for creating custom metric types.
   @classmethod
-  def train_steps_per_second(cls) -> 'Metric':
+  def train_steps_per_second(
+      cls,
+      sub_experiment_id: Optional[str] = None,
+      aggregator: Optional[
+          Union[str, Callable[[Sequence[float]], float]]] = None) -> 'Metric':
     """Returns metric for training steps per second."""
-    return Metric('train_steps_per_sec')
+    return Metric('train_steps_per_sec',
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
-  def eval_steps_per_second(cls) -> 'Metric':
+  def eval_steps_per_second(
+      cls,
+      sub_experiment_id: Optional[str] = None,
+      aggregator: Optional[
+          Union[str, Callable[[Sequence[float]], float]]] = None) -> 'Metric':
     """Returns metric for evaluation steps per second."""
-    return Metric('eval_steps_per_sec')
+    return Metric('eval_steps_per_sec',
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
-  def decode_steps_per_second(cls) -> 'Metric':
+  def decode_steps_per_second(
+      cls,
+      sub_experiment_id: Optional[str] = None,
+      aggregator: Optional[Union[str, MetricAggregationFn]] = None) -> 'Metric':
     """Returns metric for `decode_steps_per_second`."""
-    return Metric('decode_steps_per_sec')
+    return Metric('decode_steps_per_sec',
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
-  def num_params(cls) -> 'Metric':
+  def num_params(
+      cls,
+      sub_experiment_id: Optional[str] = None,
+      aggregator: Optional[Union[str, MetricAggregationFn]] = None) -> 'Metric':
     """Returns metric for `num_params`."""
-    return Metric('num_params')
+    return Metric('num_params',
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   # Class methods for creating eval metric types.
   @classmethod
-  def train(cls, metric_name: str) -> 'Metric':
+  def train(cls,
+            metric_name: str,
+            sub_experiment_id: Optional[str] = None,
+            aggregator: Optional[Union[str, MetricAggregationFn]] = None
+            ) -> 'Metric':
     """Returns a metric from evaluation on the training dataset."""
-    return Metric(metric_name, MetricType.TRAIN_METRICS)
+    return Metric(metric_name,
+                  MetricType.TRAIN_METRICS,
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
-  def eval_train(cls, metric_name: str) -> 'Metric':
+  def eval_train(cls,
+                 metric_name: str,
+                 sub_experiment_id: Optional[str] = None,
+                 aggregator: Optional[Union[str, MetricAggregationFn]] = None
+                 ) -> 'Metric':
     """Returns a metric from evaluation on the training dataset."""
-    return Metric(metric_name, MetricType.EVAL_TRAIN_METRICS)
+    return Metric(metric_name,
+                  MetricType.EVAL_TRAIN_METRICS,
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
   def eval(cls,
            metric_name: str,
-           dataset_name: Optional[str] = None) -> 'Metric':
+           dataset_name: Optional[str] = None,
+           sub_experiment_id: Optional[str] = None,
+           aggregator: Optional[Union[str, MetricAggregationFn]] = None
+           ) -> 'Metric':
     """Returns a metric from evaluation on the test dataset."""
-    return Metric(metric_name, MetricType.EVAL_METRICS, dataset_name)
+    return Metric(metric_name,
+                  MetricType.EVAL_METRICS,
+                  dataset_name,
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
   def eval_scoring(cls,
                    metric_name: str,
-                   dataset_name: Optional[str] = None) -> 'Metric':
+                   dataset_name: Optional[str] = None,
+                   sub_experiment_id: Optional[str] = None,
+                   aggregator: Optional[Union[str, MetricAggregationFn]] = None
+                   ) -> 'Metric':
     """Returns a metric from evaluation on the test dataset."""
-    return Metric(metric_name, MetricType.EVAL_SCORING_METRICS, dataset_name)
+    return Metric(metric_name,
+                  MetricType.EVAL_SCORING_METRICS,
+                  dataset_name,
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)
 
   @classmethod
   def decode(cls,
              metric_name: str,
-             dataset_name: Optional[str] = None) -> 'Metric':
+             dataset_name: Optional[str] = None,
+             sub_experiment_id: Optional[str] = None,
+             aggregator: Optional[Union[str, MetricAggregationFn]] = None
+             ) -> 'Metric':
     """Returns a metric or processed metric from a decode dataset."""
-    return Metric(metric_name, MetricType.DECODE_METRICS, dataset_name)
+    return Metric(metric_name,
+                  MetricType.DECODE_METRICS,
+                  dataset_name,
+                  sub_experiment_id=sub_experiment_id,
+                  aggregator=aggregator)

@@ -20,7 +20,7 @@ to a specific ML experiment.
 """
 
 import abc
-from typing import List, Type, TypeVar
+from typing import Dict, List, Type, TypeVar
 from paxml import automl
 from paxml import base_task
 from praxis import base_input
@@ -96,6 +96,24 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the parameters for AutoML search."""
     raise NotImplementedError(
         'Please implement `search` method for your experiment for tuning.')
+
+  def sub_experiments(self) -> Dict[str, Type['BaseExperiment']]:
+    """Creates sub-experiments for joint tuning.
+
+    A PAX experiment can have multiple sub-experiments during tuning, which
+    will be included in a single trial and run in sequence. Each sub-experiment
+    is described by an ID (str) and a `BaseExperiment` subclass, therefore,
+    PAX users can include multiple PAX experiments in the same tuning task and
+    use their metrics to compute tuning rewards. Please note that when a PAX
+    experiment class is included as a sub-experiment of other experiment, its
+    own sub-experiments will not be included. Users can also programmatically
+    create new classes based on current class, by overriding class attributes
+    or overriding its method.
+
+    Returns:
+      A dict of sub-experiment ID to sub-experiment class.
+    """
+    return {'': self.__class__}
 
   def __init_subclass__(cls):
     """Modifications to the subclasses."""

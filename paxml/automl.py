@@ -31,14 +31,29 @@ InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 
 BaseAlgorithm = automl_interfaces.BaseAlgorithm
 BaseReward = automl_interfaces.BaseReward
-MetricAggregator = automl_interfaces.MetricAggregator
+CrossStepMetricAggregator = automl_interfaces.CrossStepMetricAggregator
 SearchHParams = automl_interfaces.SearchHParams
 MetricType = automl_interfaces.MetricType
 Metric = automl_interfaces.Metric
+MetricAggregator = automl_interfaces.MetricAggregator
 
 
 # Aliases for Google-internal symbols.
 
+
+# An AutoML experiment can have multiple sub-experiments enabled by
+# `SubExperimentFactory`, which transforms an experiment config into
+# a dictionary of sub-experiment id (str) to their configs.
+# Since Vizier does not natively support merging metrics at a given step,
+# we need to report metrics from sub-experiments at non-overlapping steps.
+# To do so, we add a reporting step offset for each sub-experiment, and use
+# this constant to compute the step space. This essentially means:
+#
+# When there are 3 sub-experiments in a tuning experiment:
+#   the 1st sub-experiment starts its step 0 at step 0;
+#   the 2nd sub-experiment starts its step 0 at step 1000_000_000;
+#   the 3rd sub-experiment starts its step 0 at step 2000_000_000.
+SUB_EXPERIMENT_STEP_OFFSET = 1000_000_000
 
 #
 # Common search hyperparameters.
@@ -51,7 +66,8 @@ def hyperparameter_tuning(
     goal: str = 'maximize',
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
-    metric_aggregator: Optional[MetricAggregator.HParams] = None,
+    cross_step_metric_aggregator: Optional[
+        CrossStepMetricAggregator.HParams] = None,
     reward_for_nan: Optional[float] = None) -> SearchHParams:
   """Returns a common search HParams for hyper-parameter tuning.
 
@@ -65,9 +81,9 @@ def hyperparameter_tuning(
       `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
       RuntimeError or errors that match 'XLACompilation.*' will be treated as
       to skip.
-    metric_aggregator: An optional metric aggregator hparams indicating how
-      metrics will be aggregated at the end of the search for computing the
-      reward. If None, the last reported metrics will be used.
+    cross_step_metric_aggregator: An optional cross-step metric aggregator
+      hparams indicating how metrics will be aggregated at the end of the search
+      for computing the reward. If None, the last reported metrics will be used.
     reward_for_nan: An optional float used as the reward when metric value is
       NaN. If not specified, the reward will remain NaN so the trial will be
       skipped by the search algorithm.
@@ -82,7 +98,7 @@ def hyperparameter_tuning(
           metric=metric, goal=goal, reward_for_nan=reward_for_nan),
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
-      metric_aggregator=metric_aggregator)
+      cross_step_metric_aggregator=cross_step_metric_aggregator)
 
 
 def neural_architecture_search(
@@ -93,7 +109,8 @@ def neural_architecture_search(
     max_num_trials: int = 10000,
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
-    metric_aggregator: Optional[MetricAggregator.HParams] = None,
+    cross_step_metric_aggregator: Optional[
+        CrossStepMetricAggregator.HParams] = None,
     reward_for_nan: Optional[float] = None
     ) -> SearchHParams:
   """Search params for Neural Architecture Search."""
@@ -129,7 +146,7 @@ def neural_architecture_search(
       search_reward=reward,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
-      metric_aggregator=metric_aggregator)
+      cross_step_metric_aggregator=cross_step_metric_aggregator)
 
 
 #
@@ -383,25 +400,51 @@ class MnasSoft(TwoObjectiveAggregator):
 #
 
 
-class LastReportedMetricValues(MetricAggregator):
-  """Returns the last reported metrics."""
+class MultiSubExperimentCrossStepMetricAggregator(CrossStepMetricAggregator):
+  """Metric aggregator with sub-experiment support."""
 
   def __call__(
       self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
+    merged_metrics_across_steps = self._merge_metrics(metrics_across_steps)
+    return self.call(merged_metrics_across_steps)
+
+  def _merge_metrics(
+      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Sequence[Tuple[int, Dict[str, float]]]:
+    """Merges metrics from sub-experiments."""
+    merged_metrics_across_steps = collections.defaultdict(dict)
+    for step, metrics in metrics_across_steps:
+      step = step % SUB_EXPERIMENT_STEP_OFFSET
+      merged_metrics_across_steps[step].update(metrics)
+    return [(s, m) for s, m in merged_metrics_across_steps.items()]
+
+  @abc.abstractmethod
+  def call(
+      self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
+    """Aggregates metrics from merged metrics from multiple sub-experiments."""
+
+
+class LastReportedMetricValues(MultiSubExperimentCrossStepMetricAggregator):
+  """Returns the last reported metrics."""
+
+  def call(
+      self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+      ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
-    return metrics_across_steps[-1][1]
+    return merged_metrics_across_steps[-1][1]
 
 
-class AverageMetricValues(MetricAggregator):
+class AverageMetricValues(MultiSubExperimentCrossStepMetricAggregator):
   """Returns the average values of per-step metrics."""
 
-  def __call__(
-      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+  def call(
+      self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
     accumulated_metrics = collections.defaultdict(list)
-    for _, step_metrics in metrics_across_steps:
+    for _, step_metrics in merged_metrics_across_steps:
       for k, v in step_metrics.items():
         accumulated_metrics[k].append(v)
 
@@ -411,10 +454,10 @@ class AverageMetricValues(MetricAggregator):
     return metrics
 
 
-class MetricsWithMaxValue(MetricAggregator):
+class MetricsWithMaxValue(MultiSubExperimentCrossStepMetricAggregator):
   """Returns the step metrics which has the max value on a metric."""
 
-  class HParams(MetricAggregator.HParams):
+  class HParams(MultiSubExperimentCrossStepMetricAggregator.HParams):
     """Hyperparameters for ValueWithMax.
 
     Attributes:
@@ -423,8 +466,8 @@ class MetricsWithMaxValue(MetricAggregator):
     """
     metric: Optional[Metric] = None
 
-  def __call__(
-      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+  def call(
+      self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
     metric = self._hparams.metric or Metric('reward')
@@ -433,17 +476,17 @@ class MetricsWithMaxValue(MetricAggregator):
     # the same step, which might not be the case if we allow multiple processes
     # to report the measurement. We may need to revisit the implementation once
     # multi-role reporting is supported.
-    for i, (_, step_metrics) in enumerate(metrics_across_steps):
+    for i, (_, step_metrics) in enumerate(merged_metrics_across_steps):
       v = metric.get_value(step_metrics)
       if max_value is None or v >= max_value:
         max_i, max_value = i, v
-    return metrics_across_steps[max_i][1]
+    return merged_metrics_across_steps[max_i][1]
 
 
-class MetricsWithMinValue(MetricAggregator):
+class MetricsWithMinValue(MultiSubExperimentCrossStepMetricAggregator):
   """Returns the step metrics which has the min value on an metric."""
 
-  class HParams(MetricAggregator.HParams):
+  class HParams(MultiSubExperimentCrossStepMetricAggregator.HParams):
     """Hyperparameters for ValueWithMax.
 
     Attributes:
@@ -452,17 +495,17 @@ class MetricsWithMinValue(MetricAggregator):
     """
     metric: Optional[Metric] = None
 
-  def __call__(
-      self, metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
+  def call(
+      self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
     metric = self._hparams.metric or Metric('reward')
     min_i, min_value = None, None
-    for i, (_, step_metrics) in enumerate(metrics_across_steps):
+    for i, (_, step_metrics) in enumerate(merged_metrics_across_steps):
       v = metric.get_value(step_metrics)
       if min_value is None or v <= min_value:
         min_i, min_value = i, v
-    return metrics_across_steps[min_i][1]
+    return merged_metrics_across_steps[min_i][1]
 
 
 #
