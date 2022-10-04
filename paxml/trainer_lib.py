@@ -35,6 +35,7 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
+from praxis import sgf
 from praxis import train_states
 import tensorflow.compat.v2 as tf
 
@@ -415,7 +416,8 @@ def _maybe_aggregate_metrics_summaries(
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: NestedMap,
-) -> Tuple[JTensor, JTensor, WeightedScalars, SummaryDict, NestedMap]:
+) -> Tuple[JTensor, JTensor, Optional[JTensor], WeightedScalars, SummaryDict,
+           NestedMap]:
   """If in pmap, aggregate metrics and summaries across model replicas.
 
   Args:
@@ -426,18 +428,21 @@ def _maybe_aggregate_metrics_summaries(
     per_example_out: a NestedMap of per example values.
 
   Returns:
-    (weighted_loss, mean_loss, aggregated_metrics, aggregated_summaries,
-     per_example_out)
+    (weighted_loss, mean_loss, loss_weight, aggregated_metrics,
+     aggregated_summaries, per_example_out)
     weighted_loss - the per-replica loss to back-propagate from. Used for
       computing gradients only.
     mean_loss - the avg per-replica loss. This often is the psum of
       weighted_loss.
+    loss_weight - if applicable, the factor by which the per-replica loss was
+      weighted; otherwise `None`.
     aggregated_scalars - the aggregated weighted scalars dict.
     aggregated_summaries - the aggregated summaries.
     per_example_out - the aggregated per_example_out.
   """
   # compute weighted loss and mean across shards
-  weighted_loss, mean_loss, _ = loss_aggregator.aggregate(weighted_scalars)
+  weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
+      weighted_scalars)
 
   if base_layer.is_running_under_pmap():
     # aggregate data across devices.
@@ -460,8 +465,8 @@ def _maybe_aggregate_metrics_summaries(
     # No aggregation of summaries is needed.
     aggregated_summaries = summary_dict
 
-  return (weighted_loss, mean_loss, aggregated_scalars, aggregated_summaries,
-          per_example_out)
+  return (weighted_loss, mean_loss, loss_weight, aggregated_scalars,
+          aggregated_summaries, per_example_out)
 
 
 def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
@@ -631,8 +636,7 @@ def _train_step_single_learner_with_model(
 
   def _loss_fn(
       mdl_vars: NestedJTensor, inputs: NestedMap, prng_key
-  ) -> Tuple[JTensor, Tuple[JTensor, WeightedScalars, Dict[str, Any],
-                            SummaryDict, SummaryDict]]:
+  ) -> Tuple[JTensor, sgf.GradAuxInfo]:
     """Computes loss as well as other auxiliary outputs."""
     if fprop_dtype == jnp.float32:
       pass
@@ -657,7 +661,8 @@ def _train_step_single_learner_with_model(
       # TODO(yonghui): Fetch aux losses and add them to summaries.
       summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
 
-      (weighted_loss, mean_loss, aggregated_scalars, aggregated_summaries,
+      (weighted_loss, mean_loss, loss_weight, aggregated_scalars,
+       aggregated_summaries,
        per_example_output) = _maybe_aggregate_metrics_summaries(
            jax_task.loss_aggregator, weighted_scalars, summary_tensors,
            per_example_output)
@@ -671,8 +676,12 @@ def _train_step_single_learner_with_model(
           forward_updated_vars[collection] = updated_vars[collection]
     if fprop_dtype == jnp.bfloat16 and weighted_loss.dtype == fprop_dtype:
       weighted_loss = weighted_loss.astype(jnp.float32)
-    return weighted_loss, (mean_loss, aggregated_scalars, forward_updated_vars,
-                           aggregated_summaries, per_example_output)
+    return weighted_loss, sgf.GradAuxInfo(
+        loss_weight=loss_weight,
+        aux_info=(mean_loss, aggregated_scalars, forward_updated_vars,
+                  aggregated_summaries, per_example_output))
+
+  prng_key, subkey = jax.random.split(prng_key)
 
   # Layers may have integer-valued non-trainable vars. `allow_int=True` is
   # needed to allow jax.grad to differentiate wrt integer-values.
@@ -680,12 +689,16 @@ def _train_step_single_learner_with_model(
   # dtype (float0). They cannot be consumed by jnp operations.
   # _zero_gradient_for_non_learnable_vars needs to handle jax.dtypes.float0
   # specially.
-  grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
 
-  prng_key, subkey = jax.random.split(prng_key)
-  (weighted_loss,
-   (mean_loss, weighted_scalars, fwd_updated_vars, fwd_summary_tensors,
-    per_example_out)), grads = grad_fn(updated_mdl_vars, inputs, subkey)
+  if learner.stochastic_gradient is None:
+    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
+  else:
+    grad_fn = functools.partial(learner.stochastic_gradient.grad_fn, _loss_fn)
+  ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars,
+                                                inputs, subkey)
+
+  (mean_loss, weighted_scalars, fwd_updated_vars, fwd_summary_tensors,
+   per_example_out) = aux_info.aux_info
 
   # weighted_loss is only needed for computing gradients, but otherwise, not
   # needed.
@@ -832,7 +845,7 @@ def _eval_step_single_learner_with_model(
 
     # merge back, if any, enum keys for eval matching
     per_example_out.update(enum_keys)
-    (_, mean_loss, aggregated_scalars, aggregated_summaries,
+    (_, mean_loss, _, aggregated_scalars, aggregated_summaries,
      per_example_out) = _maybe_aggregate_metrics_summaries(
          jax_task.loss_aggregator, weighted_scalars, summary_tensors,
          per_example_out)

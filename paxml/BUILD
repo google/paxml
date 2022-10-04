@@ -433,6 +433,7 @@ pytype_strict_library(
         "//praxis:base_model",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:sgf",
         "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
     ],
