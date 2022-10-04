@@ -26,6 +26,7 @@ import re
 import threading
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
+from absl import flags
 from absl import logging
 import jax
 import numpy as np
@@ -34,9 +35,12 @@ import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
 
+FLAGS = flags.FLAGS
+
 NestedMap = py_utils.NestedMap
 
 _PROGRESS_CKPT_STEP_KEY = 'restore_checkpoint_step'
+_INTERNAL_ARTIFACTS_SUBDIR = '_internal_artifacts'
 
 
 class EvaluationMode(str, enum.Enum):
@@ -45,6 +49,9 @@ class EvaluationMode(str, enum.Enum):
 
   @property
   def progress_filename(self) -> str:
+    if 'xm_xid' in FLAGS and FLAGS.xm_xid > 0:
+      return f'_{self.value}_{FLAGS.xm_xid}_progress.json'
+
     return f'_{self.value}_progress.json'
 
 
@@ -289,7 +296,10 @@ def checkpoint_progress(job_log_dir: str, checkpoint_step: Optional[int],
     yield
   else:
     # If we're resuming after being preempted mid evaluation, don't overwrite.
-    fname = os.path.join(job_log_dir, mode.progress_filename)
+    dirname = os.path.join(job_log_dir, _INTERNAL_ARTIFACTS_SUBDIR)
+    fname = os.path.join(dirname, mode.progress_filename)
+    if not tf.io.gfile.exists(dirname):
+      tf.io.gfile.makedirs(dirname)
     if not tf.io.gfile.exists(fname):
       logging.info('Writing %s progress to %s for step %d.',
                    mode.value, fname, checkpoint_step)
@@ -324,7 +334,8 @@ def get_checkpoint_step(job_log_dir: str, restore_checkpoint_dir: str,
     written to the `job_log_dir/checkpoints`. Otherwise, returns the latest
     checkpoint step written.
   """
-  progress_fname = os.path.join(job_log_dir, mode.progress_filename)
+  progress_fname = os.path.join(job_log_dir, _INTERNAL_ARTIFACTS_SUBDIR,
+                                mode.progress_filename)
   if tf.io.gfile.exists(progress_fname):
     with tf.io.gfile.GFile(progress_fname) as f:
       progress_json = json.load(f)

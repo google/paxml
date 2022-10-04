@@ -210,6 +210,7 @@ pytype_strict_library(
     srcs = ["io_utils.py"],
     srcs_version = "PY3",
     deps = [
+        # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
