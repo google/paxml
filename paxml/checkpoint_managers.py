@@ -231,7 +231,7 @@ class CheckpointManager:
     # Read the previous checkpoints file and performs a sanity check.
     try:
       self._checkpoint_history = self._read_checkpoint_file()
-    except message.DecodeError:
+    except (message.DecodeError, tf.errors.NotFoundError):
       logging.error(
           'Checkpoints file `%s` is corrupted. Initializing a new file.',
           self.checkpoint_filename)
