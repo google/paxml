@@ -1033,7 +1033,7 @@ def train_and_evaluate_pmap(
                     global_mesh,
                     reshard_inputs=reshard_inputs,
                     create_gda_for_inputs=create_gda_for_inputs))
-          eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+          eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
               input_p=eval_input_p,
               metrics_list=eval_metrics_list,
@@ -1534,7 +1534,7 @@ def train_and_evaluate_spmd_model(
                       global_mesh,
                       reshard_inputs=reshard_inputs,
                       create_gda_for_inputs=create_gda_for_inputs))
-            eval_steps_per_sec = eval_period.elapsed / sum(num_eval_steps)
+            eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
             eval_metrics = tuning_lib.EvalMetrics(
                 input_p=eval_input_p,
                 metrics_list=eval_metrics_list,
