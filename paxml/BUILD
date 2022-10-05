@@ -189,8 +189,10 @@ pytype_strict_library(
     deps = [
         ":base_task",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
+        "//praxis:base_model",
         # Implicit pyglove dependency.
     ],
 )

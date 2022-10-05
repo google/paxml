@@ -16,11 +16,14 @@
 """Helper for testing the import and construction of experiment configs."""
 
 import re
+from typing import List
 
 from absl.testing import absltest
+import jax
 from paxml import base_task
 from praxis import base_hyperparams
 from praxis import base_input
+from praxis import base_model
 import pyglove as pg
 
 
@@ -43,13 +46,28 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     task = instantiate(task_p)
     self.assertIsInstance(task, base_task.BaseTask)
 
+    tags: List[str] = registry.get_registry_tags(name)
+
     dataset_splits = (experiment_params.datasets()
                       + experiment_params.decoder_datasets())
     # Registered experiment configurations must have at least a dataset split.
     self.assertNotEmpty(dataset_splits)
     for s in dataset_splits:
       self.assertIsInstance(s, base_input.BaseInput.HParams)
-      # Note: Creating the input generator may require data access.
+
+    # Note: Creating the input generator may require data access. Only do it
+    # for explicitly allowed experiments for now.
+    if 'smoke_test_abstract_init' in tags:
+      input_specs_provider = instantiate(
+          experiment_params.get_input_specs_provider_params())
+      self.assertNotIsInstance(
+          input_specs_provider, base_input.DatasetInputSpecsProvider,
+          'Please only tag experiments with smoke_test_abstract_init if '
+          'they implement an input specs provider that doesn\'t require '
+          'initialization of the training pipeline.')
+      input_specs = input_specs_provider.get_input_specs()
+      model: base_model.BaseModel = task.model  # pytype: disable=attribute-error
+      model.abstract_init_with_metadata(jax.random.PRNGKey(0), input_specs)
 
   @classmethod
   def create_test_methods_for_all_registered_experiments(
