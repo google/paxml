@@ -154,6 +154,10 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
             max_outputs=v.max_outputs)
         continue
 
+      if isinstance(v, seqio.metrics.Generic):
+        tf_summary.write(metric_name, v.tensor, metadata=v.metadata, step=step)
+        continue
+
       if isinstance(v, seqio.metrics.Scalar):
         v = float(v.value)
       else:
