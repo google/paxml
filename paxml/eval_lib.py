@@ -28,6 +28,7 @@ from absl import flags
 from absl import logging
 from clu import platform
 import jax
+from jax.experimental import global_device_array
 from jax.experimental import maps
 from jax.experimental import multihost_utils
 import numpy as np
@@ -132,6 +133,20 @@ def _maybe_write_scoring_outputs(
                fq_fname, len(scoring_outputs))
 
   io_utils.write_key_value_pairs(fq_fname, flat_scoring_outputs)
+
+
+def _free_device_buffer(
+    device_array: Union[global_device_array.GlobalDeviceArray, jax.Array]):
+  """Forces to free a device buffer."""
+  # This is more reliable than using only Python refcount and gc. Sometimes
+  # there is unexpected reference that cannot be cleared by gc.
+  # TODO(pax-dev): Simplify this after migrating to Array.
+  if isinstance(device_array, global_device_array.GlobalDeviceArray):
+    for s in device_array.local_shards:
+      if s.data is not None:
+        s.data.delete()
+  elif isinstance(device_array, jax.Array):
+    device_array.delete()  # pytype: disable=attribute-error
 
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
@@ -626,6 +641,7 @@ def evaluate_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         if is_last_ckpt:
           break
       # Release replicated_model_states.
+      jax.tree_util.tree_map(_free_device_buffer, replicated_model_states)
       del replicated_model_states
       new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
           checkpoint_dir)
@@ -982,6 +998,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
       # There must be a new checkpoint here.
       logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
       # Release old partitioned_train_state.
+      jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
       del partitioned_train_state
       partitioned_train_state = checkpoints.restore_checkpoint(
           train_state_global_shapes,
@@ -1229,6 +1246,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         if is_last_ckpt:
           break
       # Release replicated_model_states.
+      jax.tree_util.tree_map(_free_device_buffer, replicated_model_states)
       del replicated_model_states
       new_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
           restore_checkpoint_dir)
@@ -1709,6 +1727,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
               restore_checkpoint_dir)
         logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
         # Release old partitioned_train_state.
+        jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
         del partitioned_train_state
         partitioned_train_state = checkpoints.restore_checkpoint(
             train_state_global_shapes,
