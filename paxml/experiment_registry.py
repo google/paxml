@@ -17,7 +17,7 @@
 import collections
 import functools
 import re
-from typing import List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional
 
 from absl import logging
 
@@ -32,6 +32,7 @@ class _ExperimentRegistryHelper:
   # Global variable for the experiment configuration registry
   # A mapping from a canonical key to the BaseExperimentT class.
   _registry = {}
+  _registry_tags: Dict[str, List[str]] = {}
   # A mapping from a secondary key to all matching canonical keys.
   _secondary_keys = collections.defaultdict(list)
 
@@ -62,6 +63,7 @@ class _ExperimentRegistryHelper:
   def register(cls,
                experiment_class: Optional[BaseExperimentT] = None,
                *,
+               tags: Optional[List[str]] = None,
                allow_overwrite=False):
     """Registers an experiment configuration class into the global registry.
 
@@ -81,6 +83,8 @@ class _ExperimentRegistryHelper:
 
     Args:
       experiment_class: a BaseExperimentT class.
+      tags: String tags, which can be used to mark experiments as important or
+        unit-testable. Currently we do not prescribe any semantics.
       allow_overwrite: bool, whether re-register an existing class is allowed.
 
     Returns:
@@ -93,7 +97,8 @@ class _ExperimentRegistryHelper:
     """
     if experiment_class is None:
       # decorated with @register(...)
-      return functools.partial(cls.register, allow_overwrite=allow_overwrite)
+      return functools.partial(
+          cls.register, allow_overwrite=allow_overwrite, tags=tags)
 
     # canonical key is the full path.
     canonical_key = (
@@ -102,6 +107,7 @@ class _ExperimentRegistryHelper:
     if preexisting and not (cls._allow_overwrite or allow_overwrite):
       raise ValueError(f'Experiment already registered: {canonical_key}')
     cls._registry[canonical_key] = experiment_class
+    cls._registry_tags[canonical_key] = list(tags or [])
     logging.info('Registered experiment `%s`%s', canonical_key,
                  ' (overwritten)' if preexisting else '')
     if preexisting:
@@ -160,6 +166,10 @@ class _ExperimentRegistryHelper:
     return ret
 
   @classmethod
+  def get_registry_tags(cls, key: str) -> List[str]:
+    return cls._registry_tags.get(key, [])
+
+  @classmethod
   def get_all(cls) -> Mapping[str, BaseExperimentT]:
     """Retrieves all the experiment configurations from the global registry.
 
@@ -179,3 +189,4 @@ get = _ExperimentRegistryHelper.get
 
 get_all = _ExperimentRegistryHelper.get_all
 get_docstring_tags = _ExperimentRegistryHelper.get_docstring_tags
+get_registry_tags = _ExperimentRegistryHelper.get_registry_tags
