@@ -16,7 +16,6 @@
 """A registry of experiment configurations."""
 import collections
 import functools
-import re
 from typing import Dict, List, Mapping, Optional
 
 from absl import logging
@@ -151,21 +150,6 @@ class _ExperimentRegistryHelper:
     return cls._registry.get(canonical_keys[0])
 
   @classmethod
-  def get_docstring_tags(cls, key: str) -> Optional[Mapping[str, str]]:
-    """Retrieves @tags from the class docstring."""
-    params = cls.get(key)
-    if not params:
-      # Note that None means no experiment found, different from an empty map.
-      return None
-    ret = {}
-    for line in params.__doc__.split('\n'):
-      m = re.search(r'@(.*): (.*)', line)
-      if m:
-        tag, value = m.group(1), m.group(2)
-        ret[tag] = value
-    return ret
-
-  @classmethod
   def get_registry_tags(cls, key: str) -> List[str]:
     return cls._registry_tags.get(key, [])
 
@@ -188,5 +172,4 @@ register = _ExperimentRegistryHelper.register
 get = _ExperimentRegistryHelper.get
 
 get_all = _ExperimentRegistryHelper.get_all
-get_docstring_tags = _ExperimentRegistryHelper.get_docstring_tags
 get_registry_tags = _ExperimentRegistryHelper.get_registry_tags
