@@ -15,8 +15,10 @@
 
 """Tuning loop for PAX."""
 
+import enum
 import math
 import os
+import re
 from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Union
 from absl import logging
 from clu import platform
@@ -149,16 +151,24 @@ def tune(trial_fn: TrialFn,
                             'search_algorithm')
 
   sub_experiments = experiment_config.sub_experiments()
+  trial_dirname_generator = TrialDirectoryNameGenerator(
+      job_log_dir, search_space.dna_spec)
 
+  published_study_link = False
   for example, feedback in pg.sample(
       search_space, search_algorithm, max_num_trials,
       group=tuner_group,
       name=study if study and study.startswith('local') else None):
+
+  # Google-internal tuning infra logging.
+
     logging.info(
         'Start working on trial %d (group=%r)...', feedback.id, tuner_group)
     # Context manager to deliver different program hyperparameters
     # in each trial.
     with example():
+      trial_dirname = trial_dirname_generator.dirname(feedback.id, feedback.dna)
+
       # Mark trial as infeasible on NaN. PAX user can add more error
       # through `SearchHParams.errors_to_skip`.
       with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
@@ -168,7 +178,7 @@ def tune(trial_fn: TrialFn,
             trial_fn(
                 sub_experiment_cls(),  # pytype: disable=not-instantiable
                 work_unit,
-                os.path.join(job_log_dir, str(feedback.id), sub_experiment_id),
+                trial_dirname,
                 _get_early_stopping_fn(
                     sub_experiment_id=sub_experiment_id,
                     feedback=feedback,
@@ -446,3 +456,111 @@ def is_last_checkpoint(
       last_decode = remaining < max(decode_interval_steps, save_interval_steps)
     is_last = last_eval or last_decode
   return is_last
+
+
+class TrialDirectoryNameGenerator:
+  """Trial directory name generator.
+
+  Each trial will be creating a sub-directory under the root experiment
+  directory. To make it easy to compare trials in TensorBoard, we include
+  the search decision point names and values in the directory name. This class
+  is introduced for deciding the directory name with human readability.
+
+  By default, it will include both decision names and values with '|' delimited
+  string. For example: 'my_experiment/123/x=1|y=abc|z=(0)', where 123 is the
+  trial ID, which contains 3 decisions points named 'x', 'y', and 'z'. '(0)'
+  indicates the choice index for 'z', which will be used when its literal value
+  is not path friendly.
+
+  When there are lots of decision points, usually for NAS, including decision
+  names will make the directory name very long (determined by
+  `total_name_length_threshold`). In such case, we only include the decision
+  values in the path. For example: 'my_experiment/123/0|0.1|abc|(0)|(1)|(2)'.
+  """
+
+  class DecisionFormat(enum.Enum):
+    EMPTY = 0
+    VALUE = 1
+    LITERAL = 2
+
+  def __init__(self,
+               root_dir: str,
+               dna_spec: pg.DNASpec,
+               total_name_length_threshold: int = 64):
+    path_regex = re.compile(r'^[A-Za-z0-9\-_\.]+$')
+    def path_friendly(v: str):
+      return bool(path_regex.match(v))
+
+    decision_formats: Dict[pg.geno.DecisionPoint,
+                           TrialDirectoryNameGenerator.DecisionFormat] = {}
+
+    self._formatted_categorical_literals = {}
+
+    # Determine whether decisions can be included
+    total_key_len = 0
+    for dp in dna_spec.decision_points:
+      if isinstance(dp, pg.geno.CustomDecisionPoint):
+        decision_formats[dp] = TrialDirectoryNameGenerator.DecisionFormat.EMPTY
+      elif isinstance(dp, pg.geno.Choices) and all(
+          path_friendly(self.format_literal(v)) for v in dp.literal_values):
+        decision_formats[dp] = (
+            TrialDirectoryNameGenerator.DecisionFormat.LITERAL)
+      else:
+        decision_formats[dp] = TrialDirectoryNameGenerator.DecisionFormat.VALUE
+      total_key_len += len(dp.name)
+    include_decision_names = total_key_len < total_name_length_threshold
+    self._root_dir = root_dir
+    self._include_decision_names = include_decision_names
+    self._decision_formats = decision_formats
+
+  def format_literal(self, literal: Union[str, int, float]) -> str:
+    """Formats literal values."""
+    if isinstance(literal, int):
+      return str(literal)
+    if isinstance(literal, float):
+      return f'{literal:.3e}'
+    formatted = self._formatted_categorical_literals.get(literal, None)
+    if formatted is None:
+      formatted = self._format_categorical(literal)
+      self._formatted_categorical_literals[literal] = formatted
+    return formatted
+
+  def _format_categorical(self, literal: str) -> str:
+    """Formats common categorical values."""
+    if literal.startswith('\'') and literal.endswith('\''):
+      return literal[1:-1]
+    if literal.startswith('<class'):
+      # Try extract class name.
+      r = re.match(r'^<class \'(.+)\'>$', literal)
+      if r:
+        qual_name = r.groups()[0]
+        assert qual_name is not None
+        return qual_name.split('.')[-1]
+    # NOTE(daiyip): add formatting for more common categorical literals here.
+    return literal
+
+  def dirname(self, trial_id: int, dna: pg.DNA) -> str:
+    """Gets the directory name for a trial."""
+    kv_pairs = []
+    for dp, fmt in self._decision_formats.items():
+      decision = dna[dp]
+      assert isinstance(decision, pg.DNA), decision
+      if fmt == TrialDirectoryNameGenerator.DecisionFormat.EMPTY:
+        v = '(CUSTOM)'
+      elif fmt == TrialDirectoryNameGenerator.DecisionFormat.LITERAL:
+        assert isinstance(dp, pg.geno.Choices), dp
+        v = self.format_literal(decision.literal_value)
+      else:
+        assert fmt == TrialDirectoryNameGenerator.DecisionFormat.VALUE
+        if isinstance(dp, pg.geno.Float):
+          v = self.format_literal(decision.value)
+        else:
+          assert isinstance(dp, pg.geno.Choices)
+          v = f'({decision.value})'
+      kv_pairs.append((dp.name, v))
+
+    if self._include_decision_names:
+      items = [f'{k}={v}' for k, v in kv_pairs]
+    else:
+      items = [v for _, v in kv_pairs]
+    return os.path.join(self._root_dir, str(trial_id), '|'.join(items))

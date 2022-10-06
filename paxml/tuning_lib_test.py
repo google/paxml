@@ -162,5 +162,79 @@ class TuningLibTest(absltest.TestCase):
                       0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0])
 
 
+def get_trial_dirname(
+    search_space_fun, trial_id: int, dna: pg.DNA, root_dir: str = 'root'):
+  search_space = pg.hyper.trace(search_space_fun, require_hyper_name=True)
+  dirname_generator = tuning_lib.TrialDirectoryNameGenerator(
+      root_dir, search_space.dna_spec)
+  dna.use_spec(search_space.dna_spec)
+  return dirname_generator.dirname(trial_id, dna)
+
+
+class TrialDirnameTest(absltest.TestCase):
+  """Tests for trial dirname."""
+
+  def test_trial_with_named_values(self):
+    def _fn():
+      return pg.oneof([1, 2], name='x') + len(
+          pg.oneof(['a', 'b', 'c'], name='y'))
+
+    self.assertEqual(
+        get_trial_dirname(_fn, 1, pg.DNA([0, 0])),
+        'root/1/x=1|y=a')
+
+  def test_trial_with_named_decisions(self):
+    def _fn():
+      # ? is not allowed in path, so we use the decision index for 'y'.
+      return pg.oneof([1, 2], name='x') + len(
+          pg.oneof(['a', 'b?', 'c'], name='y'))
+
+    self.assertEqual(
+        get_trial_dirname(_fn, 1, pg.DNA([0, 0])),
+        'root/1/x=1|y=(0)')
+
+  def test_trial_with_decision_values(self):
+    def _fn():
+      # The total length of name strings exceeds 64.
+      # Thus we only include values.
+      r = 0
+      for i in range(10):
+        r += pg.oneof([1, 2, 3], name=f'decision_{i}')
+      return r
+    self.assertEqual(
+        get_trial_dirname(_fn, 1, pg.DNA([0 for _ in range(10)])),
+        'root/1/1|1|1|1|1|1|1|1|1|1')
+
+  def test_trial_with_format_literal(self):
+    class Foo:
+      pass
+
+    class Bar:
+      pass
+
+    def _fn():
+      return (pg.oneof([Foo, Bar], name='x')(), pg.floatv(0, 1000, name='y'))
+    self.assertEqual(
+        get_trial_dirname(_fn, 1, pg.DNA([0, 0.0025112])),
+        'root/1/x=Foo|y=2.511e-03')
+
+  def test_trial_with_custom_hyper(self):
+    class CustomHyper(pg.hyper.CustomHyper):
+
+      def custom_decode(self, dna: pg.geno.DNA):
+        return dna.value
+
+      def first_dna(self):
+        return pg.DNA('abc')
+
+    def _fn():
+      # ? is not allowed in path, so we use the decision index for 'y'.
+      return pg.oneof([1, 2], name='x') + len(CustomHyper(name='y'))
+
+    self.assertEqual(
+        get_trial_dirname(_fn, 1, pg.DNA([0, 'xyz'])),
+        'root/1/x=1|y=(CUSTOM)')
+
+
 if __name__ == '__main__':
   absltest.main()
