@@ -21,6 +21,7 @@ import abc
 from typing import List
 
 from praxis import base_hyperparams
+from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
@@ -28,6 +29,7 @@ from praxis import train_states
 import tensorflow_datasets as tfds
 
 NestedMap = py_utils.NestedMap
+NestedWeightHParams = base_layer.NestedWeightHParams
 PRNGKey = pytypes.PRNGKey
 TrainState = train_states.TrainState
 
@@ -52,6 +54,7 @@ class BaseInferenceRunner(base_hyperparams.BaseParameterizable, abc.ABC):
 
   @abc.abstractmethod
   def infer(self, train_state: TrainState, prng_key: PRNGKey,
+            var_weight_hparams: NestedWeightHParams,
             input_batch: NestedMap) -> NestedMap:
     """Generates some output given a model and input. Should be pmap-able."""
 

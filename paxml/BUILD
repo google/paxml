@@ -115,6 +115,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         "//praxis:base_hyperparams",
+        "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -171,12 +172,10 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
-        "//praxis:base_model",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:train_states",
-        # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
         # Implicit tensorflow_datasets dependency.
     ],
@@ -501,6 +500,7 @@ py_strict_test(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
+        "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:py_utils",
         "//praxis:pytypes",

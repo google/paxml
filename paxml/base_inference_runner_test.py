@@ -24,6 +24,7 @@ import jax
 import numpy as np
 from paxml import base_inference_runner
 from praxis import base_hyperparams
+from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
@@ -34,6 +35,7 @@ import tensorflow_datasets as tfds
 
 instantiate = base_hyperparams.instantiate
 NestedMap = py_utils.NestedMap
+NestedWeightHParams = base_layer.NestedWeightHParams
 PRNGKey = pytypes.PRNGKey
 TrainState = train_states.TrainState
 
@@ -45,6 +47,7 @@ class DummyInference(base_inference_runner.BaseInferenceRunner):
     output_schema: Any = None
 
   def infer(self, train_state: TrainState, prng_key: PRNGKey,
+            var_weight_hparams: NestedWeightHParams,
             input_batch: NestedMap) -> NestedMap:
     return self.hparams.output
 
@@ -70,7 +73,8 @@ class BaseInferenceRunnerTest(test_utils.TestCase):
     infer_runner = infer_runner_p.Instantiate(model=None)
 
     serialized_outputs = infer_runner.serialize_outputs(
-        infer_runner.infer(*([None]*3)))
+        # Pass dummy values to all 4 arguments of infer().
+        infer_runner.infer(*([None] * 4)))
 
     expected_outputs: List[NestedMap] = py_utils.tree_unstack(dummy_output, 0)
     self.assertEqual(len(serialized_outputs), len(expected_outputs))

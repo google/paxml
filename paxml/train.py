@@ -882,8 +882,8 @@ def train_and_evaluate_pmap(
 
   if decode_input_p:
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        jax_task, task_p, decode_input_pipelines, decode_input_p,
-        decode_prng_seed, job_log_dir)
+        jax_task, task_p, train_state_metadata.var_weight_hparams,
+        decode_input_pipelines, decode_input_p, decode_prng_seed, job_log_dir)
 
   logging.info('Training loop starting...')
   if eval_input_p:
@@ -1243,6 +1243,7 @@ def train_and_evaluate_spmd_model(
     jax_task = instantiate(task_p)
     train_state_metadata = trainer_lib.create_train_state_metadata(
         jax_task, init_key, train_sample_inputs)
+
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir)
@@ -1355,6 +1356,7 @@ def train_and_evaluate_spmd_model(
               init_key,
               trainer_lib.train_state_for_eval_step(
                   train_state_metadata.partitioned_specs),
+              train_sample_inputs,
               decode_inputs_shape_dtype,
               unpadded_global_batch_size=decode_unpadded_global_batch_size))
 

@@ -290,6 +290,9 @@ class SingleTask(base_task.BaseTask):
         profiler_num_steps is smaller than this value.
       profiler_capture_step: The step index at which to capture a code profile.
         No trace is captured if set to None.
+      always_use_train_for_model_init: Boolean indicating whether to use the new
+        flow for model initialization. With this new flow, dedicated evaluation
+        and decoding-only jobs rely on training inputs for model initialization.
     """
     learner: learners_lib.Learner.HParams = sub_config_field(
         learners_lib.Learner.HParams)
@@ -311,6 +314,7 @@ class SingleTask(base_task.BaseTask):
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None
+    always_use_train_for_model_init: bool = False
 
   @enum.unique
   class TrackDecoderMetricMode(str, enum.Enum):
