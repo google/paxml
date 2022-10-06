@@ -16,6 +16,7 @@
 """Tests for automl."""
 
 import math
+from typing import Dict, Type
 from absl.testing import absltest
 from clu import platform
 from paxml import automl
@@ -66,7 +67,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
 class TuningWithSubExperiments(TuningExperiment):
   """A faked tuning experiment with multiple sub-experiments."""
 
-  def sub_experiments(self) -> dict[str, type[base_experiment.BaseExperiment]]:
+  def sub_experiments(self) -> Dict[str, Type[base_experiment.BaseExperiment]]:
     def _scale_experiment(multiplier):
       class ScaledExperiment(self.__class__):
 
