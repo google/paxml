@@ -533,7 +533,7 @@ def write_hparams_file(model_config: base_experiment.BaseExperiment,
 
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
-    job_log_dir: Optional[str],
+    job_log_dir: str,
     maybe_use_persistence_checkpointing: bool,
     eval_on_test: Optional[bool],
     checkpoint_todelete_subdir: Optional[str] = None,
@@ -742,7 +742,7 @@ class _SummaryContextManager(contextlib.ExitStack):
 def train_and_evaluate_pmap(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
-    job_log_dir: Optional[str],
+    job_log_dir: str,
     checkpointer: _TrainingCheckpointer,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
@@ -1142,7 +1142,7 @@ def compile_for_auto_sharding(train_step: Any,
 def train_and_evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
-    job_log_dir: Optional[str],
+    job_log_dir: str,
     checkpointer: _TrainingCheckpointer,
     checkpoint_type: CheckpointType,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],

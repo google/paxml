@@ -356,7 +356,7 @@ def run_eval_loop_over_test_splits(
 
 
 def evaluate(experiment_config: base_experiment.BaseExperiment,
-             job_log_dir: Optional[str],
+             job_log_dir: str,
              maybe_use_persistence_checkpointing: bool,
              early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
              use_orbax: bool = False) -> None:
@@ -946,7 +946,7 @@ class _SpmdEvalRunner:
 def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
                         train_sample_inputs: Optional[NestedJTensor],
                         eval_input_p: Sequence[base_input.BaseInput.HParams],
-                        job_log_dir: Optional[str],
+                        job_log_dir: str,
                         checkpoint_type: CheckpointType,
                         early_stopping_fn: Optional[
                             trainer_lib.EarlyStoppingFn] = None,
@@ -1118,7 +1118,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
 
 
 def decode(experiment_config: base_experiment.BaseExperiment,
-           job_log_dir: Optional[str],
+           job_log_dir: str,
            maybe_use_persistence_checkpointing: bool,
            restore_checkpoint_dir: Optional[str],
            restore_checkpoint_step: Optional[int],
@@ -1234,7 +1234,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
                       train_sample_inputs: Optional[NestedJTensor],
                       input_p: Sequence[base_input.BaseInput.HParams],
                       eval_input_p: Sequence[base_input.BaseInput.HParams],
-                      job_log_dir: Optional[str],
+                      job_log_dir: str,
                       restore_checkpoint_dir: str,
                       restore_checkpoint_step: Optional[int],
                       continuous_decode: bool,
@@ -1688,7 +1688,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
                       train_sample_inputs: Optional[NestedJTensor],
                       input_p: Sequence[base_input.BaseInput.HParams],
                       eval_input_p: Sequence[base_input.BaseInput.HParams],
-                      job_log_dir: Optional[str],
+                      job_log_dir: str,
                       checkpoint_type: CheckpointType,
                       restore_checkpoint_dir: str,
                       restore_checkpoint_step: Optional[int],
@@ -2317,7 +2317,7 @@ def _find_and_maybe_update_tracked_metric(
 
 
 def infer_and_write(experiment_config: base_experiment.BaseExperiment,
-                    job_log_dir: Optional[str],
+                    job_log_dir: str,
                     use_orbax: bool = False) -> None:
   """Generates output from a model and writes it out.
 

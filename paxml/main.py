@@ -403,5 +403,5 @@ if __name__ == '__main__':
   # Provide access to --jax_backend_target and --jax_xla_backend flags.
   jax.config.config_with_absl()
 
-  # TODO(shafey): Make `job_log_dir` mandatory?
+  flags.mark_flag_as_required('job_log_dir')
   app.run(main, flags_parser=absl_flags.flags_parser)
