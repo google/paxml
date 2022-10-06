@@ -213,7 +213,7 @@ class TrialDirnameTest(absltest.TestCase):
       pass
 
     def _fn():
-      return (pg.oneof([Foo, Bar], name='x')(), pg.floatv(0, 1000, name='y'))
+      return (pg.oneof([Foo, Bar], name='x')(), pg.floatv(0.0, 1.0, name='y'))
     self.assertEqual(
         get_trial_dirname(_fn, 1, pg.DNA([0, 0.0025112])),
         'root/1/x=Foo|y=2.511e-03')
