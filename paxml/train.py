@@ -389,14 +389,16 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self.save(step_i, partitioned_train_state, is_final=True)
 
 
-def _create_checkpoint_manager(
+def _create_checkpointer(
     task_p: tasks_lib.SingleTask.HParams,
     job_log_dir: str,
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str],
     use_orbax: bool = False,
+    async_ckpt_manager: Optional[
+        gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None
-) -> CheckpointManager:
+) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
   train_p = task_p.train
@@ -420,13 +422,13 @@ def _create_checkpoint_manager(
       else:
         raise ValueError(
             f'Unsupported Orbax checkpoint type: {checkpoint_type}')
-    return checkpoint_managers.OrbaxCheckpointManager(
+    checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
         checkpoint_dir,
         checkpointer,
         options=options,
         checkpoint_type=checkpoint_type)
   else:
-    return checkpoint_managers.CheckpointManager(
+    checkpoint_manager = checkpoint_managers.CheckpointManager(
         config_name='',
         root_dir=checkpoint_dir,
         checkpoint_type=checkpoint_type,
@@ -435,6 +437,25 @@ def _create_checkpoint_manager(
         keep_interval_timedelta=keep_interval_timedelta,
         todelete_subdir=todelete_subdir)
 
+  if task_p.model.ici_mesh_shape is not None:
+    if use_orbax:
+      checkpointer = _OrbaxPjitTrainingCheckpointer(checkpoint_manager,
+                                                    checkpoint_type)
+    else:
+      checkpointer = _PjitTrainingCheckpointer(checkpoint_manager,
+                                               checkpoint_type,
+                                               async_ckpt_manager,
+                                               async_checkpointer, job_log_dir)
+  else:
+    if use_orbax:
+      checkpointer = _OrbaxPmapTrainingCheckpointer(job_log_dir,
+                                                    checkpoint_manager,
+                                                    checkpoint_type)
+    else:
+      checkpointer = _PmapTrainingCheckpointer(job_log_dir, checkpoint_manager,
+                                               async_ckpt_manager,
+                                               async_checkpointer)
+  return checkpointer
 
 
 def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
@@ -591,23 +612,16 @@ def train_and_evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task_p)
 
-  checkpoint_manager = _create_checkpoint_manager(
+  checkpointer = _create_checkpointer(
       task_p,
       job_log_dir,
       checkpoint_type,
       checkpoint_todelete_subdir,
       use_orbax=use_orbax,
+      async_ckpt_manager=async_ckpt_manager,
       async_checkpointer=async_checkpointer)
 
   if task_p.model.ici_mesh_shape is not None:
-    if use_orbax:
-      checkpointer = _OrbaxPjitTrainingCheckpointer(checkpoint_manager,
-                                                    checkpoint_type)
-    else:
-      checkpointer = _PjitTrainingCheckpointer(checkpoint_manager,
-                                               checkpoint_type,
-                                               async_ckpt_manager,
-                                               async_checkpointer, job_log_dir)
     train_and_evaluate_spmd_model(
         task_p,
         train_input_p,
@@ -619,14 +633,6 @@ def train_and_evaluate(
         early_stopping_fn,
         enable_auto_sharding)
   else:
-    if use_orbax:
-      checkpointer = _OrbaxPmapTrainingCheckpointer(job_log_dir,
-                                                    checkpoint_manager,
-                                                    checkpoint_type)
-    else:
-      checkpointer = _PmapTrainingCheckpointer(job_log_dir, checkpoint_manager,
-                                               async_ckpt_manager,
-                                               async_checkpointer)
     train_and_evaluate_pmap(
         task_p,
         train_input_p,
