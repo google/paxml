@@ -789,9 +789,11 @@ def _restore_checkpoint_gda(
   logging.info('GDA checkpoint restore tspecs: %s', tspecs)
   logging.info('GDA checkpoint restore partition_spec_leaves: %s',
                flattened_state_specs)
+
+  shardings = [py_utils.cached_mesh_pspec_sharding(global_mesh, s)
+               for s in flattened_state_specs]
   train_state_gda = gda_serialization.run_deserialization(
-      [global_mesh] * len(tspecs),
-      flattened_state_specs,
+      shardings,
       tspecs,
       concurrent_gb=96,
       dtypes=flattened_global_dtypes,
