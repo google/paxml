@@ -971,7 +971,7 @@ def compile_for_auto_sharding(train_step: Any,
   inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
   compiled = train_step.lower(
       train_state, train_key, inputs_shape_dtype, _global_avals=True).compile()
-  return compiled, compiled.input_shardings
+  return compiled, compiled.input_shardings[0]
 
 
 def train_and_evaluate_spmd_model(
