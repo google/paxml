@@ -1076,7 +1076,7 @@ def shard_on_batch_dim_partition_spec(
 
 
 def reshard_input_based_on_rank_fn(
-    mapping_dict: Dict[str, base_layer.SplitDimsMapping],
+    mapping_dict: Optional[Dict[str, base_layer.SplitDimsMapping]],
     mesh_names: Sequence[str],
     x: JTensor,
 ) -> JTensor:
@@ -1085,13 +1085,17 @@ def reshard_input_based_on_rank_fn(
   Args:
     mapping_dict: Dictionary which contains the split mapping for different
       shapes. For n-d shape, it must have an entry f'map_{n}d' which tells us
-      how to partition tensors of this dimension.
+      how to partition tensors of this dimension. If mapping_dict is None,
+      no resharding of the tensor.
     mesh_names: List of mesh axis names.
     x: JTensor which to shard.
 
   Returns:
     Resharded tensor.
   """
+  if mapping_dict is None:
+    logging.info('No resharding of input as mapping_dict is None.')
+    return x
   key = f'map_{len(x.shape)}d'
   if key not in mapping_dict:
     raise ValueError(f'Split mapping must be provided for {len(x.shape)}-d '
