@@ -19,6 +19,7 @@ import abc
 import contextlib
 import datetime
 import functools
+import json
 import os
 import re
 import time
@@ -26,6 +27,8 @@ import typing
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
+from clu import platform
+from flax.core import frozen_dict
 import jax
 from jax.experimental import maps
 from jax.experimental import pjit
@@ -739,6 +742,30 @@ class _SummaryContextManager(contextlib.ExitStack):
             self.eval_test_summary_writers, self.decode_summary_writers)
 
 
+def _write_input_specs(input_specs: NestedShapeDtypeLike,
+                       job_log_dir: str) -> None:
+  """Writes input specs as JSON to a file."""
+  if jax.process_index() != 0:
+    return
+
+  def _to_dict(array_like: Any) -> Dict[str, Any]:
+    return {
+        '_array': {
+            'shape': list(array_like.shape),
+            'dtype': str(array_like.dtype)
+        }
+    }
+
+  input_specs_dict = frozen_dict.unfreeze(
+      jax.tree_util.tree_map(_to_dict, input_specs))
+  fpath = os.path.join(job_log_dir, 'input_specs.json')
+  with tf.io.gfile.GFile(fpath, 'w') as f:
+    f.write(json.dumps(input_specs_dict, indent=2, sort_keys=True))
+
+  work_unit = platform.work_unit()
+  work_unit.create_artifact(platform.ArtifactType.FILE, fpath, 'Input specs')
+
+
 def train_and_evaluate_pmap(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
@@ -787,6 +814,11 @@ def train_and_evaluate_pmap(
   train_sample_inputs = train_input_pipeline.peek_padded()
   train_state_metadata = trainer_lib.create_train_state_metadata(
       jax_task, init_key, train_sample_inputs)
+  inputs_shape_dtype = tf.nest.map_structure(
+      py_utils.get_global_input_shape_dtype, train_sample_inputs)
+
+  # Write sample inputs.
+  _write_input_specs(inputs_shape_dtype, job_log_dir)
 
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():
@@ -1194,6 +1226,7 @@ def train_and_evaluate_spmd_model(
   train_sample_inputs = train_input_for_shape.get_next_padded()
   inputs_shape_dtype = tf.nest.map_structure(
       py_utils.get_global_input_shape_dtype, train_sample_inputs)
+  _write_input_specs(inputs_shape_dtype, job_log_dir)
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if (create_gda_for_inputs or

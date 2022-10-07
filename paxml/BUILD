@@ -403,6 +403,8 @@ pytype_strict_library(
         ":trainer_lib",
         ":tuning_lib",
         # Implicit absl.logging dependency.
+        # Implicit clu.platform dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         "//paxml:checkpoints",
