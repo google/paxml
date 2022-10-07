@@ -215,6 +215,10 @@ def adjust_input_params_for_small_batch(
     inp_p: base_input.BaseInput.HParams,
     global_mesh: maps.Mesh) -> base_input.BaseInput.HParams:
   """Creates a copy of inp_p adjusted when per-device batch < 1."""
+  # Remote input adjusts the params for small batch itself.
+  if inp_p.experimental_remote_input:
+    return inp_p
+
   # Two cases are supported:
   #   1) num_infeed_hosts == 1, and batch_size < local_device_count.
   #   2) 1 < num_infeed_hosts < process_count, and batch_size ==
