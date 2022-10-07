@@ -438,7 +438,7 @@ class SeqIOInput(base_input.BaseInput):
 
   def _enumerate(self, ds: tf.data.Dataset,
                  shard_info: seqio.ShardInfo) -> tf.data.Dataset:
-    """Adds provenance enumeration fields."""
+    """Add enumeration fields, only meaningful when is_training=False."""
     p = self.hparams
 
     def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
@@ -486,9 +486,6 @@ class SeqIOInput(base_input.BaseInput):
 
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
 
-    # TODO(b/249192219): revert to only turn on enum in is_training=False.
-    # Currently we do this to workaround the issue where the eval during train
-    # with pjit uses same input partition specs.
     if p.use_enumeration:
       # We want to add enumeration provenance fields *after* applying all
       # feature converters since feature converters don't pass through
