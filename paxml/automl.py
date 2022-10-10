@@ -255,6 +255,11 @@ class SingleObjective(BaseReward):
       reward = self._hparams.reward_for_nan
     return reward
 
+  @property
+  def used_metrics(self) -> Sequence[Metric]:
+    assert self._hparams.metric is not None
+    return [self._hparams.metric]
+
 
 class MultiObjectiveAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
   """Base class for multi objective aggregators."""
@@ -308,6 +313,11 @@ class MultiObjective(BaseReward):
       return metric_values[0]
     assert self._aggregator is not None
     return self._aggregator(metric_values)
+
+  @property
+  def used_metrics(self) -> Sequence[Metric]:
+    assert self._hparams.metrics is not None
+    return self._hparams.metrics
 
 
 class TwoObjectiveAggregator(MultiObjectiveAggregator):

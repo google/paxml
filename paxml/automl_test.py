@@ -321,6 +321,7 @@ class RewardsTest(absltest.TestCase):
         metric=automl.Metric.eval('accuracy')))
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
+    self.assertEqual(reward_fn.used_metrics, [automl.Metric.eval('accuracy')])
     self.assertTrue(math.isnan(
         reward_fn({'eval_test_abc/metrics/accuracy': math.nan}, 0)))
 
@@ -353,6 +354,7 @@ class RewardsTest(absltest.TestCase):
         metrics=[automl.Metric.eval('accuracy')]))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
+    self.assertEqual(reward_fn.used_metrics, [automl.Metric.eval('accuracy')])
 
     reward_fn = instantiate(automl.MultiObjective.HParams(
         metrics=[
@@ -362,6 +364,10 @@ class RewardsTest(absltest.TestCase):
         aggregator=automl.MnasHard.HParams(cost_objective=150),
         reward_for_nan=-1.0))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
+    self.assertEqual(reward_fn.used_metrics, [
+        automl.Metric.eval('accuracy'),
+        automl.Metric.train_steps_per_second()
+    ])
     self.assertEqual(
         reward_fn(
             {

@@ -19,7 +19,7 @@ import enum
 import math
 import os
 import re
-from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 from absl import logging
 from clu import platform
 import jax
@@ -247,16 +247,19 @@ def _get_early_stopping_fn(
         if sub_experiment_id:
           metrics = {f'{k}:{sub_experiment_id}': v for k, v in metrics.items()}
 
-        # Computing reward and report back to the tuning service.
-        reward = reward_fn(metrics, tuning_step)
+        # Computing reward and used metrics for reporting back to the
+        # tuning service.
+        reward, used_metrics = _reward_and_used_metrics(
+            reward_fn, metrics, tuning_step)
+
         if math.isnan(reward):
           raise FloatingPointError('Reward is NaN.')
-        feedback.add_measurement(reward, metrics=metrics, step=tuning_step)
+        feedback.add_measurement(reward, metrics=used_metrics, step=tuning_step)
         logging.info(
             'Measurement is reported to trial %d (sub-experiment=%s) at step '
             '%d with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
             feedback.id, sub_experiment_id, global_step, reward, running_mode,
-            is_last_ckpt, metrics)
+            is_last_ckpt, used_metrics)
 
       if is_last_ckpt:
         py_utils.sync_global_devices(
@@ -307,12 +310,25 @@ def _add_final_measurement(
 
   final_metrics = cross_step_metric_aggregator(metrics_across_steps)
   final_metrics.pop('reward', None)
-  final_reward = reward_fn(final_metrics, global_step)
-  feedback.add_measurement(final_reward, final_metrics, step=global_step)
+  final_reward, used_metrics = _reward_and_used_metrics(
+      reward_fn, final_metrics, global_step)
+  feedback.add_measurement(final_reward, used_metrics, step=global_step)
   logging.info(
       'Final measurement is reported to trial %d at step %d '
       'with reward value %f and metrics %s.',
-      feedback.id, global_step, final_reward, final_metrics)
+      feedback.id, global_step, final_reward, used_metrics)
+
+
+def _reward_and_used_metrics(
+    reward_fn: automl.BaseReward,
+    all_metrics: Dict[str, float],
+    tuning_step: int) -> Tuple[float, Dict[str, float]]:
+  """Returns computed reward and used metrics."""
+  reward = reward_fn(all_metrics, tuning_step)
+  used_metrics = {}
+  for metric in reward_fn.used_metrics:
+    used_metrics.update(dict(metric.match_items(all_metrics)))
+  return reward, used_metrics
 
 
 class EvalMetrics(NamedTuple):

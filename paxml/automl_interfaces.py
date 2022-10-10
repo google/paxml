@@ -44,6 +44,11 @@ class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     """Returns a float value as reward from a dict of metrics."""
 
+  @property
+  @abc.abstractmethod
+  def used_metrics(self) -> Sequence['Metric']:
+    """Returns `automl.Metric` objects used for computing current reward."""
+
 
 class CrossStepMetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
   """Aggregator for gathering metrics across multiple steps."""

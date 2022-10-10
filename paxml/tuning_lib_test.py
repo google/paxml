@@ -97,10 +97,14 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
   if reward > 5:
     reward = math.nan
   # Report measurements at step 1 and step 2.
-  early_stopping_fn({'eval_test_abc/metrics/reward': reward},
-                    trainer_lib.RunningMode.EVAL, 1, False)
-  early_stopping_fn({'eval_test_abc/metrics/reward': reward * 3},
-                    trainer_lib.RunningMode.EVAL, 2, True)
+  early_stopping_fn({
+      'eval_test_abc/metrics/reward': reward,
+      'unused_metric': 0.0
+  }, trainer_lib.RunningMode.EVAL, 1, False)
+  early_stopping_fn({
+      'eval_test_abc/metrics/reward': reward * 3,
+      'unused_metric': 1.0
+  }, trainer_lib.RunningMode.EVAL, 2, True)
 
 
 class TuningLibTest(absltest.TestCase):
@@ -130,6 +134,10 @@ class TuningLibTest(absltest.TestCase):
     # We use the average of the metrics across steps as the final measurement.
     self.assertEqual([t.final_measurement.reward for t in result.trials],
                      [0.0, 0.32 * 2, 3.2 * 2, 0.32 * 2, 1.6 * 2])
+    # Make sure unused metric does not appear in reported metrics.
+    self.assertEqual(result.trials[1].final_measurement.metrics, {
+        'eval_test_abc/metrics/reward': 0.64,
+    })
     # We added an extra measurement for the final report, with final step + 1.
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 3, 3, 3, 3])
