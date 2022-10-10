@@ -1291,9 +1291,12 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   eval_runner = _PmapEvalRunner(
       task_p, eval_input_p, jax_task, eval_key, job_log_dir)
-  trainer_lib.write_post_init_model_hparams_file(
-      jax_task.model, var_weight_hparams,
-      os.path.join(job_log_dir, 'decoder_out'))
+  # JaxContext needed for parameter sharing.
+  context_p = base_layer.JaxContext.HParams(do_eval=True)
+  with base_layer.JaxContext.new_context(hparams=context_p):
+    trainer_lib.write_post_init_model_hparams_file(
+        jax_task.model, var_weight_hparams,
+        os.path.join(job_log_dir, 'decoder_out'))
 
   last_checkpoint_step = checkpoints.retrieve_latest_checkpoint_step(
       restore_checkpoint_dir)
