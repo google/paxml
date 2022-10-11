@@ -473,6 +473,34 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
             'reward:2x': 0.6, 'eval_test_abc/metrics/total_loss:2x': 0.6
         })
 
+  def test_average_metric_values_last_n(self):
+    aggregator = instantiate(automl.AverageMetricValues.HParams(last_n=2))
+    self.assertEqual(
+        aggregator([
+            (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
+            (200, {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.3}),
+        ]),
+        {'reward': 0.25, 'eval_test_abc/metrics/total_loss': 0.25})
+    self.assertEqual(
+        aggregator([
+            (0,
+             {'reward:1x': 1e9, 'eval_test_abc/metrics/total_loss:1x': 1e9}),
+            (100,
+             {'reward:1x': 0.1, 'eval_test_abc/metrics/total_loss:1x': 0.1}),
+            (200,
+             {'reward:1x': 0.3, 'eval_test_abc/metrics/total_loss:1x': 0.3}),
+            (0,
+             {'reward:2x': 1e9, 'eval_test_abc/metrics/total_loss:2x': 1e9}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 100,
+             {'reward:2x': 0.5, 'eval_test_abc/metrics/total_loss:2x': 0.5}),
+            (automl.SUB_EXPERIMENT_STEP_OFFSET + 200,
+             {'reward:2x': 0.7, 'eval_test_abc/metrics/total_loss:2x': 0.7}),
+        ]),
+        {
+            'reward:1x': 0.2, 'eval_test_abc/metrics/total_loss:1x': 0.2,
+            'reward:2x': 0.6, 'eval_test_abc/metrics/total_loss:2x': 0.6
+        })
+
   def test_metrics_with_max_value(self):
     aggregator = instantiate(automl.MetricsWithMaxValue.HParams())
     self.assertEqual(

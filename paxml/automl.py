@@ -449,6 +449,15 @@ class LastReportedMetricValues(MultiSubExperimentCrossStepMetricAggregator):
 class AverageMetricValues(MultiSubExperimentCrossStepMetricAggregator):
   """Returns the average values of per-step metrics."""
 
+  class HParams(MultiSubExperimentCrossStepMetricAggregator.HParams):
+    """Hyperparameters for AverageMetricValues.
+
+    Attributes:
+      last_n: If not None, then only the `last_n` values will be used in the
+              metric average. If None, all values are used.
+    """
+    last_n: Optional[int] = None
+
   def call(
       self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
@@ -460,7 +469,11 @@ class AverageMetricValues(MultiSubExperimentCrossStepMetricAggregator):
 
     metrics = {}
     for k, v in accumulated_metrics.items():
-      metrics[k] = sum(v) / len(v)
+      if self._hparams.last_n is not None:
+        metrics[k] = sum(v[-self._hparams.last_n:]) / len(
+            v[-self._hparams.last_n:])
+      else:
+        metrics[k] = sum(v) / len(v)
     return metrics
 
 
