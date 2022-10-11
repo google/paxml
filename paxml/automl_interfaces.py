@@ -37,6 +37,14 @@ class BaseAlgorithm(BaseParameterizable, metaclass=abc.ABCMeta):
     """Returns a PyGlove DNAGenerator."""
 
 
+class BaseEarlyStoppingPolicy(BaseParameterizable, metaclass=abc.ABCMeta):
+  """Base class for population-wise early stopping policy."""
+
+  @abc.abstractmethod
+  def __call__(self) -> pg.tuning.EarlyStoppingPolicy:
+    """Returns a PyGlove early stopping policy."""
+
+
 class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
   """Base class for reward functions."""
 
@@ -79,6 +87,10 @@ class SearchHParams(BaseHyperParams):
   Attributes:
     search_algorithm: Hyperparameters for search algorithm.
     search_reward: Hyperparameters for search reward.
+    early_stopping: An optional population-wise early stopping policy.
+      If None, no population-wise early stopping policy will be used, though
+      users still can raise `automl.EarlyStoppingError` to early terminate a
+      a single trial during training/evaluation.
     cross_step_metric_aggregator: Hyperparameters for cross-step metric
       aggregator. If None, `automl.LastReportedMetricValues` will be used.
     max_num_trials: Max number of trials for the search. If None, there is no
@@ -92,6 +104,7 @@ class SearchHParams(BaseHyperParams):
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
+  early_stopping: Optional[BaseEarlyStoppingPolicy.HParams] = None
   cross_step_metric_aggregator: Optional[
       CrossStepMetricAggregator.HParams] = None
   max_num_trials: int = None

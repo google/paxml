@@ -125,12 +125,16 @@ def tune(trial_fn: TrialFn,
 
   search_hparams = experiment_config.search()
   search_algorithm = instantiate(search_hparams.search_algorithm)()
+
   reward_fn = instantiate(search_hparams.search_reward)
   max_num_trials = max_num_trials or search_hparams.max_num_trials
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
       search_hparams.cross_step_metric_aggregator
       or automl.LastReportedMetricValues.HParams())
+  early_stopping_policy = None
+  if search_hparams.early_stopping is not None:
+    early_stopping_policy = instantiate(search_hparams.early_stopping)()
 
   search_space = get_search_space(experiment_config)
   if search_space.dna_spec.is_constant:
@@ -150,6 +154,16 @@ def tune(trial_fn: TrialFn,
   work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
                             'search_algorithm')
 
+  logging.info('Early stopping policy: %s', early_stopping_policy)
+  if early_stopping_policy is not None:
+    early_stopping_policy_debug_file = os.path.join(
+        job_log_dir, 'early_stopping_policy_debug_file.txt')
+    _write_file_once(early_stopping_policy_debug_file,
+                     str(early_stopping_policy))
+    work_unit.create_artifact(platform.ArtifactType.FILE,
+                              early_stopping_policy_debug_file,
+                              'early_stopping_policy')
+
   sub_experiments = experiment_config.sub_experiments()
   trial_dirname_generator = TrialDirectoryNameGenerator(
       job_log_dir, search_space.dna_spec)
@@ -157,6 +171,7 @@ def tune(trial_fn: TrialFn,
   published_study_link = False
   for example, feedback in pg.sample(
       search_space, search_algorithm, max_num_trials,
+      early_stopping_policy=early_stopping_policy,
       group=tuner_group,
       name=study if study and study.startswith('local') else None):
 
@@ -277,7 +292,11 @@ def _get_early_stopping_fn(
         logging.info('Sub-experiment %s (trial %d) is completed.',
                      sub_experiment_id, feedback.id)
         logging.info('Trial %d is now completed.', feedback.id)
-    return feedback.should_stop_early()
+    result = feedback.should_stop_early()
+    if result:
+      raise automl.EarlyStoppingError(
+          skip=True, skip_reason='Stopped by early stopping policy.')
+    return result
   return should_stop_early
 
 

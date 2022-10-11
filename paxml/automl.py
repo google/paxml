@@ -30,6 +30,7 @@ BaseParameterizable = base_hyperparams.BaseParameterizable
 InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 
 BaseAlgorithm = automl_interfaces.BaseAlgorithm
+BaseEarlyStoppingPolicy = automl_interfaces.BaseEarlyStoppingPolicy
 BaseReward = automl_interfaces.BaseReward
 CrossStepMetricAggregator = automl_interfaces.CrossStepMetricAggregator
 SearchHParams = automl_interfaces.SearchHParams
@@ -64,10 +65,13 @@ def hyperparameter_tuning(
     metric: Metric,
     max_num_trials: int = 100,
     goal: str = 'maximize',
+    *,
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
     cross_step_metric_aggregator: Optional[
         CrossStepMetricAggregator.HParams] = None,
+    early_stopping: Optional[
+        BaseEarlyStoppingPolicy.HParams] = None,
     reward_for_nan: Optional[float] = None) -> SearchHParams:
   """Returns a common search HParams for hyper-parameter tuning.
 
@@ -84,6 +88,10 @@ def hyperparameter_tuning(
     cross_step_metric_aggregator: An optional cross-step metric aggregator
       hparams indicating how metrics will be aggregated at the end of the search
       for computing the reward. If None, the last reported metrics will be used.
+    early_stopping: An optional population-wise early stopping policy.
+      If None, no population-wise early stopping policy will be used, though
+      users still can raise `automl.EarlyStoppingError` to early terminate a
+      a single trial during training/evaluation.
     reward_for_nan: An optional float used as the reward when metric value is
       NaN. If not specified, the reward will remain NaN so the trial will be
       skipped by the search algorithm.
@@ -96,6 +104,7 @@ def hyperparameter_tuning(
       search_algorithm=Sweeping.HParams(),
       search_reward=SingleObjective.HParams(
           metric=metric, goal=goal, reward_for_nan=reward_for_nan),
+      early_stopping=early_stopping,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
       cross_step_metric_aggregator=cross_step_metric_aggregator)
@@ -111,6 +120,8 @@ def neural_architecture_search(
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
     cross_step_metric_aggregator: Optional[
         CrossStepMetricAggregator.HParams] = None,
+    early_stopping: Optional[
+        BaseEarlyStoppingPolicy.HParams] = None,
     reward_for_nan: Optional[float] = None
     ) -> SearchHParams:
   """Search params for Neural Architecture Search."""
@@ -144,6 +155,7 @@ def neural_architecture_search(
   return SearchHParams(
       search_algorithm=RegularizedEvolution.HParams(),
       search_reward=reward,
+      early_stopping=early_stopping,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
       cross_step_metric_aggregator=cross_step_metric_aggregator)
@@ -529,6 +541,68 @@ class MetricsWithMinValue(MultiSubExperimentCrossStepMetricAggregator):
       if min_value is None or v <= min_value:
         min_i, min_value = i, v
     return merged_metrics_across_steps[min_i][1]
+
+#
+# Population-wiise early stopping policies.
+#
+
+
+class EarlyStoppingByValue(BaseEarlyStoppingPolicy):
+  """Early stopping based on the absolute value of a metric at a step."""
+
+  class HParams(BaseEarlyStoppingPolicy.HParams):
+    """Hyperparameters for value-based early stopping policy.
+
+    Attributes:
+      step_values: A list of tuples for defining gating rules:
+        (step, threshold value).
+      metric: Metric to watch. If None, it watches the reward at the step.
+      maximize: If True, value below the threshold will be stopped. Otherwise
+        values above the threshold.
+    """
+    step_values: Optional[List[Tuple[int, float]]] = None
+    metric: Optional[Metric] = None
+    maximize: bool = True
+
+  def __call__(self) -> pg.early_stopping.StepWise:
+    def metric_to_watch(m: pg.tuning.Measurement) -> float:
+      metric = self._hparams.metric
+      if metric is None:
+        return m.reward
+      return metric.get_value(m.metrics)
+    return pg.early_stopping.early_stop_by_value(
+        step_values=self._hparams.step_values,
+        metric=metric_to_watch,
+        maximize=self._hparams.maximize)()
+
+
+class EarlyStoppingByRank(BaseEarlyStoppingPolicy):
+  """Early stopping based on the rank of a metric at a step."""
+
+  class HParams(BaseEarlyStoppingPolicy.HParams):
+    """Hyperparameters for rank-based early stopping policy.
+
+    Attributes:
+      step_ranks: A list of tuples for defining gating rules:
+        (step, threshold rank or threshold percentage, min_histogram_size).
+      metric: Metric to watch. If None, it watches the reward at the step.
+      maximize: If True, the sorting for computing the rank is from the largest
+        to the smallest, otherwise will be the smallest to the largest.
+    """
+    step_ranks: Optional[List[Tuple[int, Union[int, float], int]]] = None
+    metric: Optional[Metric] = None
+    maximize: bool = True
+
+  def __call__(self) -> pg.early_stopping.StepWise:
+    def metric_to_watch(m: pg.tuning.Measurement) -> float:
+      metric = self._hparams.metric
+      if metric is None:
+        return m.reward
+      return metric.get_value(m.metrics)
+    return pg.early_stopping.early_stop_by_rank(
+        step_ranks=self._hparams.step_ranks,
+        metric=metric_to_watch,
+        maximize=self._hparams.maximize)()
 
 
 #

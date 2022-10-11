@@ -64,6 +64,21 @@ class TuningExperiment(base_experiment.BaseExperiment):
         max_num_trials=10)
 
 
+class TuningWithEarlyStopping(TuningExperiment):
+  """A faked tuning experiment with population-wise early stopping."""
+
+  def search(self):
+    search_hparams = super().search()
+    search_hparams.early_stopping = automl.EarlyStoppingByValue.HParams(
+        step_values=[
+            # Watch metrics at step 5, values below 1.0 will be set as
+            # infeasible.
+            (1, 1.0)
+        ],
+        metric=automl.Metric.eval('reward'))
+    return search_hparams
+
+
 class TuningWithSubExperiments(TuningExperiment):
   """A faked tuning experiment with multiple sub-experiments."""
 
@@ -142,12 +157,32 @@ class TuningLibTest(absltest.TestCase):
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 3, 3, 3, 3])
 
+  def test_tune_with_early_stopping_policy(self):
+    job_log_dir = absltest.get_default_test_tmpdir()
+    tuning_lib.tune(run_experiment, TuningWithEarlyStopping(),
+                    platform.work_unit(),
+                    job_log_dir, study='local2', max_num_trials=5)
+    result = pg.tuning.poll_result('local2')
+    self.assertLen(result.trials, 5)
+    # We use the average of the metrics across steps as the final measurement.
+    reward_at_step0 = (
+        lambda t: t.measurements[0].reward if t.measurements else None)
+    self.assertEqual([reward_at_step0(t) for t in result.trials],
+                     [None, 0.32, 3.2, 0.32, 1.6])
+    self.assertEqual([len(t.measurements) for t in result.trials],
+                     [0, 1, 3, 1, 3])
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, True, False, True, False])
+    # We use the average of the metrics across steps as the final measurement.
+    self.assertEqual([t.final_measurement.reward for t in result.trials],
+                     [0.0, 0.0, 3.2 * 2, 0.0, 1.6 * 2])
+
   def test_tune_with_subexperiments(self):
     job_log_dir = absltest.get_default_test_tmpdir()
     tuning_lib.tune(run_experiment, TuningWithSubExperiments(),
                     platform.work_unit(), job_log_dir,
-                    study='local2', max_num_trials=5)
-    result = pg.tuning.poll_result('local2')
+                    study='local3', max_num_trials=5)
+    result = pg.tuning.poll_result('local3')
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, True, False, True])

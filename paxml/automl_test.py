@@ -313,6 +313,24 @@ class SearchAlgorithmsTest(absltest.TestCase):
                 tournament_size=5)))
 
 
+class EarlyStoppingPoliciesTest(absltest.TestCase):
+  """Tests for early stopping policies."""
+
+  def test_early_stop_by_value(self):
+    policy = instantiate(automl.EarlyStoppingByValue.HParams(step_values=[
+        (100, 0.5),
+        (200, 0.7),
+    ]))()
+    self.assertIsInstance(policy, pg.early_stopping.StepWise)
+
+  def test_early_stop_by_rank(self):
+    policy = instantiate(automl.EarlyStoppingByRank.HParams(step_ranks=[
+        (100, 0.5, 32),
+        (200, 5, 0),
+    ]))()
+    self.assertIsInstance(policy, pg.early_stopping.StepWise)
+
+
 class RewardsTest(absltest.TestCase):
   """Tests for common reward functions."""
 
