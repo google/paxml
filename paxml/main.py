@@ -122,6 +122,9 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_bool('enable_auto_sharding', False,
                   'Enable the XLA Auto SPMD partitioner.')
+flags.DEFINE_bool(
+    'enable_checkpoint_saving', True,
+    'Enable checkpoint saving. Useful to disable for test- or debug-like runs.')
 # Flags for automatic tuning.
 flags.DEFINE_string(
     'study', None,
@@ -204,6 +207,7 @@ def run_experiment(
     work_unit: platform.WorkUnit,
     job_log_dir: str,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    enable_checkpoint_saving: bool = True,
 ) -> None:
   """Run an experiment.
 
@@ -213,6 +217,7 @@ def run_experiment(
     job_log_dir: The directory for storing logs and writing checkpoints.
     early_stopping_fn: The early stopping function for training, evaluation
       and decoding. If None, the training will train to requested steps.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   train.write_hparams_file(experiment_config, job_log_dir,
                            '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
@@ -256,7 +261,8 @@ def run_experiment(
         run_decode=FLAGS.decode_during_train,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         use_orbax=use_orbax,
-        async_checkpointer=async_checkpointer)
+        async_checkpointer=async_checkpointer,
+        enable_checkpoint_saving=enable_checkpoint_saving)
 
     if async_checkpointer is not None:
       async_checkpointer.wait_until_finished()
@@ -285,7 +291,8 @@ def run_experiment(
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=use_orbax)
+        use_orbax=use_orbax,
+        enable_checkpoint_saving=enable_checkpoint_saving)
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -314,7 +321,8 @@ def run_experiment(
   py_utils.sync_global_devices('All tasks finish.')
 
 
-def run(experiment_config: base_experiment.BaseExperiment):
+def run(experiment_config: base_experiment.BaseExperiment,
+        enable_checkpoint_saving: bool = True):
   """Run an experiment.
 
   This function exists to provide a clear injection seam for a given run.
@@ -324,6 +332,7 @@ def run(experiment_config: base_experiment.BaseExperiment):
 
   Args:
     experiment_config: The experiment to run.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
 
   # Add a note so that we can tell which Borg task is which JAX host.
@@ -353,8 +362,12 @@ def run(experiment_config: base_experiment.BaseExperiment):
         experiment_config,
         work_unit,
         job_log_dir=FLAGS.job_log_dir,
-        early_stopping_fn=None)
+        early_stopping_fn=None,
+        enable_checkpoint_saving=enable_checkpoint_saving)
   else:
+    if not enable_checkpoint_saving:
+      logging.warning(
+          'Ignoring flag `--enable_checkpoint_saving` for tuning experiment.')
     tuning_lib.tune(
         trial_fn=run_experiment,
         experiment_config=experiment_config,
@@ -385,7 +398,8 @@ def main(argv: Sequence[str]) -> None:
     experiment_config = fdl.build(cfg)
 
   experiment_config.validate()
-  run(experiment_config=experiment_config)
+  run(experiment_config=experiment_config,
+      enable_checkpoint_saving=FLAGS.enable_checkpoint_saving)
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')

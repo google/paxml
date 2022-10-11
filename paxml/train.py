@@ -141,9 +141,13 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
 
 class _PjitTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self, checkpoint_manager: checkpoint_managers.CheckpointManager,
-               checkpoint_type, async_ckpt_manager, async_checkpointer,
-               job_log_dir):
+  def __init__(self,
+               checkpoint_manager: checkpoint_managers.CheckpointManager,
+               checkpoint_type,
+               async_ckpt_manager,
+               async_checkpointer,
+               job_log_dir,
+               enable_checkpoint_saving: bool = True):
     self.checkpoint_dir = _make_checkpoint_dir(job_log_dir)
     checkpoints.delete_temp_directories(self.checkpoint_dir)
     self.async_ckpt_manager = async_ckpt_manager
@@ -152,12 +156,16 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
     self.checkpoint_type = checkpoint_type
     self.multi_host_checkpointing = checkpoint_type == CheckpointType.CHECKPOINT_GDA
     self.checkpoint_manager = checkpoint_manager
+    self._enable_checkpoint_saving = enable_checkpoint_saving
 
   def save(self,
            step_i,
            partitioned_train_state,
            train_state_pspecs,
            is_final=False):
+    if not self._enable_checkpoint_saving:
+      return
+
     logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
                  step_i)
     py_utils.sync_global_devices(
@@ -187,7 +195,8 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
       self.async_ckpt_manager.check_for_errors()
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
-    if self.checkpoint_manager.last_checkpoint_step < step_i:
+    if (self.checkpoint_manager.last_checkpoint_step is None or
+        self.checkpoint_manager.last_checkpoint_step < step_i):
       self.save(
           step_i, partitioned_train_state, train_state_pspecs, is_final=True)
 
@@ -210,13 +219,17 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self,
                checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType):
+               checkpoint_type: CheckpointType,
+               enable_checkpoint_saving: bool = True):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
       raise ValueError('FLAX checkpointing not supported for pjit models.')
+    self._enable_checkpoint_saving = enable_checkpoint_saving
 
   def _save_with_args(self, step_i, partitioned_train_state):
+    if not self._enable_checkpoint_saving:
+      return
     self.checkpoint_manager.save(step_i, partitioned_train_state)
 
   def _restore_with_args(self, step_i, train_state_global_shapes, global_mesh,
@@ -249,14 +262,18 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
 class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self, job_log_dir,
+  def __init__(self,
+               job_log_dir,
                checkpoint_manager: checkpoint_managers.CheckpointManager,
-               async_ckpt_manager, async_checkpointer):
+               async_ckpt_manager,
+               async_checkpointer,
+               enable_checkpoint_saving: bool = True):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self.async_ckpt_manager = async_ckpt_manager
     self.async_checkpointer = async_checkpointer
+    self._enable_checkpoint_saving = enable_checkpoint_saving
 
   def restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
@@ -274,6 +291,8 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
           train_state_global_shapes, self.checkpoint_dir)
 
   def save(self, step_i, partitioned_train_state, is_final=False):
+    if not self._enable_checkpoint_saving:
+      return
     logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
                  step_i)
     if py_utils.pmap_use_tensorstore():
@@ -321,19 +340,23 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
       self.async_ckpt_manager.check_for_errors()
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
-    if self.checkpoint_manager.last_checkpoint_step < step_i:
+    if (self.checkpoint_manager.last_checkpoint_step is None or
+        self.checkpoint_manager.last_checkpoint_step < step_i):
       self.save(step_i, partitioned_train_state, is_final=True)
 
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self, job_log_dir,
+  def __init__(self,
+               job_log_dir,
                checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType):
+               checkpoint_type: CheckpointType,
+               enable_checkpoint_saving: bool = True):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
+    self._enable_checkpoint_saving = enable_checkpoint_saving
 
   def restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
@@ -362,6 +385,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self.checkpoint_manager.save(step_i, train_state, save_kwargs=save_args)
 
   def save(self, step_i, partitioned_train_state, is_final=False):
+    if not self._enable_checkpoint_saving:
+      return
     if py_utils.pmap_use_tensorstore():
       logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
                    step_i)
@@ -388,7 +413,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self.checkpoint_manager.check_for_errors()
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
-    if self.checkpoint_manager.latest_step() < step_i:
+    latest_step = self.checkpoint_manager.latest_step()
+    if latest_step is None or latest_step < step_i:
       self.save(step_i, partitioned_train_state, is_final=True)
 
 
@@ -400,7 +426,8 @@ def _create_checkpointer(
     use_orbax: bool = False,
     async_ckpt_manager: Optional[
         gda_serialization.GlobalAsyncCheckpointManagerBase] = None,
-    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
+    enable_checkpoint_saving: bool = True,
 ) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
@@ -442,22 +469,32 @@ def _create_checkpointer(
 
   if task_p.model.ici_mesh_shape is not None:
     if use_orbax:
-      checkpointer = _OrbaxPjitTrainingCheckpointer(checkpoint_manager,
-                                                    checkpoint_type)
+      checkpointer = _OrbaxPjitTrainingCheckpointer(
+          checkpoint_manager,
+          checkpoint_type,
+          enable_checkpoint_saving=enable_checkpoint_saving)
     else:
-      checkpointer = _PjitTrainingCheckpointer(checkpoint_manager,
-                                               checkpoint_type,
-                                               async_ckpt_manager,
-                                               async_checkpointer, job_log_dir)
+      checkpointer = _PjitTrainingCheckpointer(
+          checkpoint_manager,
+          checkpoint_type,
+          async_ckpt_manager,
+          async_checkpointer,
+          job_log_dir,
+          enable_checkpoint_saving=enable_checkpoint_saving)
   else:
     if use_orbax:
-      checkpointer = _OrbaxPmapTrainingCheckpointer(job_log_dir,
-                                                    checkpoint_manager,
-                                                    checkpoint_type)
+      checkpointer = _OrbaxPmapTrainingCheckpointer(
+          job_log_dir,
+          checkpoint_manager,
+          checkpoint_type,
+          enable_checkpoint_saving=enable_checkpoint_saving)
     else:
-      checkpointer = _PmapTrainingCheckpointer(job_log_dir, checkpoint_manager,
-                                               async_ckpt_manager,
-                                               async_checkpointer)
+      checkpointer = _PmapTrainingCheckpointer(
+          job_log_dir,
+          checkpoint_manager,
+          async_ckpt_manager,
+          async_checkpointer,
+          enable_checkpoint_saving=enable_checkpoint_saving)
   return checkpointer
 
 
@@ -546,7 +583,8 @@ def train_and_evaluate(
     run_decode: bool = False,
     enable_auto_sharding: bool = False,
     use_orbax: bool = False,
-    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None) -> None:
+    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
+    enable_checkpoint_saving: bool = True) -> None:
   """The shared path to run the training and evaluation loop.
 
   Args:
@@ -576,6 +614,7 @@ def train_and_evaluate(
     async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -622,28 +661,20 @@ def train_and_evaluate(
       checkpoint_todelete_subdir,
       use_orbax=use_orbax,
       async_ckpt_manager=async_ckpt_manager,
-      async_checkpointer=async_checkpointer)
+      async_checkpointer=async_checkpointer,
+      enable_checkpoint_saving=enable_checkpoint_saving)
+  if not enable_checkpoint_saving:
+    logging.info(
+        'Checkpointing is disabled and no checkpoint will be saved to disk.')
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(
-        task_p,
-        train_input_p,
-        job_log_dir,
-        checkpointer,
-        checkpoint_type,
-        eval_input_p,
-        decode_input_p,
-        early_stopping_fn,
-        enable_auto_sharding)
+    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
+                                  checkpointer, checkpoint_type, eval_input_p,
+                                  decode_input_p, early_stopping_fn,
+                                  enable_auto_sharding)
   else:
-    train_and_evaluate_pmap(
-        task_p,
-        train_input_p,
-        job_log_dir,
-        checkpointer,
-        eval_input_p,
-        decode_input_p,
-        early_stopping_fn)
+    train_and_evaluate_pmap(task_p, train_input_p, job_log_dir, checkpointer,
+                            eval_input_p, decode_input_p, early_stopping_fn)
 
 
 class _PeekableInput:

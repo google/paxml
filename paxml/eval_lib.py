@@ -1125,7 +1125,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
            continuous_decode: bool,
            run_eval: Optional[bool] = False,
            early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-           use_orbax: bool = False) -> None:
+           use_orbax: bool = False,
+           enable_checkpoint_saving: bool = True) -> None:
   """Runs decoding on the decoder datasets.
 
   Args:
@@ -1145,6 +1146,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     use_orbax: Enables checkpointing backed by Orbax.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
       job_log_dir, 'checkpoints')
@@ -1212,7 +1214,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
         restore_checkpoint_step,
         continuous_decode,
         early_stopping_fn,
-        use_orbax=use_orbax)
+        use_orbax=use_orbax,
+        enable_checkpoint_saving=enable_checkpoint_saving)
 
 
 def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
@@ -1240,7 +1243,8 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
                       continuous_decode: bool,
                       early_stopping_fn: Optional[
                           trainer_lib.EarlyStoppingFn] = None,
-                      use_orbax: bool = False) -> None:
+                      use_orbax: bool = False,
+                      enable_checkpoint_saving: bool = True) -> None:
   """Runs the decoding on the entire decoder datasets for a PMAP model.
 
   Args:
@@ -1258,6 +1262,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     use_orbax: Enables checkpointing backed by Orbax.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   jax_task = instantiate(task_p)
   use_ema = has_ema(task_p)
@@ -1334,10 +1339,15 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         for d in summary_eval_dirs
     ]
 
-    decode_once_fn = partition_decode_once_pmap_model(jax_task, task_p,
-                                                      var_weight_hparams,
-                                                      inputs, input_p,
-                                                      prng_seed, job_log_dir)
+    decode_once_fn = partition_decode_once_pmap_model(
+        jax_task,
+        task_p,
+        var_weight_hparams,
+        inputs,
+        input_p,
+        prng_seed,
+        job_log_dir,
+        enable_checkpoint_saving=enable_checkpoint_saving)
 
     while True:
       with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
@@ -1405,10 +1415,14 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
 
 def partition_decode_once_pmap_model(
-    jax_task: tasks_lib.SingleTask, task_p: tasks_lib.SingleTask.HParams,
-    var_weight_hparams: NestedWeightHParams, inputs: List[base_input.BaseInput],
-    input_p: Sequence[base_input.BaseInput.HParams], prng_seed: JTensor,
-    job_log_dir: str
+    jax_task: tasks_lib.SingleTask,
+    task_p: tasks_lib.SingleTask.HParams,
+    var_weight_hparams: NestedWeightHParams,
+    inputs: List[base_input.BaseInput],
+    input_p: Sequence[base_input.BaseInput.HParams],
+    prng_seed: JTensor,
+    job_log_dir: str,
+    enable_checkpoint_saving: bool = True
 ) -> Callable[[train_states.TrainState, List[SummaryWriter]],
               tuning_lib.DecodeMetrics]:
 
@@ -1416,9 +1430,17 @@ def partition_decode_once_pmap_model(
     with py_utils.timeit() as decode_period:
       (decode_metrics_list, processed_decode_metrics_list,
        decode_seqio_metrics_list, num_decode_steps) = (
-           decode_once_pmap_model(jax_task, task_p, var_weight_hparams, inputs,
-                                  input_p, prng_seed, job_log_dir,
-                                  partitioned_train_state, summary_writers))
+           decode_once_pmap_model(
+               jax_task,
+               task_p,
+               var_weight_hparams,
+               inputs,
+               input_p,
+               prng_seed,
+               job_log_dir,
+               partitioned_train_state,
+               summary_writers,
+               enable_checkpoint_saving=enable_checkpoint_saving))
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
         input_p=input_p,
@@ -1440,6 +1462,7 @@ def decode_once_pmap_model(
     job_log_dir: str,
     replicated_model_states: train_states.TrainState,
     summary_writers: List[SummaryWriter],
+    enable_checkpoint_saving: bool = True,
 ) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
            List[Optional[Dict[str, float]]],  # processed decode metrics.
            List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
@@ -1457,6 +1480,7 @@ def decode_once_pmap_model(
     job_log_dir: Directory for the job logs.
     replicated_model_states: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
 
   Returns:
     A tuple of (a list of decode metrics,
@@ -1680,8 +1704,14 @@ def decode_once_pmap_model(
     # Track metric specified by task_p.track_decoder_metric.
     if task_p.track_decoder_metric:
       _find_and_maybe_update_tracked_metric(
-          basedir, split, dirnames, step_i, input_p, replicated_model_states,
-          task_p, [merged_decode_metrics, merged_processed_decode_metrics])
+          basedir,
+          split,
+          dirnames,
+          step_i,
+          input_p,
+          replicated_model_states,
+          task_p, [merged_decode_metrics, merged_processed_decode_metrics],
+          enable_checkpoint_saving=enable_checkpoint_saving)
 
   return (decode_metrics_list, processed_decode_metrics_list,
           seqio_metrics_list, num_decode_steps)
@@ -2232,7 +2262,8 @@ def _maybe_update_tracked_metric(
     min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
     data_partition_name: str,
     replicated_model_states: train_states.TrainState,
-    use_orbax: bool = False) -> None:
+    use_orbax: bool = False,
+    enable_checkpoint_saving: bool = True) -> None:
   """Update tracked metric if new value (m_value) is lower that the stored one.
 
   Also updates the status file maintained by the tracker and writes
@@ -2250,6 +2281,7 @@ def _maybe_update_tracked_metric(
     replicated_model_states: replicated model states used to save the best
       checkpoint.
     use_orbax: Enables checkpointing backed by Orbax.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   if jax.process_index() == 0:
     if not tf.io.gfile.exists(tracker_dir_path):
@@ -2279,10 +2311,11 @@ def _maybe_update_tracked_metric(
       # EMA during training and separate decoding jobs.
       # TODO(ciprianchelba): specify the checkpoint format and/or async
       # checkpointing.
-      unreplicated_model_states = jax.tree_map(lambda x: x[0],
-                                               replicated_model_states)
-      checkpoints.save_checkpoint(
-          unreplicated_model_states, tracker_dir_path, use_orbax=use_orbax)
+      if enable_checkpoint_saving:
+        unreplicated_model_states = jax.tree_map(lambda x: x[0],
+                                                 replicated_model_states)
+        checkpoints.save_checkpoint(
+            unreplicated_model_states, tracker_dir_path, use_orbax=use_orbax)
 
 
 def _find_and_maybe_update_tracked_metric(
@@ -2293,7 +2326,8 @@ def _find_and_maybe_update_tracked_metric(
     input_p: Sequence[base_input.BaseInput.HParams],
     replicated_model_states: train_states.TrainState,
     task_p: tasks_lib.SingleTask.HParams,
-    decode_metrics_list: List[Dict[str, float]]) -> None:
+    decode_metrics_list: List[Dict[str, float]],
+    enable_checkpoint_saving: bool = True) -> None:
   tracked_metric = task_p.track_decoder_metric
   track_min_or_max = task_p.track_decoder_metric_min_or_max
   if not track_min_or_max:
@@ -2310,10 +2344,15 @@ def _find_and_maybe_update_tracked_metric(
     tracker_dir_path = os.path.join(basedir, dirnames[split],
                                     tracked_metric +
                                     f'_{track_min_or_max}_tracker')
-    _maybe_update_tracked_metric(m_value, step_i, tracker_dir_path,
-                                 tracked_metric, track_min_or_max,
-                                 input_p[split].name,
-                                 replicated_model_states)
+    _maybe_update_tracked_metric(
+        m_value,
+        step_i,
+        tracker_dir_path,
+        tracked_metric,
+        track_min_or_max,
+        input_p[split].name,
+        replicated_model_states,
+        enable_checkpoint_saving=enable_checkpoint_saving)
   else:
     logging.info('Cannot track metric %s on input %s.', tracked_metric,
                  input_p[split].name)
