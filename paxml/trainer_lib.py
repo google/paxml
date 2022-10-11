@@ -1061,6 +1061,7 @@ def initialize_partitioned_model_states(
     # for pmap models.
     partitioned_vars, _ = jax_task.apply_init_checkpoint_rules(
         partitioned_vars,
+        train_state_partition_specs=train_state_partition_specs,
         global_mesh=global_mesh,
         checkpoint_type=checkpoint_type)
 
