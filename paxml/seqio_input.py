@@ -599,6 +599,9 @@ class SeqIOInput(base_input.BaseInput):
     predictions_list = []
     targets_list = []
     for k in targets:
+      if k not in answers:
+        raise ValueError(
+            f'Example not found in decoder output (key={k}): {targets[k]}')
       ans = answers[k]
       answer = ans[_LM_DECODER_OUT_KEY]
       seqio_postprocessed_predictions = []
@@ -691,6 +694,9 @@ class SeqIOInput(base_input.BaseInput):
     # Construct (decode output, seqio target) lists by joining on enum IDs.
     # "Left-join" using targets constructed since outputs may have been padded.
     for k in targets:
+      if k not in answers:
+        raise ValueError(
+            f'Example not found in decoder output (key={k}): {targets[k]}')
       ans = answers[k]
       answer = ans[_LM_DECODER_OUT_KEY]
 
@@ -776,7 +782,8 @@ class SeqIOInput(base_input.BaseInput):
     verbose_entries_idx = 0
     for k in targets:
       if k not in answers:
-        raise ValueError(f'Example not found in eval output: {targets[k][0]}')
+        raise ValueError(
+            f'Example not found in eval output (key={k}): {targets[k][0]}')
       target = targets[k]
       score = answers[k]
       for e in targets[k]:
@@ -827,7 +834,8 @@ class SeqIOInput(base_input.BaseInput):
     verbose_entries_idx = 0
     for k in targets:
       if k not in answers:
-        raise ValueError(f'Example not found in eval output: {targets[k]}')
+        raise ValueError(
+            f'Example not found in eval output (key={k}): {targets[k]}')
       score = answers[k]
       example = targets[k]
       target_post = self.mixture_or_task.postprocess_fn(
