@@ -961,8 +961,6 @@ def train_and_evaluate_pmap(
         decode_input_pipelines, decode_input_p, decode_prng_seed, job_log_dir)
     return decode_once_fn, prng_key, decode_input_p
 
-  defer_step_increment = False
-
   _train_and_evaluate_common(
       partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
       total_num_params, early_stopping_fn, checkpointer, partition_eval_input,
@@ -970,7 +968,7 @@ def train_and_evaluate_pmap(
       train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
       train_unpadded_global_batch_size, train_state_metadata,
       train_input_pipeline, p_train_step, p_eval_step, global_mesh,
-      create_gda_for_inputs, train_prng_seed, defer_step_increment)
+      create_gda_for_inputs, train_prng_seed)
 
 
 def compile_for_auto_sharding(train_step: Any,
@@ -1269,8 +1267,6 @@ def train_and_evaluate_spmd_model(
           decode_inputs_shape_dtype, decode_inputs_partition_spec)
       return decode_once_fn, prng_key, decode_input_p
 
-  defer_step_increment = True
-
   with global_mesh:
     _train_and_evaluate_common(
         partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
@@ -1279,7 +1275,7 @@ def train_and_evaluate_spmd_model(
         train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
         train_unpadded_global_batch_size, train_state_metadata,
         train_input_pipeline, p_train_step, p_eval_step, global_mesh,
-        create_gda_for_inputs, train_prng_seed, defer_step_increment)
+        create_gda_for_inputs, train_prng_seed)
 
 
 def _train_and_evaluate_common(
@@ -1289,7 +1285,7 @@ def _train_and_evaluate_common(
     train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
     train_unpadded_global_batch_size, train_state_metadata,
     train_input_pipeline, p_train_step, p_eval_step, global_mesh,
-    create_gda_for_inputs, train_prng_seed, defer_step_increment):
+    create_gda_for_inputs, train_prng_seed):
   """Training loop code common to both pmap and spmd."""
 
   if eval_input_p:
@@ -1385,8 +1381,7 @@ def _train_and_evaluate_common(
         profiler.update_step_moving_mean(train_period.elapsed)
 
       logging.debug('  Writing summaries (attempt).')
-      if not defer_step_increment:
-        step_i += 1
+      step_i += 1
 
       # Train metrics.
       train_weighted_scalars = weighted_scalars
@@ -1415,9 +1410,6 @@ def _train_and_evaluate_common(
           steps_per_sec=steps_per_sec)
       if should_sync_device:
         step_i = new_step_i
-      elif defer_step_increment:
-        # Increment train step locally to avoid an explicit device sync.
-        step_i += 1
       logging.debug('  Wrote summaries (attempted).')
 
       eval_train_metrics = None
