@@ -97,7 +97,7 @@ flags.DEFINE_string(
     'Controls how JAX filters internal frames out of tracebacks: '
     'off, auto, tracebackhide, remove_frames. '
     'See https://github.com/google/jax/blob/main/jax/_src/config.py')
-flags.DEFINE_bool('use_orbax', False, 'Enables Orbax for checkpointing.')
+flags.DEFINE_bool('use_orbax', True, 'Enables Orbax for checkpointing.')
 flags.DEFINE_string(
     'checkpoint_todelete_subdir', None,
     'If set, checkpoints to be deleted will be only renamed into a '
