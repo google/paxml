@@ -119,7 +119,7 @@ def restore_pmap_from_tensorstore(global_shapes,
     model_states = jax.tree_map(lambda x: x.addressable_data(0),
                                 fully_replicated_gda_model_states)
   else:
-    model_states = jax.tree_map(lambda x: x.local_data(0),
+    model_states = jax.tree_map(lambda x: x.addressable_data(0),
                                 fully_replicated_gda_model_states)
   return model_states
 

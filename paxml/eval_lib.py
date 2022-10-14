@@ -145,7 +145,7 @@ def _free_device_buffer(
   # there is unexpected reference that cannot be cleared by gc.
   # TODO(pax-dev): Simplify this after migrating to Array.
   if isinstance(device_array, global_device_array.GlobalDeviceArray):
-    for s in device_array.local_shards:
+    for s in device_array.addressable_shards:
       if s.data is not None:
         s.data.delete()
   elif isinstance(device_array, jax.Array):
