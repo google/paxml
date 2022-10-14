@@ -1678,14 +1678,8 @@ def decode_once_pmap_model(
           process_decode_output = model.process_decode_out(
               inputs[split], jax.tree_map(np.asarray, out))
 
-        # The process_decode_out API allows either two or three returns, so we
-        # handle that here.
-        if len(process_decode_output) == 2:
-          (processed_scalars, processed_out) = process_decode_output
-          processed_metric_updates = None
-        else:
-          (processed_scalars, processed_out,
-           processed_metric_updates) = process_decode_output
+        (processed_scalars, processed_out,
+         processed_metric_updates) = process_decode_output
         process_decode_metrics.store(processed_scalars)
         processed_decodes.extend(processed_out)
         if processed_metric_updates:
@@ -2202,14 +2196,8 @@ def decode_once_spmd_model(
         process_decode_output = jax_task.model.process_decode_out(
             inputs[split], jax.tree_map(np.asarray, out))
 
-      # The process_decode_out API allows either two or three returns, so we
-      # handle that here.
-      if len(process_decode_output) == 2:
-        process_weighted_scalars, processed = process_decode_output
-        processed_metric_updates = None
-      else:
-        (process_weighted_scalars, processed,
-         processed_metric_updates) = process_decode_output
+      (process_weighted_scalars, processed,
+       processed_metric_updates) = process_decode_output
 
       process_decode_metrics.store(process_weighted_scalars)
       processed_decodes.extend(processed)
