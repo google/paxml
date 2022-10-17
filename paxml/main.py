@@ -51,6 +51,7 @@ from praxis import py_utils
 import pyglove as pg
 import tensorflow.compat.v2 as tf
 
+# internal experiment module import
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
 persistence_gda_serialization = gda_serialization  # mapped to internal
 
@@ -161,7 +162,7 @@ def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   # Try to import the module that registers the experiment, assuming the
   # experiment name contains the full path.
   module_name = experiment_name.rsplit('.', 1)[0]
-  # internal experiment module import code
+  # Google-internal experiment module import code
   try:
     importlib.import_module(module_name)
   except ModuleNotFoundError as e:
