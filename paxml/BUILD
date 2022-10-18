@@ -277,6 +277,15 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "experiment_utils",
+    srcs = ["experiment_utils.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":base_experiment",
+    ],
+)
+
+pytype_strict_library(
     name = "metric_utils",
     srcs = ["metric_utils.py"],
     srcs_version = "PY3",
@@ -397,6 +406,7 @@ pytype_strict_library(
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
         ":eval_lib",
+        ":experiment_utils",
         ":metric_utils",
         ":summary_utils",
         ":tasks_lib",

@@ -24,7 +24,7 @@ import os
 import re
 import time
 import typing
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union, Type
 
 from absl import logging
 from clu import platform
@@ -38,6 +38,7 @@ from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
 from paxml import eval_lib
+from paxml import experiment_utils
 from paxml import metric_utils
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -569,6 +570,22 @@ def write_hparams_file(model_config: base_experiment.BaseExperiment,
         hparams_file.write(decoder_dataset.to_text())
         hparams_file.write('\n\n')
       hparams_file.write(model_config.task().to_text())
+
+
+def write_experiment_class_vars_file(
+    exp_cls: Type[base_experiment.BaseExperiment],
+    job_log_dir: str,
+    filename_prefix: str = '') -> None:
+  """Writes a params file into the root `job_log_dir`."""
+  if jax.process_index() == 0:
+    exp_summary_fpath = os.path.join(
+        job_log_dir, filename_prefix + 'experiment_cls_vars.txt')
+    if not tf.io.gfile.exists(job_log_dir):
+      tf.io.gfile.makedirs(job_log_dir)
+
+    cls_vars_summary = experiment_utils.get_cls_vars_summary(exp_cls)
+    with tf.io.gfile.GFile(exp_summary_fpath, 'w') as summary_file:
+      summary_file.write(cls_vars_summary)
 
 
 def train_and_evaluate(

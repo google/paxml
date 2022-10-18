@@ -220,6 +220,9 @@ def run_experiment(
       and decoding. If None, the training will train to requested steps.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
+  train.write_experiment_class_vars_file(
+      experiment_config.__class__, job_log_dir,
+      '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
   train.write_hparams_file(experiment_config, job_log_dir,
                            '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
 
