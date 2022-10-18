@@ -1138,11 +1138,11 @@ def infer_partition_spec_based_on_rank_fn(
     return base_layer.to_partition_spec(mapping_dict[key], mesh_names)
 
 
-def get_input_partition_specs(mesh_axis_names, inputs_shape):
-  # Compute inputs PartitionSpec from inputs_shape
+def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
+  # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
       shard_on_batch_dim_partition_spec, mesh_axis_names)
-  return tf.nest.map_structure(inputs_partition_spec_fn, inputs_shape)
+  return tf.nest.map_structure(inputs_partition_spec_fn, inputs_shape_dtype)
 
 
 def train_state_for_eval_step(state_with_opt_states):

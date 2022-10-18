@@ -158,11 +158,11 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
     self.checkpoint_manager = checkpoint_manager
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
-  def save(self,
-           step_i,
-           partitioned_train_state,
-           train_state_pspecs,
-           is_final=False):
+  def _save(self,
+            step_i,
+            partitioned_train_state,
+            train_state_pspecs,
+            is_final=False):
     if not self._enable_checkpoint_saving:
       return
 
@@ -184,7 +184,7 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if self.checkpoint_manager.should_save(step_i):
-      self.save(
+      self._save(
           step_i, partitioned_train_state, train_state_pspecs, is_final=False)
 
     if self.async_ckpt_manager is not None:
@@ -197,7 +197,7 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     if (self.checkpoint_manager.last_checkpoint_step is None or
         self.checkpoint_manager.last_checkpoint_step < step_i):
-      self.save(
+      self._save(
           step_i, partitioned_train_state, train_state_pspecs, is_final=True)
 
   def maybe_sync_multihostcheckpointing(self):
@@ -275,7 +275,7 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
     self.async_checkpointer = async_checkpointer
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
-  def restore_from_tensorstore(self, train_state_global_shapes):
+  def _restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
     checkpoints.delete_temp_directories(self.checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
@@ -285,12 +285,12 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
     if py_utils.pmap_use_tensorstore():
-      return self.restore_from_tensorstore(train_state_global_shapes)
+      return self._restore_from_tensorstore(train_state_global_shapes)
     else:
       return checkpoints.restore_checkpoint(
           train_state_global_shapes, self.checkpoint_dir)
 
-  def save(self, step_i, partitioned_train_state, is_final=False):
+  def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
       return
     logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
@@ -330,7 +330,7 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if self.checkpoint_manager.should_save(step_i):
-      self.save(step_i, partitioned_train_state, is_final=False)
+      self._save(step_i, partitioned_train_state, is_final=False)
 
     if self.async_ckpt_manager is not None:
       # Since the checkpoint is happening asynchronously, the errors may
@@ -342,7 +342,7 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     if (self.checkpoint_manager.last_checkpoint_step is None or
         self.checkpoint_manager.last_checkpoint_step < step_i):
-      self.save(step_i, partitioned_train_state, is_final=True)
+      self._save(step_i, partitioned_train_state, is_final=True)
 
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
@@ -358,7 +358,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
-  def restore_from_tensorstore(self, train_state_global_shapes):
+  def _restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
     checkpoints.delete_temp_directories(self.checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
@@ -368,7 +368,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
     if py_utils.pmap_use_tensorstore():
-      return self.restore_from_tensorstore(train_state_global_shapes)
+      return self._restore_from_tensorstore(train_state_global_shapes)
     else:
       step = self.checkpoint_manager.latest_step()
       if step is None:
@@ -384,7 +384,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       save_args = {'step': step_i}
     self.checkpoint_manager.save(step_i, train_state, save_kwargs=save_args)
 
-  def save(self, step_i, partitioned_train_state, is_final=False):
+  def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
       return
     if py_utils.pmap_use_tensorstore():
@@ -409,13 +409,13 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self._save_with_args(step_i, unreplicated_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
-    self.save(step_i, partitioned_train_state)
+    self._save(step_i, partitioned_train_state)
     self.checkpoint_manager.check_for_errors()
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
-      self.save(step_i, partitioned_train_state, is_final=True)
+      self._save(step_i, partitioned_train_state, is_final=True)
 
 
 def _create_checkpointer(
