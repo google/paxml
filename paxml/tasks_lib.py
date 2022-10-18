@@ -824,16 +824,33 @@ class SingleTask(base_task.BaseTask):
       if train_state_pspecs is not None:
         train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
       if load_ema_state:
+        new_states = []
+        new_states_psepcs = []
         # TODO(pax-dev): This doesn't work with prefix dims.
         for i, v in enumerate(ckpt_train_state.opt_states[0]):
-          if 'ema' in v:
-            filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(
-                NestedMap(ema=v.ema))
-            v = v.replace(ema=filtered_ema.ema)
+          if 'ema' not in v:
+            new_states.append(v)
             if train_state_pspecs is not None:
-              train_state_pspecs.opt_states[0][
-                  i] = train_state_pspecs.opt_states[0][i].replace(
-                      ema=ema_pspecs.ema)
+              new_states_psepcs.append(train_state_pspecs.opt_states[0][i])
+          else:
+            v = NestedMap.FromNestedDict(v)
+            filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v.ema)
+            v.ema = filtered_ema
+            new_states.append(v)
+            if train_state_pspecs is not None:
+              v_pspecs = NestedMap.FromNestedDict(
+                  train_state_pspecs.opt_states[0][i])
+              v_pspecs.ema = ema_pspecs
+              train_state_pspecs.append(v_pspecs)
+        tuple_type = type(ckpt_train_state.opt_states[0])
+        outer_tuple_type = type(ckpt_train_state.opt_states)
+        new_states0 = outer_tuple_type([tuple_type(new_states)])
+        ckpt_train_state.replace(opt_states=new_states0 +
+                                 ckpt_train_state.opt_states[1:])
+        if train_state_pspecs is not None:
+          new_states_psepcs0 = outer_tuple_type([tuple_type(new_states_psepcs)])
+          train_state_pspecs.replace(opt_states=new_states_psepcs0 +
+                                     train_state_pspecs.opt_states[1:])
 
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.hparams.ici_mesh_shape is None):

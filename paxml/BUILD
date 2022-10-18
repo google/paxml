@@ -365,7 +365,6 @@ pytype_strict_library(
     srcs = ["tasks_lib.py"],
     srcs_version = "PY3",
     deps = [
-        ":base_experiment",
         ":base_inference_runner",
         ":base_metrics",
         ":base_task",
