@@ -835,7 +835,8 @@ class SingleTask(base_task.BaseTask):
                   i] = train_state_pspecs.opt_states[0][i].replace(
                       ema=ema_pspecs.ema)
 
-    if py_utils.pmap_use_tensorstore():
+    if (py_utils.pmap_use_tensorstore() and
+        ckpt_task.model.hparams.ici_mesh_shape is None):
       assert checkpoint_type == CheckpointType.CHECKPOINT_GDA
       loaded_train_state = restore_pmap_from_tensorstore(
           ckpt_train_state, ckpt_path, step=rules.step, global_mesh=global_mesh)
