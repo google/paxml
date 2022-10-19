@@ -825,13 +825,13 @@ class SingleTask(base_task.BaseTask):
         train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
       if load_ema_state:
         new_states = []
-        new_states_psepcs = []
+        new_states_pspecs = []
         # TODO(pax-dev): This doesn't work with prefix dims.
         for i, v in enumerate(ckpt_train_state.opt_states[0]):
           if 'ema' not in v:
             new_states.append(v)
             if train_state_pspecs is not None:
-              new_states_psepcs.append(train_state_pspecs.opt_states[0][i])
+              new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
           else:
             v = NestedMap.FromNestedDict(v)
             filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v.ema)
@@ -848,8 +848,8 @@ class SingleTask(base_task.BaseTask):
         ckpt_train_state.replace(opt_states=new_states0 +
                                  ckpt_train_state.opt_states[1:])
         if train_state_pspecs is not None:
-          new_states_psepcs0 = outer_tuple_type([tuple_type(new_states_psepcs)])
-          train_state_pspecs.replace(opt_states=new_states_psepcs0 +
+          new_states_pspecs0 = outer_tuple_type([tuple_type(new_states_pspecs)])
+          train_state_pspecs.replace(opt_states=new_states_pspecs0 +
                                      train_state_pspecs.opt_states[1:])
 
     if (py_utils.pmap_use_tensorstore() and
