@@ -1097,7 +1097,10 @@ def train_and_evaluate_spmd_model(
   with global_mesh:
     jax_task = instantiate(task_p)
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        jax_task, init_key, train_sample_inputs)
+        jax_task,
+        init_key,
+        train_sample_inputs,
+        train_shape_dtype=inputs_shape_dtype)
 
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(

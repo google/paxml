@@ -49,7 +49,7 @@ PRNGKey = pytypes.PRNGKey
 ParamsT = pytypes.HParamsT
 PyTreeDef = pytypes.PyTreeDef
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
-NestedShapeDtypeLike = pytypes.NestedShapeDtypeStruct
+NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
 SummaryDict = pytypes.SummaryDict
@@ -122,6 +122,7 @@ class TrainStateMetadata:
   var_weight_hparams: NestedWeightHParams
   padded_global_shapes: Optional[TrainState] = None
   unpadded_global_shapes: Optional[TrainState] = None
+  input_shape_dtype: Optional[NestedShapeDtypeLike] = None
   partitioned_specs: Optional[TrainState] = None
 
 
@@ -129,6 +130,7 @@ def create_train_state_metadata(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     train_sample_inputs: NestedJTensor,
+    train_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     discard_opt_states: bool = False) -> TrainStateMetadata:
   """Creates a TrainStateMetadata instance.
 
@@ -136,14 +138,22 @@ def create_train_state_metadata(
     jax_task: The SingleTask instance.
     prng_key: The PRNGKey instance to use for model abstract initialization.
     train_sample_inputs: Sample training inputs to use for shape inference.
+    train_shape_dtype: Training input shape dtype. Used in place of
+      train_sample_inputs for model.abstract_init_with_metadata() when set.
     discard_opt_states: Whether to discard the part corresponding to the
       optimizer states or not.
 
   Returns:
     A TrainStateMetadata instance.
   """
-  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      prng_key, train_sample_inputs)
+  if train_shape_dtype is not None:
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+        prng_key, train_shape_dtype)
+    input_shape_dtype = train_shape_dtype
+  else:
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+        prng_key, train_sample_inputs)
+    input_shape_dtype = None
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states)
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
@@ -158,6 +168,7 @@ def create_train_state_metadata(
       var_weight_hparams=var_weight_hparams,
       padded_global_shapes=padded_global_shapes,
       unpadded_global_shapes=unpadded_global_shapes,
+      input_shape_dtype=input_shape_dtype,
       partitioned_specs=partitioned_specs)
 
 
