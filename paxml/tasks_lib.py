@@ -841,7 +841,7 @@ class SingleTask(base_task.BaseTask):
               v_pspecs = NestedMap.FromNestedDict(
                   train_state_pspecs.opt_states[0][i])
               v_pspecs.ema = ema_pspecs
-              train_state_pspecs.append(v_pspecs)
+              new_states_pspecs.append(v_pspecs)
         tuple_type = type(ckpt_train_state.opt_states[0])
         outer_tuple_type = type(ckpt_train_state.opt_states)
         new_states0 = outer_tuple_type([tuple_type(new_states)])
