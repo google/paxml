@@ -226,16 +226,21 @@ def retrieve_latest_checkpoint_step(checkpoint_dir: str) -> Optional[int]:
     The latest checkpoint step as an integer or None if no checkpoint is found.
   """
   if not tf.io.gfile.exists(checkpoint_dir):
-    return None
-  latest_checkpoint_path = latest_checkpoint(checkpoint_dir)
-  if latest_checkpoint_path is None:
-    return None
-  checkpoint_step = get_step_from_checkpoint_asset(latest_checkpoint_path)
+    checkpoint_step = -1
+  else:
+    latest_checkpoint_path = latest_checkpoint(checkpoint_dir)
+    if latest_checkpoint_path is None:
+      checkpoint_step = -1
+    else:
+      checkpoint_step = get_step_from_checkpoint_asset(latest_checkpoint_path)
   np_checkpoint_step = multihost_utils.broadcast_one_to_all(
       np.array(checkpoint_step))
   multihost_utils.assert_equal(np_checkpoint_step,
                                "checkpoint_steps across hosts don't match.")
-  return int(np_checkpoint_step.item())
+  step = int(np_checkpoint_step.item())
+  if step == -1:
+    return None
+  return step
 
 
 def restore_checkpoint(
