@@ -1571,7 +1571,6 @@ def decode_once_pmap_model(
     summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_tensors)
-    aggregated_summaries = NestedMap(fwd_summary_tensors=aggregated_summaries)
 
     # We want to aggregate metrics across workers.
     # In pmap we do an all gather of the metric state across workers, and then
