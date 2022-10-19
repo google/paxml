@@ -2178,7 +2178,6 @@ def decode_once_spmd_model(
 
       summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
           summary_tensors)
-      summary_tensors = NestedMap(fwd_summary_tensors=summary_tensors)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
 

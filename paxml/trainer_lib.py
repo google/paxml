@@ -703,8 +703,7 @@ def _train_step_single_learner_with_model(
     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
   else:
     grad_fn = functools.partial(learner.stochastic_gradient.grad_fn, _loss_fn)
-  ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars,
-                                                inputs, subkey)
+  ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
   (mean_loss, weighted_scalars, fwd_updated_vars, fwd_summary_tensors,
    per_example_out) = aux_info.aux_info
@@ -766,9 +765,9 @@ def _train_step_single_learner_with_model(
         base_layer.add_global_summary(name, norm)
     bwd_summary_tensors = base_layer.all_global_summaries()
 
-  summary_tensors = NestedMap(
-      fwd_summary_tensors=fwd_summary_tensors,
-      bwd_summary_tensors=bwd_summary_tensors)
+  summary_tensors = NestedMap()
+  summary_tensors.update(fwd_summary_tensors)
+  summary_tensors.update(bwd_summary_tensors)
 
   return (new_states, mean_loss, weighted_scalars, per_example_out,
           summary_tensors)
