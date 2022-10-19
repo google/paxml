@@ -500,10 +500,8 @@ def _create_checkpointer(
 
 
 def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
-                              initial_global_step: int,
-                              eval_interval_steps: int) -> None:
+                              initial_global_step: int) -> None:
   """Updates `train_input_p` in place its latest model step."""
-  del eval_interval_steps
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     return
   dp = train_input_p.deterministic_input_start_index
@@ -881,8 +879,7 @@ def train_and_evaluate_pmap(
   train_p = task_p.train
   initial_global_step = int(jax.device_get(partitioned_train_state.step)[0])
   logging.info('Model initial global_step=%d', initial_global_step)
-  _update_latest_model_step(train_input_p, initial_global_step,
-                            train_p.eval_interval_steps)
+  _update_latest_model_step(train_input_p, initial_global_step)
 
   # Unreplicated model states are not needed anymore at that point.
   del model_states
@@ -1214,8 +1211,7 @@ def train_and_evaluate_spmd_model(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
     logging.info('Model initial global_step=%d', initial_global_step)
-    _update_latest_model_step(train_input_p, initial_global_step,
-                              train_p.eval_interval_steps)
+    _update_latest_model_step(train_input_p, initial_global_step)
     train_input_pipeline = _PeekableInput(instantiate(train_input_p))
     reshard_inputs = False
     is_vars_replicated = False
