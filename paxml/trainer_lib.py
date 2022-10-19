@@ -883,8 +883,6 @@ def _eval_step_single_learner_with_model(
          _maybe_to_float32,
          (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
 
-  aggregated_summaries = NestedMap(fwd_summary_tensors=aggregated_summaries)
-
   return mean_loss, aggregated_scalars, per_example_out, aggregated_summaries
 
 
