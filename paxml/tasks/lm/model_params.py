@@ -660,6 +660,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
   # Pipeline related.
   NUM_STAGES = None
   CIRCULAR_REPEAT = 1
+  PIPELINE_BROADCAST_INPUTS = False
   # One of the two need to be set.
   NUM_MICROBATCHES = None
   MICROBATCH_SIZE = None
@@ -760,7 +761,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         num_pipeline_microbatches=self.NUM_MICROBATCHES,
         pipeline_microbatch_size=self.MICROBATCH_SIZE,
         stream_io=self.STREAM_IO,
-        checkpoint_policy=self.CHECKPOINT_POLICY)
+        checkpoint_policy=self.CHECKPOINT_POLICY,
+        pipeline_broadcast_inputs=self.PIPELINE_BROADCAST_INPUTS)
 
     # Enable bf16.
     model_p.fprop_dtype = self.FPROP_DTYPE
