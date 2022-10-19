@@ -65,6 +65,7 @@ NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
+NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedWeightHParams = base_layer.NestedWeightHParams
 SummaryWriter = tf.summary.SummaryWriter
 TrainState = train_states.TrainState
@@ -329,13 +330,16 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       var_weight_hparams = train_state_metadata.var_weight_hparams
       global_shapes = train_state_metadata.unpadded_global_shapes
       is_eval_for_init = False
-      sample_inputs = train_state_metadata.sample_inputs
+      input_specs = train_state_metadata.input_shape_dtype
     else:
       assert sample_inputs is not None
       prng_key, init_key = jax.random.split(prng_key)
+      input_specs = jax.tree_map(
+          lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+          sample_inputs)
       # Restore flax checkpoints still required bak variables in TrainState
       var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-          init_key, sample_inputs, do_eval=True)
+          init_key, input_specs, do_eval=True)
       # Note: `discard_opt_states` is not supported when restoring pmap
       # checkpoints. We must restore the entire checkpoint and then trim the
       # unrelevant states.
@@ -349,7 +353,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       model_states = trainer_lib.initialize_model_state(
           jax_task,
           init_key,
-          sample_inputs,
+          input_specs,
           discard_opt_states=not self.use_ema,
           is_eval=is_eval_for_init)
     elif not self.use_ema and not self.track_metric:
@@ -585,19 +589,19 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   try:
     input_specs_provider = instantiate(
         experiment_config.get_input_specs_provider_params())
-    input_specs = input_specs_provider.get_input_specs()
-    train_sample_inputs = jax.tree_map(
-        lambda x: np.zeros(shape=x.shape, dtype=x.dtype), input_specs)
+    train_input_specs = input_specs_provider.get_input_specs()
   except ValueError:
     logging.warning('No training input specs defined.')
-    train_sample_inputs = None
+    train_input_specs = None
 
   if model_p.mesh_shape is not None:
-    evaluate_spmd_model(task_p, train_sample_inputs, eval_input_p, job_log_dir,
+    train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                     train_input_specs)
+    evaluate_spmd_model(task_p, train_input_specs, eval_input_p, job_log_dir,
                         typing.cast(_SpmdEvalCheckpointer, checkpointer),
                         early_stopping_fn)
   else:
-    evaluate_pmap_model(task_p, train_sample_inputs, eval_input_p, job_log_dir,
+    evaluate_pmap_model(task_p, train_input_specs, eval_input_p, job_log_dir,
                         typing.cast(_PmapEvalCheckpointer, checkpointer),
                         early_stopping_fn)
 
@@ -713,7 +717,7 @@ class _PmapEvalRunner:
 
 def evaluate_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
-    train_sample_inputs: Optional[NestedJTensor],
+    train_input_specs: Optional[NestedShapeDtypeLike],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
     checkpointer: _PmapEvalCheckpointer,
@@ -722,7 +726,7 @@ def evaluate_pmap_model(
 
   Args:
     task_p: Params for the task encapsulating the data parallel model.
-    train_sample_inputs: A training sample inputs for model initialization.
+    train_input_specs: Training input specs for model initialization.
     eval_input_p: List of params for the eval data input pipelines.
     job_log_dir: Directory for the job logs.
     early_stopping_fn: An optional callable object for reporting metrics and
@@ -743,13 +747,13 @@ def evaluate_pmap_model(
 
   prng_key = jax.random.PRNGKey(1234)
   if task_p.train.always_use_train_for_model_init:
-    if train_sample_inputs is None:
+    if train_input_specs is None:
       raise ValueError(
           'No training input specs available, while enabling '
           '`task_p.train.always_use_train_for_model_init` requires it.')
     prng_key, meta_key = jax.random.split(prng_key)
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        jax_task, meta_key, train_sample_inputs)
+        jax_task, meta_key, train_input_specs)
     sample_model_inputs = None
   else:
     # TODO(pax-dev): Investigate if we can use model input specs
@@ -900,13 +904,15 @@ class _SpmdEvalRunner:
         assert train_state_metadata is not None
         train_state_global_shapes = train_state_metadata.padded_global_shapes,
         partitioned_specs = train_state_metadata.partitioned_specs
-        sample_inputs = train_state_metadata.sample_inputs
+        input_specs = train_state_metadata.input_shape_dtype
       else:
         assert sample_input_p is not None
         assert sample_inputs is not None
         init_key, meta_key = jax.random.split(init_key)
+        input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                   sample_inputs)
         var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-            meta_key, sample_inputs, do_eval=True)
+            meta_key, input_specs, do_eval=True)
         train_state_global_shapes = (
             jax_task.create_train_state_padded_shapes(
                 var_weight_hparams, discard_opt_states=not use_ema))
@@ -1051,7 +1057,7 @@ class _SpmdEvalRunner:
 
 def evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
-    train_sample_inputs: Optional[NestedJTensor],
+    train_input_specs: Optional[NestedShapeDtypeLike],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
     checkpointer: _SpmdEvalCheckpointer,
@@ -1060,7 +1066,7 @@ def evaluate_spmd_model(
 
   Args:
     task_p: Params of the task encapsulating an SPMD model.
-    train_sample_inputs: Training sample inputs for model initialization.
+    train_input_specs: Training input specs for model initialization.
     eval_input_p: List of Params for the eval data pipelines.
     job_log_dir: Directory for the job logs.
     checkpoint_type: Type of model checkpointing method to use.
@@ -1105,7 +1111,7 @@ def evaluate_spmd_model(
   ]
 
   if task_p.train.always_use_train_for_model_init:
-    if train_sample_inputs is None:
+    if train_input_specs is None:
       raise ValueError(
           'No training input specs available, while enabling '
           '`task_p.train.always_use_train_for_model_init` requires it.')
@@ -1113,7 +1119,7 @@ def evaluate_spmd_model(
     train_state_metadata = trainer_lib.create_train_state_metadata(
         jax_task,
         meta_key,
-        train_sample_inputs,
+        train_input_specs,
         discard_opt_states=not checkpointer.use_ema)
     sample_inputs = None
   else:
@@ -1270,27 +1276,22 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   try:
     input_specs_provider = instantiate(
         experiment_config.get_input_specs_provider_params())
-    input_specs = input_specs_provider.get_input_specs()
-    train_sample_inputs = jax.tree_map(
-        lambda x: np.zeros(shape=x.shape, dtype=x.dtype), input_specs)
+    train_input_specs = input_specs_provider.get_input_specs()
   except ValueError:
     logging.warning('No training input specs defined.')
-    train_sample_inputs = None
+    train_input_specs = None
 
   if model_p.mesh_shape is not None:
-    decode_spmd_model(
-        task_p,
-        train_sample_inputs,
-        decoder_inputs,
-        eval_inputs,
-        job_log_dir,
-        typing.cast(_SpmdEvalCheckpointer, checkpointer),
-        continuous_decode,
-        early_stopping_fn)
+    train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                     train_input_specs)
+    decode_spmd_model(task_p, train_input_specs, decoder_inputs, eval_inputs,
+                      job_log_dir,
+                      typing.cast(_SpmdEvalCheckpointer, checkpointer),
+                      continuous_decode, early_stopping_fn)
   else:
     decode_pmap_model(
         task_p,
-        train_sample_inputs,
+        train_input_specs,
         decoder_inputs,
         eval_inputs,
         job_log_dir,
@@ -1316,7 +1317,7 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
 
 
 def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
-                      train_sample_inputs: Optional[NestedJTensor],
+                      train_input_specs: Optional[NestedShapeDtypeLike],
                       input_p: Sequence[base_input.BaseInput.HParams],
                       eval_input_p: Sequence[base_input.BaseInput.HParams],
                       job_log_dir: str,
@@ -1329,7 +1330,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   Args:
     task_p: Params of the task encapsulating a the data parallel model.
-    train_sample_inputs:
+    train_input_specs: Training input specs for model initialization.
     input_p: List of input params to be decoded.
     eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
@@ -1352,7 +1353,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   if task_p.train.always_use_train_for_model_init:
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        jax_task, init_key, train_sample_inputs)
+        jax_task, init_key, train_input_specs)
     inputs_sample = None
     var_weight_hparams = train_state_metadata.var_weight_hparams
   else:
@@ -1764,7 +1765,7 @@ def decode_once_pmap_model(
 
 def decode_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
-    train_sample_inputs: Optional[NestedJTensor],
+    train_input_specs: Optional[NestedShapeDtypeLike],
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
@@ -1775,7 +1776,7 @@ def decode_spmd_model(
 
   Args:
     task_p: Params for the task that encapsulates an SPMD model.
-    train_sample_inputs:
+    train_input_specs: Training input specs for model initialization.
     input_p: List of input params to be decoded.
     eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
@@ -1837,14 +1838,14 @@ def decode_spmd_model(
     last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
 
     if jax_task.hparams.train.always_use_train_for_model_init:
-      if train_sample_inputs is None:
+      if train_input_specs is None:
         raise ValueError(
             'No training input specs available, while enabling '
             '`task_p.train.always_use_train_for_model_init` requires it.')
       train_state_metadata = trainer_lib.create_train_state_metadata(
           jax_task,
           init_key,
-          train_sample_inputs,
+          train_input_specs,
           discard_opt_states=not checkpointer.use_ema)
 
       var_weight_hparams = train_state_metadata.var_weight_hparams
@@ -1885,7 +1886,7 @@ def decode_spmd_model(
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task, init_key,
               trim_opt_states(train_state_metadata.partitioned_specs),
-              train_state_metadata.sample_inputs, inputs_sample))
+              train_state_metadata.input_shape_dtype, inputs_sample))
     else:
       assert isinstance(model_states_out, tuple)
       (partitioned_train_state, partitioned_specs, train_state_global_shapes,
@@ -2407,24 +2408,22 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   try:
     input_specs_provider = instantiate(
         experiment_config.get_input_specs_provider_params())
-    input_specs = input_specs_provider.get_input_specs()
-    train_sample_inputs = jax.tree_map(
-        lambda x: np.zeros(shape=x.shape, dtype=x.dtype), input_specs)
+    train_input_specs = input_specs_provider.get_input_specs()
   except ValueError:
     logging.warning('No training input specs defined.')
-    train_sample_inputs = None
+    train_input_specs = None
 
   if model_p.mesh_shape is not None:
     # TODO(b/238416854): add support for SPMD models
     raise NotImplementedError('SPMD infer_and_write not implemented yet')
   else:
     checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
-    infer_and_write_pmap(task_p, train_sample_inputs, inputs_p, job_log_dir,
+    infer_and_write_pmap(task_p, train_input_specs, inputs_p, job_log_dir,
                          checkpointer)
 
 
 def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
-                         train_sample_inputs: Optional[NestedJTensor],
+                         train_input_specs: Optional[NestedShapeDtypeLike],
                          inputs_p: Sequence[base_input.BaseInput.HParams],
                          job_log_dir: str,
                          checkpointer: _PmapEvalCheckpointer) -> None:
@@ -2439,12 +2438,12 @@ def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
 
   prng_key, meta_key = jax.random.split(prng_key)
   if task_p.train.always_use_train_for_model_init:
-    if train_sample_inputs is None:
+    if train_input_specs is None:
       raise ValueError(
           'No training input specs available, while enabling '
           '`task_p.train.always_use_train_for_model_init` requires it.')
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        task, meta_key, train_sample_inputs)
+        task, meta_key, train_input_specs)
     var_weight_hparams = train_state_metadata.var_weight_hparams
     inputs_sample = None
   else:

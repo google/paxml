@@ -18,12 +18,14 @@
 Note: The module name is suffixed with `_lib` to avoid the name conflict with
 the `tasks` Python submodule.
 """
+
 from __future__ import annotations
 
 import dataclasses
 import enum
 import itertools
 import re
+import typing
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from absl import logging
@@ -694,13 +696,19 @@ class SingleTask(base_task.BaseTask):
       rules.task_p.model.ici_mesh_shape = self.model.hparams.ici_mesh_shape
       rules.task_p.model.dcn_mesh_shape = self.model.hparams.dcn_mesh_shape
       rules.task_p.model.mesh_axis_names = self.model.hparams.mesh_axis_names
-    ckpt_task = instantiate(rules.task_p)
+    ckpt_task = typing.cast(SingleTask, instantiate(rules.task_p))
     is_step_loaded, is_initialized, is_opt_states_loaded = load_status
     model_vars = train_state.mdl_vars
 
     input_specs_provider_p = rules.input_specs_provider_p
     input_specs_provider = instantiate(input_specs_provider_p)
     inputs_shape_dtype = input_specs_provider.get_input_specs()
+    # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
+    # (and check for dcn_mesh_shape too).
+    if (hasattr(ckpt_task.model, 'ici_mesh_shape') and
+        ckpt_task.model.ici_mesh_shape is not None):
+      inputs_shape_dtype = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                        inputs_shape_dtype)
     # Initialize with a dummy seed
     var_weight_hparams = ckpt_task.model.abstract_init_with_metadata(
         jax.random.PRNGKey(0), inputs_shape_dtype)

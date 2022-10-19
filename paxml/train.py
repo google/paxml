@@ -849,10 +849,13 @@ def train_and_evaluate_pmap(
 
   # Get shape and dtype of model_inputs.
   train_sample_inputs = train_input_pipeline.peek_padded()
+  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
+  # input shapes from training input pipeline.
+  inputs_shape_dtype = jax.tree_map(
+      lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+      train_sample_inputs)
   train_state_metadata = trainer_lib.create_train_state_metadata(
-      jax_task, init_key, train_sample_inputs)
-  inputs_shape_dtype = tf.nest.map_structure(
-      py_utils.get_global_input_shape_dtype, train_sample_inputs)
+      jax_task, init_key, inputs_shape_dtype)
 
   # Write sample inputs.
   _write_input_specs(inputs_shape_dtype, job_log_dir)
@@ -940,8 +943,6 @@ def train_and_evaluate_pmap(
   global_mesh = None
   reshard_inputs = True
   create_gda_for_inputs = False
-  inputs_pspecs = None
-  inputs_shape_dtype = None
   is_vars_replicated = True
 
   def partition_eval_input(eval_input_p):
@@ -1070,9 +1071,14 @@ def train_and_evaluate_spmd_model(
       train_input_p, global_mesh)
   train_input_for_shape = instantiate(train_input_p)
   train_sample_inputs = train_input_for_shape.get_next_padded()
-  inputs_shape_dtype = tf.nest.map_structure(
-      py_utils.get_global_input_shape_dtype, train_sample_inputs)
-  _write_input_specs(inputs_shape_dtype, job_log_dir)
+  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
+  # input shapes from training input pipeline.
+  perhost_inputs_shape_dtype = jax.tree_map(
+      lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+      train_sample_inputs)
+  _write_input_specs(perhost_inputs_shape_dtype, job_log_dir)
+  inputs_shape_dtype = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                    train_sample_inputs)
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if (create_gda_for_inputs or
@@ -1097,10 +1103,7 @@ def train_and_evaluate_spmd_model(
   with global_mesh:
     jax_task = instantiate(task_p)
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        jax_task,
-        init_key,
-        train_sample_inputs,
-        train_shape_dtype=inputs_shape_dtype)
+        jax_task, init_key, inputs_shape_dtype)
 
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(

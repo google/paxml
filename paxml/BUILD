@@ -192,6 +192,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_model",
+        "//praxis:py_utils",
         # Implicit pyglove dependency.
     ],
 )

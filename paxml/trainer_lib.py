@@ -118,42 +118,34 @@ class TrainStateMetadata:
   Specifically, this encapsulates information relevant for model initialization
   as well as train/eval/decode step creation.
   """
-  sample_inputs: NestedJTensor
+  input_shape_dtype: NestedShapeDtypeLike
   var_weight_hparams: NestedWeightHParams
   padded_global_shapes: Optional[TrainState] = None
   unpadded_global_shapes: Optional[TrainState] = None
-  input_shape_dtype: Optional[NestedShapeDtypeLike] = None
   partitioned_specs: Optional[TrainState] = None
 
 
 def create_train_state_metadata(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    train_sample_inputs: NestedJTensor,
-    train_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+    train_shape_dtype: NestedShapeDtypeLike,
     discard_opt_states: bool = False) -> TrainStateMetadata:
   """Creates a TrainStateMetadata instance.
 
   Args:
     jax_task: The SingleTask instance.
     prng_key: The PRNGKey instance to use for model abstract initialization.
-    train_sample_inputs: Sample training inputs to use for shape inference.
-    train_shape_dtype: Training input shape dtype. Used in place of
-      train_sample_inputs for model.abstract_init_with_metadata() when set.
+    train_shape_dtype: Training input shape dtype to be used by
+      model.abstract_init_with_metadata(). It should have per-host shapes
+      for pmap models and global shapes for pjit ones.
     discard_opt_states: Whether to discard the part corresponding to the
       optimizer states or not.
 
   Returns:
     A TrainStateMetadata instance.
   """
-  if train_shape_dtype is not None:
-    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-        prng_key, train_shape_dtype)
-    input_shape_dtype = train_shape_dtype
-  else:
-    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-        prng_key, train_sample_inputs)
-    input_shape_dtype = None
+  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+      prng_key, train_shape_dtype)
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states)
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
@@ -164,11 +156,10 @@ def create_train_state_metadata(
   else:
     partitioned_specs = None
   return TrainStateMetadata(
-      sample_inputs=train_sample_inputs,
+      input_shape_dtype=train_shape_dtype,
       var_weight_hparams=var_weight_hparams,
       padded_global_shapes=padded_global_shapes,
       unpadded_global_shapes=unpadded_global_shapes,
-      input_shape_dtype=input_shape_dtype,
       partitioned_specs=partitioned_specs)
 
 
@@ -308,7 +299,7 @@ def adjust_input_params_for_small_batch(
 
 def initialize_model_state(jax_task: tasks_lib.SingleTask,
                            prng_key: PRNGKey,
-                           sample_inputs: NestedJTensor,
+                           inputs_shape_dtype: NestedShapeDtypeLike,
                            discard_opt_states: bool = False,
                            do_init_checkpoint_rules: bool = True,
                            is_eval: bool = False) -> TrainState:
@@ -320,7 +311,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   Args:
     jax_task: An instance of tasks.SingleTask.
     prng_key: A PRNGKey, of shape [2], of type np.uint32.
-    sample_inputs: Sample inputs for shape inference.
+    inputs_shape_dtype: A nested ShapeDtype-like structure for shape inference.
     discard_opt_states: Whether to discard optimizer states.
     do_init_checkpoint_rules: Whether to apply init checkpoint rules or not.
     is_eval: whether to initialize in under eval context. Only used under the
@@ -337,7 +328,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   else:
     is_eval_for_init = is_eval
   var_weight_hparams = model.abstract_init_with_metadata(
-      init_key, sample_inputs, do_eval=is_eval_for_init)
+      init_key, inputs_shape_dtype, do_eval=is_eval_for_init)
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('var_weight_hparams: %s', var_weight_hparams)
 
@@ -351,6 +342,10 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
         inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
 
+  # Note: For pmap models, we pass per-host input shapes rather than
+  # per core input shapes, which is without consequence.
+  sample_inputs = jax.tree_map(lambda x: jnp.zeros(x.shape, x.dtype),
+                               inputs_shape_dtype)
   initial_vars = init_fn(init_key, sample_inputs)
   logging.info('initial_vars: %s', jax.tree_map(lambda x: x.shape,
                                                 initial_vars))
@@ -387,10 +382,10 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
 def initialize_replicate_model_state(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    sample_inputs: NestedJTensor,
+    inputs_shape_dtype: NestedShapeDtypeLike,
     discard_opt_states: bool = False) -> TrainState:
   """Initializes and replicates the model states."""
-  model_states = initialize_model_state(jax_task, prng_key, sample_inputs,
+  model_states = initialize_model_state(jax_task, prng_key, inputs_shape_dtype,
                                         discard_opt_states)
   return replicate_model_state(model_states)
 

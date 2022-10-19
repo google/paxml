@@ -24,6 +24,7 @@ from paxml import base_task
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_model
+from praxis import py_utils
 import pyglove as pg
 
 
@@ -67,6 +68,12 @@ class ExperimentImportsTestHelper(absltest.TestCase):
           'initialization of the training pipeline.')
       input_specs = input_specs_provider.get_input_specs()
       model: base_model.BaseModel = task.model  # pytype: disable=attribute-error
+      # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
+      # (and check for dcn_mesh_shape too).
+      if (hasattr(model, 'ici_mesh_shape') and
+          model.ici_mesh_shape is not None):
+        input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                                   input_specs)
       model.abstract_init_with_metadata(jax.random.PRNGKey(0), input_specs)
 
   @classmethod
