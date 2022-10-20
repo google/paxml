@@ -186,10 +186,12 @@ class BaseMetrics(base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta):
     for k, v in metrics.items():
       value, weight = v
       logging.info('  %s=%f (weight=%f)', k, value, weight)
-      summary_utils.write_summary_tensor(step_i, f'{prefix}/{k}', value,
-                                         summary_utils.SummaryType.SCALAR)
-      summary_utils.write_summary_tensor(step_i, f'{prefix}/{k}-weight', weight,
-                                         summary_utils.SummaryType.SCALAR)
+      summary_utils.write_summary_tensor(
+          step_i, f'{prefix}/{k}', value,
+          summary_utils.SummaryType.AGGREGATE_SCALAR)
+      summary_utils.write_summary_tensor(
+          step_i, f'{prefix}/{k}-weight', weight,
+          summary_utils.SummaryType.AGGREGATE_SCALAR)
     return metrics
 
 
