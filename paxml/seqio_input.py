@@ -826,7 +826,9 @@ class SeqIOInput(base_input.BaseInput):
         key = py_utils.get_enumeration_id(eval_example)
         if not key:
           raise ValueError('key should not be None when enum-matching')
-        answers[key] = float(eval_example[_LM_SCORE_KEY])
+        # Supporting multi-class case means that score can be a scalar
+        # or a vector.  Processing this is left up to the user.
+        answers[key] = eval_example[_LM_SCORE_KEY]
 
     # Construct (scoring output, seqio target) lists by joining on enum ID
     targets_list = []
