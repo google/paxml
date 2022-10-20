@@ -362,7 +362,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
     write_summary_tensor(step_i, 'loss', mean_loss, SummaryType.SCALAR)
     if steps_per_sec is not None:
       status_msg += f', steps/sec {steps_per_sec}'
-      write_summary_tensor(step_i, 'steps/sec', steps_per_sec,
+      write_summary_tensor(step_i, 'Steps/sec', steps_per_sec,
                            SummaryType.SCALAR)
     logging.info('Metrics values at step %d:', step_i)
     logging.info('  loss=%f', mean_loss)
@@ -380,9 +380,9 @@ def write_summary_entry(summary_writer: SummaryWriter,
       logging.info('  %s=%f (weight=%f)', key, weighted_average,
                    sum_metric_weights)
       status_msg += f', {key}={weighted_average}'
-      write_summary_tensor(step_i, f'metrics/{key}', weighted_average,
+      write_summary_tensor(step_i, f'Metrics/{key}', weighted_average,
                            SummaryType.SCALAR)
-      write_summary_tensor(step_i, f'metrics/{key}-weight', sum_metric_weights,
+      write_summary_tensor(step_i, f'Metrics/{key}-weight', sum_metric_weights,
                            SummaryType.SCALAR)
 
     work_unit.set_task_status(status_msg)
