@@ -480,14 +480,21 @@ def is_last_checkpoint(
     decode_interval_steps: int,
     save_interval_steps: int) -> bool:
   """Returns True if current step should be treated as last evaluation."""
+  if running_mode.has_train:
+    # When training and evaluation/decoding are done within the same process,
+    # evaluation/decoding are based on current weights stored in memory.
+    # Therefore, evaluation/decoding can always been performed regardless
+    # whether checkpoints are published at a certain step. So we set
+    # `save_interval_steps` to zero in such case.
+    save_interval_steps = 0
   remaining = num_train_steps - global_step
   is_last = remaining == 0
   if not is_last:
     last_eval = False
-    if running_mode & trainer_lib.RunningMode.EVAL:
+    if running_mode.has_eval:
       last_eval = remaining < max(eval_interval_steps, save_interval_steps)
     last_decode = False
-    if running_mode & trainer_lib.RunningMode.DECODE:
+    if running_mode.has_decode:
       last_decode = remaining < max(decode_interval_steps, save_interval_steps)
     is_last = last_eval or last_decode
   return is_last

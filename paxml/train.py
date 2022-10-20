@@ -508,29 +508,6 @@ def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
   dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
 
 
-def _should_early_stop_training(early_stopping_fn: trainer_lib.EarlyStoppingFn,
-                                running_mode: trainer_lib.RunningMode,
-                                task_p: tasks_lib.SingleTask.HParams,
-                                step_i: int, metrics: Dict[str, float]) -> bool:
-  """Returns True if current training should be stopped."""
-  assert early_stopping_fn is not None
-  train_p = task_p.train
-
-  remaining = train_p.num_train_steps - step_i
-  is_last_ckpt = remaining == 0
-  if not is_last_ckpt:
-    last_eval = False
-    if running_mode & trainer_lib.RunningMode.EVAL:
-      last_eval = remaining < max(train_p.eval_interval_steps,
-                                  train_p.save_interval_steps)
-    last_decode = False
-    if running_mode & trainer_lib.RunningMode.DECODE:
-      last_decode = remaining < max(train_p.decode_interval_steps,
-                                    train_p.save_interval_steps)
-    is_last_ckpt = last_eval or last_decode
-  return early_stopping_fn(metrics, running_mode, step_i, is_last_ckpt)
-
-
 def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
   """Computes the number of training steps per second."""
   # Note: This function doesn't account for the time spent on running

@@ -204,6 +204,62 @@ class TuningLibTest(absltest.TestCase):
                      [0.0, 0.64 + 1.28 + 2.56 + 5.12,
                       0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0])
 
+  def test_is_last_checkpoint(self):
+    # Training step has reached.
+    self.assertTrue(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.TRAIN,
+            global_step=1000,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=10,
+            save_interval_steps=100))
+    # Training step has not reached.
+    self.assertFalse(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.TRAIN,
+            global_step=999,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=10,
+            save_interval_steps=100))
+    # Training step has not reached, but there is not a next eval.
+    self.assertTrue(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.TRAIN | trainer_lib.RunningMode.EVAL,
+            global_step=900,
+            num_train_steps=1000,
+            eval_interval_steps=110,
+            decode_interval_steps=10,
+            save_interval_steps=10))
+    # Training step has not reached, but there is not a next checkpoint.
+    self.assertTrue(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.EVAL,
+            global_step=900,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=10,
+            save_interval_steps=400))
+    # Training step has not reached, but there is not a next decode.
+    self.assertTrue(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.TRAIN | trainer_lib.RunningMode.DECODE,
+            global_step=900,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=110,
+            save_interval_steps=10))
+    # Training step has not reached, but there is not a next checkpoint.
+    self.assertTrue(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.DECODE,
+            global_step=900,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=10,
+            save_interval_steps=400))
+
 
 def get_trial_dirname(
     search_space_fun, trial_id: int, dna: pg.DNA, root_dir: str = 'root'):
