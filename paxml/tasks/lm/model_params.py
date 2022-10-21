@@ -16,6 +16,7 @@
 """Base language model configurations."""
 
 import math
+import typing
 from typing import Optional, Sequence
 
 from jax import numpy as jnp
@@ -437,7 +438,9 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
 
     stacked_transformer_tpl.input_dropout_prob = self.INPUT_DROPOUT_PROB
     stacked_transformer_tpl.dropout_prob = self.DROPOUT_PROB
-    transformer_layer_p = (stacked_transformer_tpl.transformer_layer_params_tpl)
+    transformer_layer_p = typing.cast(
+        layers.Transformer.HParams,
+        stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
     transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
@@ -564,7 +567,9 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     stacked_transformer_tpl.dim_per_head = self.DIMS_PER_HEAD
 
     stacked_transformer_tpl.dropout_prob = self.DROPOUT_PROB
-    transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
+    transformer_layer_p = typing.cast(
+        layers.Transformer.HParams,
+        stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
@@ -725,7 +730,9 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     stacked_transformer_tpl.dim_per_head = self.DIMS_PER_HEAD
 
     stacked_transformer_tpl.dropout_prob = self.DROPOUT_PROB
-    transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
+    transformer_layer_p = typing.cast(
+        layers.Transformer.HParams,
+        stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
