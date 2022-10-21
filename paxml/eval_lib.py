@@ -719,6 +719,21 @@ class _PmapEvalRunner:
         self._job_log_dir,
         reshard_inputs=True)
 
+  def partition_run_one_step(self, eval_input_p):
+
+    def eval_one_step_fn(replicated_model_states, eval_summary_writers):
+      with py_utils.timeit() as eval_period:
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            self.run_one_step(replicated_model_states, eval_summary_writers))
+
+      return tuning_lib.EvalMetrics(
+          input_p=eval_input_p,
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+
+    return eval_one_step_fn
+
 
 def evaluate_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
@@ -766,64 +781,24 @@ def evaluate_pmap_model(
     train_state_metadata = None
     sample_model_inputs = instantiate(eval_input_p[0]).get_next_padded()
 
-  (replicated_model_states, train_state_global_shapes,
+  (partitioned_train_state, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(jax_task, prng_key,
                                                 sample_model_inputs,
                                                 train_state_metadata,
                                                 checkpointer)
 
-  runner = _PmapEvalRunner(
-      task_p, eval_input_p, jax_task, prng_key, job_log_dir)
-  logging.info('Evaluation loop starting...')
-  summary_base_dir = os.path.join(job_log_dir, 'summaries')
-  summary_eval_dirs = [
-      os.path.join(summary_base_dir, f'eval_test_{p.name}')
-      for p in eval_input_p
-  ]
-
-  last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
-  with contextlib.ExitStack() as exit_stack:
-    eval_summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_eval_dirs
-    ]
-
-    while True:
-      with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
-          job_log_dir, last_checkpoint_step, EvaluationMode.EVAL):
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            runner.run_one_step(replicated_model_states, eval_summary_writers))
-
-      eval_metrics = tuning_lib.EvalMetrics(
-          input_p=eval_input_p,
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-
-      # If the last check point evaluated matches max train steps, exit.
-      if last_checkpoint_step is not None:
-        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if tuning_lib.should_early_stop(
-            early_stopping_fn,
-            last_checkpoint_step,
-            is_last_ckpt,
-            eval_metrics=eval_metrics):
-          logging.info(
-              'Evaluation is early stopped at checkpoint step %d by the'
-              'tuner, while the num_train_steps is %d', last_checkpoint_step,
-              task_p.train.num_train_steps)
-          break
-        if is_last_ckpt:
-          break
-      # Release replicated_model_states.
-      jax.tree_util.tree_map(_free_device_buffer, replicated_model_states)
-      del replicated_model_states
-      new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
-      replicated_model_states = checkpointer.load_checkpoint_for_step(
-          new_checkpoint_step, train_state_global_shapes, partitioned_specs,
-          global_mesh)
-      last_checkpoint_step = new_checkpoint_step
+  eval_one_step_fn = _PmapEvalRunner(
+      task_p, eval_input_p, jax_task, prng_key,
+      job_log_dir).partition_run_one_step(eval_input_p)
+  decode_once_fn = None
+  input_p = None
+  continuous_decode = True
+  _common_eval_or_decode_loop(EvaluationMode.EVAL, checkpointer, task_p,
+                              job_log_dir, global_mesh, input_p, eval_input_p,
+                              eval_one_step_fn, decode_once_fn,
+                              partitioned_train_state,
+                              train_state_global_shapes, partitioned_specs,
+                              early_stopping_fn, continuous_decode)
 
 
 class _SpmdEvalRunner:
@@ -1099,6 +1074,22 @@ class _SpmdEvalRunner:
           reshard_inputs=False,
           create_gda_for_inputs=use_gda)
 
+  def partition_run_one_step(self, eval_key, eval_input_p, use_gda):
+
+    def eval_one_step_fn(partitioned_train_state, eval_summary_writers):
+      with py_utils.timeit() as eval_period:
+        (eval_metrics_list, eval_scoring_metrics_list,
+         num_eval_steps) = self.run_one_step(partitioned_train_state,
+                                             eval_summary_writers, eval_key,
+                                             use_gda)
+
+      return tuning_lib.EvalMetrics(
+          input_p=eval_input_p,
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+
+    return eval_one_step_fn
 
 def evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
@@ -1203,63 +1194,23 @@ def evaluate_spmd_model(
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
-  runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                           init_key, partitioned_specs, job_log_dir,
-                           eval_unpadded_global_batch_size)
-  logging.info('Evaluation loop starting...')
-  summary_base_dir = os.path.join(job_log_dir, 'summaries')
-  summary_eval_dirs = [
-      os.path.join(summary_base_dir, f'eval_test_{p.name}')
-      for p in eval_input_p
-  ]
-  last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
-
-  create_gda_for_inputs = (
+  use_gda = (
       py_utils.gda_or_jax_array() and
       checkpointer.checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
-  with contextlib.ExitStack() as exit_stack:
-    eval_summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_eval_dirs
-    ]
-    while True:
-      with py_utils.timeit() as eval_period, io_utils.checkpoint_progress(
-          job_log_dir, last_checkpoint_step, EvaluationMode.EVAL):
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            runner.run_one_step(partitioned_train_state, eval_summary_writers,
-                                eval_key, create_gda_for_inputs))
+  eval_one_step_fn = _SpmdEvalRunner(
+      task_p, eval_input_p, jax_task, global_mesh, init_key, partitioned_specs,
+      job_log_dir, eval_unpadded_global_batch_size).partition_run_one_step(
+          eval_key, eval_input_p, use_gda)
 
-      eval_metrics = tuning_lib.EvalMetrics(
-          input_p=eval_input_p,
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-
-      # If the last check point evaluated matches max train steps, exit.
-      if last_checkpoint_step is not None:
-        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if tuning_lib.should_early_stop(
-            early_stopping_fn,
-            last_checkpoint_step,
-            is_last_ckpt,
-            eval_metrics=eval_metrics):
-          logging.info(
-              'Evaluation is early stopped at checkpoint step %d by the'
-              'tuner, while the num_train_steps is %d', last_checkpoint_step,
-              task_p.train.num_train_steps)
-          break
-        if is_last_ckpt:
-          break
-      # Release partitioned_train_states.
-      jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
-      del partitioned_train_state
-      new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
-      partitioned_train_state = checkpointer.load_checkpoint_for_step(
-          new_checkpoint_step, train_state_global_shapes, partitioned_specs,
-          global_mesh)
-      last_checkpoint_step = new_checkpoint_step
-
+  decode_once_fn = None
+  input_p = None
+  continuous_decode = True
+  _common_eval_or_decode_loop(EvaluationMode.EVAL, checkpointer, task_p,
+                              job_log_dir, global_mesh, input_p, eval_input_p,
+                              eval_one_step_fn, decode_once_fn,
+                              partitioned_train_state,
+                              train_state_global_shapes, partitioned_specs,
+                              early_stopping_fn, continuous_decode)
 
 def decode(experiment_config: base_experiment.BaseExperiment,
            job_log_dir: str,
@@ -1426,8 +1377,10 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
         init_key, inputs_sample, do_eval=True)
 
-  eval_runner = _PmapEvalRunner(
-      task_p, eval_input_p, jax_task, eval_key, job_log_dir)
+  eval_one_step_fn = _PmapEvalRunner(
+      task_p, eval_input_p, jax_task, eval_key,
+      job_log_dir).partition_run_one_step(eval_input_p)
+
   # JaxContext needed for parameter sharing.
   context_p = base_layer.JaxContext.HParams(do_eval=True)
   with base_layer.JaxContext.new_context(hparams=context_p):
@@ -1436,7 +1389,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         os.path.join(job_log_dir, 'decoder_out'))
 
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
-  (replicated_model_states, train_state_global_shapes,
+  (partitioned_train_state, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(jax_task, prng_key,
                                                 inputs_sample,
                                                 train_state_metadata,
@@ -1447,77 +1400,22 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
-  summary_base_dir = os.path.join(job_log_dir, 'summaries')
-  summary_decode_dirs = [
-      os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
-  ]
-  summary_eval_dirs = [
-      os.path.join(summary_base_dir, f'eval_test_{p.name}')
-      for p in eval_input_p
-  ]
-  with contextlib.ExitStack() as exit_stack:
-    summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_decode_dirs
-    ]
-    eval_summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_eval_dirs
-    ]
+  decode_once_fn = partition_decode_once_pmap_model(
+      jax_task,
+      task_p,
+      var_weight_hparams,
+      inputs,
+      input_p,
+      prng_seed,
+      job_log_dir,
+      enable_checkpoint_saving=enable_checkpoint_saving)
 
-    decode_once_fn = partition_decode_once_pmap_model(
-        jax_task,
-        task_p,
-        var_weight_hparams,
-        inputs,
-        input_p,
-        prng_seed,
-        job_log_dir,
-        enable_checkpoint_saving=enable_checkpoint_saving)
-
-    while True:
-      with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
-                                        EvaluationMode.DECODE):
-        decode_metrics = decode_once_fn(
-            replicated_model_states, summary_writers)
-
-        with py_utils.timeit() as eval_period:
-          eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-              eval_runner.run_one_step(replicated_model_states,
-                                       eval_summary_writers))
-
-      eval_metrics = tuning_lib.EvalMetrics(
-          input_p=eval_input_p,
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-
-      if not continuous_decode:
-        break
-      if last_checkpoint_step is not None:
-        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-        if tuning_lib.should_early_stop(
-            early_stopping_fn,
-            last_checkpoint_step,
-            is_last_ckpt,
-            eval_metrics=eval_metrics,
-            decode_metrics=decode_metrics):
-          logging.info(
-              'Decoding is early stopped at checkpoint step %d by the'
-              'tuner, while the num_train_steps is %d', last_checkpoint_step,
-              task_p.train.num_train_steps)
-          break
-        if is_last_ckpt:
-          break
-      # Release replicated_model_states.
-      jax.tree_util.tree_map(_free_device_buffer, replicated_model_states)
-      del replicated_model_states
-      new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
-      replicated_model_states = checkpointer.load_checkpoint_for_step(
-          new_checkpoint_step, train_state_global_shapes, partitioned_specs,
-          global_mesh)
-      last_checkpoint_step = new_checkpoint_step
+  _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
+                              job_log_dir, global_mesh, input_p, eval_input_p,
+                              eval_one_step_fn, decode_once_fn,
+                              partitioned_train_state,
+                              train_state_global_shapes, partitioned_specs,
+                              early_stopping_fn, continuous_decode)
 
 
 def partition_decode_once_pmap_model(
@@ -1891,7 +1789,6 @@ def decode_spmd_model(
     use_gda = (
         py_utils.gda_or_jax_array() and
         checkpointer.checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
-    last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
 
     if jax_task.hparams.train.always_use_train_for_model_init:
       if train_input_specs is None:
@@ -1949,79 +1846,24 @@ def decode_spmd_model(
       (partitioned_train_state, partitioned_specs, train_state_global_shapes,
        decode_step_fn, inputs_partition_specs, inputs_sample) = model_states_out
 
-    eval_runner = _SpmdEvalRunner(task_p, eval_input_p, jax_task, global_mesh,
-                                  init_key, partitioned_specs, job_log_dir,
-                                  eval_unpadded_global_batch_size)
+    decode_once_fn = partition_decode_once_spmd_model(
+        jax_task, task_p, inputs, input_p, job_log_dir, prng_key, global_mesh,
+        decode_step_fn, use_gda, inputs_shape, inputs_partition_specs)
+    eval_one_step_fn = _SpmdEvalRunner(
+        task_p, eval_input_p, jax_task, global_mesh, init_key,
+        partitioned_specs, job_log_dir,
+        eval_unpadded_global_batch_size).partition_run_one_step(
+            eval_key, eval_input_p, use_gda)
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, var_weight_hparams,
         os.path.join(job_log_dir, 'decoder_out'))
-    summary_base_dir = os.path.join(job_log_dir, 'summaries')
-    summary_decode_dirs = [
-        os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
-    ]
-    summary_eval_dirs = [
-        os.path.join(summary_base_dir, f'eval_test_{p.name}')
-        for p in eval_input_p
-    ]
-    partitioned_train_state = trim_opt_states(partitioned_train_state)
-    with contextlib.ExitStack() as exit_stack:
-      summary_writers = [
-          exit_stack.enter_context(summary_utils.get_summary_writer(d))
-          for d in summary_decode_dirs
-      ]
-      eval_summary_writers = [
-          exit_stack.enter_context(summary_utils.get_summary_writer(d))
-          for d in summary_eval_dirs
-      ]
-      decode_once_fn = partition_decode_once_spmd_model(
-          jax_task, task_p, inputs, input_p, job_log_dir, prng_key, global_mesh,
-          decode_step_fn, use_gda, inputs_shape, inputs_partition_specs)
-      while True:
-        with io_utils.checkpoint_progress(
-            job_log_dir, last_checkpoint_step, EvaluationMode.DECODE):
-          decode_metrics = decode_once_fn(partitioned_train_state,
-                                          summary_writers)
 
-          with py_utils.timeit() as eval_period:
-            (eval_metrics_list, eval_scoring_metrics_list,
-             num_eval_steps) = eval_runner.run_one_step(partitioned_train_state,
-                                                        eval_summary_writers,
-                                                        eval_key, use_gda)
-
-        eval_metrics = tuning_lib.EvalMetrics(
-            input_p=eval_input_p,
-            metrics_list=eval_metrics_list,
-            scoring_metrics_list=eval_scoring_metrics_list,
-            steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
-
-        if not continuous_decode:
-          break
-        if last_checkpoint_step is not None:
-          exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-          is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
-          if tuning_lib.should_early_stop(
-              early_stopping_fn,
-              last_checkpoint_step,
-              is_last_ckpt,
-              eval_metrics=eval_metrics,
-              decode_metrics=decode_metrics):
-            logging.info(
-                'Decoding is early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d', last_checkpoint_step,
-                task_p.train.num_train_steps)
-            break
-          if is_last_ckpt:
-            break
-        # Release partitioned_train_states.
-        jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
-        del partitioned_train_state
-        new_checkpoint_step = checkpointer.wait_for_new_step(
-            last_checkpoint_step)
-        partitioned_train_state = checkpointer.load_checkpoint_for_step(
-            new_checkpoint_step, train_state_global_shapes, partitioned_specs,
-            global_mesh)
-        last_checkpoint_step = new_checkpoint_step
-
+    _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
+                                job_log_dir, global_mesh, input_p, eval_input_p,
+                                eval_one_step_fn, decode_once_fn,
+                                partitioned_train_state,
+                                train_state_global_shapes, partitioned_specs,
+                                early_stopping_fn, continuous_decode)
 
 def partition_decode_once_spmd_model(
     jax_task: tasks_lib.SingleTask,
@@ -2328,6 +2170,79 @@ def decode_once_spmd_model(
 
   return (decode_metrics_list, processed_decode_metrics_list,
           seqio_metrics_list, num_decode_steps)
+
+
+def _common_eval_or_decode_loop(
+    mode: io_utils.EvaluationMode, checkpointer: _EvalCheckpointer,
+    task_p: tasks_lib.SingleTask.HParams, job_log_dir: str,
+    global_mesh: Optional[maps.Mesh],
+    input_p: Optional[Sequence[base_input.BaseInput.HParams]],
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
+    eval_one_step_fn: Callable, decode_once_fn: Optional[Callable],
+    partitioned_train_state: train_states.TrainState,
+    train_state_global_shapes: train_states.TrainState,
+    partitioned_specs: Optional[train_states.TrainState],
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+    continuous_decode: bool):
+  last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
+  logging.info('Evaluation loop starting...')
+  summary_base_dir = os.path.join(job_log_dir, 'summaries')
+  if input_p:
+    summary_decode_dirs = [
+        os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
+    ]
+  summary_eval_dirs = [
+      os.path.join(summary_base_dir, f'eval_test_{p.name}')
+      for p in eval_input_p
+  ]
+  with contextlib.ExitStack() as exit_stack:
+    if input_p:
+      summary_writers = [
+          exit_stack.enter_context(summary_utils.get_summary_writer(d))
+          for d in summary_decode_dirs
+      ]
+    eval_summary_writers = [
+        exit_stack.enter_context(summary_utils.get_summary_writer(d))
+        for d in summary_eval_dirs
+    ]
+
+    while True:
+      with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
+                                        mode):
+        decode_metrics = None
+        if input_p:
+          decode_metrics = decode_once_fn(partitioned_train_state,
+                                          summary_writers)
+
+        eval_metrics = eval_one_step_fn(partitioned_train_state,
+                                        eval_summary_writers)
+
+      if not continuous_decode:
+        break
+      if last_checkpoint_step is not None:
+        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
+        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
+        if tuning_lib.should_early_stop(
+            early_stopping_fn,
+            last_checkpoint_step,
+            is_last_ckpt,
+            eval_metrics=eval_metrics,
+            decode_metrics=decode_metrics):
+          logging.info(
+              'Early stopped at checkpoint step %d by the'
+              'tuner, while the num_train_steps is %d', last_checkpoint_step,
+              task_p.train.num_train_steps)
+          break
+        if is_last_ckpt:
+          break
+      # Release partitioned_train_state.
+      jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
+      del partitioned_train_state
+      new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
+      partitioned_train_state = checkpointer.load_checkpoint_for_step(
+          new_checkpoint_step, train_state_global_shapes, partitioned_specs,
+          global_mesh)
+      last_checkpoint_step = new_checkpoint_step
 
 
 def _maybe_update_tracked_metric(
