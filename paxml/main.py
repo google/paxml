@@ -281,7 +281,8 @@ def run_experiment(
         maybe_use_persistence_checkpointing=FLAGS
         .maybe_use_persistence_checkpointing,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=use_orbax)
+        use_orbax=use_orbax,
+        enable_auto_sharding=FLAGS.enable_auto_sharding)
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -296,7 +297,8 @@ def run_experiment(
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
         use_orbax=use_orbax,
-        enable_checkpoint_saving=enable_checkpoint_saving)
+        enable_checkpoint_saving=enable_checkpoint_saving,
+        enable_auto_sharding=FLAGS.enable_auto_sharding)
   elif FLAGS.mode == 'decode_once':
     work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
@@ -310,7 +312,8 @@ def run_experiment(
         continuous_decode=False,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
-        use_orbax=use_orbax)
+        use_orbax=use_orbax,
+        enable_auto_sharding=FLAGS.enable_auto_sharding)
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(

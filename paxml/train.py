@@ -963,38 +963,6 @@ def train_and_evaluate_pmap(
       create_gda_for_inputs, train_prng_seed)
 
 
-def compile_for_auto_sharding(train_step: Any,
-                              train_state: train_states.TrainState,
-                              train_key: jnp.ndarray,
-                              inputs_shape_dtype: NestedShapeDtypeLike):
-  """Compiles train_step ahead of time to extract the shardings.
-
-  The sharding is returned by the auto spmd partitioner and is attached on the
-  compiled object.
-
-  Args:
-    train_step: The train_step function which will be compiled ahead of time.
-    train_state: Train state which contains abstract values for ahead of time
-      compilation.
-    train_key: Prng key used for training.
-    inputs_shape_dtype: Inputs with shape/dtype attributes to be used for shape
-      inference.
-
-  Returns:
-    * A compiled train_step function
-    * The input shardings returned by the auto spmd partitioner.
-  """
-
-  def _create_aval(x):
-    return jax.ShapedArray(x.shape, x.dtype)
-
-  train_key = jax.tree_map(_create_aval, train_key)
-  inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
-  compiled = train_step.lower(
-      train_state, train_key, inputs_shape_dtype, _global_avals=True).compile()
-  return compiled, compiled.input_shardings[0]
-
-
 def train_and_evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
@@ -1130,7 +1098,7 @@ def train_and_evaluate_spmd_model(
           train_state_metadata.var_weight_hparams,
           # TODO(pax-dev): set discard_opt_states according to is_eval.
           discard_opt_states=False)
-      p_train_step, input_shardings = compile_for_auto_sharding(
+      p_train_step, input_shardings = trainer_lib.compile_for_auto_sharding(
           p_train_step, abstract_train_state, train_prng_seed,
           inputs_shape_dtype)
       train_state_metadata.partitioned_specs = jax.tree_map(

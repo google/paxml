@@ -163,6 +163,41 @@ def create_train_state_metadata(
       partitioned_specs=partitioned_specs)
 
 
+def compile_for_auto_sharding(step_fn: Any,
+                              train_state: train_states.TrainState,
+                              step_key: pytypes.PRNGKey,
+                              inputs_shape_dtype: NestedShapeDtypeLike):
+  """Compiles step_fn ahead of time to extract the shardings.
+
+  The sharding is returned by the auto spmd partitioner and is attached on the
+  compiled object.
+
+  Args:
+    step_fn: The step_fn function which will be compiled ahead of time.
+    train_state: Train state which contains abstract values for ahead of time
+      compilation.
+    step_key: Prng key.
+    inputs_shape_dtype: Inputs with shape/dtype attributes to be used for shape
+      inference.
+
+  Returns:
+    * A compiled step_fn function
+    * The input shardings returned by the auto spmd partitioner.
+  """
+
+  def _create_aval(x):
+    # canonicalize_dtype is necessary to avoid errors like
+    # data types are different when compiling and when being called.
+    dtype = jax.dtypes.canonicalize_dtype(x.dtype)
+    return jax.ShapedArray(x.shape, dtype)
+
+  train_key = jax.tree_map(_create_aval, step_key)
+  inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
+  compiled = step_fn.lower(
+      train_state, step_key, inputs_shape_dtype, _global_avals=True).compile()
+  return compiled, compiled.input_shardings[0]
+
+
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 
@@ -1406,7 +1441,9 @@ def get_partitioned_spmd_model_decode_fn(
     model_state_partition_specs,
     train_sample_inputs: Optional[NestedJTensor],
     inputs_shape_dtype: NestedShapeDtypeStruct,
-    unpadded_global_batch_size: Optional[int] = None):
+    unpadded_global_batch_size: Optional[int] = None,
+    enable_auto_sharding: bool = False,
+):
   """Return sharded decode step function and input partition spec.
 
   Args:
@@ -1513,12 +1550,25 @@ def get_partitioned_spmd_model_decode_fn(
   # decoder output are always replicated at the moment.
   decode_fn_out_partition_specs = tf.nest.map_structure(lambda _: None,
                                                         decode_out_shapes)
-  decode_step_fn = pjit.pjit(
-      _decode_step,
-      in_axis_resources=decode_fn_in_partition_specs,
-      out_axis_resources=decode_fn_out_partition_specs)
+  if enable_auto_sharding:
+    # pjit-ed step function.
+    # provide inputs_partition_spec because GDA creation is specialized to the
+    # input partition specs created here. If we use partition specs returned by
+    # XLA, it errors out.
+    decode_step_fn = pjit.pjit(
+        _decode_step,
+        in_axis_resources=(pjit.AUTO, prng_key_partition_spec,
+                           inputs_partition_spec),
+        out_axis_resources=decode_fn_out_partition_specs)
 
-  return decode_step_fn, inputs_partition_spec
+    return decode_step_fn, None
+  else:
+    decode_step_fn = pjit.pjit(
+        _decode_step,
+        in_axis_resources=decode_fn_in_partition_specs,
+        out_axis_resources=decode_fn_out_partition_specs)
+
+    return decode_step_fn, inputs_partition_spec
 
 
 def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:

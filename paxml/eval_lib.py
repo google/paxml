@@ -32,6 +32,7 @@ import jax
 from jax.experimental import global_device_array
 from jax.experimental import maps
 from jax.experimental import multihost_utils
+import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
@@ -73,6 +74,7 @@ WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 PRNGKey = pytypes.PRNGKey
+NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 
@@ -552,6 +554,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
              job_log_dir: str,
              maybe_use_persistence_checkpointing: bool,
              early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+             enable_auto_sharding: bool = False,
              use_orbax: bool = False) -> None:
   """Runs the evaluation loop on the entire eval data set.
 
@@ -565,6 +568,8 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       and determining whether to early stop current training. The callable
       object has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
+    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
+      shardings.
     use_orbax: Enables checkpointing backed by Orbax.
   """
   task_p = experiment_config.task()
@@ -895,6 +900,7 @@ class _SpmdEvalRunner:
       is_decode: bool = False,
       use_orbax: bool = False,
       unpadded_global_batch_size: Optional[int] = None,
+      enable_auto_sharding: bool = False,
   ) -> Union[train_states.TrainState, Tuple[
       train_states.TrainState, Optional[train_states.TrainState],
       train_states.TrainState, Any, NestedPartitionSpec, NestedJTensor]]:
@@ -934,6 +940,7 @@ class _SpmdEvalRunner:
       init_key, step_key = jax.random.split(init_key)
 
       if jax_task.hparams.train.always_use_train_for_model_init:
+        # Should auto sharding be allowed here?
         _, train_inputs_partition_specs = (
             trainer_lib.get_partitioned_spmd_model_step_fn(
                 jax_task,
@@ -964,16 +971,54 @@ class _SpmdEvalRunner:
                   trim_opt_states(partitioned_specs),
                   sample_inputs,
                   inputs_shape,
-                  unpadded_global_batch_size=unpadded_global_batch_size))
+                  enable_auto_sharding=enable_auto_sharding))
+          if enable_auto_sharding:
+            # NOTE(pax-dev): The following is currently incompatible with variable
+            # uneven-sharding padding. When enable_auto_sharding is False,
+            # train_state_pspecs correspond to padded train_states.
+            abstract_train_state = jax_task.create_train_state_unpadded_shapes(
+                var_weight_hparams,
+                discard_opt_states=True)
+            step_fn, input_shardings = trainer_lib.compile_for_auto_sharding(
+                step_fn=step_fn,
+                train_state=abstract_train_state,
+                step_key=step_key,
+                inputs_shape_dtype=inputs_shape)
+            partitioned_specs = jax.tree_map(lambda x: x.spec,
+                                             input_shardings[0])
+            inputs_partition_specs = jax.tree_map(lambda x: x.spec,
+                                                  input_shardings[2])
         else:
-          step_fn, inputs_partition_specs = (
-              trainer_lib.get_partitioned_spmd_model_step_fn(
-                  jax_task,
-                  step_key,
-                  trainer_lib.train_state_for_eval_step(partitioned_specs),
-                  sample_inputs,
-                  is_eval=True,
-                  unpadded_global_batch_size=unpadded_global_batch_size))
+          if enable_auto_sharding:
+            step_fn, _ = (
+                trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
+                    jax_task,
+                    init_key=None,
+                    model_state_partition_specs=None,
+                    inputs_shape_dtype=inputs_shape,
+                    is_eval=True))
+            # NOTE(pax-dev): The following is currently incompatible with variable
+            # uneven-sharding padding. When enable_auto_sharding is False,
+            # train_state_pspecs correspond to padded train_states.
+            abstract_train_state = jax_task.create_train_state_unpadded_shapes(
+                var_weight_hparams,
+                discard_opt_states=True)
+            step_fn, input_shardings = trainer_lib.compile_for_auto_sharding(
+                step_fn, abstract_train_state, step_key,
+                inputs_shape)
+            partitioned_specs = jax.tree_map(lambda x: x.spec,
+                                             input_shardings[0])
+            inputs_partition_specs = jax.tree_map(lambda x: x.spec,
+                                                  input_shardings[2])
+          else:
+            step_fn, inputs_partition_specs = (
+                trainer_lib.get_partitioned_spmd_model_step_fn(
+                    jax_task,
+                    step_key,
+                    trainer_lib.train_state_for_eval_step(partitioned_specs),
+                    sample_inputs,
+                    is_eval=True,
+                    unpadded_global_batch_size=unpadded_global_batch_size))
 
         assert sample_input_p is not None
         if (create_gda_for_inputs or sample_input_p.experimental_remote_input):
@@ -1061,7 +1106,8 @@ def evaluate_spmd_model(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: str,
     checkpointer: _SpmdEvalCheckpointer,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    enable_auto_sharding: bool = False) -> None:
   """Runs the evaluation loop on the entire test dataset for SPMD model.
 
   Args:
@@ -1075,6 +1121,8 @@ def evaluate_spmd_model(
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     use_orbax: Enables checkpointing backed by Orbax.
+    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
+      shardings.
   """
   logging.info('Using SPMD sharding for model parallelism.')
 
@@ -1139,7 +1187,8 @@ def evaluate_spmd_model(
       checkpointer.checkpoint_type,
       checkpoint_step=checkpointer.restore_checkpoint_step,
       use_ema=checkpointer.use_ema,
-      use_orbax=checkpointer.use_orbax)
+      use_orbax=checkpointer.use_orbax,
+      enable_auto_sharding=enable_auto_sharding)
 
   if task_p.train.always_use_train_for_model_init:
     assert train_state_metadata is not None
@@ -1220,6 +1269,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
            continuous_decode: bool,
            run_eval: Optional[bool] = False,
            early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+           enable_auto_sharding: bool = False,
            use_orbax: bool = False,
            enable_checkpoint_saving: bool = True) -> None:
   """Runs decoding on the decoder datasets.
@@ -1240,6 +1290,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
+    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
+      shardings.
     use_orbax: Enables checkpointing backed by Orbax.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
@@ -1287,7 +1339,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     decode_spmd_model(task_p, train_input_specs, decoder_inputs, eval_inputs,
                       job_log_dir,
                       typing.cast(_SpmdEvalCheckpointer, checkpointer),
-                      continuous_decode, early_stopping_fn)
+        continuous_decode, early_stopping_fn,
+        enable_auto_sharding=enable_auto_sharding)
   else:
     decode_pmap_model(
         task_p,
@@ -1771,7 +1824,8 @@ def decode_spmd_model(
     job_log_dir: str,
     checkpointer: _SpmdEvalCheckpointer,
     continuous_decode: bool,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    enable_auto_sharding: bool = False) -> None:
   """Runs the decoding on the entire decoder datasets for SPMD model.
 
   Args:
@@ -1790,6 +1844,8 @@ def decode_spmd_model(
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     use_orbax: Enables checkpointing backed by Orbax.
+    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
+      shardings.
   """
   # TODO(bf-jax): Retrieve the seeds from the model definition instead.
   prng_key = jax.random.PRNGKey(1234)
@@ -1874,7 +1930,8 @@ def decode_spmd_model(
         checkpoint_step=checkpointer.restore_checkpoint_step,
         is_decode=True,
         use_ema=checkpointer.use_ema,
-        unpadded_global_batch_size=unpadded_global_batch_size)
+        unpadded_global_batch_size=unpadded_global_batch_size,
+        enable_auto_sharding=enable_auto_sharding)
 
     if jax_task.hparams.train.always_use_train_for_model_init:
       assert train_state_metadata is not None
