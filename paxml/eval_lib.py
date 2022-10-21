@@ -29,7 +29,6 @@ from absl import flags
 from absl import logging
 from clu import platform
 import jax
-from jax.experimental import global_device_array
 from jax.experimental import maps
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
@@ -139,20 +138,6 @@ def _maybe_write_scoring_outputs(
                fq_fname, len(scoring_outputs))
 
   io_utils.write_key_value_pairs(fq_fname, flat_scoring_outputs)
-
-
-def _free_device_buffer(
-    device_array: Union[global_device_array.GlobalDeviceArray, jax.Array]):
-  """Forces to free a device buffer."""
-  # This is more reliable than using only Python refcount and gc. Sometimes
-  # there is unexpected reference that cannot be cleared by gc.
-  # TODO(pax-dev): Simplify this after migrating to Array.
-  if isinstance(device_array, global_device_array.GlobalDeviceArray):
-    for s in device_array.addressable_shards:
-      if s.data is not None:
-        s.data.delete()
-  elif isinstance(device_array, jax.Array):
-    device_array.delete()  # pytype: disable=attribute-error
 
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
@@ -2236,7 +2221,7 @@ def _common_eval_or_decode_loop(
         if is_last_ckpt:
           break
       # Release partitioned_train_state.
-      jax.tree_util.tree_map(_free_device_buffer, partitioned_train_state)
+      jax.tree_util.tree_map(lambda x: x.delete(), partitioned_train_state)
       del partitioned_train_state
       new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
       partitioned_train_state = checkpointer.load_checkpoint_for_step(
