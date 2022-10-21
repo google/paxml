@@ -16,6 +16,8 @@
 """A registry of experiment configurations."""
 import collections
 import functools
+import importlib
+import traceback
 from typing import Dict, List, Mapping, Optional
 
 from absl import logging
@@ -23,6 +25,15 @@ from absl import logging
 from paxml import base_experiment
 
 BaseExperimentT = base_experiment.BaseExperimentT
+
+
+def _being_reloaded() -> bool:
+  """Returns whether we are being called from importlib.reload."""
+  for s in traceback.extract_stack():
+    if s.name == 'reload' and s.filename == importlib.__file__:
+      # A conservative guess.
+      return True
+  return False
 
 
 class _ExperimentRegistryHelper:
@@ -85,6 +96,7 @@ class _ExperimentRegistryHelper:
       tags: String tags, which can be used to mark experiments as important or
         unit-testable. Currently we do not prescribe any semantics.
       allow_overwrite: bool, whether re-register an existing class is allowed.
+        It's always set to True when reloading modules.
 
     Returns:
       experiment_class itself, so this can be used as a class decorator, or
@@ -98,6 +110,10 @@ class _ExperimentRegistryHelper:
       # decorated with @register(...)
       return functools.partial(
           cls.register, allow_overwrite=allow_overwrite, tags=tags)
+    if _being_reloaded():
+      # Allow overwrite when we're reloading modules. This often happens when
+      # developing in notebooks.
+      allow_overwrite = True
 
     # canonical key is the full path.
     canonical_key = (
