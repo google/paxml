@@ -402,6 +402,8 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
     train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
         train_state, checkpoint_type=checkpoint_type)
     if update_opt_states:
+      # Free the previous opt_states as it will be re-computed.
+      jax.tree_util.tree_map(lambda x: x.delete(), train_state.opt_states)
       # Re-compute opt_states after the model variables are updated.
       opt_states = jax_task.create_opt_states(train_state.mdl_vars,
                                               var_weight_hparams)
