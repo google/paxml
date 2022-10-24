@@ -1173,7 +1173,7 @@ def train_and_evaluate_spmd_model(
       # Do not mutate eval_input_pipelines itself. Instantiate a new one
       # to get sample input.
       sample_eval_model_inputs = instantiate(eval_input_p[0]).get_next_padded()
-      eval_test_inputs_shape_dtype = tf.nest.map_structure(
+      eval_test_inputs_shape_dtype = jax.tree_util.tree_map(
           py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
       eval_test_inputs_pspecs = trainer_lib.get_input_partition_specs(
           model_p.mesh_axis_names, eval_test_inputs_shape_dtype)
@@ -1206,7 +1206,7 @@ def train_and_evaluate_spmd_model(
       ]
       trainer_lib.check_unique_names(decode_input_pipelines)
       decode_sample_inputs = instantiate(decode_input_p[0]).get_next_padded()
-      decode_inputs_shape_dtype = tf.nest.map_structure(
+      decode_inputs_shape_dtype = jax.tree_util.tree_map(
           py_utils.get_global_input_shape_dtype, decode_sample_inputs)
       prng_key, decode_key = jax.random.split(prng_key, 2)
       logging.info('decode prng_key: %s', decode_key)

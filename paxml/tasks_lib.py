@@ -40,6 +40,7 @@ from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
 from paxml import io_utils
+from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -49,7 +50,6 @@ from praxis import optimizers
 from praxis import py_utils
 from praxis import pytypes
 from praxis import train_states
-import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
 
@@ -443,7 +443,7 @@ class SingleTask(base_task.BaseTask):
       A list of NestedJTensor to update `opt_states` in TrainState.
     """
     grad_txs = [x.get_grad_tx(var_weight_hparams) for x in self.learners]
-    tf.nest.assert_same_structure(mdl_vars, var_weight_hparams)
+    asserts.assert_same_structure(mdl_vars, var_weight_hparams)
     return [x.init(mdl_vars) for x in grad_txs]
 
   def create_train_state(self,
@@ -466,8 +466,8 @@ class SingleTask(base_task.BaseTask):
     """
     # Make a private copy of mdl_vars and var_weight_hparams structures that are
     # not shared with the caller.
-    mdl_vars = tf.nest.map_structure(lambda x: x, mdl_vars)
-    var_weight_hparams = tf.nest.map_structure(lambda x: x, var_weight_hparams)
+    mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
+    var_weight_hparams = jax.tree_util.tree_map(lambda x: x, var_weight_hparams)
     if discard_opt_states:
       opt_states = {}
     else:
@@ -504,7 +504,7 @@ class SingleTask(base_task.BaseTask):
 
     model_state_partition_specs = self.create_train_state_partition_specs(
         var_weight_hparams, discard_opt_states)
-    tf.nest.assert_same_structure(model_state_partition_specs, unpadded_shapes)
+    asserts.assert_same_structure(model_state_partition_specs, unpadded_shapes)
 
     def _maybe_pad(shape_dtype, pspec):
       if py_utils.is_optax_masked_node(shape_dtype):

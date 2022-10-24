@@ -833,7 +833,7 @@ class _SpmdEvalRunner:
     # instead of instantiating this input pipeline.
     # setup input_shape.
     sample_model_inputs = instantiate(self._eval_input_p[0]).get_next_padded()
-    self._inputs_shape = tf.nest.map_structure(
+    self._inputs_shape = jax.tree_util.tree_map(
         py_utils.get_global_input_shape_dtype, sample_model_inputs)
     self.global_mesh = global_mesh
 
@@ -911,7 +911,7 @@ class _SpmdEvalRunner:
                 unpadded_global_batch_size=unpadded_global_batch_size))
 
         if create_gda_for_inputs:
-          train_inputs_shape = tf.nest.map_structure(
+          train_inputs_shape = jax.tree_util.tree_map(
               py_utils.get_global_input_shape_dtype, sample_inputs)
           train_inputs_partition_specs_common = _extract_common_specs(
               train_inputs_shape, train_inputs_partition_specs)
@@ -921,7 +921,7 @@ class _SpmdEvalRunner:
               train_inputs_partition_specs_common)
 
       else:
-        inputs_shape = tf.nest.map_structure(
+        inputs_shape = jax.tree_util.tree_map(
             py_utils.get_global_input_shape_dtype, sample_inputs)
         if is_decode:
           step_fn, inputs_partition_specs = (
@@ -1765,8 +1765,8 @@ def decode_spmd_model(
   assert list(input_p) + list(eval_input_p)
   sample_input_p = input_p[0] if input_p else eval_input_p[0]
   inputs_sample = instantiate(sample_input_p).get_next_padded()
-  inputs_shape = tf.nest.map_structure(py_utils.get_global_input_shape_dtype,
-                                       inputs_sample)
+  inputs_shape = jax.tree_util.tree_map(py_utils.get_global_input_shape_dtype,
+                                        inputs_sample)
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
 
@@ -2023,7 +2023,7 @@ def decode_once_spmd_model(
         break
       if jax_task.hparams.train.always_use_train_for_model_init:
         if use_gda:
-          inputs_shape = tf.nest.map_structure(
+          inputs_shape = jax.tree_util.tree_map(
               py_utils.get_global_input_shape_dtype, batch)
           inputs_partition_specs_common = _extract_common_specs(
               inputs_shape, inputs_partition_specs)

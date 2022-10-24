@@ -375,6 +375,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         # Implicit optax dependency.
         "//paxml:checkpoints",
+        "//praxis:asserts",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
@@ -384,7 +385,6 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:train_states",
-        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
@@ -440,6 +440,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
+        "//praxis:asserts",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",

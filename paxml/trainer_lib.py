@@ -29,6 +29,7 @@ from jax.experimental import pjit
 from paxml import base_metrics
 from paxml import summary_utils
 from paxml import tasks_lib
+from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -444,7 +445,7 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
   Returns:
     vars with dtype of bfloat16 for every compatible tensor.
   """
-  tf.nest.assert_same_structure(mdl_vars, var_weight_hparams)
+  asserts.assert_same_structure(mdl_vars, var_weight_hparams)
 
   def _maybe_bfloat16_var_fn(var, var_param):
     if base_layer.var_disallow_bfloat16_conversion(var_param):
@@ -452,8 +453,8 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
     else:
       return _maybe_to_bfloat16(var)
 
-  return tf.nest.map_structure(_maybe_bfloat16_var_fn, mdl_vars,
-                               var_weight_hparams)
+  return jax.tree_util.tree_map(_maybe_bfloat16_var_fn, mdl_vars,
+                                var_weight_hparams)
 
 
 def _maybe_to_float32(x: JTensor) -> JTensor:
@@ -532,8 +533,8 @@ def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
   Returns:
     grads with gradient for non-learnable vars zero-ed out.
   """
-  tf.nest.assert_same_structure(grads, var_weight_hparams)
-  var_is_learnable = tf.nest.map_structure(
+  asserts.assert_same_structure(grads, var_weight_hparams)
+  var_is_learnable = jax.tree_util.tree_map(
       lambda x: not base_layer.var_not_trainable(x), var_weight_hparams)
 
   def _maybe_zero_out_grad_fn(var_grad, var_learnable):
@@ -548,7 +549,8 @@ def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
       return jnp.zeros_like(var_grad)
 
   # Zero-out gradient for non-learnable vars.
-  return tf.nest.map_structure(_maybe_zero_out_grad_fn, grads, var_is_learnable)
+  return jax.tree_util.tree_map(_maybe_zero_out_grad_fn, grads,
+                                var_is_learnable)
 
 
 def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
@@ -570,8 +572,8 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     synchronized new_vars.
   """
 
-  tf.nest.assert_same_structure(old_vars, new_vars)
-  tf.nest.assert_same_structure(old_vars, var_weight_hparams)
+  asserts.assert_same_structure(old_vars, new_vars)
+  asserts.assert_same_structure(old_vars, var_weight_hparams)
 
   def _synchronize_vars_using_mean(old_var: JTensor,
                                    new_var: JTensor) -> JTensor:
@@ -622,8 +624,8 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     def _sync_var(old_var, new_var, var_param):
       return _synchronize_non_learnable_var(old_var, new_var, var_param)
 
-    return tf.nest.map_structure(_sync_var, old_vars, new_vars,
-                                 var_weight_hparams)
+    return jax.tree_util.tree_map(_sync_var, old_vars, new_vars,
+                                  var_weight_hparams)
   else:
     # no synchronization is needed.
     return new_vars
@@ -785,7 +787,7 @@ def _train_step_single_learner_with_model(
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
       if collection in states.mdl_vars:
         # We need to update the non-trainable vars.
-        tf.nest.assert_same_structure(states.mdl_vars[collection],
+        asserts.assert_same_structure(states.mdl_vars[collection],
                                       fwd_updated_vars[collection])
         mdl_vars[collection] = _maybe_synchronize_non_learnable_vars(
             states.mdl_vars[collection], fwd_updated_vars[collection],
@@ -1078,7 +1080,7 @@ def initialize_partitioned_model_states(
 
   logging.info('unpadded_out_shape: %s', train_state_unpadded_shapes)
   logging.info('train_state_partition_specs: %s', train_state_partition_specs)
-  tf.nest.assert_same_structure(train_state_unpadded_shapes,
+  asserts.assert_same_structure(train_state_unpadded_shapes,
                                 train_state_partition_specs)
 
   mesh_names = model.hparams.mesh_axis_names
@@ -1182,7 +1184,7 @@ def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
   # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
       shard_on_batch_dim_partition_spec, mesh_axis_names)
-  return tf.nest.map_structure(inputs_partition_spec_fn, inputs_shape_dtype)
+  return jax.tree_util.tree_map(inputs_partition_spec_fn, inputs_shape_dtype)
 
 
 def train_state_for_eval_step(state_with_opt_states):
@@ -1350,13 +1352,13 @@ def get_partitioned_spmd_model_step_fn(
                            inputs_partition_spec)
   # Currently, all the outputs are fully replicated.
   # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
-  fn_out_partition_specs = tf.nest.map_structure(lambda _: None,
-                                                 out_padded_shapes)
+  fn_out_partition_specs = jax.tree_util.tree_map(lambda _: None,
+                                                  out_padded_shapes)
   if not is_eval:
     fn_out_partition_specs = tuple([model_state_partition_specs] +
                                    list(fn_out_partition_specs[1:]))
 
-  tf.nest.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
+  asserts.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
 
   # pjit-ed step function.
   step_fn = pjit.pjit(
@@ -1475,8 +1477,8 @@ def get_partitioned_spmd_model_decode_fn(
                                         task_p.train.inputs_split_mapping,
                                         mesh_names)
 
-  inputs_partition_spec = tf.nest.map_structure(inputs_partition_spec_fn,
-                                                inputs_shape_dtype)
+  inputs_partition_spec = jax.tree_util.tree_map(inputs_partition_spec_fn,
+                                                 inputs_shape_dtype)
 
   # TODO(b/198356509): Fix this so that prng_key is no longer replicated, as
   # we want each core to not have identical random behavior.
@@ -1550,8 +1552,8 @@ def get_partitioned_spmd_model_decode_fn(
                                   prng_key_partition_spec,
                                   inputs_partition_spec)
   # decoder output are always replicated at the moment.
-  decode_fn_out_partition_specs = tf.nest.map_structure(lambda _: None,
-                                                        decode_out_shapes)
+  decode_fn_out_partition_specs = jax.tree_util.tree_map(
+      lambda _: None, decode_out_shapes)
   if enable_auto_sharding:
     # pjit-ed step function.
     # provide inputs_partition_spec because GDA creation is specialized to the

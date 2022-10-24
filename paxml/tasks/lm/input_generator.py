@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import jax
 from typing import List, Optional
 
 from absl import logging
@@ -96,7 +97,7 @@ class TFRecordBertInput(base_input.BaseInput):
   def get_next(self) -> NestedMap:
     """Returns a batch with .labels, .masked_ids, and .masked_pos."""
     ret = self._iterator.get_next()
-    return tf.nest.map_structure(lambda x: x.numpy(), ret)
+    return jax.tree_util.tree_map(lambda x: x.numpy(), ret)
 
   def reset(self) -> None:
     self._iterator = iter(self._dataset)
@@ -358,7 +359,7 @@ class TextInput(base_input.BaseInput):
   def get_next(self) -> NestedMap:
     """Returns a batch with .ids, .paddings, and .labels."""
     ret = self._iterator.get_next()
-    return tf.nest.map_structure(lambda x: x.numpy(), ret)
+    return jax.tree_util.tree_map(lambda x: x.numpy(), ret)
 
   def reset(self) -> None:
     self._iterator = iter(self._dataset)
