@@ -391,8 +391,6 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     if py_utils.pmap_use_tensorstore():
       logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
                    step_i)
-      py_utils.sync_global_devices(
-          f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
       if jax.config.jax_array:
         fully_replicated_gda_train_state = jax.tree_map(
             py_utils.convert_host_local_array_to_global_array,
@@ -402,8 +400,6 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
             py_utils.convert_fully_replicated_sda_to_gda,
             partitioned_train_state)
       self._save_with_args(step_i, fully_replicated_gda_train_state)
-      py_utils.sync_global_devices(
-          f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
     else:
       unreplicated_train_state = jax.tree_map(lambda x: x[0],
                                               partitioned_train_state)
