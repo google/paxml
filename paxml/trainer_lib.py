@@ -632,9 +632,8 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
 
 
 # TODO(yonghui): refactor to pass in learner separately.
-def _train_step_single_learner_with_model(
+def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
-    model: base_model.BaseModel,
     states: TrainState,
     prng_key: PRNGKey,
     inputs: Union[JTensor, NestedMap],
@@ -650,7 +649,6 @@ def _train_step_single_learner_with_model(
 
   Args:
     jax_task: An instance of tasks.SingleTask.
-    model: An instance of base_model that is used for forward/back prop
     states: An instance of model.TrainState.
     prng_key: A PRNGKey, of shape [2], of type np.uint32.
     inputs: Inputs to the model() function.
@@ -666,6 +664,7 @@ def _train_step_single_learner_with_model(
     summary_tensors - A dict or nested map of summary tensors computed in
       forward as well as backward.
   """
+  model = jax_task.model
   assert len(jax_task.learners) == 1
   learner = jax_task.learners[0]
 
@@ -677,10 +676,9 @@ def _train_step_single_learner_with_model(
   prng_key = jax.random.fold_in(prng_key, states.step)
   prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
   init_key = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-  parent_model = jax_task.model
 
   with base_layer.JaxContext.new_context(hparams=context_p):
-    var_weight_hparams = parent_model.abstract_init_with_metadata(
+    var_weight_hparams = model.abstract_init_with_metadata(
         init_key, inputs)
 
   updated_mdl_vars = jax_task.maybe_adjust_train_state(states.step,
@@ -818,26 +816,11 @@ def _train_step_single_learner_with_model(
           summary_tensors)
 
 
-def train_step_single_learner(
+# TODO(laigd): rename - eval has nothing to do with number of learners.
+def eval_step_single_learner(
     jax_task: tasks_lib.SingleTask,
     states: TrainState,
-    prng_key: PRNGKey,
-    inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32
-) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
-  """Trains a model (or a submodel) for a single step."""
-  # default model is the base model in jax_task
-  model = jax_task.model
-
-  return _train_step_single_learner_with_model(jax_task, model, states,
-                                               prng_key, inputs, fprop_dtype)
-
-
-def _eval_step_single_learner_with_model(
-    jax_task: tasks_lib.SingleTask,
-    model: base_model.BaseModel,
-    states: TrainState,
-    prng_key: PRNGKey,
+    prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[Any, Any, Any, SummaryDict]:
   """Evaluates a model for a single step.
@@ -846,7 +829,6 @@ def _eval_step_single_learner_with_model(
 
   Args:
     jax_task: An instance of tasks.SingleTask.
-    model: An instance of base_model.BaseModel, that is used for training
     states: An instance of model.TrainState.
     prng_key: A prng seed, of shape [2], of type np.uint32.
     inputs: Inputs to the model() function.
@@ -861,6 +843,7 @@ def _eval_step_single_learner_with_model(
     summary_tensors - A nested map or dict of summary tensors computed in
       forward as well as backward pass.
   """
+  model = jax_task.model
   context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
@@ -868,12 +851,11 @@ def _eval_step_single_learner_with_model(
   mdl_vars = states.mdl_vars
   # assert not states.opt_states
 
-  parent_model = jax_task.model
   if jax_task.hparams.train.always_use_train_for_model_init:
     do_eval_for_init = False
   else:
     do_eval_for_init = True
-  var_weight_hparams = parent_model.abstract_init_with_metadata(
+  var_weight_hparams = model.abstract_init_with_metadata(
       prng_key, inputs, do_eval=do_eval_for_init)
 
   if fprop_dtype == jnp.float32:
@@ -918,19 +900,6 @@ def _eval_step_single_learner_with_model(
          (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
 
   return mean_loss, aggregated_scalars, per_example_out, aggregated_summaries
-
-
-def eval_step_single_learner(
-    jax_task: tasks_lib.SingleTask,
-    states: TrainState,
-    prng_key: JTensor,
-    inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[Any, Any, Any, SummaryDict]:
-  """Evaluates a model (or submodel)."""
-  # default model is the base model in jax_task
-  model = jax_task.model
-  return _eval_step_single_learner_with_model(jax_task, model, states, prng_key,
-                                              inputs, fprop_dtype)
 
 
 def decode_step(
