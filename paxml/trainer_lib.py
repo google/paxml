@@ -1018,7 +1018,11 @@ def initialize_partitioned_model_states(
     train_state_partition_specs = jax_task.create_train_state_partition_specs(
         var_weight_hparams, discard_opt_states)
   else:
-    train_state_partition_specs = state_specs
+    if discard_opt_states:
+      train_state_partition_specs = TrainState(
+          step=state_specs.step, mdl_vars=state_specs.mdl_vars, opt_states={})
+    else:
+      train_state_partition_specs = state_specs
 
   train_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,

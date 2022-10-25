@@ -998,7 +998,7 @@ class _SpmdEvalRunner:
                 checkpoint_type=checkpoint_type,
                 state_specs=partitioned_specs,
                 discard_opt_states=True))
-      if use_ema:
+      elif use_ema:
         partitioned_train_state = extract_ema(partitioned_train_state)
 
     if jax_task.hparams.train.always_use_train_for_model_init:
