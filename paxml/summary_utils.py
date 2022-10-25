@@ -359,11 +359,12 @@ def write_summary_entry(summary_writer: SummaryWriter,
   mean_loss = np.mean(loss).item()
   with summary_writer.as_default():
     status_msg = f'step = {step_i}, loss= {mean_loss}'
-    write_summary_tensor(step_i, 'loss', mean_loss, SummaryType.SCALAR)
+    write_summary_tensor(step_i, 'loss', mean_loss,
+                         SummaryType.AGGREGATE_SCALAR)
     if steps_per_sec is not None:
       status_msg += f', steps/sec {steps_per_sec}'
       write_summary_tensor(step_i, 'Steps/sec', steps_per_sec,
-                           SummaryType.SCALAR)
+                           SummaryType.AGGREGATE_SCALAR)
     logging.info('Metrics values at step %d:', step_i)
     logging.info('  loss=%f', mean_loss)
     for key, value_lst in weighted_scalars_list.items():
