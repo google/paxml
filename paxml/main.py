@@ -91,7 +91,7 @@ flags.DEFINE_bool(
     'means that the training can continue ahead when checkpointing is '
     'happening.')
 flags.DEFINE_bool(
-    'jax_array_in_pax', False,
+    'jax_array_in_pax', True,
     'Use jax.Array globally in PAX which replaces DA, SDA and GDA.')
 flags.DEFINE_string(
     'jax_traceback_filtering_option', 'auto',
