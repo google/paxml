@@ -15,6 +15,7 @@
 
 """Shared trainer lib utilities."""
 
+import abc
 import dataclasses
 import enum
 import functools
@@ -1218,6 +1219,234 @@ def _remove_input_padding(inputs: NestedJTensor,
 
 
 # TODO(pax): merge with get_partitioned_spmd_model_decode_fn
+class _SpmdModelStep(metaclass=abc.ABCMeta):
+  """Encapsulate a pjit-ed step function of a SPMD model."""
+
+  def __init__(self,
+               jax_task: tasks_lib.SingleTask,
+               init_key: Optional[PRNGKey],
+               model_state_partition_specs: Optional[TrainState],
+               inputs_shape_dtype: NestedShapeDtypeLike,
+               unpadded_global_batch_size: Optional[int] = None,
+               enable_auto_sharding: Optional[bool] = False):
+    """Constructor.
+
+    Args:
+      jax_task: The task which is an instance of tasks.SingleTask.
+      init_key: PRNGKey for initializing the model variables.
+      model_state_partition_specs: A TrainState contains PartitionSpecs for all
+        the variables.
+      inputs_shape_dtype: Inputs with shape/dtype attributes for use in pjit
+        sharding.
+      unpadded_global_batch_size: If not None, this is the unpadded size of
+        global batch, and the padding is on the right side of
+        inputs_shape_dtype.
+      enable_auto_sharding: Whether to enable xla auto sharding.
+    """
+    self._jax_task = jax_task
+    self._inputs_shape_dtype = inputs_shape_dtype
+    self._unpadded_global_batch_size = unpadded_global_batch_size
+    self._enable_auto_sharding = enable_auto_sharding
+    self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
+
+    if self._enable_auto_sharding:
+      del init_key, model_state_partition_specs
+      self._init_key = None
+      self._model_state_partition_specs = None
+      self._state_unpadded_shapes = None
+    else:
+      self._init_key = init_key
+      self._model_state_partition_specs = model_state_partition_specs
+      self._state_unpadded_shapes = self._get_state_unpadded_shapes()
+
+  def get_step_fn(self):
+    """Gets a sharded (pjit-ed) step function of the SPMD Model.
+
+    Returns:
+      (step_fn, inputs_partition_spec): the step function and the partition spec
+      for the inputs.
+    """
+    task_p = self._jax_task.hparams
+    model_p = task_p.model
+    reshard_inputs_fn = functools.partial(reshard_input_based_on_rank_fn,
+                                          task_p.train.inputs_split_mapping,
+                                          self._mesh_names)
+
+    def _step_fn(state, prng_key, inputs):
+      # TODO(pax-dev): Add support for padding and unpadding inputs when auto
+      # sharding is enabled.
+      if not self._enable_auto_sharding:
+        # Vars/inputs are padded at program entry/exit to avoid uneven sharding.
+        # We slice the vars to remove padding before the step computation, and
+        # pad them after the step computation to make user code independent of
+        # paddings.
+        # Internal uneven sharding in the step computation is supported by XLA.
+        state, inputs = self._unpad(state, inputs)
+
+      # Reshard inputs.
+      # TODO(pax): when xla auto-sharding is enabled, it'll automatically figure
+      # out the proper sharding of intermediate nodes, we can get rid of this
+      # manual sharding now?
+      inputs = jax.tree_map(reshard_inputs_fn, inputs)
+
+      # When auto sharding is enabled, uneven sharding is not supported. This is
+      # because the way padding is added is dependent on the
+      # `model_state_partition_specs`. This is not available during auto
+      # sharding until after the compilation is done.
+      fn_out = self._step_fn(
+          self._jax_task,
+          state,
+          prng_key,
+          inputs,
+          fprop_dtype=model_p.fprop_dtype)
+
+      if self._is_eval:
+        return fn_out
+      assert len(fn_out) > 1
+
+      # Pad the model states again for training step functions.
+      if not self._enable_auto_sharding:
+        padded_states = self._pad(fn_out[0])
+        fn_out = (padded_states,) + fn_out[1:]
+      return fn_out
+
+    fn_in_partition_specs, fn_out_partition_specs, inputs_partition_spec = (
+        self._get_pjit_partition_spec(_step_fn))
+    # pjit-ed step function.
+    step_fn = pjit.pjit(
+        _step_fn,
+        in_axis_resources=fn_in_partition_specs,
+        out_axis_resources=fn_out_partition_specs,
+        donate_argnums=() if self._is_eval else (0,))
+    return step_fn, inputs_partition_spec
+
+  @property
+  @abc.abstractmethod
+  def _is_eval(self) -> bool:
+    """Whether the step function is eval only (not changing train states)."""
+
+  @property
+  @abc.abstractmethod
+  def _step_fn(self):
+    """The model step function to be pjit-ed."""
+
+  def _get_state_unpadded_shapes(self):
+    var_weight_hparams = self._jax_task.model.abstract_init_with_metadata(
+        self._init_key, self._inputs_shape_dtype)
+    return jax.tree_map(
+        lambda x: x.shape,
+        self._jax_task.create_train_state_unpadded_shapes(
+            var_weight_hparams, discard_opt_states=self._is_eval))
+
+  def _maybe_pad(self, x, pspec, shape):
+    if py_utils.is_optax_masked_node(x):
+      return x
+
+    model_p = self._jax_task.hparams.model
+    return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
+                                              model_p.mesh_shape,
+                                              model_p.mesh_axis_names)
+
+  def _pad(self, unpadded_state):
+    """Pad variables to avoid uneven sharding."""
+    assert not self._enable_auto_sharding
+
+    return jax.tree_map(
+        self._maybe_pad,
+        unpadded_state,
+        self._model_state_partition_specs,
+        self._state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
+
+  def _unpad(self, padded_state, padded_inputs):
+    """Remove paddings from variables/inputs."""
+    assert not self._enable_auto_sharding
+    state = jax.tree_map(
+        py_utils.maybe_slice_uneven_sharding,
+        padded_state,
+        self._model_state_partition_specs,
+        self._state_unpadded_shapes,
+        is_leaf=py_utils.is_optax_masked_node)
+    inputs = _remove_input_padding(padded_inputs,
+                                   self._unpadded_global_batch_size,
+                                   self._mesh_names)
+    return state, inputs
+
+  def _get_pjit_partition_spec(self, step_fn):
+    """Returns the partition specs of the step function and its input."""
+    inputs_partition_spec = get_input_partition_specs(self._mesh_names,
+                                                      self._inputs_shape_dtype)
+    # TODO(bf-jax): prng_key is replicated. Would this be a problem?
+    prng_key_partition_spec = base_layer.to_partition_spec((None,),
+                                                           self._mesh_names)
+
+    if self._enable_auto_sharding:
+      # Provide inputs_partition_spec because GDA creation is specialized to the
+      # input partition specs created here. If we use partition specs returned by
+      # XLA, it errors out.
+      fn_in_partition_specs = (pjit.AUTO, prng_key_partition_spec,
+                               inputs_partition_spec)
+      fn_out_partition_specs = pjit.AUTO
+      return fn_in_partition_specs, fn_out_partition_specs, None
+
+    def init_model_from_seed(init_key, inputs):
+      outs = initialize_model_state(
+          self._jax_task,
+          init_key,
+          inputs,
+          discard_opt_states=self._is_eval,
+          do_init_checkpoint_rules=False)
+      return jax.tree_map(
+          self._maybe_pad,
+          outs,
+          self._model_state_partition_specs,
+          self._state_unpadded_shapes,
+          is_leaf=py_utils.is_optax_masked_node)
+
+    var_padded_shapes = jax.eval_shape(init_model_from_seed, self._init_key,
+                                       self._inputs_shape_dtype)
+
+    out_padded_shapes = jax.eval_shape(step_fn, var_padded_shapes,
+                                       self._init_key, self._inputs_shape_dtype)
+
+    fn_in_partition_specs = (self._model_state_partition_specs,
+                             prng_key_partition_spec, inputs_partition_spec)
+    # Currently, all the outputs are fully replicated.
+    # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
+    fn_out_partition_specs = jax.tree_util.tree_map(lambda _: None,
+                                                    out_padded_shapes)
+    if not self._is_eval:
+      fn_out_partition_specs = tuple([self._model_state_partition_specs] +
+                                     list(fn_out_partition_specs[1:]))
+
+    asserts.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
+    return fn_in_partition_specs, fn_out_partition_specs, inputs_partition_spec
+
+
+class _SpmdModelTrainStep(_SpmdModelStep):
+  """Train step function of a SPMD model."""
+
+  @property
+  def _is_eval(self) -> bool:
+    return False
+
+  @property
+  def _step_fn(self):
+    return train_step_single_learner
+
+
+class _SpmdModelEvalStep(_SpmdModelStep):
+  """Eval step function of a SPMD model."""
+
+  @property
+  def _is_eval(self) -> bool:
+    return True
+
+  @property
+  def _step_fn(self):
+    return eval_step_single_learner
+
+
 def get_partitioned_spmd_model_step_fn(
     jax_task: tasks_lib.SingleTask,
     init_key: PRNGKey,
@@ -1242,108 +1471,16 @@ def get_partitioned_spmd_model_step_fn(
     (step_fn, inputs_partition_spec):
     The step function and the partition spec for the inputs.
   """
-  task_p = jax_task.hparams
-  model_p = task_p.model
-  mesh_names = model_p.mesh_axis_names
-
-  reshard_inputs_fn = functools.partial(reshard_input_based_on_rank_fn,
-                                        task_p.train.inputs_split_mapping,
-                                        mesh_names)
-  inputs_partition_spec = get_input_partition_specs(mesh_names,
-                                                    inputs_shape_dtype)
-
-  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      init_key, inputs_shape_dtype)
-  state_unpadded_shapes = jax.tree_map(
-      lambda x: x.shape,
-      jax_task.create_train_state_unpadded_shapes(
-          var_weight_hparams, discard_opt_states=is_eval))
-
-  # TODO(bf-jax): prng_key is replicated. Would this be a problem?
-  prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
-
-  def _maybe_pad(x, pspec, shape):
-    if py_utils.is_optax_masked_node(x):
-      return x
-    return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
-                                              model_p.mesh_shape,
-                                              model_p.mesh_axis_names)
-
-  def _step_fn(state, prng_key, inputs):
-    # Vars/inputs are padded at program entry/exit to avoid uneven sharding. We
-    # slice the vars to remove padding before the step computation, and pad them
-    # after the step computation to make user code independent of paddings.
-    # Internal uneven sharding in the step computation is supported by XLA.
-    state = jax.tree_map(
-        py_utils.maybe_slice_uneven_sharding,
-        state,
-        model_state_partition_specs,
-        state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
-    inputs = _remove_input_padding(
-        inputs, unpadded_global_batch_size, mesh_names)
-
-    # Reshard inputs.
-    inputs = jax.tree_map(reshard_inputs_fn, inputs)
-
-    if is_eval:
-      return eval_step_single_learner(
-          jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
-
-    fn_out = train_step_single_learner(
-        jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
-    assert len(fn_out) > 1
-    new_states = jax.tree_map(
-        _maybe_pad,
-        fn_out[0],
-        model_state_partition_specs,
-        state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
-    return (new_states,) + fn_out[1:]
-
-  def init_model_from_seed(init_key, inputs):
-    outs = initialize_model_state(
-        jax_task,
-        init_key,
-        inputs,
-        discard_opt_states=is_eval,
-        do_init_checkpoint_rules=False)
-    return jax.tree_map(
-        _maybe_pad,
-        outs,
-        model_state_partition_specs,
-        state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
-
-  var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key,
-                                     inputs_shape_dtype)
-
-  out_padded_shapes = jax.eval_shape(_step_fn, var_padded_shapes, init_key,
-                                     inputs_shape_dtype)
-
-  fn_in_partition_specs = (model_state_partition_specs, prng_key_partition_spec,
-                           inputs_partition_spec)
-  # Currently, all the outputs are fully replicated.
-  # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
-  fn_out_partition_specs = jax.tree_util.tree_map(lambda _: None,
-                                                  out_padded_shapes)
-  if not is_eval:
-    fn_out_partition_specs = tuple([model_state_partition_specs] +
-                                   list(fn_out_partition_specs[1:]))
-
-  asserts.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
-
-  # pjit-ed step function.
-  step_fn = pjit.pjit(
-      _step_fn,
-      in_axis_resources=fn_in_partition_specs,
-      out_axis_resources=fn_out_partition_specs,
-      donate_argnums=() if is_eval else (0,))
-
-  return step_fn, inputs_partition_spec
+  cls = _SpmdModelEvalStep if is_eval else _SpmdModelTrainStep
+  return cls(
+      jax_task,
+      init_key,
+      model_state_partition_specs,
+      inputs_shape_dtype,
+      unpadded_global_batch_size,
+      enable_auto_sharding=False).get_step_fn()
 
 
-# TODO(pax): merge with get_partitioned_spmd_model_decode_fn
 # Q(pax-dev): how does the function below interact with padding/unpadding of
 # variables along certain variable/mesh axis?
 def get_partitioned_spmd_model_step_fn_auto_shard(
@@ -1366,50 +1503,13 @@ def get_partitioned_spmd_model_step_fn_auto_shard(
     (step_fn, inputs_partition_spec):
     The step function and the partition spec for the inputs.
   """
-  # TODO(pax-dev): Add support for padding and unpadding inputs.
-  del init_key, model_state_partition_specs
-  task_p = jax_task.hparams
-  model_p = task_p.model
-  mesh_names = model_p.mesh_axis_names
-
-  reshard_inputs_fn = functools.partial(reshard_input_based_on_rank_fn,
-                                        task_p.train.inputs_split_mapping,
-                                        mesh_names)
-  inputs_partition_spec = get_input_partition_specs(mesh_names,
-                                                    inputs_shape_dtype)
-  prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
-
-  def _step_fn(state, prng_key, inputs):
-    # Reshard inputs.
-    # TODO(pax): Since we rely on xla auto-sharding for automatically figure
-    # out the proper sharding of intermediate notes, we can get rid of this
-    # manual sharding now?
-    inputs = jax.tree_map(reshard_inputs_fn, inputs)
-
-    # When auto sharding is enabled, uneven sharding is not supported. This is
-    # because the way padding is added is dependent on the
-    # `model_state_partition_specs`. This is not available during auto sharding
-    # until after the compilation is done.
-
-    fn = eval_step_single_learner if is_eval else train_step_single_learner
-    fn_out = fn(
-        jax_task, state, prng_key, inputs, fprop_dtype=model_p.fprop_dtype)
-
-    if not is_eval:
-      assert len(fn_out) > 1
-    return fn_out
-
-  # pjit-ed step function.
-  # provide inputs_partition_spec because GDA creation is specialized to the
-  # input partition specs created here. If we use partition specs returned by
-  # XLA, it errors out.
-  step_fn = pjit.pjit(
-      _step_fn,
-      in_axis_resources=(pjit.AUTO, prng_key_partition_spec,
-                         inputs_partition_spec),
-      out_axis_resources=pjit.AUTO,
-      donate_argnums=() if is_eval else (0,))
-  return step_fn, None
+  cls = _SpmdModelEvalStep if is_eval else _SpmdModelTrainStep
+  return cls(
+      jax_task,
+      init_key,
+      model_state_partition_specs,
+      inputs_shape_dtype,
+      enable_auto_sharding=True).get_step_fn()
 
 
 def get_partitioned_spmd_model_decode_fn(
