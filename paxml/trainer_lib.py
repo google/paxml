@@ -1038,13 +1038,6 @@ def initialize_partitioned_model_states(
                                                   discard_opt_states))
   assert train_state_partition_specs is not None
 
-  def _maybe_pad(x, pspec, shape):
-    if py_utils.is_optax_masked_node(x):
-      return x
-    return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
-                                              model.hparams.mesh_shape,
-                                              model.hparams.mesh_axis_names)
-
   def init_model_from_seed(prng_key, inputs):
     outs = initialize_model_state(
         jax_task,
@@ -1052,12 +1045,10 @@ def initialize_partitioned_model_states(
         inputs,
         discard_opt_states,
         do_init_checkpoint_rules=False)
-    return jax.tree_map(
-        _maybe_pad,
-        outs,
-        train_state_partition_specs,
-        train_state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
+    return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,
+                                              train_state_unpadded_shapes,
+                                              model.hparams.mesh_shape,
+                                              model.hparams.mesh_axis_names)
 
   logging.info('unpadded_out_shape: %s', train_state_unpadded_shapes)
   logging.info('train_state_partition_specs: %s', train_state_partition_specs)
@@ -1345,25 +1336,16 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
         self._jax_task.create_train_state_unpadded_shapes(
             var_weight_hparams, discard_opt_states=self._is_eval))
 
-  def _maybe_pad(self, x, pspec, shape):
-    if py_utils.is_optax_masked_node(x):
-      return x
-
-    model_p = self._jax_task.hparams.model
-    return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
-                                              model_p.mesh_shape,
-                                              model_p.mesh_axis_names)
 
   def _pad(self, unpadded_state):
     """Pad variables to avoid uneven sharding."""
     assert not self._enable_auto_sharding
-
-    return jax.tree_map(
-        self._maybe_pad,
-        unpadded_state,
-        self._model_state_partition_specs,
-        self._state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
+    model_p = self._jax_task.hparams.model
+    return py_utils.maybe_pad_uneven_sharding(unpadded_state,
+                                              self._model_state_partition_specs,
+                                              self._state_unpadded_shapes,
+                                              model_p.mesh_shape,
+                                              model_p.mesh_axis_names)
 
   def _unpad(self, padded_state, padded_inputs):
     """Remove paddings from variables/inputs."""
@@ -1403,12 +1385,10 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
           inputs,
           discard_opt_states=self._is_eval,
           do_init_checkpoint_rules=False)
-      return jax.tree_map(
-          self._maybe_pad,
-          outs,
-          self._model_state_partition_specs,
-          self._state_unpadded_shapes,
-          is_leaf=py_utils.is_optax_masked_node)
+      model_p = self._jax_task.hparams.model
+      return py_utils.maybe_pad_uneven_sharding(
+          outs, self._model_state_partition_specs, self._state_unpadded_shapes,
+          model_p.mesh_shape, model_p.mesh_axis_names)
 
     var_padded_shapes = jax.eval_shape(init_model_from_seed, self._init_key,
                                        self._inputs_shape_dtype)
@@ -1564,13 +1544,6 @@ def get_partitioned_spmd_model_decode_fn(
   # we want each core to not have identical random behavior.
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
-  def _maybe_pad(x, pspec, shape):
-    if py_utils.is_optax_masked_node(x):
-      return pspec
-    return py_utils.maybe_pad_uneven_sharding(x, pspec, shape,
-                                              model_p.mesh_shape,
-                                              model_p.mesh_axis_names)
-
   if jax_task.hparams.train.always_use_train_for_model_init:
     if train_sample_inputs is None:
       raise ValueError(
@@ -1611,12 +1584,10 @@ def get_partitioned_spmd_model_decode_fn(
         inputs,
         discard_opt_states=True,
         do_init_checkpoint_rules=False)
-    return jax.tree_map(
-        _maybe_pad,
-        outs,
-        model_state_partition_specs,
-        model_state_unpadded_shapes,
-        is_leaf=py_utils.is_optax_masked_node)
+    return py_utils.maybe_pad_uneven_sharding(outs, model_state_partition_specs,
+                                              model_state_unpadded_shapes,
+                                              model_p.mesh_shape,
+                                              model_p.mesh_axis_names)
 
   if jax_task.hparams.train.always_use_train_for_model_init:
     var_padded_shapes = jax.eval_shape(init_model_from_seed, init_key,
