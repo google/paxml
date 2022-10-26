@@ -26,4 +26,4 @@ timeout: 24000s
 artifacts:
   objects:
     location: 'gs://pax-on-cloud-tpu-project/wheels/$(date -u +%Y%m%d)'
-    paths: ['/**/*.whl']
+    paths: ['/**/*.whl', '/**/*.txt']

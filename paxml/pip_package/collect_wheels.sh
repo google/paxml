@@ -29,4 +29,5 @@ function collect_wheels() {
   rename -v "s/^praxis-(.*?)-py3/praxis-${wheel_version}+$(date -u +%Y%m%d)-py3/" *.whl
   popd
   mv /tmp/staging-wheels/* .
+  mv /tmp/paxml_pip_package_build/dependencies.txt .
 }

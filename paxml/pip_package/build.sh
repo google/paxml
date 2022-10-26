@@ -71,26 +71,10 @@ write_action_env_to_bazelrc "TF_SHARED_LIBRARY_DIR" ${SHARED_LIBRARY_DIR}
 write_action_env_to_bazelrc "TF_SHARED_LIBRARY_NAME" ${SHARED_LIBRARY_NAME}
 write_action_env_to_bazelrc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
-# The following lines should be replaced with toolchain for manylinux2014 and CUDA 11.4
-#write_to_bazelrc "build:manylinux2010 --crosstool_top=//third_party/toolchains/preconfig/ubuntu16.04/gcc7_manylinux2010-nvcc-cuda10.0:toolchain"
-
-#if [[ "$PIP_MANYLINUX2010" == "1" ]]; then
-#  write_to_bazelrc "build --config=manylinux2010"
-#  write_to_bazelrc "test --config=manylinux2010"
-#fi
-
-# It is expected that you have git cloned this repo at the branch you want,
-# ideally in our docker.
-
 bazel clean
 bazel build ...
-# Todo: add bazel test for the purposes of the pip package.
 bazel test paxml/... --test_output=all --test_verbose_timeout_warnings
 
 DST_DIR="/tmp/paxml_pip_package_build"
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
-# Uncomment the following lines if you run this inside of the container.
-#if [[ "${PIP_MANYLINUX2010}" == "1" ]]; then
-#  find "$DST_DIR" -name "*cp${PYTHON_VERSION}${PYTHON_MINOR_VERSION}*.whl" | xargs -n1 ./third_party/auditwheel.sh repair --plat manylinux2010_x86_64 -w "$DST_DIR"
-#fi
-
+pip3 freeze > "${DST_DIR}/dependencies.txt"
