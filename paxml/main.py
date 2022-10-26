@@ -98,6 +98,10 @@ flags.DEFINE_string(
     'Controls how JAX filters internal frames out of tracebacks: '
     'off, auto, tracebackhide, remove_frames. '
     'See https://github.com/google/jax/blob/main/jax/_src/config.py')
+flags.DEFINE_bool(
+    'decode_output_pickle', True,
+    'Output the .pickle file alongside the .jsonl file when decoding, this '
+    'can take a lot of memory with large decodings so can be disabled here.')
 flags.DEFINE_bool('use_orbax', True, 'Enables Orbax for checkpointing.')
 flags.DEFINE_string(
     'checkpoint_todelete_subdir', None,
@@ -313,7 +317,9 @@ def run_experiment(
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
         use_orbax=use_orbax,
-        enable_auto_sharding=FLAGS.enable_auto_sharding)
+        enable_auto_sharding=FLAGS.enable_auto_sharding,
+        output_pickle=FLAGS.decode_output_pickle,
+        )
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(

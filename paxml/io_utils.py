@@ -184,7 +184,8 @@ class JnpEncoder(json.JSONEncoder):
 
 def write_key_value_pairs(filename: str,
                           key_value_pairs: Sequence[Tuple[str, Any]],
-                          cast_to_ndarray: bool = True) -> None:
+                          cast_to_ndarray: bool = True,
+                          write_pickle: bool = True) -> None:
   """Writes `key_value_pairs` to pkl and jsonl files."""
   root = os.path.splitext(filename)[0]
   jsonl_filename = root + '.jsonl'
@@ -193,8 +194,9 @@ def write_key_value_pairs(filename: str,
   if cast_to_ndarray:
     key_value_pairs = jax.tree_map(_to_ndarray, key_value_pairs)
 
-  with tf.io.gfile.GFile(pkl_filename, 'wb') as pkl_f:
-    pickle.dump(key_value_pairs, pkl_f, protocol=pickle.HIGHEST_PROTOCOL)
+  if write_pickle:
+    with tf.io.gfile.GFile(pkl_filename, 'wb') as pkl_f:
+      pickle.dump(key_value_pairs, pkl_f, protocol=pickle.HIGHEST_PROTOCOL)
 
   with tf.io.gfile.GFile(jsonl_filename, 'w') as jsonl_f:
     for _, v in key_value_pairs:

@@ -1211,7 +1211,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
            early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
            enable_auto_sharding: bool = False,
            use_orbax: bool = False,
-           enable_checkpoint_saving: bool = True) -> None:
+           enable_checkpoint_saving: bool = True,
+           output_pickle: bool = True) -> None:
   """Runs decoding on the decoder datasets.
 
   Args:
@@ -1234,6 +1235,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       shardings.
     use_orbax: Enables checkpointing backed by Orbax.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    output_pickle: Output .pickle file alongside the .jsonl file when decoding.
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -1291,6 +1293,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
         typing.cast(_PmapEvalCheckpointer, checkpointer),
         continuous_decode,
         early_stopping_fn,
+        output_pickle,
         enable_checkpoint_saving=enable_checkpoint_saving)
 
 
@@ -1318,6 +1321,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
                       continuous_decode: bool,
                       early_stopping_fn: Optional[
                           trainer_lib.EarlyStoppingFn] = None,
+                      output_pickle: bool = True,
                       enable_checkpoint_saving: bool = True) -> None:
   """Runs the decoding on the entire decoder datasets for a PMAP model.
 
@@ -1334,6 +1338,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    output_pickle: Output .pickle file alongside the .jsonl file when decoding.
   """
   jax_task = instantiate(task_p)
 
@@ -1397,6 +1402,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
       input_p,
       prng_seed,
       job_log_dir,
+      output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving)
 
   _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
@@ -1415,7 +1421,8 @@ def partition_decode_once_pmap_model(
     input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
     job_log_dir: str,
-    enable_checkpoint_saving: bool = True
+    output_pickle: bool = True,
+    enable_checkpoint_saving: bool = True,
 ) -> Callable[[train_states.TrainState, List[SummaryWriter]],
               tuning_lib.DecodeMetrics]:
 
@@ -1433,6 +1440,7 @@ def partition_decode_once_pmap_model(
                job_log_dir,
                partitioned_train_state,
                summary_writers,
+               output_pickle,
                enable_checkpoint_saving=enable_checkpoint_saving))
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
@@ -1455,6 +1463,7 @@ def decode_once_pmap_model(
     job_log_dir: str,
     replicated_model_states: train_states.TrainState,
     summary_writers: List[SummaryWriter],
+    output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
 ) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
            List[Optional[Dict[str, float]]],  # processed decode metrics.
@@ -1673,7 +1682,8 @@ def decode_once_pmap_model(
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
-      io_utils.write_key_value_pairs(output_file, processed_decodes)
+      io_utils.write_key_value_pairs(
+          output_file, processed_decodes, output_pickle)
 
     merged_decode_metrics = metric_utils.update_float_dict(
         metric_utils.as_float_dict(decode_metric_dict),
