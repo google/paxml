@@ -83,7 +83,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpointer = checkpoints.FlaxCheckpointer()
     elif checkpoint_type == CheckpointType.CHECKPOINT_GDA:
       checkpointer = orbax.checkpoint.Checkpointer(
-          orbax.checkpoint.PyTreeCheckpointHandler(enable_flax=False))
+          orbax.checkpoint.PyTreeCheckpointHandler(enable_aggregation=False))
     else:
       raise ValueError('Unsupported CheckpointType.')
     return checkpointer
