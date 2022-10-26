@@ -34,6 +34,7 @@ from absl import flags
 from absl import logging
 # Required import to setup work units when running through XManager.
 from clu import platform
+from etils import epath
 import fiddle as fdl
 from fiddle import absl_flags
 import jax
@@ -49,7 +50,6 @@ from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import py_utils
 import pyglove as pg
-import tensorflow.compat.v2 as tf
 
 # internal experiment module import
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
@@ -63,8 +63,11 @@ flags.DEFINE_string(
     'has a format like "<task>.<module>.<experiment>", which should have been '
     'already registered in the global experiment registry with '
     '@experiment_registry.register.')
-flags.DEFINE_string('job_log_dir', None,
-                    'Directory where all experiment assets will be stored.')
+epath.DEFINE_path(
+    'job_log_dir',
+    None,
+    'Directory where all experiment assets will be stored.',
+    required=True)
 flags.DEFINE_enum('mode', 'train',
                   ['train', 'eval', 'decode', 'decode_once', 'infer'],
                   'Flag to control which job is called.')
@@ -109,7 +112,7 @@ flags.DEFINE_string(
     'subdirectory with the provided string. Otherwise, they will be directly '
     'deleted from the file system. Useful if checkpoint deletion is time '
     'consuming. By default, delete the checkpoint assets.')
-flags.DEFINE_string(
+epath.DEFINE_path(
     'restore_checkpoint_dir', None,
     'If set, the directory from which to restore checkpoint. Only supported '
     'for --mode=decode_once and --mode=decode.')
@@ -187,30 +190,30 @@ def _default_early_stopping_fn(metrics: Dict[str, float],
                                step_i: int, unused_arg: bool) -> bool:
   """Dumping metrics into JSON file for debugging and other consumptions."""
   if jax.process_index() == 0:
-    metric_dir = os.path.join(FLAGS.job_log_dir, 'metrics')
-    if not tf.io.gfile.exists(metric_dir):
-      tf.io.gfile.makedirs(metric_dir)
-    if not tf.io.gfile.isdir(metric_dir):
+    metric_dir = FLAGS.job_log_dir / 'metrics'
+    metric_dir.mkdir(parents=True, exist_ok=True)
+    if not metric_dir.is_dir():
       raise ValueError(f'{metric_dir} should be a directory.')
-    metric_file_name = os.path.join(metric_dir, f'step-{step_i:06d}.json')
+    metric_file_name = metric_dir / f'step-{step_i:06d}.json'
+
     # Update and re-save the metrics.
     if (running_mode & trainer_lib.RunningMode.EVAL or
         running_mode & trainer_lib.RunningMode.DECODE):
-      if tf.io.gfile.exists(metric_file_name):
+      if metric_file_name.exists():
         # NOTE(daiyip): converting pg.Dict to dict which allows updates
         # with dot ('.') separated keys. (dot can be a part of dataset name)
-        existing_metrics = dict(pg.load(metric_file_name))
+        existing_metrics = dict(pg.load(str(metric_file_name)))
       else:
         existing_metrics = {}
       metrics.update(existing_metrics)
-      pg.save(metrics, metric_file_name)
+      pg.save(metrics, str(metric_file_name))
   return False
 
 
 def run_experiment(
     experiment_config: base_experiment.BaseExperiment,
     work_unit: platform.WorkUnit,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     enable_checkpoint_saving: bool = True,
 ) -> None:
@@ -355,8 +358,8 @@ def run(experiment_config: base_experiment.BaseExperiment,
   work_unit = platform.work_unit()
   work_unit.set_task_status(f'process_index: {jax.process_index()}, '
                             f'process_count: {jax.process_count()}')
-  work_unit.create_artifact(platform.ArtifactType.DIRECTORY, FLAGS.job_log_dir,
-                            'job_log_dir')
+  work_unit.create_artifact(platform.ArtifactType.DIRECTORY,
+                            str(FLAGS.job_log_dir), 'job_log_dir')
 
   # Start jax.profiler for TensorBoard and profiling in open source.
   if FLAGS.jax_profiler_port is not None:

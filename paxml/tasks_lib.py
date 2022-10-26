@@ -29,6 +29,7 @@ import typing
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from absl import logging
+from etils import epath
 import jax
 from jax import numpy as jnp
 from jax.experimental import global_device_array
@@ -76,7 +77,7 @@ LOAD_ALL = ('(.*)', '{}')
 
 # TODO(pax-dev): Move this function when `pmap_use_tensorstore` flag is deleted.
 def restore_pmap_from_tensorstore(global_shapes,
-                                  checkpoint_dir,
+                                  checkpoint_dir: epath.PathLike,
                                   step=None,
                                   global_mesh=None,
                                   checkpoint_type=CheckpointType.CHECKPOINT_GDA,
@@ -889,7 +890,7 @@ class SingleTask(base_task.BaseTask):
     else:
       loaded_train_state = checkpoints.restore_checkpoint(
           ckpt_train_state,
-          ckpt_path,
+          checkpoint_dir=ckpt_path,
           global_mesh=global_mesh,
           checkpoint_type=checkpoint_type,
           state_specs=train_state_pspecs,

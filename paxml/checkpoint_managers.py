@@ -96,7 +96,7 @@ class CheckpointManager:
   def __init__(self,
                *,
                config_name: str,
-               root_dir: str,
+               root_dir: epath.PathLike,
                checkpoint_type: CheckpointType,
                save_interval_steps=int,
                max_to_keep: Optional[int],
@@ -137,7 +137,7 @@ class CheckpointManager:
         time consuming. By default, delete the checkpoint assets.
     """
     self._config_name: str = config_name
-    self._root_dir: str = root_dir
+    self._root_dir: epath.Path = epath.Path(root_dir)
     self._checkpoint_type: CheckpointType = checkpoint_type
 
     self._save_interval_steps: int = save_interval_steps
@@ -150,9 +150,9 @@ class CheckpointManager:
     self._init_checkpoint_history()
 
   @property
-  def checkpoint_filename(self) -> str:
+  def checkpoint_filename(self) -> epath.Path:
     """Full checkpoints' filename."""
-    return os.path.join(self._root_dir, self._checkpoint_basename)
+    return self._root_dir / self._checkpoint_basename
 
   @property
   def last_checkpoint_step(self) -> int:
@@ -216,7 +216,7 @@ class CheckpointManager:
     """Creates a CheckpointHistory instance with default fields set."""
     return checkpoint_pb2.CheckpointHistory(
         config_name=self._config_name,
-        root_directory=self._root_dir,
+        root_directory=str(self._root_dir),
         checkpoint_type=self._checkpoint_type)
 
   def _init_checkpoint_history(self) -> None:
@@ -298,22 +298,23 @@ class CheckpointManager:
 
     self._save_checkpoint_file(latest_global_step)
 
-  def _delete_pattern_if_exists(self, root_dir: str, filepath: str) -> None:
+  def _delete_pattern_if_exists(self, root_dir: epath.Path,
+                                filepath: str) -> None:
     """Deletes everything under `filepath`."""
     # Note: This method may be called by different JAX processes. The
     # concurrency logic is handled in _delete_checkpoint() below.
-    src = os.path.join(root_dir, filepath)
+    root_dir = epath.Path(root_dir)
+    src = root_dir / filepath
     logging.info('Deleting files with filepath: `%s`', src)
-    if tf.io.gfile.exists(src):
+    if src.exists():
       if self._todelete_subdir:
-        rename_dir = os.path.join(root_dir, self._todelete_subdir)
-        if not tf.io.gfile.exists(rename_dir):
-          tf.io.gfile.mkdir(rename_dir)
-        dst = os.path.join(rename_dir, filepath)
+        rename_dir = root_dir / self._todelete_subdir
+        rename_dir.mkdir(parents=True, exist_ok=True)
+        dst = rename_dir / filepath
         # TODO(pax-team): Check if dst already exists?
-        tf.io.gfile.rename(src, dst)
+        src.rename(dst)
       else:
-        tf.io.gfile.rmtree(src)
+        src.rmtree()
 
   def _delete_checkpoint(self,
                          checkpoint: checkpoint_pb2.CheckpointMetadata) -> None:
@@ -497,8 +498,7 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
         return directory
       else:
-        return epath.Path(
-            checkpoints._make_checkpoint_step_dir(os.fspath(directory), step))  # pylint: disable=protected-access
+        return checkpoints._make_checkpoint_step_dir(directory, step)  # pylint: disable=protected-access
     else:
       raise ValueError(
           f'Unrecognized item {key_name} is not currently supported.')

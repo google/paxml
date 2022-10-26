@@ -16,7 +16,7 @@
 # Description:
 #   Paxml: a library for training machine learning models in Jax.
 
-load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_library")
+load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_library", "pytype_strict_test")
 load("//paxml:paxml.bzl", "py_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
@@ -39,6 +39,13 @@ bzl_library(
     srcs = ["build_defs.bzl"],
     # Implicit build flag
     deps = ["//paxml:paxml.bzl"],
+)
+
+bzl_library(
+    name = "paxml_bzl",
+    srcs = ["paxml.bzl"],
+    # Implicit build flag
+    visibility = ["//visibility:private"],
 )
 
 # Internal linker rule.
@@ -166,6 +173,7 @@ pytype_strict_library(
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
@@ -214,6 +222,7 @@ pytype_strict_library(
     deps = [
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
@@ -256,13 +265,13 @@ pytype_strict_library(
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit fiddle dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
         "//praxis:py_utils",
         # Implicit pyglove dependency.
-        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
@@ -336,6 +345,7 @@ pytype_strict_library(
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit flax dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
@@ -371,6 +381,7 @@ pytype_strict_library(
         ":base_task",
         ":io_utils",
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
@@ -414,6 +425,7 @@ pytype_strict_library(
         ":tuning_lib",
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
@@ -438,6 +450,7 @@ pytype_strict_library(
         ":summary_utils",
         ":tasks_lib",
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//praxis:asserts",
@@ -463,6 +476,7 @@ pytype_strict_library(
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
@@ -569,7 +583,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "io_utils_test",
     srcs = ["io_utils_test.py"],
     python_version = "PY3",
@@ -579,6 +593,7 @@ py_strict_test(
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
+        # Implicit etils dependency.
         # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -621,6 +636,7 @@ py_strict_test(
         ":tuning_lib",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit clu.platform dependency.
+        # Implicit etils dependency.
         # Implicit pyglove dependency.
     ],
 )
@@ -663,11 +679,11 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         # Implicit absl.logging dependency.
-        # Implicit tensorflow_no_contrib dependency.
+        # Implicit etils dependency.
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "metric_tracker_utils_test",
     srcs = ["metric_tracker_utils_test.py"],
     python_version = "PY3",

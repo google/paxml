@@ -19,10 +19,10 @@ import abc
 import dataclasses
 import enum
 import functools
-import os
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
+from etils import epath
 import jax
 from jax import numpy as jnp
 from jax.experimental import maps
@@ -206,7 +206,7 @@ EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 def write_post_init_model_hparams_file(model: base_model.BaseModel,
                                        var_weight_hparams: NestedWeightHParams,
-                                       job_log_dir: str) -> None:
+                                       job_log_dir: epath.Path) -> None:
   """Writes a post-init params file into the root `job_log_dir`.
 
   This file is the source of truth of how model is constructed. It contains two
@@ -220,11 +220,10 @@ def write_post_init_model_hparams_file(model: base_model.BaseModel,
     job_log_dir: The root dir for the training job.
   """
   if jax.process_index() == 0:
-    params_fpath = os.path.join(job_log_dir, 'post_init_model_params.txt')
+    params_fpath = job_log_dir / 'post_init_model_params.txt'
     logging.info('post_init_model_params: %s', params_fpath)
-    if not tf.io.gfile.exists(job_log_dir):
-      tf.io.gfile.makedirs(job_log_dir)
-    with tf.io.gfile.GFile(params_fpath, 'w') as params_file:
+    job_log_dir.mkdir(parents=True, exist_ok=True)
+    with params_fpath.open('w') as params_file:
       prng_key = jax.random.PRNGKey(seed=123)
 
       def gen_post_init_hparams(prng_key):

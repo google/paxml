@@ -19,6 +19,7 @@ import math
 from typing import Dict, Type
 from absl.testing import absltest
 from clu import platform
+from etils import epath
 from paxml import automl
 from paxml import base_experiment
 from paxml import trainer_lib
@@ -101,8 +102,7 @@ class TuningWithSubExperiments(TuningExperiment):
 
 
 def run_experiment(experiment_config: base_experiment.BaseExperiment,
-                   work_unit: platform.WorkUnit,
-                   job_log_dir: str,
+                   work_unit: platform.WorkUnit, job_log_dir: epath.Path,
                    early_stopping_fn: trainer_lib.EarlyStoppingFn):
   del work_unit, job_log_dir
   task_p = experiment_config.task()
@@ -139,7 +139,7 @@ class TuningLibTest(absltest.TestCase):
     }))
 
   def test_tune(self):
-    job_log_dir = absltest.get_default_test_tmpdir()
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
     tuning_lib.tune(run_experiment, TuningExperiment(), platform.work_unit(),
                     job_log_dir, study='local1', max_num_trials=5)
     result = pg.tuning.poll_result('local1')
@@ -158,7 +158,7 @@ class TuningLibTest(absltest.TestCase):
                      [0, 3, 3, 3, 3])
 
   def test_tune_with_early_stopping_policy(self):
-    job_log_dir = absltest.get_default_test_tmpdir()
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
     tuning_lib.tune(run_experiment, TuningWithEarlyStopping(),
                     platform.work_unit(),
                     job_log_dir, study='local2', max_num_trials=5)
@@ -178,7 +178,7 @@ class TuningLibTest(absltest.TestCase):
                      [0.0, 0.0, 3.2 * 2, 0.0, 1.6 * 2])
 
   def test_tune_with_subexperiments(self):
-    job_log_dir = absltest.get_default_test_tmpdir()
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
     tuning_lib.tune(run_experiment, TuningWithSubExperiments(),
                     platform.work_unit(), job_log_dir,
                     study='local3', max_num_trials=5)
@@ -261,11 +261,13 @@ class TuningLibTest(absltest.TestCase):
             save_interval_steps=400))
 
 
-def get_trial_dirname(
-    search_space_fun, trial_id: int, dna: pg.DNA, root_dir: str = 'root'):
+def get_trial_dirname(search_space_fun,
+                      trial_id: int,
+                      dna: pg.DNA,
+                      root_dir: str = 'root') -> epath.Path:
   search_space = pg.hyper.trace(search_space_fun, require_hyper_name=True)
   dirname_generator = tuning_lib.TrialDirectoryNameGenerator(
-      root_dir, search_space.dna_spec)
+      epath.Path(root_dir), search_space.dna_spec)
   dna.use_spec(search_space.dna_spec)
   return dirname_generator.dirname(trial_id, dna)
 
@@ -279,8 +281,7 @@ class TrialDirnameTest(absltest.TestCase):
           pg.oneof(['a', 'b', 'c'], name='y'))
 
     self.assertEqual(
-        get_trial_dirname(_fn, 1, pg.DNA([0, 0])),
-        'root/1/x=1|y=a')
+        str(get_trial_dirname(_fn, 1, pg.DNA([0, 0]))), 'root/1/x=1|y=a')
 
   def test_trial_with_named_decisions(self):
     def _fn():
@@ -289,8 +290,7 @@ class TrialDirnameTest(absltest.TestCase):
           pg.oneof(['a', 'b?', 'c'], name='y'))
 
     self.assertEqual(
-        get_trial_dirname(_fn, 1, pg.DNA([0, 0])),
-        'root/1/x=1|y=(0)')
+        str(get_trial_dirname(_fn, 1, pg.DNA([0, 0]))), 'root/1/x=1|y=(0)')
 
   def test_trial_with_decision_values(self):
     def _fn():
@@ -301,7 +301,7 @@ class TrialDirnameTest(absltest.TestCase):
         r += pg.oneof([1, 2, 3], name=f'decision_{i}')
       return r
     self.assertEqual(
-        get_trial_dirname(_fn, 1, pg.DNA([0 for _ in range(10)])),
+        str(get_trial_dirname(_fn, 1, pg.DNA([0 for _ in range(10)]))),
         'root/1/1|1|1|1|1|1|1|1|1|1')
 
   def test_trial_with_format_literal(self):
@@ -314,7 +314,7 @@ class TrialDirnameTest(absltest.TestCase):
     def _fn():
       return (pg.oneof([Foo, Bar], name='x')(), pg.floatv(0.0, 1.0, name='y'))
     self.assertEqual(
-        get_trial_dirname(_fn, 1, pg.DNA([0, 0.0025112])),
+        str(get_trial_dirname(_fn, 1, pg.DNA([0, 0.0025112]))),
         'root/1/x=Foo|y=2.511e-03')
 
   def test_trial_with_custom_hyper(self):
@@ -331,7 +331,7 @@ class TrialDirnameTest(absltest.TestCase):
       return pg.oneof([1, 2], name='x') + len(CustomHyper(name='y'))
 
     self.assertEqual(
-        get_trial_dirname(_fn, 1, pg.DNA([0, 'xyz'])),
+        str(get_trial_dirname(_fn, 1, pg.DNA([0, 'xyz']))),
         'root/1/x=1|y=(CUSTOM)')
 
 

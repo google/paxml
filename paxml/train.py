@@ -28,6 +28,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union, Type
 
 from absl import logging
 from clu import platform
+from etils import epath
 from flax.core import frozen_dict
 import jax
 from jax.experimental import maps
@@ -70,15 +71,15 @@ PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
 _N_STEPS_WARMUP_LOGGING = 5
 
 
-def _checkpoint_dir(job_log_dir: str) -> str:
+def _checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
   """Returns the checkpoint directory from the root `job_log_dir`."""
-  return os.path.join(job_log_dir, 'checkpoints')
+  return job_log_dir / 'checkpoints'
 
 
-def _make_checkpoint_dir(job_log_dir: str) -> str:
+def _make_checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
   checkpoint_dir = _checkpoint_dir(job_log_dir)
-  if jax.process_index() == 0 and not tf.io.gfile.exists(checkpoint_dir):
-    tf.io.gfile.makedirs(checkpoint_dir)
+  if jax.process_index() == 0 and not checkpoint_dir.exists():
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
   # Block all hosts until directory is ready.
   py_utils.sync_global_devices(f'checkpointer:makedirs:{checkpoint_dir}')
   return checkpoint_dir
@@ -152,7 +153,7 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
                checkpoint_type,
                async_ckpt_manager,
                async_checkpointer,
-               job_log_dir,
+               job_log_dir: epath.Path,
                enable_checkpoint_saving: bool = True):
     self.checkpoint_dir = _make_checkpoint_dir(job_log_dir)
     checkpoints.delete_temp_directories(self.checkpoint_dir)
@@ -277,7 +278,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self,
-               job_log_dir,
+               job_log_dir: epath.Path,
                checkpoint_manager: checkpoint_managers.CheckpointManager,
                checkpoint_type: CheckpointType,
                async_ckpt_manager,
@@ -377,7 +378,7 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self,
-               job_log_dir,
+               job_log_dir: epath.Path,
                checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
                checkpoint_type: CheckpointType,
                enable_checkpoint_saving: bool = True):
@@ -452,7 +453,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
 def _create_checkpointer(
     task_p: tasks_lib.SingleTask.HParams,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str],
     use_orbax: bool = False,
@@ -562,14 +563,13 @@ def _train_log_interval_steps(
 
 
 def write_hparams_file(model_config: base_experiment.BaseExperiment,
-                       job_log_dir: str, filename_prefix: str = '') -> None:
+                       job_log_dir: epath.Path,
+                       filename_prefix: str = '') -> None:
   """Writes a params file into the root `job_log_dir`."""
   if jax.process_index() == 0:
-    params_fpath = os.path.join(job_log_dir,
-                                filename_prefix + 'model_params.txt')
-    if not tf.io.gfile.exists(job_log_dir):
-      tf.io.gfile.makedirs(job_log_dir)
-    with tf.io.gfile.GFile(params_fpath, 'w') as hparams_file:
+    job_log_dir.mkdir(parents=True, exist_ok=True)
+    params_fpath = job_log_dir / f'{filename_prefix}model_params.txt'
+    with params_fpath.open('w') as hparams_file:
       for dataset in model_config.datasets():
         hparams_file.write(dataset.to_text())
         hparams_file.write('\n\n')
@@ -580,25 +580,22 @@ def write_hparams_file(model_config: base_experiment.BaseExperiment,
       hparams_file.write(model_config.task().to_text())
 
 
-def write_experiment_class_vars_file(
-    exp_cls: Type[base_experiment.BaseExperiment],
-    job_log_dir: str,
-    filename_prefix: str = '') -> None:
+def write_experiment_class_vars_file(exp_cls: Type[
+    base_experiment.BaseExperiment],
+                                     job_log_dir: epath.Path,
+                                     filename_prefix: str = '') -> None:
   """Writes a params file into the root `job_log_dir`."""
   if jax.process_index() == 0:
-    exp_summary_fpath = os.path.join(
-        job_log_dir, filename_prefix + 'experiment_cls_vars.txt')
-    if not tf.io.gfile.exists(job_log_dir):
-      tf.io.gfile.makedirs(job_log_dir)
+    exp_summary_fpath = job_log_dir / f'{filename_prefix}experiment_cls_vars.txt'
+    job_log_dir.mkdir(parents=True, exist_ok=True)
 
     cls_vars_summary = experiment_utils.get_cls_vars_summary(exp_cls)
-    with tf.io.gfile.GFile(exp_summary_fpath, 'w') as summary_file:
-      summary_file.write(cls_vars_summary)
+    exp_summary_fpath.write_text(cls_vars_summary)
 
 
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
-    job_log_dir: str,
+    job_log_dir: epath.PathLike,
     maybe_use_persistence_checkpointing: bool,
     eval_on_test: Optional[bool],
     checkpoint_todelete_subdir: Optional[str] = None,
@@ -679,6 +676,7 @@ def train_and_evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task_p)
 
+  job_log_dir = epath.Path(job_log_dir)
   checkpointer = _create_checkpointer(
       task_p,
       job_log_dir,
@@ -742,7 +740,7 @@ class _SummaryContextManager(contextlib.ExitStack):
   _exit_callbacks = []
 
   def __init__(self,
-               job_log_dir: str,
+               job_log_dir: epath.Path,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
                decode_input_p: Sequence[base_input.BaseInput.HParams],
                eval_skip_train: bool = False):
@@ -757,20 +755,19 @@ class _SummaryContextManager(contextlib.ExitStack):
         set to True, this is skipped.
     """
     super().__init__()
-    self.summary_base_dir = os.path.join(job_log_dir, 'summaries')
-    self.summary_train_dir = os.path.join(self.summary_base_dir, 'train')
-    self.summary_eval_dir = os.path.join(self.summary_base_dir, 'eval_train')
+    self.summary_base_dir = job_log_dir / 'summaries'
+    self.summary_train_dir = self.summary_base_dir / 'train'
+    self.summary_eval_dir = self.summary_base_dir / 'eval_train'
     self.summary_writer = summary_utils.get_summary_writer
     if eval_input_p:
       self.summary_eval_test_dirs = [
-          os.path.join(self.summary_base_dir, f'eval_test_{p.name}')
-          for p in eval_input_p
+          self.summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
       ]
     else:
       self.summary_eval_test_dirs = []
     if decode_input_p:
       self.summary_decode_dirs = [
-          os.path.join(self.summary_base_dir, f'decode_test_{p.name}')
+          self.summary_base_dir / f'decode_test_{p.name}'
           for p in decode_input_p
       ]
     else:
@@ -799,7 +796,7 @@ class _SummaryContextManager(contextlib.ExitStack):
 
 
 def _write_input_specs(input_specs: NestedShapeDtypeLike,
-                       job_log_dir: str) -> None:
+                       job_log_dir: epath.Path) -> None:
   """Writes input specs as JSON to a file."""
   if jax.process_index() != 0:
     return
@@ -814,18 +811,19 @@ def _write_input_specs(input_specs: NestedShapeDtypeLike,
 
   input_specs_dict = frozen_dict.unfreeze(
       jax.tree_util.tree_map(_to_dict, input_specs))
-  fpath = os.path.join(job_log_dir, 'input_specs.json')
-  with tf.io.gfile.GFile(fpath, 'w') as f:
-    f.write(json.dumps(input_specs_dict, indent=2, sort_keys=True))
+  fpath = job_log_dir / 'input_specs.json'
+  with fpath.open('w') as f:
+    json.dump(input_specs_dict, f, indent=2, sort_keys=True)
 
   work_unit = platform.work_unit()
-  work_unit.create_artifact(platform.ArtifactType.FILE, fpath, 'Input specs')
+  work_unit.create_artifact(platform.ArtifactType.FILE, str(fpath),
+                            'Input specs')
 
 
 def train_and_evaluate_pmap(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
@@ -1003,7 +1001,7 @@ def train_and_evaluate_pmap(
 def train_and_evaluate_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     checkpoint_type: CheckpointType,
     eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],

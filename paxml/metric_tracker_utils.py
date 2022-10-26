@@ -15,13 +15,10 @@
 
 """MetricTracker class and associated utilities."""
 
-import os
 import re
 
 from absl import logging
-
-import tensorflow.compat.v2 as tf
-
+from etils import epath
 
 class MetricTracker:
   """Stateful tracker for metrics , e.g. WER.
@@ -46,12 +43,14 @@ class MetricTracker:
     metric_filename: filename (full absolute path) where metric value is stored.
   """
 
-  def __init__(self,
-               dir_name: str,
-               metric_name: str,
-               metric_partition: str,
-               initial_metric_value: float):
-    self._dir_name: str = dir_name
+  def __init__(
+      self,
+      dir_name: epath.PathLike,
+      metric_name: str,
+      metric_partition: str,
+      initial_metric_value: float,
+  ):
+    self._dir_name: epath.Path = epath.Path(dir_name)
     self._global_step: int = -1
     self._metric_name: str = metric_name
     self._metric_partition: str = metric_partition
@@ -65,15 +64,15 @@ class MetricTracker:
       default_value: if file does not exist: first time use; set value to
         default_value and write file.
     """
-    if tf.io.gfile.exists(self.metric_filename):
+    if self.metric_filename.exists():
       self._restore_from_file()
     else:
       self._set(default_value, -1)
 
   def _restore_from_file(self) -> None:
     """Restore metric value from file."""
-    assert tf.io.gfile.exists(self.metric_filename)
-    with tf.io.gfile.GFile(self.metric_filename, mode='r') as summary_file:
+    assert self.metric_filename.exists()
+    with self.metric_filename.open() as summary_file:
       for line in summary_file:
         m = re.fullmatch(r'Checkpoint at step=(\S+)\s+(\S+)\s+(\S+)\: (\S+);',
                          line.strip())
@@ -93,21 +92,21 @@ class MetricTracker:
     self._metric_value = value
     self._global_step = global_step
     # Also update file.
-    with tf.io.gfile.GFile(self.metric_filename, mode='w') as summary_file:
-      summary_file.write(
-          ''.join((f'Checkpoint at step={self._global_step}',
-                   f'\t{self._metric_partition} ',
-                   f'{self._metric_name}: ',
-                   f'{self._metric_value};\n')))
+    content = ''.join([
+        f'Checkpoint at step={self._global_step}',
+        f'\t{self._metric_partition} ',
+        f'{self._metric_name}: ',
+        f'{self._metric_value};\n',
+    ])
+    self.metric_filename.write_text(content)
 
   @property
   def global_step(self) -> int:
     return self._global_step
 
   @property
-  def metric_filename(self) -> str:
-    return os.path.join(self._dir_name,
-                        self._metric_name + '-tracker')
+  def metric_filename(self) -> epath.Path:
+    return self._dir_name / f'{self._metric_name}-tracker'
 
   @property
   def metric_value(self) -> float:
@@ -122,10 +121,9 @@ class MetricTracker:
       # past for checkpoints with many small files.
       # TODO(ciprianchelba): Update the path to include global-step with
       # leading zeros, once TensorStore-base checkpoint will be used.
-      checkpoint_assets = os.path.join(self._dir_name,
-                                       f'checkpoint_{self._global_step}')
-      if tf.io.gfile.exists(checkpoint_assets):
+      checkpoint_assets = self._dir_name / f'checkpoint_{self._global_step}'
+      if checkpoint_assets.exists():
         logging.info('Removing existing checkpoint %s.', checkpoint_assets)
-        tf.io.gfile.rmtree(checkpoint_assets)
+        checkpoint_assets.rmtree()
       # Then set the new best values.
       self._set(value, global_step)

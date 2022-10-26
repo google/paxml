@@ -19,7 +19,6 @@ import abc
 import collections
 import contextlib
 import functools
-import os
 import sys
 import time
 import typing
@@ -28,10 +27,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from absl import flags
 from absl import logging
 from clu import platform
+from etils import epath
 import jax
 from jax.experimental import maps
 from jax.experimental import multihost_utils
-import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
@@ -86,9 +85,9 @@ def _is_vectorized(states: train_states.TrainState) -> bool:
 
 
 def _get_dir_names(
-    input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[str]:
+    input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[epath.Path]:
   """Returns a list of same length for parent dir names for each dataset."""
-  return [p.name for p in input_p]
+  return [epath.Path(p.name) for p in input_p]
 
 
 def _get_filename(step: Union[base_layer.JTensorOrPartitionSpec, int],
@@ -98,8 +97,8 @@ def _get_filename(step: Union[base_layer.JTensorOrPartitionSpec, int],
   return f'{prefix}_out_{step_num}_shard_{jax.process_index()}'
 
 
-def _can_load_written_outputs(basedir: str, pname: str, mode: EvaluationMode,
-                              step: int) -> bool:
+def _can_load_written_outputs(basedir: epath.Path, pname: str,
+                              mode: EvaluationMode, step: int) -> bool:
   """Returns whether we can load the eval/decoder outputs already."""
   success = np.array([0], dtype=np.int32)
   if jax.process_index() == 0:
@@ -113,20 +112,16 @@ def _can_load_written_outputs(basedir: str, pname: str, mode: EvaluationMode,
 
 
 def _maybe_write_scoring_outputs(
-    job_log_dir: str, step: int, input_name: str,
+    job_log_dir: epath.Path, step: int, input_name: str,
     scoring_outputs: Sequence[Dict[str, Any]]) -> None:
   """Write model scoring outputs to disk from leader process."""
   if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
     return
 
   mode_str = EvaluationMode.EVAL.value
-  basedir = os.path.join(job_log_dir, f'{mode_str}_out')
-  fname = _get_filename(step, mode_str)
-  fq_fname = os.path.join(basedir, input_name, fname)
-
-  dir_path = os.path.dirname(fq_fname)
-  if not tf.io.gfile.exists(dir_path):
-    tf.io.gfile.makedirs(dir_path)
+  basedir = job_log_dir / f'{mode_str}_out'
+  fq_fname = basedir / input_name / _get_filename(step, mode_str)
+  fq_fname.parent.mkdir(parents=True, exist_ok=True)
 
   # convert list of batches into list of example kv pairs
   flat_scoring_outputs = []
@@ -192,7 +187,7 @@ def trim_opt_states(
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
   """Adapts particular implementations of checkpointing into a common API."""
 
-  restore_checkpoint_dir: str
+  restore_checkpoint_dir: epath.Path
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -222,18 +217,19 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
   def __init__(self,
                task_p: tasks_lib.SingleTask.HParams,
-               job_log_dir: str,
+               job_log_dir: epath.Path,
                maybe_use_persistence_checkpointing: bool,
                mode: EvaluationMode,
-               restore_checkpoint_dir: str,
+               restore_checkpoint_dir: epath.Path,
                restore_checkpoint_step: int,
                use_orbax: bool = False):
+    del mode
     self.checkpoint_type = checkpoints.retrieve_checkpoint_type(
         maybe_use_persistence_checkpointing, task_p)
     self.task_p = task_p
     self.job_log_dir = job_log_dir
     self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
-    self.restore_checkpoint_dir: str = restore_checkpoint_dir
+    self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_orbax: bool = use_orbax
     self.use_ema: bool = has_ema(task_p)
@@ -262,10 +258,10 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
   def __init__(self,
                task_p: tasks_lib.SingleTask.HParams,
-               job_log_dir: str,
+               job_log_dir: epath.Path,
                maybe_use_persistence_checkpointing: bool,
                mode: EvaluationMode,
-               restore_checkpoint_dir: str,
+               restore_checkpoint_dir: epath.Path,
                restore_checkpoint_step: int,
                use_orbax: bool = False):
     self.checkpoint_type = checkpoints.retrieve_checkpoint_type(
@@ -273,7 +269,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     self.task_p = task_p
     self.job_log_dir = job_log_dir
     self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
-    self.restore_checkpoint_dir: str = restore_checkpoint_dir
+    self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_orbax: bool = use_orbax
     self.use_ema: bool = has_ema(task_p)
@@ -356,14 +352,15 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
 
 def _create_checkpointer(task_p: tasks_lib.SingleTask.HParams,
-                         job_log_dir: str,
+                         job_log_dir: epath.Path,
                          maybe_use_persistence_checkpointing: bool,
                          mode: Optional[EvaluationMode],
-                         restore_checkpoint_dir: Optional[str],
+                         restore_checkpoint_dir: Optional[epath.PathLike],
                          restore_checkpoint_step: Optional[int],
                          use_orbax: bool = False) -> _EvalCheckpointer:
-  restore_checkpoint_dir = restore_checkpoint_dir or os.path.join(
-      job_log_dir, 'checkpoints')
+  if not restore_checkpoint_dir:
+    # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
+    restore_checkpoint_dir = job_log_dir / 'checkpoints'
 
   if restore_checkpoint_step is None and mode is not None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
@@ -406,7 +403,7 @@ def run_eval_loop_over_test_splits(
     summary_writers: List[SummaryWriter],
     step: int,
     model_inputs: List[base_input.BaseInput],
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     eval_inputs_pspecs=None,
     eval_inputs_shape=None,
     global_mesh=None,
@@ -415,7 +412,7 @@ def run_eval_loop_over_test_splits(
 ) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics.
            List[Optional[Dict[str, float]]],  # eval scoring metrics.
            List[int]  # performed eval steps.
-           ]:
+          ]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -540,7 +537,7 @@ def run_eval_loop_over_test_splits(
 
 
 def evaluate(experiment_config: base_experiment.BaseExperiment,
-             job_log_dir: str,
+             job_log_dir: epath.Path,
              maybe_use_persistence_checkpointing: bool,
              early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
              enable_auto_sharding: bool = False,
@@ -561,6 +558,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       shardings.
     use_orbax: Enables checkpointing backed by Orbax.
   """
+  del enable_auto_sharding
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   checkpointer = _create_checkpointer(task_p, job_log_dir,
@@ -618,7 +616,7 @@ class _PmapEvalRunner:
   def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                eval_input_p: Sequence[base_input.BaseInput.HParams],
                jax_task: tasks_lib.SingleTask, pmap_prng_key: PRNGKey,
-               job_log_dir: str):
+               job_log_dir: epath.Path):
     self._eval_input_p = eval_input_p
     self._task_p = task_p
     self._job_log_dir = job_log_dir
@@ -728,7 +726,7 @@ def evaluate_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_specs: Optional[NestedShapeDtypeLike],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     checkpointer: _PmapEvalCheckpointer,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs the evaluation loop on the entire test dataset for PMAP model.
@@ -742,7 +740,6 @@ def evaluate_pmap_model(
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    use_orbax: Enables checkpointing backed by Orbax.
   """
   logging.info('Using pmap for data parallelism.')
 
@@ -815,7 +812,7 @@ class _SpmdEvalRunner:
                global_mesh: maps.Mesh,
                init_key: PRNGKey,
                partitioned_specs: train_states.TrainState,
-               job_log_dir: str,
+               job_log_dir: epath.Path,
                use_ema: bool = False,
                unpadded_global_batch_size: Optional[int] = None):
     self._eval_input_p = eval_input_p
@@ -857,7 +854,7 @@ class _SpmdEvalRunner:
       sample_input_p: Optional[base_input.BaseInput.HParams],
       sample_inputs: Optional[NestedJTensor],
       train_state_metadata: Optional[trainer_lib.TrainStateMetadata],
-      checkpoint_dir: str,
+      checkpoint_dir: epath.Path,
       checkpoint_type: CheckpointType,
       checkpoint_step: Optional[int] = None,
       use_ema: bool = False,
@@ -1080,14 +1077,15 @@ class _SpmdEvalRunner:
 
     return eval_one_step_fn
 
-def evaluate_spmd_model(
-    task_p: tasks_lib.SingleTask.HParams,
-    train_input_specs: Optional[NestedShapeDtypeLike],
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str,
-    checkpointer: _SpmdEvalCheckpointer,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    enable_auto_sharding: bool = False) -> None:
+
+def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
+                        train_input_specs: Optional[NestedShapeDtypeLike],
+                        eval_input_p: Sequence[base_input.BaseInput.HParams],
+                        job_log_dir: epath.Path,
+                        checkpointer: _SpmdEvalCheckpointer,
+                        early_stopping_fn: Optional[
+                            trainer_lib.EarlyStoppingFn] = None,
+                        enable_auto_sharding: bool = False) -> None:
   """Runs the evaluation loop on the entire test dataset for SPMD model.
 
   Args:
@@ -1095,12 +1093,11 @@ def evaluate_spmd_model(
     train_input_specs: Training input specs for model initialization.
     eval_input_p: List of Params for the eval data pipelines.
     job_log_dir: Directory for the job logs.
-    checkpoint_type: Type of model checkpointing method to use.
+    checkpointer: The model checkpointing method to use.
     early_stopping_fn: An optional callable object for reporting metrics and
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    use_orbax: Enables checkpointing backed by Orbax.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
   """
@@ -1109,7 +1106,7 @@ def evaluate_spmd_model(
   if not eval_input_p:
     return
 
-  checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+  checkpoint_dir = job_log_dir / 'checkpoints'
   checkpoint_step = io_utils.get_checkpoint_step(
       job_log_dir, checkpoint_dir, EvaluationMode.EVAL)
 
@@ -1201,10 +1198,11 @@ def evaluate_spmd_model(
                               train_state_global_shapes, partitioned_specs,
                               early_stopping_fn, continuous_decode)
 
+
 def decode(experiment_config: base_experiment.BaseExperiment,
-           job_log_dir: str,
+           job_log_dir: epath.PathLike,
            maybe_use_persistence_checkpointing: bool,
-           restore_checkpoint_dir: Optional[str],
+           restore_checkpoint_dir: Optional[epath.PathLike],
            restore_checkpoint_step: Optional[int],
            continuous_decode: bool,
            run_eval: Optional[bool] = False,
@@ -1237,6 +1235,10 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
   """
+  job_log_dir = epath.Path(job_log_dir)
+  if restore_checkpoint_dir:
+    restore_checkpoint_dir = epath.Path(restore_checkpoint_dir)
+
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   model_p = task_p.model
@@ -1278,10 +1280,15 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   if model_p.mesh_shape is not None:
     train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
                                      train_input_specs)
-    decode_spmd_model(task_p, train_input_specs, decoder_inputs, eval_inputs,
-                      job_log_dir,
-                      typing.cast(_SpmdEvalCheckpointer, checkpointer),
-        continuous_decode, early_stopping_fn,
+    decode_spmd_model(
+        task_p,
+        train_input_specs,
+        decoder_inputs,
+        eval_inputs,
+        job_log_dir,
+        typing.cast(_SpmdEvalCheckpointer, checkpointer),
+        continuous_decode,
+        early_stopping_fn,
         enable_auto_sharding=enable_auto_sharding)
   else:
     decode_pmap_model(
@@ -1316,7 +1323,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
                       train_input_specs: Optional[NestedShapeDtypeLike],
                       input_p: Sequence[base_input.BaseInput.HParams],
                       eval_input_p: Sequence[base_input.BaseInput.HParams],
-                      job_log_dir: str,
+                      job_log_dir: epath.Path,
                       checkpointer: _PmapEvalCheckpointer,
                       continuous_decode: bool,
                       early_stopping_fn: Optional[
@@ -1379,8 +1386,10 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
   context_p = base_layer.JaxContext.HParams(do_eval=True)
   with base_layer.JaxContext.new_context(hparams=context_p):
     trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model, var_weight_hparams,
-        os.path.join(job_log_dir, 'decoder_out'))
+        jax_task.model,
+        var_weight_hparams,
+        job_log_dir / 'decoder_out',
+    )
 
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   (partitioned_train_state, train_state_global_shapes,
@@ -1420,7 +1429,7 @@ def partition_decode_once_pmap_model(
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
 ) -> Callable[[train_states.TrainState, List[SummaryWriter]],
@@ -1460,7 +1469,7 @@ def decode_once_pmap_model(
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     replicated_model_states: train_states.TrainState,
     summary_writers: List[SummaryWriter],
     output_pickle: bool = True,
@@ -1562,11 +1571,11 @@ def decode_once_pmap_model(
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
-  basedir = os.path.join(job_log_dir, f'{EvaluationMode.DECODE.value}_out')
+  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
   dirnames = _get_dir_names(input_p)
   filename = _get_filename(
       replicated_model_states.step, EvaluationMode.DECODE.value)
-  filenames = [os.path.join(basedir, s, filename) for s in dirnames]
+  filenames = [basedir / s / filename for s in dirnames]
 
   decode_metrics_list = []
   processed_decode_metrics_list = []
@@ -1676,9 +1685,8 @@ def decode_once_pmap_model(
 
     if (jax.process_index() == 0 and
         not flags.FLAGS.pax_only_aggregate_summaries):
-      dir_path = os.path.join(basedir, dirnames[split])
-      if not tf.io.gfile.exists(dir_path):
-        tf.io.gfile.makedirs(dir_path)
+      dir_path = basedir / dirnames[split]
+      dir_path.mkdir(parents=True, exist_ok=True)
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
@@ -1713,16 +1721,16 @@ def decode_once_pmap_model(
           seqio_metrics_list, num_decode_steps)
 
 
-def decode_spmd_model(
-    task_p: tasks_lib.SingleTask.HParams,
-    train_input_specs: Optional[NestedShapeDtypeLike],
-    input_p: Sequence[base_input.BaseInput.HParams],
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str,
-    checkpointer: _SpmdEvalCheckpointer,
-    continuous_decode: bool,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    enable_auto_sharding: bool = False) -> None:
+def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
+                      train_input_specs: Optional[NestedShapeDtypeLike],
+                      input_p: Sequence[base_input.BaseInput.HParams],
+                      eval_input_p: Sequence[base_input.BaseInput.HParams],
+                      job_log_dir: epath.Path,
+                      checkpointer: _SpmdEvalCheckpointer,
+                      continuous_decode: bool,
+                      early_stopping_fn: Optional[
+                          trainer_lib.EarlyStoppingFn] = None,
+                      enable_auto_sharding: bool = False) -> None:
   """Runs the decoding on the entire decoder datasets for SPMD model.
 
   Args:
@@ -1731,16 +1739,12 @@ def decode_spmd_model(
     input_p: List of input params to be decoded.
     eval_input_p: List of input params to be evaluated.
     job_log_dir: Directory for the job logs.
-    checkpoint_type: Type of model checkpointing method to use.
-    restore_checkpoint_dir: The directory from which to restore checkpoint.
-    restore_checkpoint_step: The checkpoint step to restore. If unset, the
-      decoded model will be randomly initialized.
+    checkpointer: The checkpointer to use
     continuous_decode: whether to continuously decode on the latest ckpt.
     early_stopping_fn: An optional callable object for reporting metrics and
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    use_orbax: Enables checkpointing backed by Orbax.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
   """
@@ -1853,9 +1857,9 @@ def decode_spmd_model(
         partitioned_specs, job_log_dir,
         eval_unpadded_global_batch_size).partition_run_one_step(
             eval_key, eval_input_p, use_gda)
-    trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model, var_weight_hparams,
-        os.path.join(job_log_dir, 'decoder_out'))
+    trainer_lib.write_post_init_model_hparams_file(jax_task.model,
+                                                   var_weight_hparams,
+                                                   job_log_dir / 'decoder_out')
 
     _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
                                 job_log_dir, global_mesh, input_p, eval_input_p,
@@ -1869,7 +1873,7 @@ def partition_decode_once_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     prng_key: JTensor,
     global_mesh: maps.Mesh,
     decode_step_fn: Callable[[NestedJTensor, JTensor, NestedJTensor],
@@ -1879,7 +1883,6 @@ def partition_decode_once_spmd_model(
     inputs_partition_specs: NestedPartitionSpec,
 ) -> Callable[[train_states.TrainState, List[SummaryWriter]],
               tuning_lib.DecodeMetrics]:
-
   def decode_once_fn(partitioned_train_state, summary_writers):
     with py_utils.timeit() as decode_period:
       (decode_metrics_list, processed_decode_metrics_list,
@@ -1931,7 +1934,7 @@ def decode_once_spmd_model(
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: str,
+    job_log_dir: epath.Path,
     train_state: train_states.TrainState,
     summary_writers: List[SummaryWriter],
     prng_key: JTensor,
@@ -1977,11 +1980,10 @@ def decode_once_spmd_model(
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
-  basedir = os.path.join(job_log_dir, f'{EvaluationMode.DECODE.value}_out')
+  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
   dirnames = _get_dir_names(input_p)
   filenames = [
-      os.path.join(basedir, s,
-                   _get_filename(step_i, EvaluationMode.DECODE.value))
+      basedir / s / _get_filename(step_i, EvaluationMode.DECODE.value)
       for s in dirnames
   ]
 
@@ -2140,9 +2142,8 @@ def decode_once_spmd_model(
       metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
     if jax.process_index() == 0:
-      dir_path = os.path.join(basedir, dirnames[split])
-      if not tf.io.gfile.exists(dir_path):
-        tf.io.gfile.makedirs(dir_path)
+      dir_path = basedir / dirnames[split]
+      dir_path.mkdir(parents=True, exist_ok=True)
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
@@ -2172,27 +2173,30 @@ def decode_once_spmd_model(
 
 
 def _common_eval_or_decode_loop(
-    mode: io_utils.EvaluationMode, checkpointer: _EvalCheckpointer,
-    task_p: tasks_lib.SingleTask.HParams, job_log_dir: str,
+    mode: io_utils.EvaluationMode,
+    checkpointer: _EvalCheckpointer,
+    task_p: tasks_lib.SingleTask.HParams,
+    job_log_dir: epath.Path,
     global_mesh: Optional[maps.Mesh],
     input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
-    eval_one_step_fn: Callable, decode_once_fn: Optional[Callable],
+    eval_one_step_fn: Callable,
+    decode_once_fn: Optional[Callable],
     partitioned_train_state: train_states.TrainState,
     train_state_global_shapes: train_states.TrainState,
     partitioned_specs: Optional[train_states.TrainState],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-    continuous_decode: bool):
+    continuous_decode: bool,
+):
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
-  summary_base_dir = os.path.join(job_log_dir, 'summaries')
+  summary_base_dir = job_log_dir / 'summaries'
   if input_p:
     summary_decode_dirs = [
-        os.path.join(summary_base_dir, f'decode_test_{p.name}') for p in input_p
+        summary_base_dir / f'decode_test_{p.name}' for p in input_p
     ]
   summary_eval_dirs = [
-      os.path.join(summary_base_dir, f'eval_test_{p.name}')
-      for p in eval_input_p
+      summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
   ]
   with contextlib.ExitStack() as exit_stack:
     if input_p:
@@ -2247,7 +2251,7 @@ def _common_eval_or_decode_loop(
 def _maybe_update_tracked_metric(
     m_value: float,
     step: int,
-    tracker_dir_path: str,
+    tracker_dir_path: epath.Path,
     tracked_metric: str,
     min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
     data_partition_name: str,
@@ -2274,8 +2278,7 @@ def _maybe_update_tracked_metric(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   if jax.process_index() == 0:
-    if not tf.io.gfile.exists(tracker_dir_path):
-      tf.io.gfile.makedirs(tracker_dir_path)
+    tracker_dir_path.mkdir(parents=True, exist_ok=True)
     initial_value = sys.float_info.max
     if min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MAX:
       initial_value = -sys.float_info.max
@@ -2309,9 +2312,9 @@ def _maybe_update_tracked_metric(
 
 
 def _find_and_maybe_update_tracked_metric(
-    basedir: str,
+    basedir: epath.Path,
     split: int,
-    dirnames: Sequence[str],
+    dirnames: Sequence[epath.Path],
     step_i: int,
     input_p: Sequence[base_input.BaseInput.HParams],
     replicated_model_states: train_states.TrainState,
@@ -2331,9 +2334,9 @@ def _find_and_maybe_update_tracked_metric(
       break
 
   if m_value:
-    tracker_dir_path = os.path.join(basedir, dirnames[split],
-                                    tracked_metric +
-                                    f'_{track_min_or_max}_tracker')
+    tracker_dir_path = (
+        basedir / dirnames[split] /
+        f'{tracked_metric}_{track_min_or_max}_tracker')
     _maybe_update_tracked_metric(
         m_value,
         step_i,
@@ -2349,7 +2352,7 @@ def _find_and_maybe_update_tracked_metric(
 
 
 def infer_and_write(experiment_config: base_experiment.BaseExperiment,
-                    job_log_dir: str,
+                    job_log_dir: epath.Path,
                     use_orbax: bool = False) -> None:
   """Generates output from a model and writes it out.
 
@@ -2396,7 +2399,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
 def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
                          train_input_specs: Optional[NestedShapeDtypeLike],
                          inputs_p: Sequence[base_input.BaseInput.HParams],
-                         job_log_dir: str,
+                         job_log_dir: epath.Path,
                          checkpointer: _PmapEvalCheckpointer) -> None:
   """Runs the infer_and_write for each of the inputs given task in pmap."""
   task = instantiate(task_p)
@@ -2457,19 +2460,18 @@ def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
       logging.info('total number of steps: %d', num_steps)
 
     # Only write from one process
-    dirname = os.path.join(job_log_dir, 'output', input_p.name)
-    # fq_filename = os.path.join(dirname, 'output.tfrecord')
-    fq_filename = os.path.join(dirname, 'output')
+    dirname = job_log_dir / 'output' / input_p.name
+    fq_filename = dirname / 'output'
     if jax.process_index() == 0:
       # Create output dirs if DNE
-      if not tf.io.gfile.exists(dirname):
-        tf.io.gfile.makedirs(dirname)
+      if not dirname.exists():
+        dirname.mkdir(parents=True, exist_ok=True)
 
       # Write example schema, metadata, and serialized example protos
       logging.info('writing output to %s', fq_filename)
       features_dict = tfds.features.FeaturesDict(
           task.inference_runner.output_schema)
-      features_dict.save_config(dirname)
+      features_dict.save_config(dirname.as_posix())
       tfds.core.MetadataDict(
           restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
           restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,

@@ -24,10 +24,11 @@ import os
 import pickle
 import re
 import threading
-from typing import Any, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from absl import flags
 from absl import logging
+from etils import epath
 import jax
 import numpy as np
 from praxis import py_utils
@@ -83,7 +84,9 @@ class ShardedParallelWriter:
   chunks consistently.
   """
 
-  def __init__(self, fq_filename: str, num_shards: int,
+  def __init__(self,
+               fq_filename: epath.PathLike,
+               num_shards: int,
                output_format: OutputFormatType = OutputFormatType.TFRECORD):
     """Constructor.
 
@@ -127,13 +130,13 @@ class ShardedParallelWriter:
 
     self._futures = incomplete_futures
 
-  def _write_to_shard(self, shard_idx: int, chunk: List[bytes]) -> None:
+  def _write_to_shard(self, shard_idx: int, chunk: Sequence[bytes]) -> None:
     with self._locks[shard_idx]:
       writer = self._writers[shard_idx]
       for ser_bytes in chunk:
         writer.write(ser_bytes)
 
-  def write(self, chunk: List[bytes]) -> None:
+  def write(self, chunk: Sequence[bytes]) -> None:
     """Async write: submits a write job to worker pool.
 
     Args:
@@ -182,52 +185,54 @@ class JnpEncoder(json.JSONEncoder):
     return super().default(o)
 
 
-def write_key_value_pairs(filename: str,
+def write_key_value_pairs(filename: epath.PathLike,
                           key_value_pairs: Sequence[Tuple[str, Any]],
                           cast_to_ndarray: bool = True,
                           write_pickle: bool = True) -> None:
   """Writes `key_value_pairs` to pkl and jsonl files."""
-  root = os.path.splitext(filename)[0]
-  jsonl_filename = root + '.jsonl'
-  pkl_filename = root + '.pickle'
+  filename = epath.Path(filename)
 
   if cast_to_ndarray:
     key_value_pairs = jax.tree_map(_to_ndarray, key_value_pairs)
 
   if write_pickle:
-    with tf.io.gfile.GFile(pkl_filename, 'wb') as pkl_f:
+    with filename.with_suffix('.pickle').open('wb') as pkl_f:
       pickle.dump(key_value_pairs, pkl_f, protocol=pickle.HIGHEST_PROTOCOL)
 
-  with tf.io.gfile.GFile(jsonl_filename, 'w') as jsonl_f:
+  with filename.with_suffix('.jsonl').open('w') as jsonl_f:
     for _, v in key_value_pairs:
       jsonl_f.write(json.dumps(v, cls=JnpEncoder) + '\n')
 
 
-def _validate_filenames(filenames: Sequence[str],
+def _validate_filenames(filenames: Iterable[epath.PathLike],
                         step: Optional[int] = None) -> Tuple[int, int]:
   """Validates the list of file names."""
   if not filenames:
     raise ValueError('Expecting at least one file. Found none.')
+  filenames = [epath.Path(p) for p in filenames]
   # filename format: {eval,decoder}_out_400000_shard_0.pickle
-  shard_fname_regex = '(eval|decoder)_out_([0-9]*)_shard_([0-9]*).pickle'
+  shard_fname_regex = re.compile(
+      '(eval|decoder)_out_([0-9]*)_shard_([0-9]*).pickle')
   steps_to_shards = collections.defaultdict(set)
   for fname in filenames:
-    filename = os.path.split(fname)[1]
-    m = re.fullmatch(shard_fname_regex, filename)
-    if m is None:
+    filename = os.path.basename(fname)
+    if (m := shard_fname_regex.fullmatch(filename)) is None:
       raise ValueError(f'filename {filename} is not recognized as valid')
     steps_to_shards[int(m.group(2))].add(int(m.group(3)))
-  available_steps = ', '.join([str(x) for x in steps_to_shards.keys()])
-  if step is None and len(steps_to_shards) > 1:
-    raise ValueError(
-        'Requiring explicit step= argument, as eval/decode outputs from'
-        f' multiple steps are found: {available_steps}')
+  available_steps = ', '.join(str(x) for x in steps_to_shards)
+
   if step is None:
-    step = list(steps_to_shards.keys())[0]
+    if len(steps_to_shards) > 1:
+      raise ValueError(
+          'Requiring explicit step= argument, as eval/decode outputs from'
+          f' multiple steps are found: {available_steps}')
+    step = list(steps_to_shards)[0]
+
   if step not in steps_to_shards:
     raise ValueError(
         f'step={step} not found in eval/decode outputs. Available steps: '
         f'{available_steps}')
+
   full_shards = set()
   num_shards = len(steps_to_shards[step])
   for i in range(num_shards):
@@ -238,7 +243,9 @@ def _validate_filenames(filenames: Sequence[str],
   return step, num_shards
 
 
-def load_outputs(basedir: str, pname: str, fname_prefix: str,
+def load_outputs(basedir: epath.Path,
+                 pname: str,
+                 fname_prefix: str,
                  step: Optional[int] = None) -> List[Any]:
   """Loads and returns the eval/decode outputs.
 
@@ -252,22 +259,22 @@ def load_outputs(basedir: str, pname: str, fname_prefix: str,
   Returns:
     A list of the decoder outputs.
   """
-  if basedir.endswith('/1') or basedir.endswith('/1/'):
-    dirname = os.path.join(basedir, f'{fname_prefix}_out/{pname}/')
+  if basedir.parts[-1] == '1':
+    dirname = basedir / f'{fname_prefix}_out/{pname}/'
   else:
-    dirname = os.path.join(basedir, f'1/{fname_prefix}_out/{pname}/')
-  filenames = tf.io.gfile.glob(
-      os.path.join(dirname, f'{fname_prefix}_out_*.pickle'))
+    dirname = basedir / f'1/{fname_prefix}_out/{pname}/'
+  filenames = dirname.glob(f'{fname_prefix}_out_*.pickle')
+
   try:
     step, num_shards = _validate_filenames(filenames, step)
   except ValueError as e:
     raise ValueError(f'Failed to read outputs under "{basedir}"') from e
+
   # load the data
   ret = list()
   for shard_idx in range(num_shards):
-    fname = os.path.join(dirname,
-                         f'{fname_prefix}_out_{step}_shard_{shard_idx}.pickle')
-    with tf.io.gfile.GFile(fname, 'rb') as f:
+    fname = dirname / f'{fname_prefix}_out_{step}_shard_{shard_idx}.pickle'
+    with fname.open('rb') as f:
       ret.extend(pickle.load(f))
   logging.info('Loaded %s outputs from "%s", from %d shards, step=%d',
                fname_prefix, dirname, num_shards, step)
@@ -275,7 +282,7 @@ def load_outputs(basedir: str, pname: str, fname_prefix: str,
 
 
 @contextlib.contextmanager
-def checkpoint_progress(job_log_dir: str, checkpoint_step: Optional[int],
+def checkpoint_progress(job_log_dir: epath.Path, checkpoint_step: Optional[int],
                         mode: EvaluationMode) -> Iterator[None]:
   """Checkpoints eval/decode status by writing current step to job_log_dir.
 
@@ -300,15 +307,13 @@ def checkpoint_progress(job_log_dir: str, checkpoint_step: Optional[int],
     yield
   else:
     # If we're resuming after being preempted mid evaluation, don't overwrite.
-    dirname = os.path.join(job_log_dir, _INTERNAL_ARTIFACTS_SUBDIR)
-    fname = os.path.join(dirname, mode.progress_filename)
-    if not tf.io.gfile.exists(dirname):
-      tf.io.gfile.makedirs(dirname)
-    if not tf.io.gfile.exists(fname):
+    fname = job_log_dir / _INTERNAL_ARTIFACTS_SUBDIR / mode.progress_filename
+    fname.parent.mkdir(parents=True, exist_ok=True)
+    if not fname.exists():
       logging.info('Writing %s progress to %s for step %d.',
                    mode.value, fname, checkpoint_step)
-      with tf.io.gfile.GFile(fname, 'w') as f:
-        f.write(json.dumps({_PROGRESS_CKPT_STEP_KEY: checkpoint_step}))
+      with fname.open('w') as f:
+        json.dump({_PROGRESS_CKPT_STEP_KEY: checkpoint_step}, f)
     else:
       logging.info('Not writing %s progress to %s since resuming.',
                    mode.value, fname)
@@ -317,10 +322,11 @@ def checkpoint_progress(job_log_dir: str, checkpoint_step: Optional[int],
       yield
     finally:
       logging.info('Completed %s for step %d.', mode.value, checkpoint_step)
-      tf.io.gfile.remove(fname)
+      fname.unlink()
 
 
-def get_checkpoint_step(job_log_dir: str, restore_checkpoint_dir: str,
+def get_checkpoint_step(job_log_dir: epath.Path,
+                        restore_checkpoint_dir: epath.Path,
                         mode: EvaluationMode) -> Optional[int]:
   """Gets the latest checkpoint step to eval/decode on.
 
@@ -338,10 +344,10 @@ def get_checkpoint_step(job_log_dir: str, restore_checkpoint_dir: str,
     written to the `job_log_dir/checkpoints`. Otherwise, returns the latest
     checkpoint step written.
   """
-  progress_fname = os.path.join(job_log_dir, _INTERNAL_ARTIFACTS_SUBDIR,
-                                mode.progress_filename)
-  if tf.io.gfile.exists(progress_fname):
-    with tf.io.gfile.GFile(progress_fname) as f:
+  progress_fname = (
+      job_log_dir / _INTERNAL_ARTIFACTS_SUBDIR / mode.progress_filename)
+  if progress_fname.exists():
+    with progress_fname.open() as f:
       progress_json = json.load(f)
 
     step = progress_json[_PROGRESS_CKPT_STEP_KEY]

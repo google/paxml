@@ -16,7 +16,6 @@
 """Tests for io_utils."""
 
 import json
-import os
 import pathlib
 import pickle
 import random
@@ -26,6 +25,7 @@ from typing import Any, Sequence
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
+from etils import epath
 import numpy
 from paxml import io_utils
 import tensorflow.compat.v2 as tf
@@ -34,9 +34,9 @@ import tensorflow.compat.v2 as tf
 FLAGS = flags.FLAGS
 
 
-def _read_jsonl_file(filename: str) -> Sequence[Any]:
+def _read_jsonl_file(filename: epath.Path) -> Sequence[Any]:
   contents = []
-  with tf.io.gfile.GFile(filename, 'r') as f:
+  with filename.open('r') as f:
     for line in f:
       contents.append(json.loads(line))
 
@@ -46,10 +46,10 @@ def _read_jsonl_file(filename: str) -> Sequence[Any]:
 class IoUtilsTest(parameterized.TestCase):
 
   def test_write_key_value_pairs(self):
-    filename = os.path.join(FLAGS.test_tmpdir, 'kv.pickle')
+    filename = epath.Path(FLAGS.test_tmpdir) / 'kv.pickle'
     kv = [('word1', 7), ('word2', 4), ('word3', 5)]
     io_utils.write_key_value_pairs(filename, kv)
-    self.assertTrue(pathlib.Path(filename).exists())
+    self.assertTrue(filename.exists())
 
   def test_write_key_value_pairs_with_device_array(self):
 
@@ -64,14 +64,15 @@ class IoUtilsTest(parameterized.TestCase):
       def _value(self):
         return self._ndarray_value
 
-    filename = os.path.join(FLAGS.test_tmpdir, 'kvd.pickle')
+    filename = epath.Path(FLAGS.test_tmpdir) / 'kvd.pickle'
     kv = [
         ('word1', MockDeviceArray(numpy.asarray([7]))),
         ('word2', MockDeviceArray(numpy.asarray([4]))),
         ('word3', MockDeviceArray(numpy.asarray([5]))),
     ]
     io_utils.write_key_value_pairs(filename, kv, cast_to_ndarray=True)
-    kv_reload = pickle.load(open(filename, 'rb'))
+    with filename.open('rb') as f:
+      kv_reload = pickle.load(f)
     self.assertEqual(numpy.ndarray, type(kv_reload[0][1]))
     self.assertEqual(numpy.ndarray, type(kv_reload[1][1]))
     self.assertEqual(numpy.ndarray, type(kv_reload[2][1]))
@@ -105,7 +106,7 @@ class IoUtilsTest(parameterized.TestCase):
       io_utils._validate_filenames(fnames)
 
   def test_write_key_value_pairs_jsonl(self):
-    filename = os.path.join(FLAGS.test_tmpdir, 'kv.jsonl')
+    filename = epath.Path(FLAGS.test_tmpdir) / 'kv.jsonl'
     kv = [('key1', {'out1': 1}), ('key2', {'out2': 2}), ('key3', {'out3': 3})]
     io_utils.write_key_value_pairs(filename, kv)
     self.assertTrue(pathlib.Path(filename).exists())
@@ -116,8 +117,8 @@ class IoUtilsTest(parameterized.TestCase):
       ('_decode', io_utils.EvaluationMode.DECODE),
   )
   def test_eval_resume_from_same_step(self, mode):
-    job_log_dir = FLAGS.test_tmpdir
-    checkpoint_dir = os.path.join(job_log_dir, 'checkpoints')
+    job_log_dir = epath.Path(FLAGS.test_tmpdir)
+    checkpoint_dir = job_log_dir / 'checkpoints'
     checkpoint_step = 1234
 
     with io_utils.checkpoint_progress(job_log_dir, checkpoint_step, mode):
@@ -140,20 +141,22 @@ class ShardedParallelWriterTest(absltest.TestCase):
 
   def test_tfrecord_write(self):
     num_shards, num_chunks = 4, 10
-    filename = os.path.join(FLAGS.test_tmpdir, 'output')
+    tmpdir = epath.Path(FLAGS.test_tmpdir)
     writer = io_utils.ShardedParallelWriter(
-        filename, num_shards, output_format=io_utils.OutputFormatType.TFRECORD)
+        tmpdir / 'output',
+        num_shards,
+        output_format=io_utils.OutputFormatType.TFRECORD)
 
     expected = set()
     for _ in range(num_chunks):
       chunk = self._get_random_bytes()
       writer.write(chunk)
-      expected = expected.union(chunk)
+      expected |= set(chunk)
 
     writer.close()
 
     # Read and check contents are the same
-    ds = tf.data.TFRecordDataset(tf.io.gfile.glob(filename + '*'))
+    ds = tf.data.TFRecordDataset(list(tmpdir.glob('output*')))
     for tf_ex in ds:
       ex_bytes = tf_ex.numpy()
       self.assertIn(ex_bytes, expected)

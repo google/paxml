@@ -17,11 +17,11 @@
 
 import enum
 import math
-import os
 import re
-from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, Text
 from absl import logging
 from clu import platform
+from etils import epath
 import jax
 from paxml import automl
 from paxml import base_experiment
@@ -37,11 +37,12 @@ import tensorflow.compat.v2 as tf
 
 
 instantiate = base_hyperparams.instantiate
-TrialFn = Callable[[base_experiment.BaseExperiment,  # Experiment config.
-                    platform.WorkUnit,               # Platform work unit.
-                    str,                             # Job log dir
-                    trainer_lib.EarlyStoppingFn],    # Early stopping fn.
-                   None]
+TrialFn = Callable[[
+    base_experiment.BaseExperiment,  # Experiment config.
+    platform.WorkUnit,  # Platform work unit.
+    epath.Path,  # Job log dir
+    trainer_lib.EarlyStoppingFn  # Early stopping fn.
+], None]
 
 
 # Step interval for sub-experiments to report their metrics, which is necessary
@@ -74,7 +75,7 @@ def get_search_space(
 def tune(trial_fn: TrialFn,
          experiment_config: base_experiment.BaseExperiment,
          work_unit: platform.WorkUnit,
-         job_log_dir: str,
+         job_log_dir: epath.Path,
          study: Optional[str] = None,
          pythia_port: Optional[int] = None,
          is_metric_reporting_role: bool = True,
@@ -141,27 +142,27 @@ def tune(trial_fn: TrialFn,
     raise ValueError(f'Aborting tuning: there is no tunable parameters in'
                      f'experiment {experiment_config.__class__.__name__!r}.')
 
-  tf.io.gfile.makedirs(job_log_dir)
+  job_log_dir.mkdir(parents=True, exist_ok=True)
   logging.info('Search space: %s', search_space.dna_spec)
-  search_space_debug_file = os.path.join(job_log_dir, 'search_space.txt')
+  search_space_debug_file = job_log_dir / 'search_space.txt'
   _write_file_once(search_space_debug_file, str(search_space.dna_spec))
   work_unit.create_artifact(platform.ArtifactType.FILE, search_space_debug_file,
                             'search_space')
 
   logging.info('Search algorithm: %s', search_algorithm)
-  algorithm_debug_file = os.path.join(job_log_dir, 'search_algorithm.txt')
+  algorithm_debug_file = job_log_dir / 'search_algorithm.txt'
   _write_file_once(algorithm_debug_file, str(search_algorithm))
   work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
                             'search_algorithm')
 
   logging.info('Early stopping policy: %s', early_stopping_policy)
   if early_stopping_policy is not None:
-    early_stopping_policy_debug_file = os.path.join(
-        job_log_dir, 'early_stopping_policy_debug_file.txt')
+    early_stopping_policy_debug_file = (
+        job_log_dir / 'early_stopping_policy_debug_file.txt')
     _write_file_once(early_stopping_policy_debug_file,
                      str(early_stopping_policy))
     work_unit.create_artifact(platform.ArtifactType.FILE,
-                              early_stopping_policy_debug_file,
+                              str(early_stopping_policy_debug_file),
                               'early_stopping_policy')
 
   sub_experiments = experiment_config.sub_experiments()
@@ -300,12 +301,11 @@ def _get_early_stopping_fn(
   return should_stop_early
 
 
-def _write_file_once(file_path, content):
+def _write_file_once(file_path: epath.Path, content: Text):
   """Writes debug information to file only once."""
-  if not tf.io.gfile.exists(file_path):
+  if not file_path.exists():
     try:
-      with tf.io.gfile.GFile(file_path, 'w') as f:
-        f.write(content)
+      file_path.write_text(content)
     except tf.errors.NotFoundError:
       logging.warn(
           'Cannot write file %r as another process is writing to the same '
@@ -526,7 +526,7 @@ class TrialDirectoryNameGenerator:
     LITERAL = 2
 
   def __init__(self,
-               root_dir: str,
+               root_dir: epath.Path,
                dna_spec: pg.DNASpec,
                total_name_length_threshold: int = 64):
     path_regex = re.compile(r'^[A-Za-z0-9\-_\.]+$')
@@ -581,7 +581,7 @@ class TrialDirectoryNameGenerator:
     # NOTE(daiyip): add formatting for more common categorical literals here.
     return literal
 
-  def dirname(self, trial_id: int, dna: pg.DNA) -> str:
+  def dirname(self, trial_id: int, dna: pg.DNA) -> epath.Path:
     """Gets the directory name for a trial."""
     kv_pairs = []
     for dp, fmt in self._decision_formats.items():
@@ -605,4 +605,4 @@ class TrialDirectoryNameGenerator:
       items = [f'{k}={v}' for k, v in kv_pairs]
     else:
       items = [v for _, v in kv_pairs]
-    return os.path.join(self._root_dir, str(trial_id), '|'.join(items))
+    return self._root_dir / str(trial_id) / '|'.join(items)
