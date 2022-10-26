@@ -79,11 +79,12 @@ def restore_pmap_from_tensorstore(global_shapes,
                                   checkpoint_dir,
                                   step=None,
                                   global_mesh=None,
+                                  checkpoint_type=CheckpointType.CHECKPOINT_GDA,
                                   use_orbax=False):
   """Restores pmap checkpoints from tensorstore.
 
-  The model_states returned are of type `DeviceArray`. They are later converted
-  to SDA by calling `replicate_model_state` where this function is used.
+  The model_states returned are of type `DeviceArray`, `GlobalDeviceArray` or
+  `ShardedDeviceArray`.
 
   Args:
     global_shapes: Global shapes of the tensors to be restored.
@@ -93,28 +94,42 @@ def restore_pmap_from_tensorstore(global_shapes,
     global_mesh: If set, use this mesh to restore the checkpoint (meaning that
        the checkpoint is restored as part of an init_checkpoint_rules() call for
        a pjit model) and return a GDA. If unset, use a dummy mesh and return
-       a regular `DeviceArray` to be used with pmap.
+       a regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
+    checkpoint_type: The type of checkpoint to use.
     use_orbax: Enables checkpointing backed by Orbax.
 
   Returns:
-    Restored model states of type `DeviceArray` or `GlobalDeviceArray`.
+    Restored model states of type `DeviceArray`, `GlobalDeviceArray` or
+    ShardedDeviceArray`.
   """
   if global_mesh is None:
     restore_global_mesh = maps.Mesh(np.array(jax.devices()), axis_names=('x',))
   else:
     restore_global_mesh = global_mesh
-  fully_replicated_state_specs = jax.tree_map(
-      lambda x: pjit.PartitionSpec(None), global_shapes)
-  fully_replicated_gda_model_states = checkpoints.restore_checkpoint(
-      global_shapes,
-      checkpoint_dir,
-      global_mesh=restore_global_mesh,
-      checkpoint_type=CheckpointType.CHECKPOINT_GDA,
-      state_specs=fully_replicated_state_specs,
-      step=step,
-      use_orbax=use_orbax)
+
+  def _get_spec(shape):
+    if shape.shape:
+      return pjit.PartitionSpec(None)
+    else:
+      return pjit.PartitionSpec()
+
+  fully_replicated_state_specs = jax.tree_map(_get_spec, global_shapes)
+  with restore_global_mesh:
+    fully_replicated_gda_model_states = checkpoints.restore_checkpoint(
+        global_shapes,
+        checkpoint_dir,
+        global_mesh=restore_global_mesh,
+        checkpoint_type=checkpoint_type,
+        state_specs=fully_replicated_state_specs,
+        step=step,
+        use_orbax=use_orbax)
   if global_mesh is not None:
     return fully_replicated_gda_model_states
+  if checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+    fully_replicated_sda_model_states = jax.tree_map(
+        py_utils.convert_fully_replicated_gda_to_sda,
+        fully_replicated_gda_model_states)
+    return fully_replicated_sda_model_states
   # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
   if jax.config.jax_array:
@@ -862,9 +877,15 @@ class SingleTask(base_task.BaseTask):
 
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.hparams.ici_mesh_shape is None):
-      assert checkpoint_type == CheckpointType.CHECKPOINT_GDA
+      assert (checkpoint_type in {
+          CheckpointType.CHECKPOINT_GDA, CheckpointType.CHECKPOINT_PERSISTENCE
+      })
       loaded_train_state = restore_pmap_from_tensorstore(
-          ckpt_train_state, ckpt_path, step=rules.step, global_mesh=global_mesh)
+          ckpt_train_state,
+          ckpt_path,
+          step=rules.step,
+          global_mesh=global_mesh,
+          checkpoint_type=checkpoint_type)
     else:
       loaded_train_state = checkpoints.restore_checkpoint(
           ckpt_train_state,

@@ -115,14 +115,13 @@ def retrieve_checkpoint_type(
     task_p: base_task.BaseTask.HParams) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
   using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
-  if using_pjit:
-    assert py_utils.gda_or_jax_array(), 'pjit requires GDA or jax.Array'
+  if using_pjit or py_utils.pmap_use_tensorstore():
+    if using_pjit:
+      assert py_utils.gda_or_jax_array(), 'pjit requires GDA or jax.Array'
     if maybe_use_persistence_checkpointing:
       return CheckpointType.CHECKPOINT_PERSISTENCE
     else:
       return CheckpointType.CHECKPOINT_GDA
-  if py_utils.pmap_use_tensorstore():
-    return CheckpointType.CHECKPOINT_GDA
   else:
     # pmap uses CHECKPOINT_FLAX, Persistence-based or not.
     return CheckpointType.CHECKPOINT_FLAX

@@ -27,6 +27,7 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import maps
 from jax.experimental import pjit
+from jax.interpreters import pxla
 from paxml import base_metrics
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -415,7 +416,14 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
 
 def replicate_model_state(model_states: TrainState) -> TrainState:
   """Replicates the model states."""
-  return jax.device_put_replicated(model_states, jax.local_devices())
+  def _replicate(state):
+    # Skip the copy if it's already replicated.
+    if isinstance(state, pxla.ShardedDeviceArray):
+      return state
+    else:
+      return jax.device_put_replicated(state, jax.local_devices())
+
+  return jax.tree_map(_replicate, model_states)
 
 
 def initialize_replicate_model_state(

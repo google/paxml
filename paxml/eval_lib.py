@@ -268,6 +268,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
                restore_checkpoint_dir: str,
                restore_checkpoint_step: int,
                use_orbax: bool = False):
+    self.checkpoint_type = checkpoints.retrieve_checkpoint_type(
+        maybe_use_persistence_checkpointing, task_p)
     self.task_p = task_p
     self.job_log_dir = job_log_dir
     self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
@@ -286,11 +288,13 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           step=step,
+          checkpoint_type=self.checkpoint_type,
           use_orbax=self.use_orbax)
     else:
       return checkpoints.restore_checkpoint(
           train_state_global_shapes,
           self.restore_checkpoint_dir,
+          checkpoint_type=self.checkpoint_type,
           step=step,
           use_orbax=self.use_orbax)
 

@@ -139,6 +139,11 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   def maybe_sync_multihostcheckpointing(self):
     pass
 
+  @property
+  @abc.abstractmethod
+  def checkpoint_type(self) -> CheckpointType:
+    raise NotImplementedError
+
 
 class _PjitTrainingCheckpointer(_TrainingCheckpointer):
 
@@ -154,7 +159,7 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
     self.async_ckpt_manager = async_ckpt_manager
     self.async_checkpointer = async_checkpointer
 
-    self.checkpoint_type = checkpoint_type
+    self._checkpoint_type = checkpoint_type
     self.multi_host_checkpointing = checkpoint_type == CheckpointType.CHECKPOINT_GDA
     self.checkpoint_manager = checkpoint_manager
     self._enable_checkpoint_saving = enable_checkpoint_saving
@@ -174,7 +179,7 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
     checkpoints.save_checkpoint(
         partitioned_train_state,
         self.checkpoint_dir,
-        checkpoint_type=self.checkpoint_type,
+        checkpoint_type=self._checkpoint_type,
         state_specs=train_state_pspecs,
         async_ckpt_manager=self.async_ckpt_manager,
         use_orbax=False,
@@ -211,9 +216,13 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
         train_state_global_shapes,
         self.checkpoint_dir,
         global_mesh=global_mesh,
-        checkpoint_type=self.checkpoint_type,
+        checkpoint_type=self._checkpoint_type,
         state_specs=train_state_pspecs,
         use_orbax=False)
+
+  @property
+  def checkpoint_type(self) -> CheckpointType:
+    return self._checkpoint_type
 
 
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
@@ -260,17 +269,23 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           step, train_state_global_shapes, global_mesh, train_state_pspecs)
     return partitioned_train_state
 
+  @property
+  def checkpoint_type(self) -> CheckpointType:
+    return self._checkpoint_type
+
 
 class _PmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def __init__(self,
                job_log_dir,
                checkpoint_manager: checkpoint_managers.CheckpointManager,
+               checkpoint_type: CheckpointType,
                async_ckpt_manager,
                async_checkpointer,
                enable_checkpoint_saving: bool = True):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
+    self._checkpoint_type = checkpoint_type
     self.checkpoint_manager = checkpoint_manager
     self.async_ckpt_manager = async_ckpt_manager
     self.async_checkpointer = async_checkpointer
@@ -281,15 +296,19 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
     checkpoints.delete_temp_directories(self.checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
-    return tasks_lib.restore_pmap_from_tensorstore(train_state_global_shapes,
-                                                   self.checkpoint_dir)
+    return tasks_lib.restore_pmap_from_tensorstore(
+        train_state_global_shapes,
+        self.checkpoint_dir,
+        checkpoint_type=self._checkpoint_type)
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
     if py_utils.pmap_use_tensorstore():
       return self._restore_from_tensorstore(train_state_global_shapes)
     else:
       return checkpoints.restore_checkpoint(
-          train_state_global_shapes, self.checkpoint_dir)
+          train_state_global_shapes,
+          self.checkpoint_dir,
+          checkpoint_type=self._checkpoint_type)
 
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
@@ -308,10 +327,14 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
         fully_replicated_gda_model_states = jax.tree_map(
             py_utils.convert_fully_replicated_sda_to_gda,
             partitioned_train_state)
+
+      fully_replicated_state_specs = jax.tree_map(
+          lambda x: pjit.PartitionSpec(None), fully_replicated_gda_model_states)
       checkpoints.save_checkpoint(
           fully_replicated_gda_model_states,
           self.checkpoint_dir,
-          checkpoint_type=CheckpointType.CHECKPOINT_GDA,
+          checkpoint_type=self._checkpoint_type,
+          state_specs=fully_replicated_state_specs,
           async_ckpt_manager=self.async_ckpt_manager,
           use_orbax=False,
           async_checkpointer=self.async_checkpointer)
@@ -325,6 +348,7 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
         checkpoints.save_checkpoint(
             unreplicated_model_states,
             self.checkpoint_dir,
+            checkpoint_type=self._checkpoint_type,
             use_orbax=False,
             async_checkpointer=self.async_checkpointer)
     self.checkpoint_manager.save_metadata(global_step_id=step_i, force=is_final)
@@ -344,6 +368,10 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
     if (self.checkpoint_manager.last_checkpoint_step is None or
         self.checkpoint_manager.last_checkpoint_step < step_i):
       self._save(step_i, partitioned_train_state, is_final=True)
+
+  @property
+  def checkpoint_type(self) -> CheckpointType:
+    return self._checkpoint_type
 
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
@@ -365,7 +393,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
     return tasks_lib.restore_pmap_from_tensorstore(
-        train_state_global_shapes, self.checkpoint_dir, use_orbax=True)
+        train_state_global_shapes,
+        self.checkpoint_dir,
+        checkpoint_type=self._checkpoint_type,
+        use_orbax=True)
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
     if py_utils.pmap_use_tensorstore():
@@ -413,6 +444,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
       self._save(step_i, partitioned_train_state, is_final=True)
+
+  @property
+  def checkpoint_type(self) -> CheckpointType:
+    return self._checkpoint_type
 
 
 def _create_checkpointer(
@@ -490,6 +525,7 @@ def _create_checkpointer(
       checkpointer = _PmapTrainingCheckpointer(
           job_log_dir,
           checkpoint_manager,
+          checkpoint_type,
           async_ckpt_manager,
           async_checkpointer,
           enable_checkpoint_saving=enable_checkpoint_saving)
@@ -850,11 +886,15 @@ def train_and_evaluate_pmap(
 
   logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
 
-  total_num_params = py_utils.total_num_vars(model_states.mdl_vars)
   partitioned_train_state = trainer_lib.replicate_model_state(model_states)
+  total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
+  assert total_num_params % jax.local_device_count() == 0
+  total_num_params = total_num_params // jax.local_device_count()
 
   train_p = task_p.train
-  initial_global_step = int(jax.device_get(partitioned_train_state.step)[0])
+  initial_global_step = int(
+      py_utils.maybe_unreplicate_for_fully_replicated(
+          partitioned_train_state.step))
   logging.info('Model initial global_step=%d', initial_global_step)
   _update_latest_model_step(train_input_p, initial_global_step)
 
