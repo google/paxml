@@ -479,8 +479,7 @@ def _create_checkpointer(
       checkpointer = checkpoints.FlaxCheckpointer()
     if checkpointer is None:
       if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-        checkpointer = Checkpointer(
-            PaxCheckpointHandler(enable_aggregation=False))
+        checkpointer = Checkpointer(PaxCheckpointHandler(enable_flax=False))
       elif checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
         raise ValueError('Checkpointer must already be initialized.')
       else:
