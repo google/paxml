@@ -64,9 +64,14 @@ RUN mkdir /bazel && \
     cd / && \
     rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
 
-# Use these commits for testing
 COPY . /paxml
-RUN git clone https://github.com/google/praxis.git
+RUN mkdir /tmp/paxml_pip_package_build/ && \
+  cd paxml && git log | head -n 1 | cut -d' ' -f2 \
+  > /tmp/paxml_pip_package_build/paxml_commit.txt
+
+RUN git clone https://github.com/google/praxis.git && \
+  cd praxis && git log | head -n 1 | cut -d' ' -f2 \
+  > /tmp/paxml_pip_package_build/praxis_commit.txt
 
 RUN cp -r praxis/praxis /paxml/
 
