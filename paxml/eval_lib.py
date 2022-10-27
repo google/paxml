@@ -142,7 +142,7 @@ def _wait_until_step(checkpointer, start_step):
 
   while True:
     cur_step = checkpointer.retrieve_latest_checkpoint_step()
-    if start_step <= cur_step:
+    if cur_step is not None and start_step <= cur_step:
       break
     time.sleep(300)
 
