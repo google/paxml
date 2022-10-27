@@ -3,13 +3,13 @@ clu
 etils
 flax
 jax
-lingvo==0.11.0
+lingvo==0.12.1
 numpy
 orbax
 praxis
 pyglove
 seqio-nightly
 t5
-tensorflow-text==2.7.3
-tensorflow==2.7.3
+tensorflow-text==2.9
+tensorflow==2.9.2
 tensorstore

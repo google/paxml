@@ -39,18 +39,20 @@ install_requires = _get_requirements()
 
 setup(
     name='paxml',
-    version='0.1.0',  # use major/minor version number, e.g. "0.1.0"
+    version='0.2.0',  # use major/minor version number, e.g. "0.1.0"
     description=('Framework to configure and run machine learning experiments '
                  'on top of Jax.'),
     author='PAX team',
     author_email='pax-dev@google.com',
     packages=find_namespace_packages(include=['paxml*']),
-    python_requires='~=3.8',
+    python_requires='>=3.8',
     install_requires=install_requires,
     url='https://github.com/google/paxml',
     license='Apache-2.0',
     classifiers=[
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
     zip_safe=False,
 )
