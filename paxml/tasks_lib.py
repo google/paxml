@@ -730,7 +730,7 @@ class SingleTask(base_task.BaseTask):
                                         inputs_shape_dtype)
     # Initialize with a dummy seed
     var_weight_hparams = ckpt_task.model.abstract_init_with_metadata(
-        jax.random.PRNGKey(0), inputs_shape_dtype)
+        inputs_shape_dtype)
     ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
         var_weight_hparams)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(

@@ -74,7 +74,7 @@ class ExperimentImportsTestHelper(absltest.TestCase):
           model.ici_mesh_shape is not None):
         input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
                                    input_specs)
-      model.abstract_init_with_metadata(jax.random.PRNGKey(0), input_specs)
+      model.abstract_init_with_metadata(input_specs)
 
   @classmethod
   def create_test_methods_for_all_registered_experiments(

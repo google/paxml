@@ -148,7 +148,7 @@ def create_train_state_metadata(
     A TrainStateMetadata instance.
   """
   var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      prng_key, train_shape_dtype)
+      train_shape_dtype)
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states)
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
@@ -365,7 +365,7 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
   else:
     is_eval_for_init = is_eval
   var_weight_hparams = model.abstract_init_with_metadata(
-      init_key, inputs_shape_dtype, do_eval=is_eval_for_init)
+      inputs_shape_dtype, do_eval=is_eval_for_init)
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('var_weight_hparams: %s', var_weight_hparams)
 
@@ -686,8 +686,7 @@ def train_step_single_learner(
   init_key = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
 
   with base_layer.JaxContext.new_context(hparams=context_p):
-    var_weight_hparams = model.abstract_init_with_metadata(
-        init_key, inputs)
+    var_weight_hparams = model.abstract_init_with_metadata(inputs)
 
   updated_mdl_vars = jax_task.maybe_adjust_train_state(states.step,
                                                        states.mdl_vars,
@@ -864,7 +863,7 @@ def eval_step_single_learner(
   else:
     do_eval_for_init = True
   var_weight_hparams = model.abstract_init_with_metadata(
-      prng_key, inputs, do_eval=do_eval_for_init)
+      inputs, do_eval=do_eval_for_init)
 
   if fprop_dtype == jnp.float32:
     pass
@@ -1019,8 +1018,7 @@ def initialize_partitioned_model_states(
     The partitioned specs and the partitioned vars themselves.
   """
   model = jax_task.model
-  var_weight_hparams = model.abstract_init_with_metadata(
-      prng_key, sample_inputs)
+  var_weight_hparams = model.abstract_init_with_metadata(sample_inputs)
 
   if state_specs is None:
     train_state_partition_specs = jax_task.create_train_state_partition_specs(
@@ -1330,7 +1328,7 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
 
   def _get_state_unpadded_shapes(self):
     var_weight_hparams = self._jax_task.model.abstract_init_with_metadata(
-        self._init_key, self._inputs_shape_dtype)
+        self._inputs_shape_dtype)
     return jax.tree_map(
         lambda x: x.shape,
         self._jax_task.create_train_state_unpadded_shapes(
@@ -1550,10 +1548,10 @@ def get_partitioned_spmd_model_decode_fn(
           'No training input specs available, while enabling '
           '`task_p.train.always_use_train_for_model_init` requires it.')
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-        init_key, train_sample_inputs)
+        train_sample_inputs)
   else:
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-        init_key, inputs_shape_dtype, do_eval=True)
+        inputs_shape_dtype, do_eval=True)
   model_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
       jax_task.create_train_state_unpadded_shapes(

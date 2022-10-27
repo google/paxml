@@ -338,7 +338,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           sample_inputs)
       # Restore flax checkpoints still required bak variables in TrainState
       var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-          init_key, input_specs, do_eval=True)
+          input_specs, do_eval=True)
       # Note: `discard_opt_states` is not supported when restoring pmap
       # checkpoints. We must restore the entire checkpoint and then trim the
       # unrelevant states.
@@ -891,7 +891,7 @@ class _SpmdEvalRunner:
         input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
                                    sample_inputs)
         var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-            meta_key, input_specs, do_eval=True)
+            input_specs, do_eval=True)
         train_state_global_shapes = (
             jax_task.create_train_state_padded_shapes(
                 var_weight_hparams, discard_opt_states=not use_ema))
@@ -1388,7 +1388,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     # instead of instantiating this input pipeline.
     inputs_sample = instantiate(sample_input_p).get_next_padded()
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-        init_key, inputs_sample, do_eval=True)
+        inputs_sample, do_eval=True)
 
   eval_one_step_fn = _PmapEvalRunner(
       task_p, eval_input_p, jax_task, eval_key,
@@ -1824,7 +1824,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     else:
       train_state_metadata = None
       var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-          init_key, inputs_sample, do_eval=True)
+          inputs_sample, do_eval=True)
 
     if continuous_decode:
       # Waits until train.decode_start_after_n_steps is reached.
@@ -2448,7 +2448,7 @@ def infer_and_write_pmap(task_p: tasks_lib.SingleTask.HParams,
     # input pipelines below.
     inputs_sample = instantiate(inputs_p[0]).get_next_padded()
     var_weight_hparams = task.model.abstract_init_with_metadata(
-        meta_key, inputs_sample, do_eval=True)
+        inputs_sample, do_eval=True)
 
   replicated_model_states, _, prng_key = _PmapEvalRunner.get_model_states(
       task, prng_key, inputs_sample, train_state_metadata, checkpointer)

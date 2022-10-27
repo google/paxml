@@ -95,7 +95,7 @@ def _write_post_init_model_hparams_file(model_param, filepath,
     if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
       input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
                                  input_specs)
-    params_inits = model.abstract_init_with_metadata(prng_key, input_specs)
+    params_inits = model.abstract_init_with_metadata(input_specs)
     params_inits_text = base_hyperparams.nested_struct_to_text(params_inits)
     fout.write(params_inits_text)
 
