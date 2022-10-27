@@ -2235,14 +2235,17 @@ def _common_eval_or_decode_loop(
                                         mode):
         decode_metrics = None
         if input_p:
+          logging.info('Decoding step %d ckpt ...', last_checkpoint_step)
           decode_metrics = decode_once_fn(partitioned_train_state,
                                           summary_writers)
 
+        logging.info('Evaling step %d ckpt ...', last_checkpoint_step)
         eval_metrics = eval_one_step_fn(partitioned_train_state,
                                         eval_summary_writers)
 
       if not continuous_decode:
         break
+
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
         is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
