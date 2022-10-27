@@ -301,6 +301,8 @@ class SingleTask(base_task.BaseTask):
       decode_interval_steps: How frequently to run decode on the model on the
         decoder_datasets() in terms of the number of training steps. Skipped if
         this value is not a positive int. Set to 0 to disable decode steps.
+      decode_start_after_n_steps: Starts decoder after N steps, only used in
+        continuous decoding.
       profiler_num_steps: The number of steps to be captured by the profiler
         based on the step time estimate.
       profiler_min_duration_sec: The minimum duration to be captured by the
@@ -329,6 +331,7 @@ class SingleTask(base_task.BaseTask):
     init_from_checkpoint_rules: Dict[
         str, CheckpointLoadingRules] = dataclasses.field(default_factory=dict)
     decode_interval_steps: Optional[int] = None
+    decode_start_after_n_steps: int = 0
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None

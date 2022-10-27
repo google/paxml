@@ -135,6 +135,18 @@ def _maybe_write_scoring_outputs(
   io_utils.write_key_value_pairs(fq_fname, flat_scoring_outputs)
 
 
+def _wait_until_step(checkpointer, start_step):
+  """Waits until start_step is reached."""
+  if not start_step:
+    return
+
+  while True:
+    cur_step = checkpointer.retrieve_latest_checkpoint_step()
+    if start_step <= cur_step:
+      break
+    time.sleep(300)
+
+
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
   """Determines whether ema is used or not."""
   return task_p.train.learner.optimizer.ema_decay > 0.
@@ -1391,7 +1403,11 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         job_log_dir / 'decoder_out',
     )
 
-  last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
+  if continuous_decode:
+    # Waits until train.decode_start_after_n_steps is reached.
+    _wait_until_step(checkpointer,
+                     jax_task.hparams.train.decode_start_after_n_steps)
+
   (partitioned_train_state, train_state_global_shapes,
    prng_key) = _PmapEvalRunner.get_model_states(jax_task, prng_key,
                                                 inputs_sample,
@@ -1809,6 +1825,11 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
       train_state_metadata = None
       var_weight_hparams = jax_task.model.abstract_init_with_metadata(
           init_key, inputs_sample, do_eval=True)
+
+    if continuous_decode:
+      # Waits until train.decode_start_after_n_steps is reached.
+      _wait_until_step(checkpointer,
+                       jax_task.hparams.train.decode_start_after_n_steps)
 
     # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
     # We assume that either eval_input or decoder_input can be used to retrieve
