@@ -171,7 +171,7 @@ def save_checkpoint(
         async_checkpointer.save(checkpoint_step_dir, train_state)
       else:
         checkpointer = orbax.checkpoint.Checkpointer(
-            PaxCheckpointHandler(enable_flax=False))
+            PaxCheckpointHandler(enable_aggregation=False))
         checkpointer.save(checkpoint_step_dir, train_state)
     else:
       _save_checkpoint_gda(train_state, checkpoint_dir, overwrite, step,
@@ -283,7 +283,7 @@ def restore_checkpoint(
           return None
       checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
       checkpointer = orbax.checkpoint.Checkpointer(
-          PaxCheckpointHandler(enable_flax=False))
+          PaxCheckpointHandler(enable_aggregation=False))
       restored_train_state = checkpointer.restore(
           checkpoint_step_dir,
           item=state_global_shapes,
@@ -560,7 +560,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     self._set_param_names(flattened_nested_names)
 
     def create_restore_args(pspec, shape_struct):
-      return orbax.checkpoint.RestoreArgs(
+      return orbax.checkpoint.ArrayRestoreArgs(
           mesh=mesh, mesh_axes=pspec, global_shape=shape_struct.shape)
 
     restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
