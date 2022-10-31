@@ -1167,8 +1167,10 @@ class SequenceModelFeatures(seqio.EncDecFeatureConverter):
   LanguageModelFeatures above.
   """
 
-  def __init__(self, pack: bool = False) -> None:
-    super().__init__(pack=pack, use_custom_packing_ops=False)
+  def __init__(self,
+               pack: bool = False,
+               use_custom_packing_ops: bool = False) -> None:
+    super().__init__(pack=pack, use_custom_packing_ops=use_custom_packing_ops)
 
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax SequenceModel."""
