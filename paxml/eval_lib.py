@@ -1121,10 +1121,6 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   if not eval_input_p:
     return
 
-  checkpoint_dir = job_log_dir / 'checkpoints'
-  checkpoint_step = io_utils.get_checkpoint_step(
-      job_log_dir, checkpoint_dir, EvaluationMode.EVAL)
-
   model_p = task_p.model
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
                                             model_p.dcn_mesh_shape)
