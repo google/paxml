@@ -29,6 +29,7 @@ from absl import logging
 from clu import platform
 from etils import epath
 import jax
+import jax.numpy as jnp
 from jax.experimental import maps
 from jax.experimental import multihost_utils
 import numpy as np
@@ -881,7 +882,7 @@ class _SpmdEvalRunner:
     with global_mesh:
       if jax_task.hparams.train.always_use_train_for_model_init:
         assert train_state_metadata is not None
-        train_state_global_shapes = train_state_metadata.padded_global_shapes,
+        train_state_global_shapes = train_state_metadata.padded_global_shapes
         partitioned_specs = train_state_metadata.partitioned_specs
         input_specs = train_state_metadata.input_shape_dtype
       else:
@@ -919,15 +920,17 @@ class _SpmdEvalRunner:
                 jax_task,
                 step_key,
                 trainer_lib.train_state_for_eval_step(partitioned_specs),
-                sample_inputs,
+                input_specs,
                 is_eval=True,
                 unpadded_global_batch_size=unpadded_global_batch_size))
 
         if create_gda_for_inputs:
           train_inputs_shape = jax.tree_util.tree_map(
-              py_utils.get_global_input_shape_dtype, sample_inputs)
+              py_utils.get_global_input_shape_dtype, input_specs)
           train_inputs_partition_specs_common = _extract_common_specs(
               train_inputs_shape, train_inputs_partition_specs)
+          sample_inputs = jax.tree_map(
+              lambda x: jnp.zeros(shape=x.shape, dtype=x.dtype), input_specs)
           # TODO(b/244798638): py_utils.assert_same_shape_and_dtype?
           sample_inputs = py_utils.create_gda(
               sample_inputs, train_inputs_shape, global_mesh,
