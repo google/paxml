@@ -575,6 +575,16 @@ class SeqIOInput(base_input.BaseInput):
         use_cached=p.use_cached,
         trim_output_features=p.trim_output_features)
 
+    # customized input may contain ragged tensor, which may cause errors in
+    # decoding when calling 'as_numpy_iterator()' below. We filter out
+    # RaggedTensor here.
+    ds_non_ragged_element_keys = []
+    for ds_element_key, ds_element_value in targets_ds.element_spec.items():
+      if not isinstance(ds_element_value, tf.RaggedTensorSpec):
+        ds_non_ragged_element_keys.append(ds_element_key)
+    targets_ds = targets_ds.map(
+        lambda x: {i: x[i] for i in ds_non_ragged_element_keys})
+
     # Note that lists are used per prefix since there may be duplicates
     targets = collections.defaultdict(list)
     examples = collections.defaultdict(list)
