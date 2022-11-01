@@ -20,7 +20,6 @@ import contextlib
 import datetime
 import functools
 import json
-import os
 import re
 import time
 import typing
@@ -34,7 +33,6 @@ import jax
 from jax.experimental import maps
 from jax.experimental import pjit
 from jax.experimental.gda_serialization import serialization as gda_serialization
-import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
@@ -50,7 +48,6 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -856,14 +853,11 @@ def train_and_evaluate_pmap(
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
 
   # Get shape and dtype of model_inputs.
-  train_sample_inputs = train_input_pipeline.peek_padded()
+  inputs_shape_dtype = train_input_pipeline.peek_padded()
   # TODO(pax-dev): Retrieve shapes from input specs and compare against real
   # input shapes from training input pipeline.
-  inputs_shape_dtype = jax.tree_map(
-      lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
-      train_sample_inputs)
   train_state_metadata = trainer_lib.create_train_state_metadata(
-      jax_task, init_key, inputs_shape_dtype)
+      jax_task, inputs_shape_dtype)
 
   # Write sample inputs.
   _write_input_specs(inputs_shape_dtype, job_log_dir)
@@ -880,7 +874,7 @@ def train_and_evaluate_pmap(
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
     model_states = trainer_lib.initialize_model_state(jax_task, init_key,
-                                                      train_sample_inputs)
+                                                      inputs_shape_dtype)
 
   logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
 
@@ -1083,7 +1077,7 @@ def train_and_evaluate_spmd_model(
   with global_mesh:
     jax_task = instantiate(task_p)
     train_state_metadata = trainer_lib.create_train_state_metadata(
-        jax_task, init_key, inputs_shape_dtype)
+        jax_task, inputs_shape_dtype)
 
     # Dump out model meta info for debugging.
     trainer_lib.write_post_init_model_hparams_file(
@@ -1156,16 +1150,11 @@ def train_and_evaluate_spmd_model(
 
     # Randomly initialized variables if no files in checkpoint dir.
     if partitioned_train_state is None:
-      if (create_gda_for_inputs or
-          train_input_for_shape.hparams.experimental_remote_input):
-        # pjit(model.init) requires a GDA input.
-        train_sample_inputs = train_input_for_shape.reshard_for_spmd(
-            train_sample_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
       _, partitioned_train_state = (
           trainer_lib.initialize_partitioned_model_states(
               jax_task,
               init_key,
-              train_sample_inputs,
+              inputs_shape_dtype,
               global_mesh=global_mesh,
               # Note: We currently enforce that the checkpoint to reload via
               # init_checkpoint_rules are in the same format as the checkpoint
