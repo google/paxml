@@ -536,6 +536,8 @@ def run_eval_loop_over_test_splits(
 def evaluate(experiment_config: base_experiment.BaseExperiment,
              job_log_dir: epath.Path,
              maybe_use_persistence_checkpointing: bool,
+             restore_checkpoint_dir: Optional[epath.Path] = None,
+             restore_checkpoint_step: Optional[int] = None,
              early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
              enable_auto_sharding: bool = False,
              use_orbax: bool = False) -> None:
@@ -547,6 +549,9 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
     job_log_dir: The directory for the job logs.
     maybe_use_persistence_checkpointing: If set, it will try to use
       persistence-based checkpointing if suitable.
+    restore_checkpoint_dir: Optional directory from which to restore a
+      checkpoint.
+    restore_checkpoint_step: If set, the checkpoint step to restore.
     early_stopping_fn: An optional callable object for reporting eval metrics
       and determining whether to early stop current training. The callable
       object has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
@@ -558,12 +563,14 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   del enable_auto_sharding
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
-  checkpointer = _create_checkpointer(task_p, job_log_dir,
-                                      maybe_use_persistence_checkpointing,
-                                      EvaluationMode.EVAL,
-                                      restore_checkpoint_dir=None,
-                                      restore_checkpoint_step=None,
-                                      use_orbax=use_orbax)
+  checkpointer = _create_checkpointer(
+      task_p,
+      job_log_dir,
+      maybe_use_persistence_checkpointing,
+      EvaluationMode.EVAL,
+      restore_checkpoint_dir=restore_checkpoint_dir,
+      restore_checkpoint_step=restore_checkpoint_step,
+      use_orbax=use_orbax)
 
   model_p = task_p.model
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
@@ -575,13 +582,11 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
 
-  try:
+  train_input_specs = None
+  if task_p.train.always_use_train_for_model_init:
     input_specs_provider = instantiate(
         experiment_config.get_input_specs_provider_params())
     train_input_specs = input_specs_provider.get_input_specs()
-  except ValueError:
-    logging.warning('No training input specs defined.')
-    train_input_specs = None
 
   if model_p.mesh_shape is not None:
     train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
