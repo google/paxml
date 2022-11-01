@@ -16,7 +16,7 @@
 """Tests for automl."""
 
 import math
-from typing import Dict, Type
+from typing import Dict, Optional, Type
 from absl.testing import absltest
 from clu import platform
 from etils import epath
@@ -26,6 +26,37 @@ from paxml import trainer_lib
 from paxml import tuning_lib
 
 import pyglove as pg
+
+
+class StopWithLowerMetric(automl.BaseReward):
+
+  class HParams(automl.BaseReward.HParams):
+    metric: Optional[automl.Metric] = None
+    threshold: float = 0.0
+    skip: bool = False
+    reward_replacement: Optional[float] = None
+    metrics_replacement: Optional[Dict[str, float]] = None
+
+  def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
+    p = self._hparams
+    reward = p.metric.get_value(metrics_dict)
+    if reward < p.threshold:
+      if p.skip:
+        raise automl.EarlyStoppingError(
+            skip=p.skip,
+            skip_reason='Trial skipped due to lower metric value.',
+            step=global_step)
+      else:
+        raise automl.EarlyStoppingError(
+            skip=False,
+            step=global_step,
+            reward=p.reward_replacement,
+            metrics=p.metrics_replacement)
+    return reward
+
+  @property
+  def used_metrics(self):
+    return [self._hparams.metric]
 
 
 class TuningExperiment(base_experiment.BaseExperiment):
@@ -65,16 +96,54 @@ class TuningExperiment(base_experiment.BaseExperiment):
         max_num_trials=10)
 
 
-class TuningWithEarlyStopping(TuningExperiment):
+class TuningWithPerTrialEarlyStopping(TuningExperiment):
+  """A faked tuning experiment with per-trial early stopping."""
+
+  def search(self):
+    search_hparams = super().search()
+    search_hparams.search_reward = StopWithLowerMetric.HParams(
+        metric=automl.Metric.eval('reward'),
+        threshold=1.0,
+        skip=True)
+    return search_hparams
+
+
+class TuningWithPerTrialEarlyStoppingAndRewardReplacement(TuningExperiment):
+  """A faked experiemnt with per-trial early stopping and reward replacement."""
+
+  def search(self):
+    search_hparams = super().search()
+    search_hparams.search_reward = StopWithLowerMetric.HParams(
+        metric=automl.Metric.eval('reward'),
+        threshold=1.0,
+        skip=False,
+        reward_replacement=-1.0)
+    return search_hparams
+
+
+class TuningWithPerTrialEarlyStoppingAndMetricsReplacement(TuningExperiment):
+  """A faked experiemnt with per-trial early stopping and reward replacement."""
+
+  def search(self):
+    search_hparams = super().search()
+    search_hparams.search_reward = StopWithLowerMetric.HParams(
+        metric=automl.Metric.eval('reward'),
+        threshold=1.0,
+        skip=False,
+        metrics_replacement={'eval_test_dev/metrics/reward': 100.0})
+    return search_hparams
+
+
+class TuningWithPopulationWiseEarlyStopping(TuningExperiment):
   """A faked tuning experiment with population-wise early stopping."""
 
   def search(self):
     search_hparams = super().search()
     search_hparams.early_stopping = automl.EarlyStoppingByValue.HParams(
         step_values=[
-            # Watch metrics at step 5, values below 1.0 will be set as
+            # Watch metrics at step 10, values below 1.0 will be set as
             # infeasible.
-            (1, 1.0)
+            (10, 1.0)
         ],
         metric=automl.Metric.eval('reward'))
     return search_hparams
@@ -111,15 +180,39 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
   reward = task_p['learning_rate'] * task_p['batch_size'] * 1
   if reward > 5:
     reward = math.nan
-  # Report measurements at step 1 and step 2.
-  early_stopping_fn({
-      'eval_test_abc/metrics/reward': reward,
-      'unused_metric': 0.0
-  }, trainer_lib.RunningMode.EVAL, 1, False)
-  early_stopping_fn({
-      'eval_test_abc/metrics/reward': reward * 3,
-      'unused_metric': 1.0
-  }, trainer_lib.RunningMode.EVAL, 2, True)
+  # Report eval metrics at step 10 with possible early stopping.
+  if tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=10,
+      is_last_ckpt=False,
+      eval_metrics=tuning_lib.EvalMetrics(
+          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
+          input_p=[pg.Dict(name='abc')],
+          metrics_list=[dict(reward=reward)],
+          steps_per_sec=1.0)):
+    return
+  # Check early stopping without reporting metrics at step 15.
+  if tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=15,
+      is_last_ckpt=False):
+    return
+  # Report both eval and decode metrics at step 20 with possible early stopping.
+  if tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=20,
+      is_last_ckpt=True,
+      eval_metrics=tuning_lib.EvalMetrics(
+          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
+          input_p=[pg.Dict(name='abc')],
+          metrics_list=[dict(reward=reward * 3)],
+          steps_per_sec=1.0),
+      decode_metrics=tuning_lib.DecodeMetrics(
+          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
+          input_p=[pg.Dict(name='abc')],
+          metrics_list=[dict(reward=reward * 3)],
+          steps_per_sec=1.0)):
+    return
 
 
 class TuningLibTest(absltest.TestCase):
@@ -141,8 +234,8 @@ class TuningLibTest(absltest.TestCase):
   def test_tune(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
     tuning_lib.tune(run_experiment, TuningExperiment(), platform.work_unit(),
-                    job_log_dir, study='local1', max_num_trials=5)
-    result = pg.tuning.poll_result('local1')
+                    job_log_dir, study='local_basic', max_num_trials=5)
+    result = pg.tuning.poll_result('local_basic')
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, False, False, False])
@@ -155,14 +248,80 @@ class TuningLibTest(absltest.TestCase):
     })
     # We added an extra measurement for the final report, with final step + 1.
     self.assertEqual([t.final_measurement.step for t in result.trials],
-                     [0, 3, 3, 3, 3])
+                     [0, 21, 21, 21, 21])
 
-  def test_tune_with_early_stopping_policy(self):
+  def test_tune_with_per_trial_early_stopping(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
-    tuning_lib.tune(run_experiment, TuningWithEarlyStopping(),
+    tuning_lib.tune(run_experiment,
+                    TuningWithPerTrialEarlyStopping(),
                     platform.work_unit(),
-                    job_log_dir, study='local2', max_num_trials=5)
-    result = pg.tuning.poll_result('local2')
+                    job_log_dir,
+                    study='local_per_trial_early_stopping',
+                    max_num_trials=5)
+    result = pg.tuning.poll_result('local_per_trial_early_stopping')
+    self.assertLen(result.trials, 5)
+    reward_at_step0 = (
+        lambda t: t.measurements[0].reward if t.measurements else None)
+    self.assertEqual([reward_at_step0(t) for t in result.trials],
+                     [None, None, 3.2, None, 1.6])
+    self.assertEqual([len(t.measurements) for t in result.trials],
+                     [0, 0, 3, 0, 3])
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, True, False, True, False])
+
+  def test_tune_with_per_trial_early_stopping_and_reward_replacement(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(
+        run_experiment,
+        TuningWithPerTrialEarlyStoppingAndRewardReplacement(),
+        platform.work_unit(),
+        job_log_dir,
+        study='local_per_trial_early_stopping_and_reward_replacement',
+        max_num_trials=5)
+    result = pg.tuning.poll_result(
+        'local_per_trial_early_stopping_and_reward_replacement')
+    self.assertLen(result.trials, 5)
+    reward_at_step0 = (
+        lambda t: t.measurements[0].reward if t.measurements else None)
+    self.assertEqual([reward_at_step0(t) for t in result.trials],
+                     [None, -1.0, 3.2, -1.0, 1.6])
+    self.assertEqual([len(t.measurements) for t in result.trials],
+                     [0, 1, 3, 1, 3])
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, False, False, False, False])
+
+  def test_tune_with_per_trial_early_stopping_and_metrics_replacement(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(
+        run_experiment,
+        TuningWithPerTrialEarlyStoppingAndMetricsReplacement(),
+        platform.work_unit(),
+        job_log_dir,
+        study='local_per_trial_early_stopping_and_metrics_replacement',
+        max_num_trials=5)
+    result = pg.tuning.poll_result(
+        'local_per_trial_early_stopping_and_metrics_replacement')
+    self.assertLen(result.trials, 5)
+    reward_at_step0 = (
+        lambda t: t.measurements[0].reward if t.measurements else None)
+    self.assertEqual([reward_at_step0(t) for t in result.trials],
+                     [None, 100., 3.2, 100., 1.6])
+    self.assertEqual([t.final_measurement.reward for t in result.trials],
+                     [0., 100., 6.4, 100., 3.2])
+    self.assertEqual([len(t.measurements) for t in result.trials],
+                     [0, 1, 3, 1, 3])
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, False, False, False, False])
+
+  def test_tune_with_population_wise_early_stopping_policy(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment,
+                    TuningWithPopulationWiseEarlyStopping(),
+                    platform.work_unit(),
+                    job_log_dir,
+                    study='local_population_wise_early_stopping',
+                    max_num_trials=5)
+    result = pg.tuning.poll_result('local_population_wise_early_stopping')
     self.assertLen(result.trials, 5)
     # We use the average of the metrics across steps as the final measurement.
     reward_at_step0 = (
@@ -179,10 +338,13 @@ class TuningLibTest(absltest.TestCase):
 
   def test_tune_with_subexperiments(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
-    tuning_lib.tune(run_experiment, TuningWithSubExperiments(),
-                    platform.work_unit(), job_log_dir,
-                    study='local3', max_num_trials=5)
-    result = pg.tuning.poll_result('local3')
+    tuning_lib.tune(run_experiment,
+                    TuningWithSubExperiments(),
+                    platform.work_unit(),
+                    job_log_dir,
+                    study='local_subexperiments',
+                    max_num_trials=5)
+    result = pg.tuning.poll_result('local_subexperiments')
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, True, False, True])

@@ -146,14 +146,14 @@ def tune(trial_fn: TrialFn,
   logging.info('Search space: %s', search_space.dna_spec)
   search_space_debug_file = job_log_dir / 'search_space.txt'
   _write_file_once(search_space_debug_file, str(search_space.dna_spec))
-  work_unit.create_artifact(platform.ArtifactType.FILE, search_space_debug_file,
-                            'search_space')
+  work_unit.create_artifact(
+      platform.ArtifactType.FILE, str(search_space_debug_file), 'search_space')
 
   logging.info('Search algorithm: %s', search_algorithm)
   algorithm_debug_file = job_log_dir / 'search_algorithm.txt'
   _write_file_once(algorithm_debug_file, str(search_algorithm))
-  work_unit.create_artifact(platform.ArtifactType.FILE, algorithm_debug_file,
-                            'search_algorithm')
+  work_unit.create_artifact(
+      platform.ArtifactType.FILE, str(algorithm_debug_file), 'search_algorithm')
 
   logging.info('Early stopping policy: %s', early_stopping_policy)
   if early_stopping_policy is not None:
@@ -185,120 +185,193 @@ def tune(trial_fn: TrialFn,
     with example():
       trial_dirname = trial_dirname_generator.dirname(feedback.id, feedback.dna)
 
-      # Mark trial as infeasible on NaN. PAX user can add more error
-      # through `SearchHParams.errors_to_skip`.
-      with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
-        try:
-          for i, (sub_experiment_id, sub_experiment_cls) in enumerate(
-              sub_experiments.items()):
-            trial_fn(
-                sub_experiment_cls(),  # pytype: disable=not-instantiable
-                work_unit,
-                trial_dirname,
-                _get_early_stopping_fn(
-                    sub_experiment_id=sub_experiment_id,
-                    feedback=feedback,
-                    reward_fn=reward_fn,
-                    cross_step_metric_aggregator=cross_step_metric_aggregator,
-                    is_metric_reporting_role=is_metric_reporting_role,
-                    is_last_experiment=(i == len(sub_experiments) - 1),
-                    tuning_step_start=i * automl.SUB_EXPERIMENT_STEP_OFFSET))
-        except automl.EarlyStoppingError as e:
-          if jax.process_index() == 0:
-            if e.skip:
-              py_utils.sync_global_devices(
-                  f'Sync on trial {feedback.id} early stopping started.')
-              feedback.skip(e.skip_reason or 'Unknown.')
-              py_utils.sync_global_devices(
-                  f'Sync on trial {feedback.id} early stopping completed.')
-              logging.info(
-                  'Trial %d is early stopped at step %d and will be skipped '
-                  'by controller. Reason: %s.',
-                  feedback.id, e.step, e.skip_reason)
-            else:
-              reward = e.reward
-              if reward is None:
-                reward = reward_fn(e.metrics, e.step)
-              feedback.add_measurement(
-                  reward=reward,
-                  step=e.step,
-                  metrics=e.metrics,
-                  checkpoint_path=e.checkpoint)
-              py_utils.sync_global_devices(
-                  f'Sync on trial {feedback.id} early stopping started.')
-              feedback.done()
-              py_utils.sync_global_devices(
-                  f'Sync on trial {feedback.id} early stopping completed.')
-              logging.info(
-                  'Trial %d is early stopped at step %d with reward %f which '
-                  'will be fed back to the controller. Metrics: %s.',
-                  feedback.id, e.step, reward, e.metrics)
+      for i, (sub_experiment_id, sub_experiment_cls) in enumerate(
+          sub_experiments.items()):
+        early_stopping_fn = EarlyStoppingFn(
+            feedback=feedback,
+            sub_experiment_id=sub_experiment_id,
+            reward_fn=reward_fn,
+            cross_step_metric_aggregator=cross_step_metric_aggregator,
+            is_metric_reporting_role=is_metric_reporting_role,
+            is_last_experiment=(i == len(sub_experiments) - 1),
+            tuning_step_start=i * automl.SUB_EXPERIMENT_STEP_OFFSET)
+
+        # Mark trial as infeasible on NaN. PAX user can add more error
+        # through `SearchHParams.errors_to_skip`.
+        with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
+          trial_fn(sub_experiment_cls(),
+                   work_unit,
+                   trial_dirname,
+                   early_stopping_fn)  # pytype: disable=not-instantiable
+
+        # We shortcircuit remaining sub-experiments if current trial is either
+        # done or skipped.
+        if feedback.get_trial().status == 'COMPLETED':
+          break
+      logging.info('Trial %d is now completed.', feedback.id)
   logging.info('Completed with all trials for study %r', study)
 
 
-def _get_early_stopping_fn(
-    sub_experiment_id: str,
-    feedback: pg.tuning.Feedback,
-    reward_fn: automl.BaseReward,
-    cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
-    is_metric_reporting_role: bool,
-    is_last_experiment: bool,
-    tuning_step_start: int) -> trainer_lib.EarlyStoppingFn:
-  """Gets early stopping function based on a feedback object."""
+class EarlyStoppingFn:
+  """Early stopping function for a sub-experiment."""
 
-  def should_stop_early(metrics: Dict[str, float],
-                        running_mode: trainer_lib.RunningMode,
-                        global_step: int, is_last_ckpt: bool) -> bool:
-    """Early stopping function."""
-    if is_metric_reporting_role:
-      tuning_step = tuning_step_start + global_step
+  def __init__(
+      self,
+      feedback: pg.tuning.Feedback,
+      sub_experiment_id: str,
+      reward_fn: automl.BaseReward,
+      cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
+      is_metric_reporting_role: bool,
+      is_last_experiment: bool,
+      tuning_step_start: int):
+    self._feedback = feedback
+    self._sub_experiment_id = sub_experiment_id
+    self._reward_fn = reward_fn
+    self._cross_step_metric_aggregator = cross_step_metric_aggregator
+    self._is_metric_reporting_role = is_metric_reporting_role
+    self._is_last_experiment = is_last_experiment
+    self._tuning_step_start = tuning_step_start
 
-      # `metrics_by_dataset` could be None for interleaved train/eval
-      # when evaluation is not performed at current global step.
-      if (jax.process_index() == 0 and
-          (running_mode & trainer_lib.RunningMode.EVAL or
-           running_mode & trainer_lib.RunningMode.DECODE)):
+  def __call__(self,
+               metrics: Dict[str, float],
+               running_mode: trainer_lib.RunningMode,
+               global_step: int, is_last_ckpt: bool) -> bool:
+    """Returns True if trial should be stopped early."""
+    tuning_step = self._tuning_step_start + global_step
+    if self._is_metric_reporting_role:
+      # For metric reporting role, when there is no eval and decode, early
+      # stopping should always return False.
+      if not running_mode.has_eval and not running_mode.has_decode:
+        return False
 
-        # Append sub_experiment_id as the suffix.
-        if sub_experiment_id:
-          metrics = {f'{k}:{sub_experiment_id}': v for k, v in metrics.items()}
+      # We only handle metric updates on main host.
+      if jax.process_index() == 0:
+        self._update_metrics(metrics, running_mode, tuning_step, is_last_ckpt)
 
-        # Computing reward and used metrics for reporting back to the
-        # tuning service.
-        reward, used_metrics = _reward_and_used_metrics(
-            reward_fn, metrics, tuning_step)
+      # NOTE(daiyip): we synchronize all hosts after each eval/decode step so
+      # all of them can move to the next train step or stop uniformly. This is
+      # necessary since `sync_global_devices` will be called during
+      # checkpointing, which requires all hosts to arrive at that point with the
+      # same sequence of `sync_global_devices` calls.
+      action_str = ' and '.join(
+          [s for s, mode in zip(
+              ['evaluation', 'decoding'],
+              [running_mode.has_eval, running_mode.has_decode])])
+      py_utils.sync_global_devices(
+          f'Sync on trial {self._feedback.id} after {action_str} '
+          f'at tuning step {tuning_step}.')
 
-        if math.isnan(reward):
-          raise FloatingPointError('Reward is NaN.')
-        feedback.add_measurement(reward, metrics=used_metrics, step=tuning_step)
-        logging.info(
-            'Measurement is reported to trial %d (sub-experiment=%s) at step '
-            '%d with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
-            feedback.id, sub_experiment_id, global_step, reward, running_mode,
-            is_last_ckpt, used_metrics)
+    should_stop = False
+    if self._feedback.get_trial().status == 'COMPLETED':
+      should_stop = True
+    elif self._feedback.should_stop_early():
+      # `feedback.skip` is preferably called just once, so we always call
+      # it on the main host.
+      if jax.process_index() == 0:
+        self._feedback.skip()
+      should_stop = True
+    if should_stop:
+      # NOTE(daiyip): at the end of each trial, we sync all hosts to make sure
+      # they advance to the next trial at the same time.
+      py_utils.sync_global_devices(
+          f'Sync on trial {self._feedback.id} upon completion.')
+    return should_stop
+
+  def _update_metrics(
+      self,
+      metrics: Dict[str, float],
+      running_mode: trainer_lib.RunningMode,
+      tuning_step: int,
+      is_last_ckpt: bool):
+    """Handle metric update."""
+    assert jax.process_index() == 0
+
+    # Append sub_experiment_id as the suffix.
+    if self._sub_experiment_id:
+      metrics = {f'{k}:{self._sub_experiment_id}': v
+                 for k, v in metrics.items()}
+
+    try:
+      # Computing reward and used metrics for reporting back to the
+      # tuning service.
+      reward, used_metrics = self._reward_and_used_metrics(metrics, tuning_step)
+      if math.isnan(reward):
+        raise FloatingPointError('Reward is NaN.')
+      self._feedback.add_measurement(
+          reward, metrics=used_metrics, step=tuning_step)
+
+      logging.info(
+          'Measurement is reported to trial %d (sub-experiment=%s) at step '
+          '%d with reward value %f (mode=%s, is_last_checkpoint=%s): %s.',
+          self._feedback.id, self._sub_experiment_id,
+          tuning_step, reward, running_mode,
+          is_last_ckpt, used_metrics)
 
       if is_last_ckpt:
-        py_utils.sync_global_devices(
-            f'Sync on trial (sub-experiment={sub_experiment_id!r}) '
-            f'termination at step {global_step} started.')
         # `feedback.done` should be called just once per trial.
-        if is_last_experiment and jax.process_index() == 0:
-          _add_final_measurement(
-              feedback, cross_step_metric_aggregator,
-              reward_fn, tuning_step + 1)
-          feedback.done()
-        py_utils.sync_global_devices(
-            f'Sync on trial (sub-experiment={sub_experiment_id!r}) '
-            f'termination at step {global_step} completed.')
-        logging.info('Sub-experiment %s (trial %d) is completed.',
-                     sub_experiment_id, feedback.id)
-        logging.info('Trial %d is now completed.', feedback.id)
-    result = feedback.should_stop_early()
-    if result:
-      raise automl.EarlyStoppingError(
-          skip=True, skip_reason='Stopped by early stopping policy.')
-    return result
-  return should_stop_early
+        if self._is_last_experiment:
+          self._complete_trial(
+              aggregate_metrics=True, global_step=tuning_step + 1)
+    except automl.EarlyStoppingError as e:
+      # Calling the reward_fn triggers `EarlyStoppingError`, which indicates
+      # user signaled early stopping.
+      if e.skip:
+        self._feedback.skip(e.skip_reason or 'Unknown.')
+        logging.info(
+            'Trial %d is early stopped at step %s and will be skipped '
+            'by controller. Reason: %s.',
+            self._feedback.id, e.step, e.skip_reason)
+      else:
+        reward = e.reward
+        if reward is None:
+          reward = self._reward_fn(e.metrics, e.step)
+        self._feedback.add_measurement(
+            reward=reward,
+            step=e.step,
+            metrics=e.metrics,
+            checkpoint_path=e.checkpoint)
+        self._complete_trial()
+        logging.info(
+            'Trial %d is early stopped at step %s with reward %f which '
+            'will be fed back to the controller. Metrics: %s.',
+            self._feedback.id, e.step, reward, e.metrics)
+
+  def _reward_and_used_metrics(
+      self,
+      all_metrics: Dict[str, float],
+      tuning_step: int) -> Tuple[float, Dict[str, float]]:
+    """Returns computed reward and used metrics."""
+    reward = self._reward_fn(all_metrics, tuning_step)
+    used_metrics = {}
+    for metric in self._reward_fn.used_metrics:
+      used_metrics.update(dict(metric.match_items(all_metrics)))
+    return reward, used_metrics
+
+  def _complete_trial(
+      self,
+      aggregate_metrics: bool = False,
+      global_step: Optional[int] = None):
+    """Adds final measurement to trial based on metric aggregator."""
+    # Poll the metrics across steps for aggregation.
+    if aggregate_metrics:
+      assert global_step is not None
+      metrics_across_steps = []
+      for m in self._feedback.get_trial().measurements:
+        metrics = dict(m.metrics)
+        metrics['reward'] = m.reward
+        metrics_across_steps.append((m.step, metrics))
+
+      final_metrics = self._cross_step_metric_aggregator(metrics_across_steps)
+      final_metrics.pop('reward', None)
+      final_reward, used_metrics = self._reward_and_used_metrics(
+          final_metrics, global_step)
+      self._feedback.add_measurement(
+          final_reward, used_metrics, step=global_step)
+      logging.info(
+          'Final measurement is reported to trial %d at step %d '
+          'with reward value %f and metrics %s.',
+          self._feedback.id, global_step, final_reward, used_metrics)
+    self._feedback.done()
 
 
 def _write_file_once(file_path: epath.Path, content: Text):
@@ -312,42 +385,6 @@ def _write_file_once(file_path: epath.Path, content: Text):
           'file. This is not an issue as the file is only created for '
           'debugging purpose and has the same content among all the workers. '
           'So any successful write will achieve this purpose.', file_path)
-
-
-def _add_final_measurement(
-    feedback: pg.tuning.Feedback,
-    cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
-    reward_fn: automl.BaseReward,
-    global_step: int):
-  """Adds final measurement to trial based on metric aggregator."""
-  # Poll the metrics across steps for aggregation.
-  metrics_across_steps = []
-  for m in feedback.get_trial().measurements:
-    metrics = dict(m.metrics)
-    metrics['reward'] = m.reward
-    metrics_across_steps.append((m.step, metrics))
-
-  final_metrics = cross_step_metric_aggregator(metrics_across_steps)
-  final_metrics.pop('reward', None)
-  final_reward, used_metrics = _reward_and_used_metrics(
-      reward_fn, final_metrics, global_step)
-  feedback.add_measurement(final_reward, used_metrics, step=global_step)
-  logging.info(
-      'Final measurement is reported to trial %d at step %d '
-      'with reward value %f and metrics %s.',
-      feedback.id, global_step, final_reward, used_metrics)
-
-
-def _reward_and_used_metrics(
-    reward_fn: automl.BaseReward,
-    all_metrics: Dict[str, float],
-    tuning_step: int) -> Tuple[float, Dict[str, float]]:
-  """Returns computed reward and used metrics."""
-  reward = reward_fn(all_metrics, tuning_step)
-  used_metrics = {}
-  for metric in reward_fn.used_metrics:
-    used_metrics.update(dict(metric.match_items(all_metrics)))
-  return reward, used_metrics
 
 
 class EvalMetrics(NamedTuple):
