@@ -360,7 +360,7 @@ class SingleTask(base_task.BaseTask):
       infer_writer: specifies how to generate and write some output with a model
       use_orbax: if True, enables checkpointing with Orbax.
     """
-    model: Optional[base_model.BaseModel.HParams] = None
+    model: Optional[base_model.BaseModel.HParams] = sub_config_field(None)
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
