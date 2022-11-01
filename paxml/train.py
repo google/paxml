@@ -1460,8 +1460,8 @@ def _train_and_evaluate_common(
             logging.debug('  Retrieved eval model_inputs.')
             logging.debug('  Performing eval_step() runs on training split.')
             eval_inputs = prepare_eval_inputs(train_input_pipeline, eval_inputs)
-            loss, weighted_scalars, _, summary_tensors = (
-                eval_lib.run_eval_one_step(eval_inputs, eval_step_fn))
+            loss, weighted_scalars, _, summary_tensors = eval_step_fn(
+                eval_inputs)
             logging.debug('  Completed eval_step() runs on training split.')
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):

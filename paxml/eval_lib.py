@@ -394,22 +394,6 @@ def _create_checkpointer(task_p: tasks_lib.SingleTask.HParams,
                                  restore_checkpoint_step, use_orbax)
 
 
-def run_eval_one_step(eval_inputs: NestedJTensor,
-                      eval_step: Callable[[NestedJTensor], Any]):
-  """Runs eval on entire batch of eval inputs or for one step.
-
-  Args:
-    eval_inputs: `NestedJTensor` of eval inputs.
-    eval_step: The eval step which evaluates the model on eval inputs.
-
-  Returns:
-    Tuple of eval loss, mean metrics and eval summaries.
-  """
-  loss, weighted_scalars, per_example_output, summary_tensors = eval_step(
-      eval_inputs)
-  return loss, weighted_scalars, per_example_output, summary_tensors
-
-
 def run_eval_loop_over_test_splits(
     num_steps: List[int],
     eval_step: Callable[[NestedJTensor], Any],
@@ -493,7 +477,7 @@ def run_eval_loop_over_test_splits(
         eval_inputs = model_inputs[split].reshard_for_pmap(eval_inputs)
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
       (eval_loss, eval_metrics, per_example_output,
-       eval_summary_tensors) = run_eval_one_step(eval_inputs, eval_step)
+       eval_summary_tensors) = eval_step(eval_inputs)
 
       logging.info('Finished eval step on input batch %d for %s',
                    step_num, model_inputs[split].hparams.name)
