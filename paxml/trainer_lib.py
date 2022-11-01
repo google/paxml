@@ -1314,6 +1314,9 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
 
     fn_in_partition_specs, fn_out_partition_specs, inputs_partition_spec = (
         self._get_pjit_partition_spec(_step_fn))
+    logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
+    logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
+    logging.info('step_fn inputs_partition_spec=%s', inputs_partition_spec)
     # pjit-ed step function.
     step_fn = pjit.pjit(
         _step_fn,
