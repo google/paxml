@@ -43,6 +43,8 @@ from praxis import train_states
 
 from paxml import checkpoints  # mapped to internal
 
+PartitionSpec = pjit.PartitionSpec
+
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
 NestedMap = py_utils.NestedMap
@@ -1373,9 +1375,7 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
     """Returns the partition specs of the step function and its input."""
     inputs_partition_spec = get_input_partition_specs(self._mesh_names,
                                                       self._inputs_shape_dtype)
-    # TODO(bf-jax): prng_key is replicated. Would this be a problem?
-    prng_key_partition_spec = base_layer.to_partition_spec((None,),
-                                                           self._mesh_names)
+    prng_key_partition_spec = PartitionSpec(None)
 
     if self._enable_auto_sharding:
       # Provide inputs_partition_spec because GDA creation is specialized to the
@@ -1383,9 +1383,10 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
       # XLA, it errors out.
       fn_in_partition_specs = (pjit.AUTO, prng_key_partition_spec,
                                inputs_partition_spec)
-      fn_out_partition_specs = (None if self._auto_sharding_replicate_output
-                                else pjit.AUTO)
-      return fn_in_partition_specs, fn_out_partition_specs, None
+      fn_out_partition_specs = (
+          PartitionSpec()
+          if self._auto_sharding_replicate_output else pjit.AUTO)
+      return fn_in_partition_specs, fn_out_partition_specs, PartitionSpec(None)
 
     init_key = self._sharding_info.init_key
     model_state_partition_specs = (
@@ -1412,7 +1413,7 @@ class _SpmdModelStep(metaclass=abc.ABCMeta):
                              prng_key_partition_spec, inputs_partition_spec)
     # Currently, all the outputs are fully replicated.
     # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
-    fn_out_partition_specs = jax.tree_util.tree_map(lambda _: None,
+    fn_out_partition_specs = jax.tree_util.tree_map(lambda _: PartitionSpec(),
                                                     out_padded_shapes)
     if not self._is_eval:
       fn_out_partition_specs = tuple([model_state_partition_specs] +
