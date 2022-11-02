@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Experiment utils."""
-from typing import Any, List, Type
+from typing import Any, Dict, List, Type
 
 from paxml import base_experiment
 
@@ -52,7 +52,7 @@ def _get_mro(cls: Type[BaseExperiment]) -> List[Type[BaseExperiment]]:
   return mro[:-1]
 
 
-def _get_cls_vars(cls: Type[BaseExperiment]) -> dict[str, Any]:
+def _get_cls_vars(cls: Type[BaseExperiment]) -> Dict[str, Any]:
   """Returns cls vars."""
   res = {}
 
@@ -74,7 +74,7 @@ def _get_cls_vars(cls: Type[BaseExperiment]) -> dict[str, Any]:
   return {k: v for k, v in res.items() if k not in base_vars}
 
 
-def _summarize_cls_vars(cls: Type[BaseExperiment]) -> dict[str, dict[str, Any]]:
+def _summarize_cls_vars(cls: Type[BaseExperiment]) -> Dict[str, Dict[str, Any]]:
   """Summarizes cls vars and their owners.
 
   Args:
