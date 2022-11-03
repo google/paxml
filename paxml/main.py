@@ -48,6 +48,7 @@ from paxml import tasks_lib
 from paxml import train
 from paxml import trainer_lib
 from paxml import tuning_lib
+from praxis import pax_fiddle
 from praxis import py_utils
 import pyglove as pg
 
@@ -411,7 +412,7 @@ def main(argv: Sequence[str]) -> None:
   else:
     cfg = absl_flags.create_buildable_from_flags(
         module=None, allow_imports=True)
-    experiment_config = fdl.build(cfg)
+    experiment_config = pax_fiddle.build(cfg)
 
   experiment_config.validate()
   run(experiment_config=experiment_config,

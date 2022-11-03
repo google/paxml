@@ -270,6 +270,7 @@ pytype_strict_library(
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental.gda_serialization dependency.
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit pyglove dependency.
     ],
