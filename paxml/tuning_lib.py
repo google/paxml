@@ -127,7 +127,11 @@ def tune(trial_fn: TrialFn,
   search_hparams = experiment_config.search()
   search_algorithm = instantiate(search_hparams.search_algorithm)()
 
-  reward_fn = instantiate(search_hparams.search_reward)
+  reward_params = search_hparams.search_reward
+  if reward_params:
+    reward_fn = instantiate(reward_params)
+  else:
+    reward_fn = None
   max_num_trials = max_num_trials or search_hparams.max_num_trials
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
@@ -219,7 +223,7 @@ class EarlyStoppingFn:
       self,
       feedback: pg.tuning.Feedback,
       sub_experiment_id: str,
-      reward_fn: automl.BaseReward,
+      reward_fn: Optional[automl.BaseReward],
       cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
       is_metric_reporting_role: bool,
       is_last_experiment: bool,
@@ -235,32 +239,42 @@ class EarlyStoppingFn:
   def __call__(self,
                metrics: Dict[str, float],
                running_mode: trainer_lib.RunningMode,
-               global_step: int, is_last_ckpt: bool) -> bool:
+               global_step: int,
+               is_last_ckpt: bool) -> bool:
     """Returns True if trial should be stopped early."""
     tuning_step = self._tuning_step_start + global_step
     if self._is_metric_reporting_role:
       # For metric reporting role, when there is no eval and decode, early
       # stopping should always return False.
-      if not running_mode.has_eval and not running_mode.has_decode:
+      if running_mode.has_eval or running_mode.has_decode:
+
+        # We only handle metric updates on main host.
+        if jax.process_index() == 0:
+          self._update_metrics(metrics, running_mode, tuning_step, is_last_ckpt)
+
+        # NOTE(daiyip): we synchronize all hosts after each eval/decode step so
+        # all of them can move to the next train step or stop uniformly. This is
+        # necessary since `sync_global_devices` will be called during
+        # checkpointing, which requires all hosts to arrive at that point with
+        # the same sequence of `sync_global_devices` calls.
+        action_str = ' and '.join(
+            [s for s, mode in zip(
+                ['evaluation', 'decoding'],
+                [running_mode.has_eval, running_mode.has_decode])])
+        py_utils.sync_global_devices(
+            f'Sync on trial {self._feedback.id} after {action_str} '
+            f'at tuning step {tuning_step}.')
+      elif is_last_ckpt:
+        if jax.process_index() == 0:
+          trial = self._feedback.get_trial()
+          if not trial.measurements:
+            self._feedback.skip(
+                f'No eval/decode has taken place before training ended. '
+                f'(trial={self._feedback.id}, step={global_step})')
+      else:
         return False
 
-      # We only handle metric updates on main host.
-      if jax.process_index() == 0:
-        self._update_metrics(metrics, running_mode, tuning_step, is_last_ckpt)
-
-      # NOTE(daiyip): we synchronize all hosts after each eval/decode step so
-      # all of them can move to the next train step or stop uniformly. This is
-      # necessary since `sync_global_devices` will be called during
-      # checkpointing, which requires all hosts to arrive at that point with the
-      # same sequence of `sync_global_devices` calls.
-      action_str = ' and '.join(
-          [s for s, mode in zip(
-              ['evaluation', 'decoding'],
-              [running_mode.has_eval, running_mode.has_decode])])
-      py_utils.sync_global_devices(
-          f'Sync on trial {self._feedback.id} after {action_str} '
-          f'at tuning step {tuning_step}.')
-
+    # Poll completion or early stopping decision, and sync on trial completion.
     should_stop = False
     if self._feedback.get_trial().status == 'COMPLETED':
       should_stop = True
@@ -276,6 +290,12 @@ class EarlyStoppingFn:
       py_utils.sync_global_devices(
           f'Sync on trial {self._feedback.id} upon completion.')
     return should_stop
+
+  def _compute_reward(
+      self, metrics: Dict[str, float], tuning_step: int) -> float:
+    if self._reward_fn is None:
+      return 0.
+    return self._reward_fn(metrics, tuning_step)
 
   def _update_metrics(
       self,
@@ -324,7 +344,7 @@ class EarlyStoppingFn:
       else:
         reward = e.reward
         if reward is None:
-          reward = self._reward_fn(e.metrics, e.step)
+          reward = self._compute_reward(e.metrics, e.step)
         self._feedback.add_measurement(
             reward=reward,
             step=e.step,
@@ -341,10 +361,13 @@ class EarlyStoppingFn:
       all_metrics: Dict[str, float],
       tuning_step: int) -> Tuple[float, Dict[str, float]]:
     """Returns computed reward and used metrics."""
-    reward = self._reward_fn(all_metrics, tuning_step)
-    used_metrics = {}
-    for metric in self._reward_fn.used_metrics:
-      used_metrics.update(dict(metric.match_items(all_metrics)))
+    reward = self._compute_reward(all_metrics, tuning_step)
+    if self._reward_fn is None:
+      used_metrics = all_metrics
+    else:
+      used_metrics = {}
+      for metric in self._reward_fn.used_metrics:
+        used_metrics.update(dict(metric.match_items(all_metrics)))
     return reward, used_metrics
 
   def _complete_trial(

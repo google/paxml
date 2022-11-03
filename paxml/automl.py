@@ -19,7 +19,7 @@ import abc
 import collections
 import inspect
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
 from paxml import automl_interfaces
 # Placeholder for importing Google-internal tuning modules.
 from praxis import base_hyperparams
@@ -677,3 +677,37 @@ def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
   for name, hyper in inspect.getmembers(
       cls, lambda x: isinstance(x, pg.hyper.HyperPrimitive)):
     setattr(cls, name, create_hyper_property(name, hyper))
+
+
+#
+# Decorators for parameter sweeping.
+#
+
+
+def parameter_sweep(
+    metric: Optional[Metric] = None,
+    goal: str = 'maximize') -> Callable[[Type[Any]], Type[Any]]:
+  """Returns a decorator for enabling parameter sweeping on a PAX experiment.
+
+  Args:
+    metric: Metric to use as trial objective. If None, trial objective will be
+      0, and users will be able to see all metrics in Vizier dashboard.
+    goal: Goal for optimization. By default, it's to maximize the metric.
+
+  Returns:
+    A callable that adds the `search` method to the experiment class.
+  """
+  if metric is None:
+    search_reward = None
+  else:
+    search_reward = SingleObjective.HParams(metric=metric, goal=goal)
+  def decorator(cls):
+    def search(self):
+      del self
+      return SearchHParams(
+          search_algorithm=Sweeping.HParams(),
+          search_reward=search_reward)
+    setattr(cls, 'search', search)
+    return cls
+  return decorator
+

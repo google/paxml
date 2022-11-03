@@ -87,6 +87,8 @@ class SearchHParams(BaseHyperParams):
   Attributes:
     search_algorithm: Hyperparameters for search algorithm.
     search_reward: Hyperparameters for search reward.
+      If None, 0 will be used as objective, which shall be used only
+      for grid search or random search.
     early_stopping: An optional population-wise early stopping policy.
       If None, no population-wise early stopping policy will be used, though
       users still can raise `automl.EarlyStoppingError` to early terminate a

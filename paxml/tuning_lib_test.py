@@ -96,6 +96,25 @@ class TuningExperiment(base_experiment.BaseExperiment):
         max_num_trials=10)
 
 
+@automl.parameter_sweep()
+class TuningWithParameterSweep(base_experiment.BaseExperiment):
+  """Parameter sweep the search space."""
+
+  LEARNING_RATE = pg.oneof([0.1, 0.01, 0.001])
+  DATASET_PARAM1 = pg.oneof(['foo', 'bar'])
+
+  def task(self):
+    return {
+        'learning_rate': self.LEARNING_RATE,
+        'batch_size': pg.oneof([16, 32, 64], name='batch_size')
+    }
+
+  def datasets(self):
+    return [{
+        'dataset_param1': self.DATASET_PARAM1,
+    }]
+
+
 class TuningWithPerTrialEarlyStopping(TuningExperiment):
   """A faked tuning experiment with per-trial early stopping."""
 
@@ -215,6 +234,22 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
     return
 
 
+def run_experiment_without_reporting_metrics(
+    experiment_config: base_experiment.BaseExperiment,
+    work_unit: platform.WorkUnit, job_log_dir: epath.Path,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn):
+  del work_unit, job_log_dir
+  task_p = experiment_config.task()
+  _ = experiment_config.datasets()
+  _ = experiment_config.decoder_datasets()
+
+  # Reach to the final step without reporting any metrics.
+  _ = tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=10,
+      is_last_ckpt=True)
+
+
 class TuningLibTest(absltest.TestCase):
   """Tests for tuning_lib."""
 
@@ -230,6 +265,7 @@ class TuningLibTest(absltest.TestCase):
         'decoder_dataset_param2': pg.oneof(range(3),
                                            name='decoder_dataset_param2')
     }))
+    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2 * 3 * 3 * 3)
 
   def test_tune(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
@@ -249,6 +285,35 @@ class TuningLibTest(absltest.TestCase):
     # We added an extra measurement for the final report, with final step + 1.
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 21, 21, 21, 21])
+
+  def test_parameter_sweep(self):
+    search_space = tuning_lib.get_search_space(TuningWithParameterSweep())
+    self.assertEqual(search_space.hyper_dict, pg.Dict({
+        'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
+        'batch_size': pg.oneof([16, 32, 64], name='batch_size'),
+        'DATASET_PARAM1': pg.oneof(['foo', 'bar'], name='DATASET_PARAM1'),
+    }))
+    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2)
+
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment, TuningWithParameterSweep(),
+                    platform.work_unit(), job_log_dir,
+                    study='local_hp_sweep')
+    result = pg.tuning.poll_result('local_hp_sweep')
+    self.assertLen(result.trials, search_space.dna_spec.space_size)
+
+  def test_tune_without_reporting_metrics(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment_without_reporting_metrics,
+                    TuningExperiment(),
+                    platform.work_unit(),
+                    job_log_dir,
+                    study='local_no_metrics_reported',
+                    max_num_trials=5)
+    result = pg.tuning.poll_result('local_no_metrics_reported')
+    self.assertLen(result.trials, 5)
+    self.assertEqual([t.status for t in result.trials], ['COMPLETED'] * 5)
+    self.assertEqual([t.infeasible for t in result.trials], [True] * 5)
 
   def test_tune_with_per_trial_early_stopping(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())

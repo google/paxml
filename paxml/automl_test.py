@@ -657,6 +657,16 @@ class TuningExperimentWithoutHyperName(RegularExperiment):
   BATCH_SIZE = pg.oneof([8, 16, 32])
 
 
+@automl.parameter_sweep()
+class ParameterSweepingExperiment(TuningExperiment):
+  """Parameter sweeping experiment."""
+
+
+@automl.parameter_sweep(automl.Metric.train('total_loss'))
+class ParameterSweepingWithReportingTrainLoss(TuningExperiment):
+  """Parameter sweeping experiment with train loss as the objective."""
+
+
 class ClassLevelHyperPrimitiveTest(absltest.TestCase):
   """Test class-level hyper primitives on experiment specifications."""
 
@@ -698,6 +708,22 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
         context.hyper_dict, {
             'BATCH_SIZE': pg.oneof([8, 16, 32], name='BATCH_SIZE')
         })
+
+
+class AutoMLDecoratorsTest(absltest.TestCase):
+  """Tests for AutoML decorators."""
+
+  def test_parameter_sweep(self):
+    search_hparams = ParameterSweepingExperiment().search()
+    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertIsNone(search_hparams.search_reward)
+
+    search_hparams = ParameterSweepingWithReportingTrainLoss().search()
+    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertEqual(
+        search_hparams.search_reward,
+        automl.SingleObjective.HParams(
+            metric=automl.Metric.train('total_loss')))
 
 
 if __name__ == '__main__':
