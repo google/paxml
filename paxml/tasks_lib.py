@@ -335,7 +335,7 @@ class SingleTask(base_task.BaseTask):
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None
-    always_use_train_for_model_init: bool = False
+    always_use_train_for_model_init: bool = True
 
   @enum.unique
   class TrackDecoderMetricMode(str, enum.Enum):
