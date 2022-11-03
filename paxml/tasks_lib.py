@@ -359,6 +359,8 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
       use_orbax: if True, enables checkpointing with Orbax.
+      fold_decode_prng_key_per_batch: if True, folds the decode prng key per
+        decoding batch index. Only effective for pmap decoding.
     """
     # TODO(b/249483164) Change this to just `= sub_config_field(None)` after
     # Fiddle migration is complete.
@@ -380,6 +382,7 @@ class SingleTask(base_task.BaseTask):
         SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
     use_orbax: bool = False
+    fold_decode_prng_key_per_batch: bool = False
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)

@@ -29,6 +29,7 @@ from absl import logging
 from clu import platform
 from etils import epath
 import jax
+import jax.numpy as jnp
 from jax.experimental import maps
 from jax.experimental import multihost_utils
 import numpy as np
@@ -1476,11 +1477,15 @@ def decode_once_pmap_model(
 
   logging.info('step=%d', step_i)
 
-  def decode_step(mdl_states, prng_key, inputs):
+  def decode_step(mdl_states, prng_key, inputs, batch_idx):
+    if task_p.fold_decode_prng_key_per_batch:
+      prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
+    else:
+      prng_seed_decode = prng_key
     mdl_states = trainer_lib.train_state_for_eval_step(mdl_states)
     (weighted_scalars, per_example_out,
      updated_metrics), updated_vars = trainer_lib.decode_step(
-         model, mdl_states, prng_key, var_weight_hparams, inputs,
+         model, mdl_states, prng_seed_decode, var_weight_hparams, inputs,
          model_p.fprop_dtype)
 
     weighted_scalars = decode_metrics.aggregate(weighted_scalars)
@@ -1525,9 +1530,10 @@ def decode_once_pmap_model(
       axis_name=PMAP_PARALLEL_AXIS_NAME,
       out_axes=(None, None, None, None))
 
-  def decode_step_func(inputs):
+  def decode_step_func(inputs, batch_idx):
     # TODO(pax): shall we eval all sub-models during eval?
-    return pmap_decode_step(replicated_model_states, prng_seed, inputs)
+    return pmap_decode_step(replicated_model_states, prng_seed, inputs,
+                            batch_idx * jnp.ones((jax.local_device_count(),)))
 
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
@@ -1577,7 +1583,7 @@ def decode_once_pmap_model(
         break
       batch = inputs[split].reshard_for_pmap(batch)
       (batch_metrics, out, summary_tensors,
-       updated_metrics) = decode_step_func(batch)
+       updated_metrics) = decode_step_func(batch, batch_idx=step_num)
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
       # we store the metric directly as it has already been aggregated in
