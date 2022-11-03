@@ -1744,7 +1744,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   assert list(input_p) + list(eval_input_p)
   sample_input_p = input_p[0] if input_p else eval_input_p[0]
   input_shape_dtypes = instantiate(sample_input_p).get_next_padded()
-  inputs_shape = jax.tree_util.tree_map(py_utils.get_global_input_shape_dtype,
+  input_shape_dtypes = jax.tree_util.tree_map(py_utils.get_global_input_shape_dtype,
                                         input_shape_dtypes)
   inputs = [instantiate(p) for p in input_p]
   trainer_lib.check_unique_names(inputs)
@@ -1816,7 +1816,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
 
     decode_once_fn = partition_decode_once_spmd_model(
         jax_task, task_p, inputs, input_p, job_log_dir, prng_key, global_mesh,
-        decode_step_fn, use_gda, inputs_shape, inputs_partition_specs)
+        decode_step_fn, use_gda, input_shape_dtypes, inputs_partition_specs)
     eval_one_step_fn = _SpmdEvalRunner(
         task_p, eval_input_p, jax_task, global_mesh, init_key,
         partitioned_specs, job_log_dir,
