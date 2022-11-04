@@ -1055,8 +1055,8 @@ def initialize_partitioned_model_states(
       init_model_from_seed,
       in_axis_resources=(prng_key_partition_spec),
       out_axis_resources=train_state_partition_specs)
+  init_fn = bind_mesh(init_fn, global_mesh)
 
-  assert py_utils.global_mesh_defined(), 'must be inside maps.mesh scope'
   partitioned_vars = init_fn(prng_key)
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
   if (do_init_checkpoint_rules and
@@ -1223,6 +1223,7 @@ class _SpmdModelPartitioner:
                jax_task: tasks_lib.SingleTask,
                init_key: PRNGKey,
                inputs_shape_dtype: NestedShapeDtypeLike,
+               global_mesh: maps.Mesh,
                train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
                sharding_info: Optional[ShardingInfo] = None,
                auto_sharding_replicate_output: Optional[bool] = False):
@@ -1233,6 +1234,7 @@ class _SpmdModelPartitioner:
       init_key: PRNGKey for initializing the model variables.
       inputs_shape_dtype: Shape/dtype attributes of the step function input for
         use in pjit sharding.
+      global_mesh: The global mesh.
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. If not
         provided, it assumes it's the same as input_shape_dtype.
@@ -1248,6 +1250,7 @@ class _SpmdModelPartitioner:
     self._enable_auto_sharding = (sharding_info is None)
     self._auto_sharding_replicate_output = auto_sharding_replicate_output
     self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
+    self._global_mesh = global_mesh
 
     if train_inputs_shape_dtype is None:
       self._init_shape_dtype = inputs_shape_dtype  # Specs used for vars init.
@@ -1275,13 +1278,14 @@ class _SpmdModelPartitioner:
     wrapped_step_fn = self._get_step_fn(step_fn, is_eval, state_unpadded_shapes)
     input_partition_spec = get_input_partition_specs(self._mesh_names,
                                                      self._inputs_shape_dtype)
-    if self._enable_auto_sharding:
-      return self._partition_auto_shard(wrapped_step_fn, is_eval,
-                                        input_partition_spec)
-    else:
-      return self._partition_manual_shard(wrapped_step_fn, is_eval,
-                                          input_partition_spec,
-                                          state_unpadded_shapes)
+    with self._global_mesh:
+      if self._enable_auto_sharding:
+        return self._partition_auto_shard(wrapped_step_fn, is_eval,
+                                          input_partition_spec)
+      else:
+        return self._partition_manual_shard(wrapped_step_fn, is_eval,
+                                            input_partition_spec,
+                                            state_unpadded_shapes)
 
   def _get_step_fn(self, step_fn, is_eval, state_unpadded_shapes):
     """Returns a step function to apply the SPMD partition (pjit)."""
@@ -1337,13 +1341,14 @@ class _SpmdModelPartitioner:
             fn_out_partition_specs):
     logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
     logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
-    return pjit.pjit(
+    pjitted_fn = pjit.pjit(
         step_fn,
         in_axis_resources=fn_in_partition_specs,
         out_axis_resources=fn_out_partition_specs,
         # For training we don't need the original TrainState after running the
         # train step.
         donate_argnums=() if is_eval else (0,))
+    return bind_mesh(pjitted_fn, self._global_mesh)
 
   def _get_var_weight_hparams(self, is_eval):
     return self._jax_task.model.abstract_init_with_metadata(
@@ -1451,6 +1456,7 @@ class _SpmdModelPartitioner:
 def get_partitioned_spmd_model_step_fn(
     jax_task: tasks_lib.SingleTask,
     init_key: PRNGKey,
+    global_mesh: maps.Mesh,
     model_state_partition_specs: TrainState,
     inputs_shape_dtype: NestedShapeDtypeLike,
     is_eval: bool,
@@ -1460,6 +1466,7 @@ def get_partitioned_spmd_model_step_fn(
   Args:
     jax_task: The task which is an instance of tasks.SingleTask.
     init_key: PRNGKey for initializing the model variables.
+    global_mesh: The global mesh.
     model_state_partition_specs: A TrainState contains PartitionSpecs for all
       the variables.
     inputs_shape_dtype: Inputs with shape/dtype attributes for use in pjit
@@ -1475,7 +1482,8 @@ def get_partitioned_spmd_model_step_fn(
   sharding_info = _SpmdModelPartitioner.ShardingInfo(
       model_state_partition_specs, unpadded_global_batch_size)
   partitioner = _SpmdModelPartitioner(
-      jax_task, init_key, inputs_shape_dtype, sharding_info=sharding_info)
+      jax_task, init_key, inputs_shape_dtype, global_mesh,
+      sharding_info=sharding_info)
   return partitioner.partition(
       eval_step_single_learner if is_eval else train_step_single_learner,
       is_eval)
@@ -1485,13 +1493,14 @@ def get_partitioned_spmd_model_step_fn(
 # variables along certain variable/mesh axis?
 def get_partitioned_spmd_model_step_fn_auto_shard(
     jax_task: tasks_lib.SingleTask, init_key: Optional[PRNGKey],
-    model_state_partition_specs: Optional[TrainState],
+    global_mesh: maps.Mesh, model_state_partition_specs: Optional[TrainState],
     inputs_shape_dtype: NestedShapeDtypeLike, is_eval: bool):
   """Return sharded train or eval step function of the SPMD Model.
 
   Args:
     jax_task: The task which is an instance of tasks.SingleTask.
     init_key: (Unused) PRNGKey for initializing the model variables.
+    global_mesh: The global mesh.
     model_state_partition_specs: (Unused) A TrainState contains PartitionSpecs
       for all the variables. This argument is ignored when auto sharding is
       enabled.
@@ -1504,7 +1513,8 @@ def get_partitioned_spmd_model_step_fn_auto_shard(
     The step function and the partition spec for the inputs.
   """
   del model_state_partition_specs
-  partitioner = _SpmdModelPartitioner(jax_task, init_key, inputs_shape_dtype)
+  partitioner = _SpmdModelPartitioner(jax_task, init_key, inputs_shape_dtype,
+                                      global_mesh)
   return partitioner.partition(
       eval_step_single_learner if is_eval else train_step_single_learner,
       is_eval)
@@ -1513,6 +1523,7 @@ def get_partitioned_spmd_model_step_fn_auto_shard(
 def get_partitioned_spmd_model_decode_fn(
     jax_task,
     init_key,
+    global_mesh: maps.Mesh,
     model_state_partition_specs,
     train_global_input_shapes: Optional[NestedShapeDtypeLike],
     inputs_shape_dtype: NestedShapeDtypeStruct,
@@ -1557,6 +1568,7 @@ def get_partitioned_spmd_model_decode_fn(
       jax_task,
       init_key,
       inputs_shape_dtype,
+      global_mesh,
       train_global_input_shapes,
       sharding_info,
       auto_sharding_replicate_output=True)
@@ -1577,3 +1589,18 @@ def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:
     if name in names:
       raise ValueError(f'Duplicate param name found in list: "{name}"')
     names.add(name)
+
+
+def bind_mesh(pjitted_fn, global_mesh: maps.Mesh):
+  """Wraps a pjitted_fn with a mesh context."""
+
+  def call(*args):
+    with global_mesh:
+      return pjitted_fn(*args)
+
+  def lower(*args, **kwargs):
+    with global_mesh:
+      return pjitted_fn.lower(*args, **kwargs)
+
+  call.lower = lower
+  return call
