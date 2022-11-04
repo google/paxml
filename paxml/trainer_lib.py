@@ -1248,9 +1248,12 @@ class _SpmdModelPartitioner:
     self._auto_sharding_replicate_output = auto_sharding_replicate_output
     self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
 
-    self._init_shape_dtype = inputs_shape_dtype  # Specs used for vars init.
-    if train_inputs_shape_dtype is not None:
+    if train_inputs_shape_dtype is None:
+      self._init_shape_dtype = inputs_shape_dtype  # Specs used for vars init.
+      self._abstract_init_with_train = False
+    else:
       self._init_shape_dtype = train_inputs_shape_dtype
+      self._abstract_init_with_train = True
 
   def partition(self, step_fn, is_eval):
     """Gets a sharded (pjit-ed) step function of the SPMD Model.
@@ -1323,7 +1326,8 @@ class _SpmdModelPartitioner:
 
   def _get_state_unpadded_shapes(self, is_eval):
     var_weight_hparams = self._jax_task.model.abstract_init_with_metadata(
-        self._init_shape_dtype, do_eval=is_eval)
+        self._init_shape_dtype,
+        do_eval=False if self._abstract_init_with_train else is_eval)
     return jax.tree_map(
         lambda x: x.shape,
         self._jax_task.create_train_state_unpadded_shapes(
@@ -1487,11 +1491,17 @@ def get_partitioned_spmd_model_decode_fn(
     (decode_step_fn, inputs_partition_spec):
     The decode step function, and input partition spec.
   """
-  if (jax_task.hparams.train.always_use_train_for_model_init and
-      train_global_input_shapes is None):
-    raise ValueError(
-        'No training input specs available, while enabling '
-        '`task_p.train.always_use_train_for_model_init` requires it.')
+  if jax_task.hparams.train.always_use_train_for_model_init:
+    if train_global_input_shapes is None:
+      raise ValueError(
+          'No training input specs available, while enabling '
+          '`task_p.train.always_use_train_for_model_init` requires it.')
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+        train_global_input_shapes)
+  else:
+    assert train_global_input_shapes is None
+    var_weight_hparams = jax_task.model.abstract_init_with_metadata(
+        inputs_shape_dtype, do_eval=True)
 
   sharding_info = None
   if not enable_auto_sharding:
@@ -1503,11 +1513,6 @@ def get_partitioned_spmd_model_decode_fn(
       train_global_input_shapes,
       sharding_info,
       auto_sharding_replicate_output=True)
-
-  var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      (inputs_shape_dtype
-       if train_global_input_shapes is None else train_global_input_shapes),
-      do_eval=True)
 
   # TODO(laigd): train/eval/decode step functions should have the same
   # signature.
