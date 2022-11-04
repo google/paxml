@@ -893,7 +893,7 @@ class _SpmdEvalRunner:
       if not jax_task.hparams.train.always_use_train_for_model_init:
         inputs_shape = input_shape_dtypes
         if is_decode:
-          step_fn, inputs_partition_specs = (
+          step_fn, inputs_partition_specs, partitioned_specs = (
               trainer_lib.get_partitioned_spmd_model_decode_fn(
                   jax_task,
                   step_key,
@@ -901,46 +901,17 @@ class _SpmdEvalRunner:
                   input_shape_dtypes,
                   inputs_shape,
                   enable_auto_sharding=enable_auto_sharding))
-          if enable_auto_sharding:
-            # NOTE(pax-dev): The following is currently incompatible with variable
-            # uneven-sharding padding. When enable_auto_sharding is False,
-            # train_state_pspecs correspond to padded train_states.
-            abstract_train_state = jax_task.create_train_state_unpadded_shapes(
-                var_weight_hparams,
-                discard_opt_states=True)
-            step_fn, input_shardings = trainer_lib.compile_for_auto_sharding(
-                step_fn=step_fn,
-                train_state=abstract_train_state,
-                step_key=step_key,
-                inputs_shape_dtype=inputs_shape)
-            partitioned_specs = jax.tree_map(lambda x: x.spec,
-                                             input_shardings[0])
-            inputs_partition_specs = jax.tree_map(lambda x: x.spec,
-                                                  input_shardings[2])
         else:
           if enable_auto_sharding:
-            step_fn, _ = (
+            step_fn, inputs_partition_specs, partitioned_specs = (
                 trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
                     jax_task,
-                    init_key=None,
+                    step_key,
                     model_state_partition_specs=None,
                     inputs_shape_dtype=inputs_shape,
                     is_eval=True))
-            # NOTE(pax-dev): The following is currently incompatible with variable
-            # uneven-sharding padding. When enable_auto_sharding is False,
-            # train_state_pspecs correspond to padded train_states.
-            abstract_train_state = jax_task.create_train_state_unpadded_shapes(
-                var_weight_hparams,
-                discard_opt_states=True)
-            step_fn, input_shardings = trainer_lib.compile_for_auto_sharding(
-                step_fn, abstract_train_state, step_key,
-                inputs_shape)
-            partitioned_specs = jax.tree_map(lambda x: x.spec,
-                                             input_shardings[0])
-            inputs_partition_specs = jax.tree_map(lambda x: x.spec,
-                                                  input_shardings[2])
           else:
-            step_fn, inputs_partition_specs = (
+            step_fn, inputs_partition_specs, _ = (
                 trainer_lib.get_partitioned_spmd_model_step_fn(
                     jax_task,
                     step_key,
@@ -979,7 +950,7 @@ class _SpmdEvalRunner:
     if not self._eval_input_p:
       return
     with self.global_mesh:
-      eval_step, inputs_partition_specs = (
+      eval_step, inputs_partition_specs, _ = (
           trainer_lib.get_partitioned_spmd_model_step_fn(
               self._jax_task,
               init_key,
@@ -1809,7 +1780,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
       partitioned_train_state = model_states_out
       partitioned_specs = train_state_metadata.partitioned_specs
       train_state_global_shapes = train_state_metadata.padded_global_shapes
-      decode_step_fn, inputs_partition_specs = (
+      decode_step_fn, inputs_partition_specs, _ = (
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task, init_key,
               trim_opt_states(train_state_metadata.partitioned_specs),

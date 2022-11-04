@@ -1116,33 +1116,18 @@ def train_and_evaluate_spmd_model(
         raise NotImplementedError(
             'Per-device batch size < 1 not supported for auto sharding.')
       logging.info('Auto sharding is enabled in PAX.')
-      # If auto sharding is enabled, create abstract train state and ahead of
-      # time compile the `train_step`. Then we can extract the input shardings
-      # returned by XLA's auto spmd partitioner from the compiled object.
-      p_train_step, _ = trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
+      (p_train_step, inputs_pspecs, train_state_metadata.partitioned_specs
+      ) = trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
           jax_task,
-          init_key=None,
+          train_prng_seed,
           model_state_partition_specs=None,
           inputs_shape_dtype=inputs_shape_dtype,
           is_eval=False)
-      # NOTE(pax-dev): The following is currently incompatible with variable
-      # uneven-sharding padding. When enable_auto_sharding is False,
-      # train_state_pspecs correspond to padded train_states.
-      abstract_train_state = jax_task.create_train_state_unpadded_shapes(
-          train_state_metadata.var_weight_hparams,
-          # TODO(pax-dev): set discard_opt_states according to is_eval.
-          discard_opt_states=False)
-      p_train_step, input_shardings = trainer_lib.compile_for_auto_sharding(
-          p_train_step, abstract_train_state, train_prng_seed,
-          inputs_shape_dtype)
-      train_state_metadata.partitioned_specs = jax.tree_map(
-          lambda x: x.spec, input_shardings[0])
-      inputs_pspecs = jax.tree_map(lambda x: x.spec, input_shardings[2])
     else:
-      p_train_step, inputs_pspecs = (
+      p_train_step, inputs_pspecs, _ = (
           trainer_lib.get_partitioned_spmd_model_step_fn(
               jax_task,
-              init_key,
+              train_prng_seed,
               train_state_metadata.partitioned_specs,
               inputs_shape_dtype,
               is_eval=False,
@@ -1171,7 +1156,7 @@ def train_and_evaluate_spmd_model(
     # TODO(pax): Support auto-sharding for eval step. In this case, we would
     # have to fix the sharding of the input to be the same as what's derived
     # from the train_step.
-    p_eval_step, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
+    p_eval_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
         jax_task,
         init_key,
         trainer_lib.train_state_for_eval_step(
@@ -1245,7 +1230,7 @@ def train_and_evaluate_spmd_model(
       logging.info('decode prng_key: %s', decode_key)
       decode_key = _broadcast_key(decode_key)
       # TODO(pax-dev): Support auto-sharding for decoder step.
-      decode_step_fn, decode_inputs_partition_spec = (
+      decode_step_fn, decode_inputs_partition_spec, _ = (
           trainer_lib.get_partitioned_spmd_model_decode_fn(
               jax_task,
               init_key,
