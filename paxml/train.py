@@ -255,6 +255,8 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     self._save_with_args(step_i, partitioned_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+    if not self.checkpoint_manager.should_save(step_i):
+      return
     self._save_with_args(step_i, partitioned_train_state)
     self.checkpoint_manager.check_for_errors()
 
@@ -417,6 +419,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
       return
+
     if py_utils.pmap_use_tensorstore():
       logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
                    step_i)
@@ -435,6 +438,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self._save_with_args(step_i, unreplicated_train_state)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+    if not self.checkpoint_manager.should_save(step_i):
+      return
     self._save(step_i, partitioned_train_state)
     self.checkpoint_manager.check_for_errors()
 
