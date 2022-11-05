@@ -27,12 +27,12 @@ cd /tmp/paxml
 From the /tmp/paxml directory, run
 
 ```sh
-rm -rf /tmp/paxml_pip_package_build
+rm -rf /tmp/wheels
 PYTHON_MINOR_VERSION=8 pip_package/build.sh
 ```
 
 If everything goes well, this will produce a wheel for python3.8 in
-/tmp/paxml_pip_package_build. You can copy to /tmp/paxml/ and
+/tmp/wheels , you can copy to /tmp/paxml/ and
 test scp it to a VM
 
 If this works successfully, you can then upload to the production server.

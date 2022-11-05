@@ -8,7 +8,8 @@ LABEL maintainer="Pax team <pax-dev@google.com>"
 # instruction after a FROM.
 ARG cpu_base_image="ubuntu:20.04"
 ARG base_image=$cpu_base_image
-
+ARG wheel_folder
+ENV WHEEL_FOLDER $wheel_folder
 ENV PYTHON_VERSION="3"
 ENV PYTHON_MINOR_VERSION="8"
 
@@ -65,13 +66,12 @@ RUN mkdir /bazel && \
     rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
 
 COPY . /paxml
-RUN mkdir /tmp/paxml_pip_package_build/ && \
-  cd paxml && git log | head -n 1 | cut -d' ' -f2 \
-  > /tmp/paxml_pip_package_build/paxml_commit.txt
+
+RUN mkdir $WHEEL_FOLDER && cd paxml && \
+  git rev-parse HEAD > $WHEEL_FOLDER/paxml_commit.txt
 
 RUN git clone https://github.com/google/praxis.git && \
-  cd praxis && git log | head -n 1 | cut -d' ' -f2 \
-  > /tmp/paxml_pip_package_build/praxis_commit.txt
+  git rev-parse HEAD > $WHEEL_FOLDER/praxis_commit.txt
 
 RUN cp -r praxis/praxis /paxml/
 

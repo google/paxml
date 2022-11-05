@@ -2,8 +2,7 @@ steps:
 - name: 'gcr.io/cloud-builders/docker'
   args: [
           'build',
-          '--build-arg', 'python_version=${_PYTHON_VERSION}',
-          '--build-arg', 'release_version=${_RELEASE_VERSION}',
+          '--build-arg', 'wheel_folder=${_WHEEL_FOLDER}',
           '-t', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}',
           '-f', 'paxml/pip_package/Dockerfile', '.'
         ]
@@ -13,12 +12,13 @@ steps:
   timeout: 1800s
 - name: 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}'
   entrypoint: 'bash'
-  args: ['-c', 'source paxml/pip_package/collect_wheels.sh && collect_wheels ${_RELEASE_VERSION}']
+  args: ['-c', 'source paxml/pip_package/collect_wheels.sh && collect_wheels ${_RELEASE_VERSION} ${_WHEEL_FOLDER}']
 
 substitutions:
     _PYTHON_VERSION: '3.8'
     _RELEASE_VERSION: 'nightly'  # or rX.Y
     _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
+    _WHEEL_FOLDER: '/tmp/wheels'
 options:
     dynamic_substitutions: true
     substitution_option: 'ALLOW_LOOSE'
