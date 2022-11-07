@@ -402,7 +402,9 @@ class TextInput(base_input.BaseInput):
             maxlen=self.hparams.max_sequence_length,
             dtype=paddings.dtype),
         dtype=paddings.dtype)
-    return py_utils.NestedMap(ids=ids, labels=labels, paddings=new_paddings)
+    weights = 1. - new_paddings
+    return py_utils.NestedMap(
+        ids=ids, labels=labels, paddings=new_paddings, weights=weights)
 
   def _remove_bytes_repr(self, ds):
 
