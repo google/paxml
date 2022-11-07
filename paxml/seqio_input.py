@@ -1294,6 +1294,15 @@ class RemoveProvenance(seqio.PassThroughFeatureConverter):
     return ds
 
 
+class UnflattenAndRemoveProvenance(RemoveProvenance):
+  """Un-flattens and removes provenance fields added by Deterministic tasks."""
+
+  def __call__(self, ds: tf.data.Dataset,
+               task_feature_lengths: Mapping[str, int]) -> tf.data.Dataset:
+    ds = ds.map(seqio.unflatten_dict)
+    return super().__call__(ds, task_feature_lengths)
+
+
 class MetricType(enum.Enum):
   """SeqIO metric types."""
   PREDICT = 1  # decoding-based metrics
