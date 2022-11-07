@@ -3,7 +3,7 @@ clu
 etils
 flax
 jax
-lingvo~=0.12.3
+lingvo~=0.12.4
 numpy
 orbax
 praxis
