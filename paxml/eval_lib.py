@@ -47,6 +47,7 @@ from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import base_model
 from praxis import optimizer_prefix_vectorization
 from praxis import py_utils
 from praxis import pytypes
@@ -146,6 +147,32 @@ def _wait_until_step(checkpointer, start_step):
     if cur_step is not None and start_step <= cur_step:
       break
     time.sleep(300)
+
+
+def _maybe_update_decode_output_keys(
+    process_decode_output: base_model.ProcessDecodeOut,
+    decode_out: NestedMap) -> base_model.ProcessDecodeOut:
+  """Return output with updated keys if using SeqIO enum-based keys."""
+  original_kv_pairs = process_decode_output[1]
+  updated_kv_pairs = []
+
+  def _safe_index(i: int, x: Any) -> Any:
+    try:
+      return x[i]
+    except IndexError:
+      # Some pytree leafs, which we don't care about, may not be indexable.
+      return None
+
+  for idx, (k, v) in enumerate(original_kv_pairs):
+    ex = jax.tree_map(lambda x: _safe_index(idx, x), decode_out)  # pylint: disable=cell-var-from-loop
+    enum_key = py_utils.get_enumeration_id(ex)
+
+    if enum_key:
+      k = enum_key
+
+    updated_kv_pairs.append((k, v))
+
+  return (process_decode_output[0], updated_kv_pairs, process_decode_output[2])
 
 
 def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
@@ -1573,8 +1600,10 @@ def decode_once_pmap_model(
       # don't want on-device allocation as would eventually lead to HBM OOM.
       if jax.process_index() == 0:
         with jax.default_device(jax.devices('cpu')[0]):
-          process_decode_output = model.process_decode_out(
-              inputs[split], jax.tree_map(np.asarray, out))
+          out = jax.tree_map(np.asarray, out)
+          process_decode_output = model.process_decode_out(inputs[split], out)
+          process_decode_output = _maybe_update_decode_output_keys(
+              process_decode_output, out)
 
         (processed_scalars, processed_out,
          processed_metric_updates) = process_decode_output
@@ -2035,8 +2064,11 @@ def decode_once_spmd_model(
       # expected to be JIT friendly. Since we keep track of its outputs, we also
       # don't want on-device allocation as would eventually lead to HBM OOM.
       with jax.default_device(jax.devices('cpu')[0]):
+        out = jax.tree_map(np.asarray, out)
         process_decode_output = jax_task.model.process_decode_out(
-            inputs[split], jax.tree_map(np.asarray, out))
+            inputs[split], out)
+        process_decode_output = _maybe_update_decode_output_keys(
+            process_decode_output, out)
 
       (process_weighted_scalars, processed,
        processed_metric_updates) = process_decode_output

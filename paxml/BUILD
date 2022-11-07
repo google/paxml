@@ -180,6 +180,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:base_model",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:py_utils",
         "//praxis:pytypes",
