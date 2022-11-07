@@ -1556,7 +1556,9 @@ def get_partitioned_spmd_model_decode_fn(
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
         train_global_input_shapes)
   else:
-    assert train_global_input_shapes is None
+    # TODO(laigd): check that this is None if always_use_train_for_model_init is
+    # not set.
+    train_global_input_shapes = None
     var_weight_hparams = jax_task.model.abstract_init_with_metadata(
         inputs_shape_dtype, do_eval=True)
 
