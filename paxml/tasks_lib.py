@@ -303,6 +303,8 @@ class SingleTask(base_task.BaseTask):
         this value is not a positive int. Set to 0 to disable decode steps.
       decode_start_after_n_steps: Starts decoder after N steps, only used in
         continuous decoding.
+      decode_use_ema_state: If True, use ema states to run decode during train,
+        note that in this case ema MUST be enabled in the learner.
       profiler_num_steps: The number of steps to be captured by the profiler
         based on the step time estimate.
       profiler_min_duration_sec: The minimum duration to be captured by the
@@ -332,6 +334,8 @@ class SingleTask(base_task.BaseTask):
         str, CheckpointLoadingRules] = dataclasses.field(default_factory=dict)
     decode_interval_steps: Optional[int] = None
     decode_start_after_n_steps: int = 0
+    # TODO(zhishuai): verify this for a pjit model.
+    decode_use_ema_state: bool = False
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None

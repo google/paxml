@@ -1456,7 +1456,15 @@ def _train_and_evaluate_common(
       decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
       if (decode_input_p and train_p.decode_interval_steps and
           step_i % train_p.decode_interval_steps == 0):
-        decode_metrics = decode_once_fn(partitioned_train_state,
+        if train_p.decode_use_ema_state:
+          if not eval_lib.has_ema(task_p):
+            raise ValueError('decode_use_ema_state is requested but the '
+                             'learner does not seem to have ema enabled')
+          decode_partitioned_train_state = eval_lib.extract_ema(
+              partitioned_train_state)
+        else:
+          decode_partitioned_train_state = partitioned_train_state
+        decode_metrics = decode_once_fn(decode_partitioned_train_state,
                                         decode_summary_writers)
 
       logging.debug('step=`%d`: End', step_i - 1)
