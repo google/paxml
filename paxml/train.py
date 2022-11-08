@@ -1119,24 +1119,16 @@ def train_and_evaluate_spmd_model(
       raise NotImplementedError(
           'Per-device batch size < 1 not supported for auto sharding.')
     logging.info('Auto sharding is enabled in PAX.')
-    (p_train_step, inputs_pspecs, train_state_metadata.partitioned_specs
-    ) = trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
-        jax_task,
-        train_prng_seed,
-        global_mesh=global_mesh,
-        model_state_partition_specs=None,
-        inputs_shape_dtype=inputs_shape_dtype,
-        is_eval=False)
-  else:
-    p_train_step, inputs_pspecs, _ = (
-        trainer_lib.get_partitioned_spmd_model_step_fn(
-            jax_task,
-            train_prng_seed,
-            global_mesh,
-            train_state_metadata.partitioned_specs,
-            inputs_shape_dtype,
-            is_eval=False,
-            unpadded_global_batch_size=train_unpadded_global_batch_size))
+  (p_train_step, inputs_pspecs, train_state_metadata.partitioned_specs
+  ) = trainer_lib.get_partitioned_spmd_model_step_fn(
+      jax_task,
+      trainer_lib.RunningMode.TRAIN,
+      global_mesh,
+      train_prng_seed,
+      inputs_shape_dtype,
+      train_state_partition_spec=train_state_metadata.partitioned_specs,
+      unpadded_global_batch_size=train_unpadded_global_batch_size,
+      enable_auto_sharding=enable_auto_sharding)
 
   # Try to restore from checkpoint.
   partitioned_train_state = checkpointer.restore(
@@ -1163,12 +1155,12 @@ def train_and_evaluate_spmd_model(
   # from the train_step.
   p_eval_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
       jax_task,
-      init_key,
+      trainer_lib.RunningMode.EVAL,
       global_mesh,
-      trainer_lib.train_state_for_eval_step(
-          train_state_metadata.partitioned_specs),
+      init_key,
       inputs_shape_dtype,
-      is_eval=True,
+      train_state_partition_spec=trainer_lib.train_state_for_eval_step(
+          train_state_metadata.partitioned_specs),
       unpadded_global_batch_size=train_unpadded_global_batch_size)
 
   logging.info(
@@ -1237,14 +1229,15 @@ def train_and_evaluate_spmd_model(
     decode_key = _broadcast_key(decode_key)
     # TODO(pax-dev): Support auto-sharding for decoder step.
     decode_step_fn, decode_inputs_partition_spec, _ = (
-        trainer_lib.get_partitioned_spmd_model_decode_fn(
+        trainer_lib.get_partitioned_spmd_model_step_fn(
             jax_task,
-            init_key,
+            trainer_lib.RunningMode.DECODE,
             global_mesh,
-            trainer_lib.train_state_for_eval_step(
-                train_state_metadata.partitioned_specs),
-            train_sample_inputs,
+            init_key,
             decode_inputs_shape_dtype,
+            train_sample_inputs,
+            train_state_partition_spec=trainer_lib.train_state_for_eval_step(
+                train_state_metadata.partitioned_specs),
             unpadded_global_batch_size=decode_unpadded_global_batch_size))
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
         jax_task, task_p, decode_input_pipelines, decode_input_p, job_log_dir,

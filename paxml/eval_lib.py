@@ -918,36 +918,17 @@ class _SpmdEvalRunner:
 
     if not jax_task.hparams.train.always_use_train_for_model_init:
       inputs_shape = input_shape_dtypes
-      if is_decode:
-        step_fn, inputs_partition_specs, partitioned_specs = (
-            trainer_lib.get_partitioned_spmd_model_decode_fn(
-                jax_task,
-                step_key,
-                global_mesh,
-                trim_opt_states(partitioned_specs),
-                input_shape_dtypes,
-                inputs_shape,
-                enable_auto_sharding=enable_auto_sharding))
-      else:
-        if enable_auto_sharding:
-          step_fn, inputs_partition_specs, partitioned_specs = (
-              trainer_lib.get_partitioned_spmd_model_step_fn_auto_shard(
-                  jax_task,
-                  step_key,
-                  global_mesh=global_mesh,
-                  model_state_partition_specs=None,
-                  inputs_shape_dtype=inputs_shape,
-                  is_eval=True))
-        else:
-          step_fn, inputs_partition_specs, _ = (
-              trainer_lib.get_partitioned_spmd_model_step_fn(
-                  jax_task,
-                  step_key,
-                  global_mesh,
-                  trainer_lib.train_state_for_eval_step(partitioned_specs),
-                  inputs_shape,
-                  is_eval=True,
-                  unpadded_global_batch_size=unpadded_global_batch_size))
+      step_fn, inputs_partition_specs, partitioned_specs = (
+          trainer_lib.get_partitioned_spmd_model_step_fn(
+              jax_task,
+              trainer_lib.RunningMode.DECODE
+              if is_decode else trainer_lib.RunningMode.EVAL,
+              global_mesh,
+              step_key,
+              inputs_shape,
+              train_state_partition_spec=trim_opt_states(partitioned_specs),
+              unpadded_global_batch_size=unpadded_global_batch_size,
+              enable_auto_sharding=enable_auto_sharding))
 
     if partitioned_train_state is None:
       _, partitioned_train_state = (
@@ -981,11 +962,12 @@ class _SpmdEvalRunner:
     eval_step, inputs_partition_specs, _ = (
         trainer_lib.get_partitioned_spmd_model_step_fn(
             self._jax_task,
-            init_key,
+            trainer_lib.RunningMode.EVAL,
             self.global_mesh,
-            trainer_lib.train_state_for_eval_step(partitioned_specs),
+            init_key,
             self._inputs_shape,
-            is_eval=True,
+            train_state_partition_spec=trainer_lib.train_state_for_eval_step(
+                partitioned_specs),
             unpadded_global_batch_size=unpadded_global_batch_size))
     self._eval_step = eval_step
     self._inputs_partition_specs = inputs_partition_specs
@@ -1811,10 +1793,10 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
     partitioned_specs = train_state_metadata.partitioned_specs
     train_state_global_shapes = train_state_metadata.padded_global_shapes
     decode_step_fn, inputs_partition_specs, _ = (
-        trainer_lib.get_partitioned_spmd_model_decode_fn(
-            jax_task, init_key, global_mesh,
-            trim_opt_states(train_state_metadata.partitioned_specs),
-            train_state_metadata.input_shape_dtype, input_shape_dtypes))
+        trainer_lib.get_partitioned_spmd_model_step_fn(
+            jax_task, trainer_lib.RunningMode.DECODE, global_mesh, init_key,
+            input_shape_dtypes, train_state_metadata.input_shape_dtype,
+            trim_opt_states(train_state_metadata.partitioned_specs)))
   else:
     assert isinstance(model_states_out, tuple)
     (partitioned_train_state, partitioned_specs, train_state_global_shapes,
