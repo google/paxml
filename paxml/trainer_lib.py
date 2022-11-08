@@ -1262,6 +1262,10 @@ class _SpmdModelPartitioner:
   def partition(self, step_fn, is_eval):
     """Gets a sharded (pjit-ed) step function of the SPMD Model.
 
+    Args:
+      step_fn: Training or eval step function.
+      is_eval: bool, indicating if it's a eval/decode task or not.
+
     Returns:
       (partitioned_step_fn, input_partition_spec, train_state_partition_spec):
 
