@@ -22,7 +22,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 import jax
@@ -114,6 +114,16 @@ def _convert_bytes_to_str(tree: Any) -> Any:
     return leaf.decode('utf-8')
 
   return jax.tree_map(_convert_fn, tree)
+
+
+def _select_split(
+    task: str,
+    split_name: Union[str, Callable[[str], str]],
+) -> str:
+  """Returns a split name given a split selector (Callable) or str literal."""
+  if callable(split_name):
+    return split_name(task)
+  return split_name
 
 
 def should_process_outputs(inp: base_input.BaseInput) -> bool:
@@ -1315,11 +1325,11 @@ def get_eval_hparams_for_seqio(
     feature_lengths: Mapping[str, int],
     seed: int,
     metric_type: MetricType,
-    split_name: str = 'validation',
+    split_name: Union[str, Callable[[str], str]] = "validation",
     feature_converter: Optional[seqio.FeatureConverter] = None,
     num_infeed_hosts: int = 0,
     use_enumeration: bool = False,
-) -> Sequence[SeqIOInput.HParams]:
+) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
   This is the easiest way to configure eval hparams in datasets() (for scoring
@@ -1347,7 +1357,10 @@ def get_eval_hparams_for_seqio(
       prompts selected.
     metric_type: The type of metrics to return hparams for. Configure PREDICT
       type in decoder_datasets() and SCORE type in datasets().
-    split_name: The split to use for evaluation, defaults to 'validation'.
+    split_name: The split to use for evaluation, defaults to 'validation'. This
+      may optionally be a callable that takes a str task name (i.e. a member
+      of the provided mixture) and returns the name of the split to use for each
+      task.
     feature_converter: The SeqIO FeatureConverter to use to transform data,
       defaults to seqio_input.LanguageModelFeatures with packing disabled
     num_infeed_hosts: Usually set to jax.process_count(). Implementation must
@@ -1364,7 +1377,6 @@ def get_eval_hparams_for_seqio(
   p = SeqIOInput.HParams(
       name=task_or_mixture_name,
       mixture_name=task_or_mixture_name,
-      split_name=split_name,
       feature_converter=feature_converter,
       is_training=False,
       eval_loop_num_batches=None,
@@ -1388,11 +1400,16 @@ def get_eval_hparams_for_seqio(
   }
 
   # Split hparams per tasks and filter by metric type.
-  tasks = seqio.get_subtasks(seqio.get_mixture_or_task(task_or_mixture_name))
+  tasks: Sequence[seqio.Task] = seqio.get_subtasks(
+      seqio.get_mixture_or_task(task_or_mixture_name))
   hparams = []
   for task in tasks:
     hp = p.clone().set(mixture_name=task.name, name=task.name,
                        use_enumeration=use_enumeration)
+    # Allow selecting split based on `Callable` `split_name` if mixture contains
+    # tasks with varying splits.
+    hp.split_name = _select_split(task.name, split_name)
+    assert isinstance(hp.split_name, str)
     if task.predict_metric_fns and metric_type is MetricType.PREDICT:
       hparams.append(hp)
     if task.score_metric_fns and metric_type is MetricType.SCORE:
