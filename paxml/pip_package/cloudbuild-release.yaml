@@ -1,0 +1,31 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+          'build',
+          '-t', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}',
+          '-f', 'paxml/pip_package/release.Dockerfile', '.',
+          '--build-arg', 'wheel_folder=${_WHEEL_FOLDER}',
+          '--build-arg', 'praxis_version=${_PRAXIS_VERSION}',
+        ]
+  timeout: 14400s
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}']
+  timeout: 1800s
+- name: 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}'
+  entrypoint: 'bash'
+  args: ['-c', 'mv ${_WHEEL_FOLDER}/*.whl .']
+
+substitutions:
+    _PYTHON_VERSION: '3.8'
+    _RELEASE_VERSION: '0.1.0'  # or rX.Y
+    _PRAXIS_VERSION: '0.1.0'  # or rX.Y
+    _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
+    _WHEEL_FOLDER: '/tmp/wheels'
+options:
+    dynamic_substitutions: true
+    substitution_option: 'ALLOW_LOOSE'
+timeout: 24000s
+artifacts:
+  objects:
+    location: 'gs://pax-on-cloud-tpu-project/wheels/$(date -u +%Y%m%d)-paxml-${_RELEASE_VERSION}'
+    paths: ['/**/*.whl']
