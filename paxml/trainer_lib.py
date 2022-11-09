@@ -47,6 +47,7 @@ PartitionSpec = pjit.PartitionSpec
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
 NestedMap = py_utils.NestedMap
+NestedNpTensor = pytypes.NestedNpTensor
 NestedShape = NestedMap
 PRNGKey = pytypes.PRNGKey
 ParamsT = pytypes.HParamsT
@@ -255,79 +256,51 @@ def adjust_input_params_for_small_batch(
   if inp_p.experimental_remote_input:
     return inp_p
 
-  # Two cases are supported:
-  #   1) num_infeed_hosts == 1, and batch_size < local_device_count.
-  #   2) 1 < num_infeed_hosts < process_count, and batch_size ==
-  #     local_device_count.
   local_device_count = jax.local_device_count()
   batch_size = inp_p.cls.get_batch_size(inp_p)
 
-  # Case 1: num_infeed_hosts == 1 and process_count == 1, and batch_size <
-  # local_device_count.
-  if inp_p.num_infeed_hosts == 1 and jax.process_count() == 1:
-    if batch_size >= local_device_count:
-      return inp_p
-    copy = inp_p.clone()
-    copy.batch_padding_size = local_device_count - batch_size
-    return copy
-
-  # Case 2: 1 < num_infeed_hosts < process_count, and batch_size ==
-  #     local_device_count.
-  # This implementation requires part of the hosts to infeed real data, and that
-  # a host emits data for either all local cores or none of the local cores. It
-  # has limitations for TPU slice topologies, and the minimum per-core batch
-  # size also depends on the logical mesh shape.
-
-  # Despite the limitations, it should be generally fine for cases like:
-  #   TPUv4, physical topo 4xYxZ, minimum per-core batch size is at least 1/2
-  #   TPUv4, physical topo 8xYxZ, minimum per-core batch size is at least 1/4
-  #   ...
-  #   2x TPUv4 topology of 4xYxZ, minimum per-core batch size is at least 1/4
-  #   4x TPUv4 topology of 8xYxZ, minimum per-core batch size is at least 1/16
-
-  # A more ideal way would be to still have each host infeed data, then pad for
-  # the local cores. However, that would require shuffling the batch since the
-  # cores that have data may not be contiguous on the device mesh. It is
-  # solvable by having a different device mesh for the inputs, then we
-  # immediately reshard it with the default device mesh (collective permute),
-  # but pjit doesn't support specific mesh on part of the arguments.
-  if inp_p.num_infeed_hosts == jax.process_count():
+  if (batch_size % local_device_count == 0 and
+      inp_p.num_infeed_hosts == jax.process_count()):
     return inp_p
-  assert inp_p.num_infeed_hosts < jax.process_count()
-  if local_device_count != batch_size:
-    raise NotImplementedError(
-        'Per-process batch size must be set to local_device_count when '
-        'num_infeed_hosts < process_count')
-  global_batch_size = batch_size * inp_p.num_infeed_hosts
-  if global_batch_size % local_device_count != 0:
-    raise NotImplementedError(
-        'Global batch size must be divisible by local_device_count.')
   copy = inp_p.clone()
-  # Some hosts will produce duplicate data, but they will be discarded.
-  copy.infeed_host_index = 0
-  has_real_data = [None] * jax.process_count()
-  global_device_idx = 0
-  # We place useful data on the left-aligned subsequence of all devices.
-  for device in global_mesh.devices.flat:
-    process_idx = device.process_index
-    device_has_data = global_device_idx < global_batch_size
-    if has_real_data[process_idx] is None:
-      has_real_data[process_idx] = device_has_data
-    elif has_real_data[process_idx] != device_has_data:
-      raise NotImplementedError(
-          'Devices in a process must either all receive inputs, or none '
-          'receives input. Try a larger num_infeed_hosts.')
-    global_device_idx += 1
-  process_idx = jax.process_index()
-  if has_real_data[process_idx]:
-    copy.infeed_host_index = sum(
-        [1 if p else 0 for p in has_real_data[:process_idx]])
-    logging.info('Process %s: infeed_host_index is set to %s', process_idx,
-                 copy.infeed_host_index)
+  if batch_size > local_device_count:
+    if batch_size % local_device_count != 0:
+      raise NotImplementedError('Per-host batch size must be a multiple of per-'
+                                'host device count, or smaller than it.')
   else:
-    logging.info(
-        'Process %s: infeed data will be dropped. infeed_host_index '
-        'is set to 0', process_idx)
+    copy.batch_padding_size = local_device_count - batch_size
+
+  assert inp_p.num_infeed_hosts <= jax.process_count()
+  if jax.process_count() == 1:
+    # If there is only one host, valid examples are already contiguous so we can
+    # use default GDA creation.
+    return copy
+  # Some hosts may produce duplicate data, but they will be discarded.
+  copy.infeed_host_index = jax.process_index() % inp_p.num_infeed_hosts
+  if copy.infeed_host_index >= inp_p.num_infeed_hosts:
+    logging.info('Process %s: infeed data will be dropped.',
+                 jax.process_index())
+
+  # Figure out the cores that have valid data, and construct a device order for
+  # GSPMD sharding that place the valid data on the left side of the logical
+  # input tensor.
+  per_host_core_counter = {}
+  for pid in range(jax.process_count()):
+    per_host_core_counter[pid] = 0
+  # We place useful data on the left-aligned subsequence of all devices.
+  used_cores = []
+  unused_cores = []
+  for global_device_idx, device in enumerate(global_mesh.devices.flat):
+    process_idx = device.process_index
+    core_offset_in_host = per_host_core_counter[device.process_index]
+    per_host_core_counter[device.process_index] += 1
+    if (process_idx >= inp_p.num_infeed_hosts or
+        core_offset_in_host >= batch_size):
+      # Not an infeeding host.
+      unused_cores.append(global_device_idx)
+    else:
+      used_cores.append(global_device_idx)
+  copy.custom_device_order = used_cores + unused_cores
   return copy
 
 
@@ -1163,6 +1136,9 @@ def _remove_input_padding(inputs: NestedJTensor,
   """Removes input padding on the batch dimension."""
   if unpadded_global_batch_size is None:
     return inputs
+  padded_global_batch_size = jax.tree_util.tree_leaves(inputs)[0].shape[0]
+  if padded_global_batch_size == unpadded_global_batch_size:
+    return inputs
 
   # At the beginning input is fully sharded on the batch dim which has
   # paddings. If we just slice out the padding, there won't be any overhead;
@@ -1176,7 +1152,6 @@ def _remove_input_padding(inputs: NestedJTensor,
   # and inner >= unpadded_global_batch_size. This way, halo exchange will be
   # limited inside the inner dim, and replication on the outer-dim is a
   # single all-reduce.
-  padded_global_batch_size = jax.tree_util.tree_leaves(inputs)[0].shape[0]
   inner_reshape_dim = padded_global_batch_size
   outer_reshape_dim = 1
   # Find a size for inner_reshape_dim that can evenly divide
@@ -1217,7 +1192,7 @@ class _SpmdModelPartitioner:
     train_state_partition_spec: TrainState
     # If not None, this is the unpadded size of global batch, and the padding is
     # on the right side of each input.
-    unpadded_global_batch_size: int
+    unpadded_global_batch_size: Optional[int]
 
   def __init__(self,
                jax_task: tasks_lib.SingleTask,
@@ -1278,10 +1253,11 @@ class _SpmdModelPartitioner:
     """
     state_unpadded_shapes = (None if self._enable_auto_sharding else
                              self._get_state_unpadded_shapes(is_eval))
-    # Step function to be pjit-ed.
-    wrapped_step_fn = self._get_step_fn(step_fn, is_eval, state_unpadded_shapes)
     input_partition_spec = get_input_partition_specs(self._mesh_names,
                                                      self._inputs_shape_dtype)
+    # Step function to be pjit-ed.
+    wrapped_step_fn = self._get_step_fn(step_fn, is_eval, state_unpadded_shapes,
+                                        input_partition_spec)
     with self._global_mesh:
       if self._enable_auto_sharding:
         return self._partition_auto_shard(wrapped_step_fn, is_eval,
@@ -1291,7 +1267,8 @@ class _SpmdModelPartitioner:
                                             input_partition_spec,
                                             state_unpadded_shapes)
 
-  def _get_step_fn(self, step_fn, is_eval, state_unpadded_shapes):
+  def _get_step_fn(self, step_fn, is_eval, state_unpadded_shapes,
+                   input_partition_spec):
     """Returns a step function to apply the SPMD partition (pjit)."""
     task_p = self._jax_task.hparams
     model_p = task_p.model
@@ -1305,6 +1282,12 @@ class _SpmdModelPartitioner:
       # TODO(pax-dev): Add support for padding and unpadding inputs when auto
       # sharding is enabled.
       if not self._enable_auto_sharding:
+        # When there are input padding on multi-host, we use a different device
+        # order in the program's input sharding. We now make sure they are
+        # resharded back to the device order consistent with the global mesh.
+        inputs = jax.tree_util.tree_map(
+            lambda x, s: base_layer.maybe_shard(x, s, self._mesh_names), inputs,
+            input_partition_spec)
         # Vars/inputs are padded at program entry/exit to avoid uneven sharding.
         # We slice the vars to remove padding before the step computation, and
         # pad them after the step computation to make user code independent of
@@ -1341,17 +1324,27 @@ class _SpmdModelPartitioner:
 
     return _wrapped_step_fn
 
-  def _pjit(self, step_fn, is_eval, fn_in_partition_specs,
-            fn_out_partition_specs):
+  def _pjit(self,
+            step_fn,
+            is_eval,
+            fn_in_partition_specs,
+            fn_out_partition_specs,
+            use_pspec_on_array_inputs=False):
     logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
     logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
-    pjitted_fn = pjit.pjit(
-        step_fn,
-        in_axis_resources=fn_in_partition_specs,
-        out_axis_resources=fn_out_partition_specs,
-        # For training we don't need the original TrainState after running the
-        # train step.
-        donate_argnums=() if is_eval else (0,))
+    if jax.config.jax_array and not use_pspec_on_array_inputs:
+      pjitted_fn = pjit.pjit(
+          step_fn,
+          out_axis_resources=fn_out_partition_specs,
+          # For training we don't need the original TrainState after running the
+          # train step.
+          donate_argnums=() if is_eval else (0,))
+    else:
+      pjitted_fn = pjit.pjit(
+          step_fn,
+          in_axis_resources=fn_in_partition_specs,
+          out_axis_resources=fn_out_partition_specs,
+          donate_argnums=() if is_eval else (0,))
     return bind_mesh(pjitted_fn, self._global_mesh)
 
   def _get_var_weight_hparams(self, is_eval):
@@ -1401,8 +1394,12 @@ class _SpmdModelPartitioner:
     fn_out_partition_specs = (
         PartitionSpec() if self._auto_sharding_replicate_output else pjit.AUTO)
 
-    partitioned_step_fn = self._pjit(step_fn, is_eval, fn_in_partition_specs,
-                                     fn_out_partition_specs)
+    partitioned_step_fn = self._pjit(
+        step_fn,
+        is_eval,
+        fn_in_partition_specs,
+        fn_out_partition_specs,
+        use_pspec_on_array_inputs=True)
 
     # NOTE(pax-dev): The following is currently incompatible with variable
     # uneven-sharding padding. When enable_auto_sharding is False,
