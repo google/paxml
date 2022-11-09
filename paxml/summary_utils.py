@@ -475,12 +475,14 @@ class SummaryHandler:
       self._summary_pool = None
 
   def __del__(self):
-    self.close()
+    # A blocking shutdown may prevent the main thread from exiting when an
+    # exception happens.
+    self.close(wait=False)
 
-  def close(self):
+  def close(self, wait=True):
     """Shutdown the thread pool if processing summaries asynchronously."""
     if self._summary_pool:
-      self._summary_pool.shutdown(wait=True)
+      self._summary_pool.shutdown(wait=wait)
 
   @property
   def accumulate_over_steps(self) -> bool:

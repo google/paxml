@@ -1489,3 +1489,6 @@ def _train_and_evaluate_common(
     # Save checkpoint for the last step.
     checkpointer.save_final(step_i, partitioned_train_state,
                             train_state_metadata.partitioned_specs)
+
+    train_summary_handler.close()
+    eval_summary_handler.close()
