@@ -49,11 +49,11 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     if not training_splits:
       raise ValueError(
           'Could not find any training split dataset in this experiment '
-          'config (`{self.datasets()}`).')
+          f'config (`{self.datasets()}`).')
     if len(training_splits) > 1:
       raise ValueError(
           'Found multiple training split datasets in this experiment '
-          'config (`{self.datasets()}`).')
+          f'config (`{self.datasets()}`).')
     return training_splits[0]
 
   # Optional. Returns a list of datasets to be decoded.
