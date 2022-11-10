@@ -155,7 +155,7 @@ class BaseTaskTest(test_utils.TestCase):
                                                    inputs)
 
     def eval_step(states, prng_key, inputs):
-      states = trainer_lib.train_state_for_eval_step(states)
+      states = states.to_eval_state()
       return trainer_lib.eval_step_single_learner(jax_task, states, prng_key,
                                                   inputs)
 

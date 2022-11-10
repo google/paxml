@@ -1123,13 +1123,6 @@ def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
   return jax.tree_util.tree_map(inputs_partition_spec_fn, inputs_shape_dtype)
 
 
-def train_state_for_eval_step(state_with_opt_states):
-  return TrainState(
-      step=state_with_opt_states.step,
-      mdl_vars=state_with_opt_states.mdl_vars,
-      opt_states={})
-
-
 def _remove_input_padding(inputs: NestedJTensor,
                           unpadded_global_batch_size: Optional[int] = None,
                           mesh_names: Optional[Sequence[str]] = None):

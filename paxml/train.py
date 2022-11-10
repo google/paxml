@@ -1159,8 +1159,8 @@ def train_and_evaluate_spmd_model(
       global_mesh,
       init_key,
       inputs_shape_dtype,
-      train_state_partition_spec=trainer_lib.train_state_for_eval_step(
-          train_state_metadata.partitioned_specs),
+      train_state_partition_spec=train_state_metadata.partitioned_specs
+      .to_eval_state(),
       unpadded_global_batch_size=train_unpadded_global_batch_size)
 
   logging.info(
@@ -1236,8 +1236,8 @@ def train_and_evaluate_spmd_model(
             init_key,
             decode_inputs_shape_dtype,
             train_sample_inputs,
-            train_state_partition_spec=trainer_lib.train_state_for_eval_step(
-                train_state_metadata.partitioned_specs),
+            train_state_partition_spec=train_state_metadata.partitioned_specs
+            .to_eval_state(),
             unpadded_global_batch_size=decode_unpadded_global_batch_size))
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
         jax_task, task_p, decode_input_pipelines, decode_input_p, job_log_dir,
@@ -1395,8 +1395,7 @@ def _train_and_evaluate_common(
       if (train_p.eval_interval_steps and
           step_i % train_p.eval_interval_steps == 0):
         eval_step_fn = functools.partial(
-            p_eval_step,
-            trainer_lib.train_state_for_eval_step(partitioned_train_state),
+            p_eval_step, partitioned_train_state.to_eval_state(),
             eval_prng_seed)
 
         logging.debug('  Starting eval_step().')

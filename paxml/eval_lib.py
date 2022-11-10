@@ -217,13 +217,6 @@ def extract_ema(
                    model_states.opt_states)
 
 
-def trim_opt_states(
-    model_states: train_states.TrainState) -> train_states.TrainState:
-  """Trim the optimizer states from a TrainState instance."""
-  return train_states.TrainState(
-      step=model_states.step, mdl_vars=model_states.mdl_vars, opt_states={})
-
-
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
   """Adapts particular implementations of checkpointing into a common API."""
 
@@ -342,7 +335,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     if self.use_ema:
       model_states = extract_ema(model_states)
     elif not self.track_metric:
-      model_states = trim_opt_states(model_states)
+      model_states = model_states.to_eval_state()
     replicated_model_states = trainer_lib.replicate_model_state(model_states)
     del model_states  # Unused at that point.
     return replicated_model_states
@@ -382,7 +375,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           discard_opt_states=not self.use_ema,
           is_eval=is_eval_for_init)
     elif not self.use_ema and not self.track_metric:
-      model_states = trim_opt_states(model_states)
+      model_states = model_states.to_eval_state()
     if self.use_ema:
       model_states = extract_ema(model_states)
     replicated_model_states = trainer_lib.replicate_model_state(model_states)
@@ -867,7 +860,7 @@ class _SpmdEvalRunner:
     self._eval_step = None
     self._inputs_partition_specs = None
     if use_ema:
-      partitioned_specs = trim_opt_states(partitioned_specs)
+      partitioned_specs = partitioned_specs.to_eval_state()
     self._run_pjit(init_key, partitioned_specs, unpadded_global_batch_size)
 
   @classmethod
@@ -926,7 +919,7 @@ class _SpmdEvalRunner:
               global_mesh,
               step_key,
               inputs_shape,
-              train_state_partition_spec=trim_opt_states(partitioned_specs),
+              train_state_partition_spec=partitioned_specs.to_eval_state(),  # pytype: disable=attribute-error
               unpadded_global_batch_size=unpadded_global_batch_size,
               enable_auto_sharding=enable_auto_sharding))
 
@@ -966,8 +959,7 @@ class _SpmdEvalRunner:
             self.global_mesh,
             init_key,
             self._inputs_shape,
-            train_state_partition_spec=trainer_lib.train_state_for_eval_step(
-                partitioned_specs),
+            train_state_partition_spec=partitioned_specs.to_eval_state(),
             unpadded_global_batch_size=unpadded_global_batch_size))
     self._eval_step = eval_step
     self._inputs_partition_specs = inputs_partition_specs
@@ -986,10 +978,9 @@ class _SpmdEvalRunner:
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
-    eval_step_fn = functools.partial(
-        self._eval_step,
-        trainer_lib.train_state_for_eval_step(partitioned_train_state),
-        eval_key)
+    eval_step_fn = functools.partial(self._eval_step,
+                                     partitioned_train_state.to_eval_state(),
+                                     eval_key)
     # Run the eval loop.
     with self.global_mesh:
       return run_eval_loop_over_test_splits(
@@ -1464,7 +1455,7 @@ def decode_once_pmap_model(
       prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
     else:
       prng_seed_decode = prng_key
-    mdl_states = trainer_lib.train_state_for_eval_step(mdl_states)
+    mdl_states = mdl_states.to_eval_state()
     (weighted_scalars, per_example_out,
      updated_metrics), updated_vars = trainer_lib.decode_step(
          model, mdl_states, prng_seed_decode, var_weight_hparams, inputs,
@@ -1796,7 +1787,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
         trainer_lib.get_partitioned_spmd_model_step_fn(
             jax_task, trainer_lib.RunningMode.DECODE, global_mesh, init_key,
             input_shape_dtypes, train_state_metadata.input_shape_dtype,
-            trim_opt_states(train_state_metadata.partitioned_specs)))
+            train_state_metadata.partitioned_specs.to_eval_state()))
   else:
     assert isinstance(model_states_out, tuple)
     (partitioned_train_state, partitioned_specs, train_state_global_shapes,
@@ -1947,9 +1938,8 @@ def decode_once_spmd_model(
   # use a single global key instead to rely on pjit to split for different
   # replicas.
   logging.info('decode prng_key: %s', prng_key)
-  spmd_decode_step_fn = functools.partial(
-      decode_step_fn, trainer_lib.train_state_for_eval_step(train_state),
-      prng_key)
+  spmd_decode_step_fn = functools.partial(decode_step_fn,
+                                          train_state.to_eval_state(), prng_key)
 
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
