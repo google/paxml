@@ -1325,10 +1325,11 @@ def get_eval_hparams_for_seqio(
     feature_lengths: Mapping[str, int],
     seed: int,
     metric_type: MetricType,
-    split_name: Union[str, Callable[[str], str]] = "validation",
+    split_name: Union[str, Callable[[str], str]] = 'validation',
     feature_converter: Optional[seqio.FeatureConverter] = None,
     num_infeed_hosts: int = 0,
     use_enumeration: bool = False,
+    use_cached: bool = False,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1369,6 +1370,7 @@ def get_eval_hparams_for_seqio(
         if it is still not set during __init__, a value of 1 will be used.
     use_enumeration: whether to use enumeration in both batch generation
       (get_next()) and metrics computation. For details, see SeqIOInput.HParams.
+    use_cached: whether to use cached data.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1405,7 +1407,8 @@ def get_eval_hparams_for_seqio(
   hparams = []
   for task in tasks:
     hp = p.clone().set(mixture_name=task.name, name=task.name,
-                       use_enumeration=use_enumeration)
+                       use_enumeration=use_enumeration,
+                       use_cached=use_cached)
     # Allow selecting split based on `Callable` `split_name` if mixture contains
     # tasks with varying splits.
     hp.split_name = _select_split(task.name, split_name)
