@@ -1,0 +1,18 @@
+# To update requirements.txt for praxis and paxml, run:
+# bash ./compile_requirements.sh
+
+absl-py
+clu
+etils
+flax
+jax
+lingvo~=0.12.4
+numpy
+orbax
+praxis
+pyglove
+seqio-nightly
+t5
+tensorflow~=2.9.2
+tensorflow-text~=2.9.0
+tensorstore

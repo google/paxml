@@ -23,7 +23,7 @@ from setuptools import setup
 def _get_requirements():
   """Parses requirements.txt file."""
   install_requires_tmp = []
-  with open(os.path.join(os.path.dirname(__file__), './requirements.txt'),
+  with open(os.path.join(os.path.dirname(__file__), './requirements.in'),
             'r') as f:
     for line in f:
       package_name = line.strip()

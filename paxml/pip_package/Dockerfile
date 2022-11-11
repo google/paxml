@@ -52,6 +52,8 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
 # Make python3.8 the default python version
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 0
 
+# Install pip package
+RUN pip3 install pip-tools
 
 ARG bazel_version=5.1.1
 # This is to install bazel, for development purposes.
@@ -75,8 +77,20 @@ RUN git clone https://github.com/google/praxis.git && \
 
 RUN cp -r praxis/praxis /paxml/
 
-RUN pip3 install paxml/praxis/pip_package
-RUN pip3 install paxml/paxml/pip_package
+RUN pip-compile --quiet /paxml/praxis/pip_package/requirements.in \
+    --output-file $WHEEL_FOLDER/praxis_requirements.txt && \
+    diff -a /paxml/praxis/pip_package/requirements.txt \
+    -b $WHEEL_FOLDER/praxis_requirements.txt > \
+    $WHEEL_FOLDER/praxis_requirements_diff.txt
+
+RUN pip-compile --quiet /paxml/praxis/pip_package/requirements.in \
+    /paxml/paxml/pip_package/requirements.in \
+    --output-file $WHEEL_FOLDER/paxml_requirements.txt && \
+    diff -a /paxml/paxml/pip_package/requirements.txt \
+    -b $WHEEL_FOLDER/paxml_requirements.txt > \
+    $WHEEL_FOLDER/paxml_requirements_diff.txt
+
+RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
 
 RUN git clone https://github.com/google/flaxformer.git
 RUN cd flaxformer && pip3 install .
@@ -84,7 +98,23 @@ RUN cd flaxformer && pip3 install .
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
 #TODO:enable -praxis/layers:normalizations_test once the new Lingvo pip package is released
-RUN cd praxis && bazel test --test_output=all --test_verbose_timeout_warnings -- praxis/... -praxis/layers:transformer_models_test -praxis/layers:flaxformer_models_test -praxis/layers:ngrammer_test -praxis/layers:attentions_test -praxis/layers:transformers_test -praxis/layers:models_test -praxis/layers:convolutions_test -praxis/layers:embedding_softmax_test -praxis/layers:ctc_objectives_test -praxis/layers:normalizations_test
+RUN cd praxis && \
+  bazel test \
+  --test_output=all \
+  --test_verbose_timeout_warnings \
+  -- \
+  praxis/... \
+  -praxis/layers:attentions_test \
+  -praxis/layers:convolutions_test \
+  -praxis/layers:ctc_objectives_test \
+  -praxis/layers:embedding_softmax_test \
+  -praxis/layers:flaxformer_models_test \
+  -praxis/layers:models_test \
+  -praxis/layers:ngrammer_test \
+  -praxis/layers:normalizations_test \
+  -praxis/layers:transformer_models_test \
+  -praxis/layers:transformers_test
+
 RUN cd praxis && bash praxis/pip_package/build_pip_pkg.sh
 
 WORKDIR /
