@@ -2095,8 +2095,8 @@ def _common_eval_or_decode_loop(
     global_mesh: Optional[maps.Mesh],
     input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
-    eval_one_step_fn: Callable,
-    decode_once_fn: Optional[Callable],
+    eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
+    decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: train_states.TrainState,
     train_state_global_shapes: train_states.TrainState,
     partitioned_specs: Optional[train_states.TrainState],
@@ -2129,11 +2129,11 @@ def _common_eval_or_decode_loop(
                                         mode):
         decode_metrics = None
         if input_p:
-          logging.info('Decoding step %d ckpt ...', last_checkpoint_step)
+          logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
           decode_metrics = decode_once_fn(partitioned_train_state,
                                           summary_writers)
 
-        logging.info('Evaling step %d ckpt ...', last_checkpoint_step)
+        logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
         eval_metrics = eval_one_step_fn(partitioned_train_state,
                                         eval_summary_writers)
 
