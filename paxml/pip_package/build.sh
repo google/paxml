@@ -74,7 +74,7 @@ write_action_env_to_bazelrc "TF_NEED_CUDA" ${TF_NEED_CUDA}
 
 bazel clean
 bazel build ...
-bazel test paxml/... --test_output=all --test_verbose_timeout_warnings
+bazel test  --test_output=all --test_verbose_timeout_warnings   --  paxml/... -paxml/tasks/vision:input_generator_test
 
 ./pip_package/build_pip_pkg.sh "$DST_DIR" ${PYTHON_VERSION}
 pip3 freeze > "${DST_DIR}/dependencies.txt"

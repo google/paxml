@@ -11,9 +11,11 @@ RUN pip3 install -r /paxml/paxml/pip_package/requirements.txt
 RUN cd /paxml && bazel build ...
 RUN cd /paxml && \
   bazel test \
-    paxml/... \
-    --test_output=all \
-    --test_verbose_timeout_warnings
+  --test_output=all \
+  --test_verbose_timeout_warnings \
+  -- \
+  paxml/... \
+  -paxml/tasks/vision:input_generator_test
 
 WORKDIR /
 
