@@ -117,6 +117,13 @@ class BaseImageNetInput(base_input_generator.BaseInputGeneratorFromFiles):
   def _is_training(self):
     raise NotImplementedError('Abstract method of %s' % self)
 
+  def ImageBytesToBatch(self, image_bytes):
+    """Returns an input batch containing the image_bytes."""
+    image = self._preprocess(image_bytes)
+    # Adds dim 0
+    image = image[tf.newaxis, ...]
+    return py_utils.NestedMap(image=image)
+
 
 class ImageNetTrain(BaseImageNetInput):
   """Imagenet train set."""
