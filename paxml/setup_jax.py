@@ -45,7 +45,7 @@ def setup_jax(globally_use_hardware_rng: bool,
   # https://github.com/google/jax/blob/main/jax/_src/config.py
   jax.config.update('jax_traceback_filtering', jax_traceback_filtering_option)
 
-  if jax_array and jax_xla_backend != 'pathways':
+  if jax_array:
     # Always default to Array.
     jax.config.update('jax_array', True)
     jax.config.update('jax_parallel_functions_output_gda', False)

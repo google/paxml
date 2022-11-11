@@ -127,9 +127,15 @@ def restore_pmap_from_tensorstore(global_shapes,
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
-    fully_replicated_sda_model_states = jax.tree_map(
-        py_utils.convert_fully_replicated_gda_to_sda,
-        fully_replicated_gda_model_states)
+    if jax.config.jax_array:
+      fully_replicated_array_model_states = jax.tree_map(
+          py_utils.convert_fully_replicated_array_to_pmap_array,
+          fully_replicated_gda_model_states)
+      return fully_replicated_array_model_states
+    else:
+      fully_replicated_sda_model_states = jax.tree_map(
+          py_utils.convert_fully_replicated_gda_to_sda,
+          fully_replicated_gda_model_states)
     return fully_replicated_sda_model_states
   # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
