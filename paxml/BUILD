@@ -383,6 +383,7 @@ pytype_strict_library(
         ":io_utils",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
@@ -604,11 +605,12 @@ py_strict_test(
     python_version = "PY3",
     srcs_version = "PY3",
     deps = [
-        ":base_experiment",
         ":checkpoints",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
@@ -620,6 +622,7 @@ py_strict_test(
         "//praxis:pytypes",
         "//praxis:schedules",
         "//praxis:test_utils",
+        "//praxis/layers",
     ],
 )
 
