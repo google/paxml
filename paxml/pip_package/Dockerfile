@@ -16,25 +16,12 @@ ENV PYTHON_MINOR_VERSION="8"
 # Pick up some TF dependencies
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends software-properties-common
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
-        aria2 \
         build-essential \
         curl \
-        dirmngr \
-        emacs \
         git \
-        gpg-agent \
-        less \
-        libfreetype6-dev \
-        libhdf5-serial-dev \
-        libpng-dev \
-        libzmq3-dev \
-        lsof \
         pkg-config \
         rename \
         rsync \
-        python-dev \
-        python3-distutils \
-        sox \
         unzip \
         vim \
         && \
@@ -48,9 +35,6 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     rm -rf /var/lib/apt/lists/* && \
     python3.8 -m pip install pip --upgrade && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 0
-
-# Make python3.8 the default python version
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 0
 
 # Install pip package
 RUN pip3 install pip-tools
@@ -69,7 +53,7 @@ RUN mkdir /bazel && \
 
 COPY . /paxml
 
-RUN mkdir $WHEEL_FOLDER && cd paxml && \
+RUN mkdir -p $WHEEL_FOLDER && cd paxml && \
   git rev-parse HEAD > $WHEEL_FOLDER/paxml_commit.txt
 
 RUN git clone https://github.com/google/praxis.git && \
@@ -77,18 +61,13 @@ RUN git clone https://github.com/google/praxis.git && \
 
 RUN cp -r praxis/praxis /paxml/
 
-RUN pip-compile --quiet /paxml/praxis/pip_package/requirements.in \
-    --output-file $WHEEL_FOLDER/praxis_requirements.txt && \
-    diff -a /paxml/praxis/pip_package/requirements.txt \
-    -b $WHEEL_FOLDER/praxis_requirements.txt > \
-    $WHEEL_FOLDER/praxis_requirements_diff.txt
+RUN cd /paxml/praxis/pip_package && \
+    pip-compile --quiet requirements.in \
+    --output-file $WHEEL_FOLDER/praxis_requirements.txt
 
-RUN pip-compile --quiet /paxml/praxis/pip_package/requirements.in \
-    /paxml/paxml/pip_package/requirements.in \
-    --output-file $WHEEL_FOLDER/paxml_requirements.txt && \
-    diff -a /paxml/paxml/pip_package/requirements.txt \
-    -b $WHEEL_FOLDER/paxml_requirements.txt > \
-    $WHEEL_FOLDER/paxml_requirements_diff.txt
+RUN cd /paxml/paxml/pip_package && \
+    pip-compile --quiet requirements.in \
+    --output-file $WHEEL_FOLDER/paxml_requirements.txt
 
 RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
 

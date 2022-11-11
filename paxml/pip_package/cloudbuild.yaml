@@ -22,6 +22,7 @@ substitutions:
 options:
     dynamic_substitutions: true
     substitution_option: 'ALLOW_LOOSE'
+    machineType: E2_STANDARD_2
 timeout: 24000s
 artifacts:
   objects:

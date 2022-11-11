@@ -52,7 +52,7 @@ function main() {
   echo "=== Copy paxml files"
 
   cp ${PIP_FILE_PREFIX}setup.py "${TMPDIR}"
-  cp ${PIP_FILE_PREFIX}requirements.txt "${TMPDIR}"
+  cp ${PIP_FILE_PREFIX}requirements.in "${TMPDIR}"
   cp LICENSE "${TMPDIR}"
   rsync -avm -L paxml "${TMPDIR}"
   rsync -avm -L  --include="*.so" --include="*_pb2.py" \
