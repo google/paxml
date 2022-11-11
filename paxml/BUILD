@@ -75,12 +75,10 @@ pytype_strict_library(
     deps = [
         ":checkpoint_py_pb2",
         ":checkpoints",
-        # Implicit python proto dependency.
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit orbax.checkpoint dependency.
-        "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -143,7 +141,6 @@ pytype_strict_library(
         # Implicit flax.core dependency.
         # Implicit flax.training dependency.
         # Implicit jax dependency.
-        # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
@@ -269,7 +266,6 @@ pytype_strict_library(
         # Implicit fiddle dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
-        # Implicit jax.experimental.gda_serialization dependency.
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit pyglove dependency.
@@ -307,7 +303,6 @@ pytype_strict_library(
         # Implicit clu.values dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit seqio dependency.
@@ -363,7 +358,6 @@ py_strict_test(
     srcs = ["summary_utils_test.py"],
     deps = [
         ":summary_utils",
-        # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
@@ -535,20 +529,6 @@ py_strict_test(
         "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
         # Implicit tensorflow_datasets dependency.
-    ],
-)
-
-py_strict_test(
-    name = "checkpoint_managers_test",
-    srcs = ["checkpoint_managers_test.py"],
-    deps = [
-        ":checkpoint_managers",
-        ":checkpoint_py_pb2",
-        # Implicit absl.flags dependency.
-        # Implicit absl.testing.absltest.absltest dependency.
-        # Implicit absl.testing.parameterized dependency.
-        # Implicit jax dependency.
-        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
