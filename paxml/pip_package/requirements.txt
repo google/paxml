@@ -271,7 +271,7 @@ libclang==14.0.6
     # via tensorflow
 libcst==0.4.9
     # via fiddle
-lingvo==0.12.4
+lingvo==0.12.5
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -393,7 +393,7 @@ optax==0.1.3
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.0.15
+orbax==0.0.16
     # via -r paxml-requirements.in
 packaging==21.3
     # via
@@ -557,7 +557,7 @@ sentencepiece==0.1.97
     #   t5
 seqio==0.0.12
     # via t5
-seqio-nightly==0.0.12.dev20221110
+seqio-nightly==0.0.12.dev20221111
     # via -r paxml-requirements.in
 six==1.16.0
     # via
@@ -621,7 +621,7 @@ tensorflow-hub==0.12.0
     #   tensorflow-text
 tensorflow-io-gcs-filesystem==0.27.0
     # via tensorflow
-tensorflow-metadata==1.10.0
+tensorflow-metadata==1.11.0
     # via
     #   tensorflow-datasets
     #   tfds-nightly
@@ -647,7 +647,7 @@ terminado==0.17.0
     #   jupyter-server
     #   nbclassic
     #   notebook
-tfds-nightly==4.7.0.dev202211100045
+tfds-nightly==4.7.0.dev202211120045
     # via
     #   seqio
     #   seqio-nightly

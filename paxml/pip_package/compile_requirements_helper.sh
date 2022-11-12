@@ -14,7 +14,10 @@
 # limitations under the License.
 
 #!/bin/bash
+
+set -e -x
+
 pip3 install -U pip-tools
 cd /tmp/requirements
-pip-compile praxis-requirements.in paxml-requirements.in --output-file paxml-requirements.txt
-pip-compile praxis-requirements.in --output-file praxis-requirements.txt
+pip-compile --quiet --output-file paxml-requirements.txt praxis-requirements.in paxml-requirements.in
+pip-compile --quiet --output-file praxis-requirements.txt praxis-requirements.in
