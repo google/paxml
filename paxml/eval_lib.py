@@ -47,6 +47,7 @@ from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import base_model
 from praxis import optimizer_prefix_vectorization
 from praxis import py_utils
 from praxis import pytypes
@@ -1525,11 +1526,14 @@ def decode_once_pmap_model(
       # don't want on-device allocation as would eventually lead to HBM OOM.
       if jax.process_index() == 0:
         with jax.default_device(jax.devices('cpu')[0]):
-          process_decode_output = model.process_decode_out(
-              inputs[split], jax.tree_map(np.asarray, out))
+          out = jax.tree_map(np.asarray, out)
+          process_decode_output = model.process_decode_out(inputs[split], out)
 
         (processed_scalars, processed_out,
          processed_metric_updates) = process_decode_output
+        processed_out = seqio_input.maybe_update_decode_output_keys(
+            processed_out, out)
+
         process_decode_metrics.store(processed_scalars)
         processed_decodes.extend(processed_out)
         if processed_metric_updates:
@@ -1986,11 +1990,13 @@ def decode_once_spmd_model(
       # expected to be JIT friendly. Since we keep track of its outputs, we also
       # don't want on-device allocation as would eventually lead to HBM OOM.
       with jax.default_device(jax.devices('cpu')[0]):
+        out = jax.tree_map(np.asarray, out)
         process_decode_output = jax_task.model.process_decode_out(
-            inputs[split], jax.tree_map(np.asarray, out))
+            inputs[split], out)
 
       (process_weighted_scalars, processed,
        processed_metric_updates) = process_decode_output
+      processed = seqio_input.maybe_update_decode_output_keys(processed, out)
 
       process_decode_metrics.store(process_weighted_scalars)
       processed_decodes.extend(processed)
