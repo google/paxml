@@ -656,6 +656,23 @@ pytype_strict_library(
     ],
 )
 
+py_strict_test(
+    name = "seqio_input_test",
+    srcs = ["seqio_input_test.py"],
+    shard_count = 3,
+    deps = [
+        ":seqio_input",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit numpy dependency.
+        "//praxis:base_hyperparams",
+        "//praxis:py_utils",
+        "//praxis:test_utils",
+        # Implicit seqio dependency.
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
 pytype_strict_library(
     name = "metric_tracker_utils",
     srcs = ["metric_tracker_utils.py"],
