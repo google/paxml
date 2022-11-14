@@ -6,7 +6,7 @@ steps:
           '-t', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}',
           '-f', 'paxml/pip_package/Dockerfile', '.'
         ]
-  timeout: 14400s
+  timeout: 3600s
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}']
   timeout: 1800s
@@ -23,7 +23,7 @@ options:
     dynamic_substitutions: true
     substitution_option: 'ALLOW_LOOSE'
     machineType: E2_HIGHCPU_8
-timeout: 24000s
+timeout: 5400s
 artifacts:
   objects:
     location: 'gs://pax-on-cloud-tpu-project/wheels/$(date -u +%Y%m%d)'

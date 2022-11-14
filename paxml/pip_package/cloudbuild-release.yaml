@@ -7,7 +7,7 @@ steps:
           '--build-arg', 'wheel_folder=${_WHEEL_FOLDER}',
           '--build-arg', 'praxis_version=${_PRAXIS_VERSION}',
         ]
-  timeout: 14400s
+  timeout: 3600s
 - name: 'gcr.io/cloud-builders/docker'
   args: ['push', '--all-tags', 'gcr.io/${PROJECT_ID}/${_IMAGE_NAME}']
   timeout: 1800s
@@ -24,7 +24,7 @@ substitutions:
 options:
     dynamic_substitutions: true
     substitution_option: 'ALLOW_LOOSE'
-timeout: 24000s
+timeout: 5400s
 artifacts:
   objects:
     location: 'gs://pax-on-cloud-tpu-project/wheels/$(date -u +%Y%m%d)-paxml-${_RELEASE_VERSION}'
