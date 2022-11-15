@@ -195,7 +195,7 @@ class CheckpointManager:
           f'(last saved step: `{self._last_saved_checkpoint_step}` --'
           f' save interval steps: `{self._save_interval_steps}`).')
 
-    current_time = datetime.datetime.utcnow()
+    current_time = datetime.datetime.now()
     self._last_saved_checkpoint_step = global_step_id
 
     # Use datetime.datetime directly rather than timestamp.GetCurrentTime()
@@ -247,11 +247,11 @@ class CheckpointManager:
 
     last_saved_timestamp = (
         self._checkpoint_history.checkpoints[-1].timestamp_sec)
-    current_datetime = datetime.datetime.utcnow()
+    current_datetime = datetime.datetime.now()
     if current_datetime < from_timestamp(last_saved_timestamp):
       # Time seems to have reversed itself.
       logging.warning(
-          'datetime.datetime.utcnow() returned a value `%s` behind the last '
+          'datetime.datetime.now() returned a value `%s` behind the last '
           'saved checkpoint timestamp.',
           from_timestamp(last_saved_timestamp) - current_datetime)
 

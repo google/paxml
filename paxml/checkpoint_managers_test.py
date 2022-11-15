@@ -161,7 +161,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -173,7 +173,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes = []
     for step in steps:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -215,7 +215,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -227,7 +227,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes = []
     for step in steps:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -269,7 +269,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -283,7 +283,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes = []
     for step in steps:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -327,7 +327,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -340,7 +340,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes = []
     for step in steps:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -365,7 +365,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     del checkpoint_manager
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -395,7 +395,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes_2 = []
     for step in steps_2:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -441,7 +441,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -454,7 +454,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_datetimes = []
     for step in steps:
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -480,7 +480,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     del checkpoint_manager
     max_to_keep = 5
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -492,7 +492,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     step = 10000
     steps.append(step)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       if checkpoint_manager.should_save(step):
         _create_dummy_checkpoint(root_dir, step, checkpoint_type)
@@ -534,7 +534,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     current_datetime = datetime.datetime.now()
     zero_datetime = datetime.datetime.fromtimestamp(0)
     with mock.patch('datetime.datetime', autospec=True) as dt:
-      dt.utcnow.return_value = current_datetime
+      dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
       checkpoint_manager = checkpoint_managers.CheckpointManager(
           config_name=config_name,
@@ -551,7 +551,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     for step in range(save_step + 1):
       with mock.patch('datetime.datetime', autospec=True) as dt:
-        dt.utcnow.return_value = current_datetime
+        dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
         if checkpoint_manager.should_save(step):
           _create_dummy_checkpoint(root_dir, step, checkpoint_type)
