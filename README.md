@@ -28,8 +28,10 @@ After ssh-ing the VM, paxml can be installed using
 
 ```bash
 $ python3 -m pip install -U pip
-$ python3 -m pip install paxml praxis
+$ python3 -m pip install protobuf==3.15 paxml jax[tpu] \
+-f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
+For the exact version of dependencies used to build/test each release, go to the corresponding release branch rX.Y.Z and check out `paxml/pip_package/requirements.txt`
 
 # Data inputs
 
