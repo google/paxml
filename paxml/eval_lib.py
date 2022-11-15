@@ -116,7 +116,7 @@ def _can_load_written_outputs(basedir: epath.Path, pname: str,
 def _maybe_write_scoring_outputs(
     job_log_dir: epath.Path, step: int, input_name: str,
     scoring_outputs: Sequence[Dict[str, Any]]) -> None:
-  """Write model scoring outputs to disk from leader process."""
+  """Writes model scoring outputs to disk from leader process."""
   if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
     return
 
@@ -905,7 +905,7 @@ class _SpmdEvalRunner:
   def _run_pjit(self, init_key: PRNGKey,
                 partitioned_specs: train_states.TrainState,
                 unpadded_global_batch_size: Optional[int] = None) -> None:
-    """Run pjit on the single step evaluation function."""
+    """Runs pjit on the single step evaluation function."""
     if not self._eval_input_p:
       return
     eval_step, inputs_partition_specs, _ = (
@@ -2160,7 +2160,7 @@ def _maybe_update_tracked_metric(
     data_partition_name: str,
     replicated_model_states: train_states.TrainState,
     enable_checkpoint_saving: bool = True) -> None:
-  """Update tracked metric if new value (m_value) is lower that the stored one.
+  """Updates tracked metric if new value (m_value) is lower that the stored one.
 
   Also updates the status file maintained by the tracker and writes
   new checkpoint assets in the same tracker directory.
