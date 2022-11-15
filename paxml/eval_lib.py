@@ -2234,14 +2234,16 @@ def _find_and_maybe_update_tracked_metric(
       break
 
   if m_value:
+    # Filesystem friendly name for the tracked metric.
+    tracked_metric_name = tracked_metric.replace('/', '-')
     tracker_dir_path = (
         basedir / dirnames[split] /
-        f'{tracked_metric}_{track_min_or_max}_tracker')
+        f'{tracked_metric_name}_{track_min_or_max}_tracker')
     _maybe_update_tracked_metric(
         m_value,
         step_i,
         tracker_dir_path,
-        tracked_metric,
+        tracked_metric_name,
         track_min_or_max,
         input_p[split].name,
         replicated_model_states,
