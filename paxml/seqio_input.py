@@ -100,7 +100,6 @@ def _log_plain_text_output(
     print(ans.get('prefix', ''), file=plain_text_output)
     print('>>>', file=plain_text_output)
     print(ans.get(_LM_DECODER_OUT_KEY, ''), file=plain_text_output)
-    print(ans[_LM_DECODER_OUT_KEY], file=plain_text_output)
     if 'seqio_targets' in ans:
       print('REF', file=plain_text_output)
       print(ans['seqio_targets'], file=plain_text_output)
