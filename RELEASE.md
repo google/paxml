@@ -1,7 +1,22 @@
 # Version: 0.2.0
 ## Major Features and Improvements
-## Breaking changes
-## Deprecations
+* Revamp training and evaluation/decoding loops in preparation of multi-task
+  learning support
+* Better seqio metrics and clu metrics support
+* Suppot per-core batch size < 1
+* Introduction of training input specifications
+* Add GPT-3-like Language Modeling configuration
+* Add ResNet-50 image classification configuration
+* Checkpointing
+  - Save on-demand checkpoint when preemption signal is received
+  - Migration to Orbax checkpointing
+  - Save checkpoints more consistently after pre-emption and when training
+    completes
+* Summaries
+  - Add support for aggregation across steps
+* TPU profiling can be configured and automated
+* Improvements to Auto-ML and hyperparameters sweeping using PyGlove
+* Use etils for handling filenames / directories
 ## Note
 *   Version: 0.2.0
 *   Build Date: 20221114
