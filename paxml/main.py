@@ -172,6 +172,7 @@ def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
     importlib.import_module(module_name)
   except ModuleNotFoundError as e:
     raise ValueError(f'Could not find experiment `{experiment_name}`.') from e
+  # Google-internal experiment module import cleanup
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
     return experiment_class
