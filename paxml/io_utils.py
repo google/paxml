@@ -188,7 +188,7 @@ class JnpEncoder(json.JSONEncoder):
 
 
 def write_key_value_pairs(filename: epath.PathLike,
-                          key_value_pairs: Sequence[Tuple[str, Any]],
+                          key_value_pairs: Sequence[Tuple[Optional[str], Any]],
                           cast_to_ndarray: bool = True,
                           write_pickle: bool = True) -> None:
   """Writes `key_value_pairs` to pkl and jsonl files."""

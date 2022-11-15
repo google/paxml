@@ -115,7 +115,7 @@ def _can_load_written_outputs(basedir: epath.Path, pname: str,
 
 def _maybe_write_scoring_outputs(
     job_log_dir: epath.Path, step: int, input_name: str,
-    scoring_outputs: Sequence[Dict[str, Any]]) -> None:
+    scoring_outputs: Sequence[Tuple[str, Any]]) -> None:
   """Writes model scoring outputs to disk from leader process."""
   if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
     return
@@ -125,16 +125,10 @@ def _maybe_write_scoring_outputs(
   fq_fname = basedir / input_name / _get_filename(step, mode_str)
   fq_fname.parent.mkdir(parents=True, exist_ok=True)
 
-  # convert list of batches into list of example kv pairs
-  flat_scoring_outputs = []
-  for batch in scoring_outputs:
-    for ex in py_utils.tree_unstack(batch, 0):
-      flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
-
   logging.info('Writing eval outputs to %s with %d entries',
                fq_fname, len(scoring_outputs))
 
-  io_utils.write_key_value_pairs(fq_fname, flat_scoring_outputs)
+  io_utils.write_key_value_pairs(fq_fname, scoring_outputs)
 
 
 def _wait_until_step(checkpointer, start_step):
@@ -494,12 +488,18 @@ def run_eval_loop_over_test_splits(
         metrics[k].append(eval_metrics[k])
 
     logging.info('Finished eval on input %s', model_inputs[split].hparams.name)
-
+    # Flatten scoring outputs to simplify input for metrics eval computation.
+    # Constructs a new flattened array of single example outputs from original
+    # array containing batches of outputs.
+    flat_scoring_outputs = []
+    for batch in per_example_scores:
+      for ex in py_utils.tree_unstack(batch, 0):
+        flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
     eval_scoring_metrics = None
     if seqio_input.should_process_outputs(model_inputs[split]):
       eval_scoring_metrics = seqio_input.process_outputs(
-          model_inputs[split], per_example_scores, summary_writers[split],
-          seqio_input.MetricType.SCORE, step)
+          model_inputs[split], flat_scoring_outputs,
+          summary_writers[split], seqio_input.MetricType.SCORE, step)
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -519,8 +519,9 @@ def run_eval_loop_over_test_splits(
     eval_scoring_metrics_list.append(eval_scoring_metrics)
     num_eval_steps.append(step_num)
 
-    _maybe_write_scoring_outputs(
-        job_log_dir, step, model_inputs[split].hparams.name, per_example_scores)
+    _maybe_write_scoring_outputs(job_log_dir, step,
+                                 model_inputs[split].hparams.name,
+                                 flat_scoring_outputs)
 
   return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 

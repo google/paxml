@@ -600,14 +600,18 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     labels = np.array([[7, 8, 1, 3, 9, 0], [15, 16, 17, 1, 29, 1]],
                       dtype=np.int32)
     scores = np.array([1.0, 2.5], dtype=np.float32)
-    eval_output = [py_utils.NestedMap(labels=labels, scores=scores)]
+    eval_output = []
+    for label, score in zip(labels, scores):
+      eval_output.append((None, py_utils.NestedMap(labels=label, scores=score)))
     m = inp.compute_metrics_eval(eval_output)
     self.assertLen(m, 1)
     self.assertEqual(m[0]['total_score'], 3.5)
 
     # length is wrong: does not match feature converter.
     labels2 = np.array([[7, 8, 1, 3, 9], [15, 16, 17, 1, 29]], dtype=np.int32)
-    eval_output = [py_utils.NestedMap(labels=labels2, scores=scores)]
+    eval_output = []
+    for label, score in zip(labels2, scores):
+      eval_output.append((None, py_utils.NestedMap(labels=label, scores=score)))
     with self.assertRaisesRegex(ValueError, 'Example not found'):
       inp.compute_metrics_eval(eval_output)
 

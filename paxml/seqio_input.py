@@ -53,6 +53,7 @@ DECODE_METRICS_PREFIX = 'decoder'
 # outputs other than models.LanguageModel.
 _LM_DECODER_OUT_KEY = 'decoded_substr'
 _LM_SCORE_KEY = 'scores'
+_LM_LABEL_KEY = 'labels'
 
 
 def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any],
@@ -813,7 +814,7 @@ class SeqIOInput(base_input.BaseInput):
     return predictions_list, targets_list
 
   def _build_scoring_metric_inputs_with_labels(
-      self, eval_outputs: Sequence[Dict[str, py_utils.JTensor]],
+      self, answers: Dict[Tuple[int], NestedMap],
       verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
     """Build 1-to-1 mapped scores and targets for metrics via label matching."""
     # TODO(b/241386390): deprecate label-based matching for metrics computation.
@@ -834,21 +835,8 @@ class SeqIOInput(base_input.BaseInput):
     for example, converted_example in zip(
         targets_ds.as_numpy_iterator(),
         converted_targets_ds.as_numpy_iterator()):
-      key = tuple(converted_example['labels'])
+      key = tuple(converted_example[_LM_LABEL_KEY])
       targets[key].append(example)
-
-    # Group model's scoring outputs by tuple(label_token_ids).
-    answers = dict()
-    for element in eval_outputs:
-      labels = np.asarray(element['labels'])
-      scores = np.asarray(element[_LM_SCORE_KEY])
-      if len(labels.shape) > 2:
-        labels = np.reshape(labels, [-1, labels.shape[-1]])
-      if len(scores.shape) > 1:
-        scores = np.reshape(scores, [-1])
-      for i in range(labels.shape[0]):
-        key = tuple(labels[i, :])
-        answers[key] = float(scores[i])
 
     # Construct (scoring output, seqio target) lists by joining on label tokens
     targets_list = []
@@ -858,8 +846,9 @@ class SeqIOInput(base_input.BaseInput):
       if k not in answers:
         raise ValueError(
             f'Example not found in eval output (key={k}): {targets[k][0]}')
+      ans = answers[k]
       target = targets[k]
-      score = answers[k]
+      score = ans[_LM_SCORE_KEY]
       for e in targets[k]:
         target_post = self.mixture_or_task.postprocess_fn(
             target, example=e, is_target=True)
@@ -885,24 +874,10 @@ class SeqIOInput(base_input.BaseInput):
     return scores_list, targets_list
 
   def _build_scoring_metric_inputs_with_enum(
-      self, eval_outputs: Sequence[Dict[str, py_utils.JTensor]],
+      self, answers: Dict[str, NestedMap],
       verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
     assert self.hparams.use_enumeration
-
     targets = self._get_targets_with_enum_key()
-
-    # Group model's scoring outputs by enum key.
-    answers = {}
-    for batch in eval_outputs:
-      # transfer to cpu
-      batch = jax.tree_map(np.asarray, batch)
-      for eval_example in py_utils.tree_unstack(batch, 0):
-        key = py_utils.get_enumeration_id(eval_example)
-        if not key:
-          raise ValueError('key should not be None when enum-matching')
-        # Supporting multi-class case means that score can be a scalar
-        # or a vector.  Processing this is left up to the user.
-        answers[key] = eval_example[_LM_SCORE_KEY]
 
     # Construct (scoring output, seqio target) lists by joining on enum ID
     targets_list = []
@@ -912,7 +887,8 @@ class SeqIOInput(base_input.BaseInput):
       if k not in answers:
         raise ValueError(
             f'Example not found in eval output (key={k}): {targets[k]}')
-      score = answers[k]
+      ans = answers[k]
+      score = ans[_LM_SCORE_KEY]
       example = targets[k]
       target_post = self.mixture_or_task.postprocess_fn(
           score, example=example, is_target=True)
@@ -1018,7 +994,7 @@ class SeqIOInput(base_input.BaseInput):
 
   def compute_metrics_eval(
       self,
-      eval_outputs: Sequence[Dict[str, py_utils.JTensor]],
+      eval_outputs: Sequence[Tuple[Optional[str], NestedMap]],
       verbose_entries: int = 0
   ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
@@ -1041,11 +1017,10 @@ class SeqIOInput(base_input.BaseInput):
     For tasks with predict_metric_fns, use compute_metrics() above.
 
     Args:
-      eval_outputs: A list of per_example_outputs. Each element is a nested map
-        from string to JTensor, and is expected to have keys `labels` and
-        `scores`. `labels` is int32 token ids and should be convertible to shape
-        [B, T], and `scores` is float and should be convertible to shape [B],
-        where B is batch size and T is sequence length.
+      eval_outputs: A list of flattened scoring outputs. Each element is a map
+        from string to NestedMap, and is expected to have keys `labels` and
+        `scores`. `labels` is int32 token ids of length [T], where T is the
+        sequence length.
       verbose_entries: int, how many entries to log for inspection and sanity
         checking.
 
@@ -1069,7 +1044,7 @@ class SeqIOInput(base_input.BaseInput):
 
     if not eval_outputs:
       return []
-    if _LM_SCORE_KEY not in eval_outputs[0]:
+    if _LM_SCORE_KEY not in eval_outputs[0][1]:
       logging.warning(
           ('LanguageModel output format with "%s" key is expected, but '
            'the key was not found in eval_outputs (b/244434890)'),
@@ -1077,11 +1052,16 @@ class SeqIOInput(base_input.BaseInput):
       return []
 
     if p.use_enumeration:
+      answers = dict(eval_outputs)
       scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
-          eval_outputs, verbose_entries)
+          answers, verbose_entries)
     else:
+      answers = {}
+      for _, ex_d in eval_outputs:
+        key = tuple(ex_d[_LM_LABEL_KEY])
+        answers[key] = ex_d
       scores_list, targets_list = self._build_scoring_metric_inputs_with_labels(
-          eval_outputs, verbose_entries)
+          answers, verbose_entries)
 
     metrics = []
     for fn in task.score_metric_fns:
