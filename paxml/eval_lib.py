@@ -701,7 +701,7 @@ class _PmapEvalRunner:
         self._job_log_dir,
         reshard_inputs=True)
 
-  def partition_run_one_step(self, eval_input_p):
+  def partition_run_one_step(self):
 
     def eval_one_step_fn(replicated_model_states, eval_summary_writers):
       with py_utils.timeit() as eval_period:
@@ -709,7 +709,7 @@ class _PmapEvalRunner:
             self.run_one_step(replicated_model_states, eval_summary_writers))
 
       return tuning_lib.EvalMetrics(
-          input_p=eval_input_p,
+          input_p=self._eval_input_p,
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
           steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
@@ -769,7 +769,7 @@ def evaluate_pmap_model(
 
   eval_one_step_fn = _PmapEvalRunner(
       task_p, eval_input_p, jax_task, prng_key,
-      job_log_dir).partition_run_one_step(eval_input_p)
+      job_log_dir).partition_run_one_step()
   decode_once_fn = None
   input_p = None
   continuous_decode = True
@@ -971,7 +971,7 @@ class _SpmdEvalRunner:
           reshard_inputs=False,
           create_gda_for_inputs=use_gda)
 
-  def partition_run_one_step(self, eval_key, eval_input_p, use_gda):
+  def partition_run_one_step(self, eval_key, use_gda):
 
     def eval_one_step_fn(partitioned_train_state, eval_summary_writers):
       with py_utils.timeit() as eval_period:
@@ -981,7 +981,7 @@ class _SpmdEvalRunner:
                                              use_gda)
 
       return tuning_lib.EvalMetrics(
-          input_p=eval_input_p,
+          input_p=self._eval_input_p,
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
           steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
@@ -1092,7 +1092,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   eval_one_step_fn = _SpmdEvalRunner(
       task_p, eval_input_p, jax_task, global_mesh, init_key, partitioned_specs,
       job_log_dir, eval_unpadded_global_batch_size).partition_run_one_step(
-          eval_key, eval_input_p, use_gda)
+          eval_key, use_gda)
 
   decode_once_fn = None
   input_p = None
@@ -1286,7 +1286,7 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
 
   eval_one_step_fn = _PmapEvalRunner(
       task_p, eval_input_p, jax_task, eval_key,
-      job_log_dir).partition_run_one_step(eval_input_p)
+      job_log_dir).partition_run_one_step()
 
   # JaxContext needed for parameter sharing.
   context_p = base_layer.JaxContext.HParams(do_eval=True)
@@ -1776,8 +1776,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   eval_one_step_fn = _SpmdEvalRunner(
       task_p, eval_input_p, jax_task, global_mesh, init_key,
       partitioned_specs, job_log_dir,
-      eval_unpadded_global_batch_size).partition_run_one_step(
-          eval_key, eval_input_p, use_gda)
+      eval_unpadded_global_batch_size).partition_run_one_step(eval_key, use_gda)
   trainer_lib.write_post_init_model_hparams_file(jax_task.model,
                                                  var_weight_hparams,
                                                  job_log_dir / 'decoder_out')
