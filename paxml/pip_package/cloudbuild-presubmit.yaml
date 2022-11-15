@@ -13,4 +13,5 @@ substitutions:
 options:
     dynamic_substitutions: true
     substitution_option: 'ALLOW_LOOSE'
+    machineType: E2_HIGHCPU_8
 timeout: 1200s
