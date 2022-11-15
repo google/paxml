@@ -345,12 +345,12 @@ def _load_partial_opt_states(train_state: TrainState,
 
 
 # TODO(pax-dev): Move this function when `pmap_use_tensorstore` flag is deleted.
-def restore_pmap_from_tensorstore(
-    global_shapes,
-    checkpoint_dir: epath.PathLike,
-    step=None,
-    global_mesh=None,
-    checkpoint_type=CheckpointType.CHECKPOINT_GDA):
+def restore_pmap_from_tensorstore(global_shapes,
+                                  checkpoint_dir: epath.PathLike,
+                                  step=None,
+                                  global_mesh=None,
+                                  checkpoint_type=CheckpointType.CHECKPOINT_GDA,
+                                  use_orbax=False):
   """Restores pmap checkpoints from tensorstore.
 
   The model_states returned are of type `DeviceArray`, `GlobalDeviceArray` or
@@ -366,6 +366,7 @@ def restore_pmap_from_tensorstore(
        a pjit model) and return a GDA. If unset, use a dummy mesh and return
        a regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
     checkpoint_type: The type of checkpoint to use.
+    use_orbax: Enables checkpointing backed by Orbax.
 
   Returns:
     Restored model states of type `DeviceArray`, `GlobalDeviceArray` or
@@ -390,7 +391,8 @@ def restore_pmap_from_tensorstore(
         global_mesh=restore_global_mesh,
         checkpoint_type=checkpoint_type,
         state_specs=fully_replicated_state_specs,
-        step=step)
+        step=step,
+        use_orbax=use_orbax)
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
@@ -638,6 +640,7 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
+      use_orbax: if True, enables checkpointing with Orbax.
       fold_decode_prng_key_per_batch: if True, folds the decode prng key per
         decoding batch index. Only effective for pmap decoding.
     """
@@ -660,6 +663,7 @@ class SingleTask(base_task.BaseTask):
     track_decoder_metric_min_or_max: Optional[
         SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
+    use_orbax: bool = False
     fold_decode_prng_key_per_batch: bool = False
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
