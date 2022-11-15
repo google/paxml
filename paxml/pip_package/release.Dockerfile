@@ -17,25 +17,12 @@ ENV PYTHON_MINOR_VERSION="8"
 # Pick up some TF dependencies
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends software-properties-common
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
-        aria2 \
         build-essential \
         curl \
-        dirmngr \
-        emacs \
         git \
-        gpg-agent \
-        less \
-        libfreetype6-dev \
-        libhdf5-serial-dev \
-        libpng-dev \
-        libzmq3-dev \
-        lsof \
         pkg-config \
         rename \
         rsync \
-        python-dev \
-        python3-distutils \
-        sox \
         unzip \
         vim \
         && \
@@ -71,8 +58,7 @@ RUN git clone -b r${praxis_version} https://github.com/google/praxis.git
 
 RUN cp -r praxis/praxis /paxml/
 
-RUN pip3 install paxml/praxis/pip_package
-RUN pip3 install paxml/paxml/pip_package
+RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
 
 RUN git clone https://github.com/google/flaxformer.git
 RUN cd flaxformer && pip3 install .
