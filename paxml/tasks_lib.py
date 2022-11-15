@@ -362,9 +362,9 @@ def restore_pmap_from_tensorstore(global_shapes,
       present.
     step: Step to restore checkpoint from.
     global_mesh: If set, use this mesh to restore the checkpoint (meaning that
-       the checkpoint is restored as part of an init_checkpoint_rules() call for
-       a pjit model) and return a GDA. If unset, use a dummy mesh and return
-       a regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
+      the checkpoint is restored as part of an init_checkpoint_rules() call for
+      a pjit model) and return a GDA. If unset, use a dummy mesh and return a
+      regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
     checkpoint_type: The type of checkpoint to use.
     use_orbax: Enables checkpointing backed by Orbax.
 
@@ -590,6 +590,8 @@ class SingleTask(base_task.BaseTask):
         profiler_num_steps is smaller than this value.
       profiler_capture_step: The step index at which to capture a code profile.
         No trace is captured if set to None.
+      profiler_max_num_hosts: If set, limit profiling only on the specified
+        number of hosts.
       always_use_train_for_model_init: Boolean indicating whether to use the new
         flow for model initialization. With this new flow, dedicated evaluation
         and decoding-only jobs rely on training inputs for model initialization.
@@ -617,6 +619,7 @@ class SingleTask(base_task.BaseTask):
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None
+    profiler_max_num_hosts: Optional[int] = None
     always_use_train_for_model_init: bool = True
 
   @enum.unique
@@ -646,9 +649,8 @@ class SingleTask(base_task.BaseTask):
     """
     # TODO(b/249483164) Change this to just `= sub_config_field(None)` after
     # Fiddle migration is complete.
-    model: Optional[base_model.BaseModel.HParams] = (
-        None if issubclass(base_model.BaseModel, base_layer.BaseLayer) else
-        sub_config_field(None))
+    model: Optional[base_model.BaseModel.HParams] = (None if issubclass(
+        base_model.BaseModel, base_layer.BaseLayer) else sub_config_field(None))
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from

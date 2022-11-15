@@ -915,19 +915,11 @@ def train_and_evaluate_pmap(
   def train_step(states, prng_key, inputs):
     """Train model for a single step."""
     return trainer_lib.train_step_single_learner(
-        jax_task,
-        states,
-        prng_key,
-        inputs,
-        fprop_dtype=fprop_dtype)
+        jax_task, states, prng_key, inputs, fprop_dtype=fprop_dtype)
 
   def eval_step(eval_states, prng_key, inputs):
     return trainer_lib.eval_step_single_learner(
-        jax_task,
-        eval_states,
-        prng_key,
-        inputs,
-        fprop_dtype=fprop_dtype)
+        jax_task, eval_states, prng_key, inputs, fprop_dtype=fprop_dtype)
 
   def prepare_model_inputs(train_input_pipeline, model_inputs, step_counter):
     del step_counter  # Unused in pmap flow
@@ -948,12 +940,8 @@ def train_and_evaluate_pmap(
       train_input_p.num_infeed_hosts)
 
   p_train_step = jax.pmap(
-      train_step,
-      donate_argnums=(0,),
-      axis_name=PMAP_PARALLEL_AXIS_NAME)
-  p_eval_step = jax.pmap(
-      eval_step,
-      axis_name=PMAP_PARALLEL_AXIS_NAME)
+      train_step, donate_argnums=(0,), axis_name=PMAP_PARALLEL_AXIS_NAME)
+  p_eval_step = jax.pmap(eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
   global_mesh = None
   reshard_inputs = True
   create_gda_for_inputs = False
@@ -1204,9 +1192,8 @@ def train_and_evaluate_spmd_model(
         -1 if p.reset_for_eval else p.eval_loop_num_batches
         for p in eval_input_p
     ]
-    return (eval_input_pipelines, eval_num_steps,
-            eval_test_inputs_shape_dtype, eval_test_inputs_pspecs,
-            eval_input_p)
+    return (eval_input_pipelines, eval_num_steps, eval_test_inputs_shape_dtype,
+            eval_test_inputs_pspecs, eval_input_p)
 
   def partition_decode_once_fn(prng_key, decode_input_p):
     decode_input_p_0 = decode_input_p[0]
@@ -1307,7 +1294,8 @@ def _train_and_evaluate_common(
 
     profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
-        min_duration_sec=train_p.profiler_min_duration_sec)
+        min_duration_sec=train_p.profiler_min_duration_sec,
+        max_num_hosts=train_p.profiler_max_num_hosts)
 
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
