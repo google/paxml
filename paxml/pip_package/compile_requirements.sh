@@ -19,19 +19,21 @@
 
 set -e -x
 
-[ -f /tmp/requirements ] && rm -rf /tmp/requirements
-mkdir -p /tmp/requirements
-cp ../../paxml/pip_package/requirements.in /tmp/requirements/paxml-requirements.in
-cp ../../praxis/pip_package/requirements.in /tmp/requirements/praxis-requirements.in
-cp ./compile_requirements_helper.sh /tmp/requirements/
-sed -i 's/praxis/#praxis/' /tmp/requirements/paxml-requirements.in
+export TMP_FOLDER="$HOME/tmp/requirements"
+
+[ -f $TMP_FOLDER ] && rm -rf $TMP_FOLDER
+mkdir -p $TMP_FOLDER
+cp ../../paxml/pip_package/requirements.in $TMP_FOLDER/paxml-requirements.in
+cp ../../praxis/pip_package/requirements.in $TMP_FOLDER/praxis-requirements.in
+cp ./compile_requirements_helper.sh $TMP_FOLDER/
+sed -i 's/praxis/#praxis/' $TMP_FOLDER/paxml-requirements.in
 
 docker pull gcr.io/pax-on-cloud-project/paxml_nightly_3.8:latest
-docker run --rm -a stdin -a stdout -a stderr -v /tmp/requirements:/tmp/requirements \
+docker run --rm -a stdin -a stdout -a stderr -v $TMP_FOLDER:/tmp/requirements \
   --name container1 gcr.io/pax-on-cloud-project/paxml_nightly_3.8:latest \
   bash /tmp/requirements/compile_requirements_helper.sh
 
-cp /tmp/requirements/paxml-requirements.txt ../../paxml/pip_package/requirements.txt
-cp /tmp/requirements/praxis-requirements.txt ../../praxis/pip_package/requirements.txt
+cp $TMP_FOLDER/paxml-requirements.txt ../../paxml/pip_package/requirements.txt
+cp $TMP_FOLDER/praxis-requirements.txt ../../praxis/pip_package/requirements.txt
 
-rm -rf /tmp/requirements
+rm -rf $TMP_FOLDER

@@ -10,7 +10,7 @@ lingvo
 numpy
 orbax
 praxis
-protobuf==3.15
+protobuf==3.19.5
 pyglove
 seqio-nightly
 t5
