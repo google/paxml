@@ -664,8 +664,9 @@ def train_and_evaluate(
   train_input_p = train_input_p[0]
   logging.info('train_input_p=%s', train_input_p.to_text())
   logging.info('task_p=%s', task_p.to_text())
-  eval_input_p = None
-  if eval_on_test:
+  eval_input_p = []
+  if (eval_on_test and task_p.train.eval_interval_steps is not None and
+      task_p.train.eval_interval_steps > 0):
     eval_input_p = [v for v in input_p if not v.is_training]
 
   if (run_decode and task_p.train.decode_interval_steps is not None and
@@ -830,7 +831,7 @@ def train_and_evaluate_pmap(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
-    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
   """Runs the training and evaluation loop with PMAP.
@@ -840,8 +841,8 @@ def train_and_evaluate_pmap(
     train_input_p: HParams for the train data input pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
-    eval_input_p: Optional list of hparams for the eval input pipelines.
-    decode_input_p: Optional list of hparams for the decode input pipelines.
+    eval_input_p: list of hparams for the eval input pipelines.
+    decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
       and determining whether to early stop current training. The callable
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
@@ -947,7 +948,7 @@ def train_and_evaluate_pmap(
   create_gda_for_inputs = False
   is_vars_replicated = True
 
-  def partition_eval_input(eval_input_p):
+  def partition_eval_input_fn(eval_input_p):
     eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
     trainer_lib.check_unique_names(eval_input_pipelines)
     # We either run p.eval_loop_num_batches steps or one epoch (when supported
@@ -980,9 +981,10 @@ def train_and_evaluate_pmap(
 
   _train_and_evaluate_common(
       partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
-      total_num_params, early_stopping_fn, checkpointer, partition_eval_input,
-      partition_decode_once_fn, job_log_dir, eval_prng_seed, reshard_inputs,
-      train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
+      total_num_params, early_stopping_fn, checkpointer,
+      partition_eval_input_fn, partition_decode_once_fn, job_log_dir,
+      eval_prng_seed, reshard_inputs, train_p, prepare_eval_inputs,
+      prepare_model_inputs, is_vars_replicated,
       train_unpadded_global_batch_size, train_state_metadata,
       train_input_pipeline, p_train_step, p_eval_step, global_mesh,
       create_gda_for_inputs, train_prng_seed)
@@ -994,7 +996,7 @@ def train_and_evaluate_spmd_model(
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     checkpoint_type: CheckpointType,
-    eval_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     enable_auto_sharding: bool = False) -> None:
@@ -1006,8 +1008,8 @@ def train_and_evaluate_spmd_model(
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
     checkpoint_type: The type of checkpoint to use.
-    eval_input_p: Optional list of params for the eval input pipelines.
-    decode_input_p: Optional list of hparams for the decode input pipelines.
+    eval_input_p: list of params for the eval input pipelines.
+    decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
       and determining whether to early stop current training. The callable
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
@@ -1167,7 +1169,8 @@ def train_and_evaluate_spmd_model(
   reshard_inputs = False
   is_vars_replicated = False
 
-  def partition_eval_input(eval_input_p):
+  def partition_eval_input_fn(eval_input_p):
+    assert eval_input_p, 'eval_input_p must not be empty'
     eval_input_p = [
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
         for input_p in eval_input_p
@@ -1196,6 +1199,7 @@ def train_and_evaluate_spmd_model(
             eval_test_inputs_pspecs, eval_input_p)
 
   def partition_decode_once_fn(prng_key, decode_input_p):
+    assert decode_input_p, 'decode_input_p must not be empty'
     decode_input_p_0 = decode_input_p[0]
     decode_unpadded_global_batch_size = (
         decode_input_p_0.cls.get_batch_size(decode_input_p_0) *
@@ -1234,9 +1238,10 @@ def train_and_evaluate_spmd_model(
 
   _train_and_evaluate_common(
       partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
-      total_num_params, early_stopping_fn, checkpointer, partition_eval_input,
-      partition_decode_once_fn, job_log_dir, eval_prng_seed, reshard_inputs,
-      train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
+      total_num_params, early_stopping_fn, checkpointer,
+      partition_eval_input_fn, partition_decode_once_fn, job_log_dir,
+      eval_prng_seed, reshard_inputs, train_p, prepare_eval_inputs,
+      prepare_model_inputs, is_vars_replicated,
       train_unpadded_global_batch_size, train_state_metadata,
       train_input_pipeline, p_train_step, p_eval_step, global_mesh,
       create_gda_for_inputs, train_prng_seed)
@@ -1244,7 +1249,7 @@ def train_and_evaluate_spmd_model(
 
 def _train_and_evaluate_common(
     partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
-    total_num_params, early_stopping_fn, checkpointer, partition_eval_input,
+    total_num_params, early_stopping_fn, checkpointer, partition_eval_input_fn,
     partition_decode_once_fn, job_log_dir, eval_prng_seed, reshard_inputs,
     train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
     train_unpadded_global_batch_size, train_state_metadata,
@@ -1254,7 +1259,8 @@ def _train_and_evaluate_common(
 
   if eval_input_p:
     (eval_input_pipelines, eval_num_steps, eval_test_inputs_shape_dtype,
-     eval_test_inputs_pspecs, eval_input_p) = partition_eval_input(eval_input_p)
+     eval_test_inputs_pspecs, eval_input_p) = partition_eval_input_fn(
+         eval_input_p)
 
   if decode_input_p:
     decode_once_fn, prng_key, decode_input_p = partition_decode_once_fn(
