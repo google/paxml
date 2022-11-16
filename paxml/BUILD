@@ -467,6 +467,28 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_test(
+    name = "trainer_lib_test",
+    srcs = ["trainer_lib_test.py"],
+    deps = [
+        ":tasks_lib",
+        ":trainer_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:base_model",
+        "//praxis:optimizers",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:schedules",
+        "//praxis:test_utils",
+        "//praxis/layers",
+    ],
+)
+
 pytype_strict_library(
     name = "tuning_lib",
     srcs = ["tuning_lib.py"],

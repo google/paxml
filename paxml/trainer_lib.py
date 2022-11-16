@@ -54,6 +54,7 @@ ParamsT = pytypes.HParamsT
 PyTreeDef = pytypes.PyTreeDef
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
+NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
 SummaryDict = pytypes.SummaryDict
@@ -115,7 +116,7 @@ class RunningMode(enum.Flag):
     return bool(self & RunningMode.DECODE)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class TrainStateMetadata:
   """Metadata around the TrainState.
 
@@ -1459,7 +1460,8 @@ def get_partitioned_spmd_model_step_fn(
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     train_state_partition_spec: Optional[TrainState] = None,
     unpadded_global_batch_size: Optional[int] = None,
-    enable_auto_sharding: bool = False):
+    enable_auto_sharding: bool = False
+) -> Tuple[Any, NestedPartitionSpec, NestedPartitionSpec]:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
   Args:

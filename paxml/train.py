@@ -17,6 +17,7 @@
 
 import abc
 import contextlib
+import dataclasses
 import datetime
 import functools
 import json
@@ -59,6 +60,7 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PARAMS = base_layer.PARAMS
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
+NestedPartitionSpec = pytypes.NestedPartitionSpec
 SummaryWriter = tf.summary.SummaryWriter
 CheckpointManager = Union[checkpoint_managers.CheckpointManager,
                           checkpoint_managers.OrbaxCheckpointManager]
@@ -1109,16 +1111,28 @@ def train_and_evaluate_spmd_model(
       raise NotImplementedError(
           'Per-device batch size < 1 not supported for auto sharding.')
     logging.info('Auto sharding is enabled in PAX.')
-  (p_train_step, inputs_pspecs, train_state_metadata.partitioned_specs
-  ) = trainer_lib.get_partitioned_spmd_model_step_fn(
-      jax_task,
-      trainer_lib.RunningMode.TRAIN,
-      global_mesh,
-      train_prng_seed,
-      inputs_shape_dtype,
-      train_state_partition_spec=train_state_metadata.partitioned_specs,
-      unpadded_global_batch_size=train_unpadded_global_batch_size,
-      enable_auto_sharding=enable_auto_sharding)
+  (p_train_step, inputs_pspecs,
+   partitioned_specs) = trainer_lib.get_partitioned_spmd_model_step_fn(
+       jax_task,
+       trainer_lib.RunningMode.TRAIN,
+       global_mesh,
+       train_prng_seed,
+       inputs_shape_dtype,
+       train_state_partition_spec=train_state_metadata.partitioned_specs,
+       unpadded_global_batch_size=train_unpadded_global_batch_size,
+       enable_auto_sharding=enable_auto_sharding)
+  if (not enable_auto_sharding and
+      train_state_metadata.partitioned_specs != partitioned_specs):
+    raise ValueError(
+        'Manually partitioned spec in train_state diverges with partitioner.\n'
+        f'Manual partition_spec: {train_state_metadata.partitioned_specs}\n'
+        f'Partitioned spec from partitioner: {partitioned_specs}')
+
+  # Replace the partition spec. This only has effect when enable_auto_sharding
+  # is turned on since the original train_state_metadata would have `None` as
+  # original sharding.
+  train_state_metadata = dataclasses.replace(
+      train_state_metadata, partitioned_specs=partitioned_specs)
 
   # Try to restore from checkpoint.
   partitioned_train_state = checkpointer.restore(
