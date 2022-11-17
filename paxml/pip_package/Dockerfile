@@ -66,6 +66,7 @@ RUN cd /paxml/praxis/pip_package && \
     --output-file $WHEEL_FOLDER/praxis_requirements.txt
 
 RUN cd /paxml/paxml/pip_package && \
+    sed -i 's/praxis/#praxis/' requirements.in && \
     pip-compile --quiet requirements.in \
     /paxml/praxis/pip_package/requirements.in \
     --output-file $WHEEL_FOLDER/paxml_requirements.txt
