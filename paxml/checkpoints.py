@@ -29,6 +29,7 @@ from flax.training import checkpoints as flax_checkpoints
 import jax
 from jax.experimental import maps
 from jax.experimental import multihost_utils
+from jax.experimental.global_device_array import GlobalDeviceArray
 from jax.experimental.gda_serialization import serialization as gda_serialization
 gda_serialization_spec = gda_serialization  # mapped to internal
 import numpy as np
@@ -563,8 +564,13 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     self._set_param_names(flattened_nested_names)
 
     def create_restore_args(pspec, shape_struct):
+      restore_type = jax.Array if jax.config.jax_array else GlobalDeviceArray
       return orbax.checkpoint.ArrayRestoreArgs(
-          mesh=mesh, mesh_axes=pspec, global_shape=shape_struct.shape)
+          restore_type=restore_type,
+          mesh=mesh,
+          mesh_axes=pspec,
+          global_shape=shape_struct.shape,
+          dtype=shape_struct.dtype)
 
     restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
                                 flattened_train_state)
