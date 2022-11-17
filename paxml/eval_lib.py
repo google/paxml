@@ -859,6 +859,8 @@ class _SpmdEvalRunner:
       train_states.TrainState, Optional[train_states.TrainState],
       train_states.TrainState, Any, NestedPartitionSpec, NestedJTensor]]:
     """Gets a partitioned model states and the step function."""
+    init_key, step_key = jax.random.split(init_key)
+
     if jax_task.hparams.train.always_use_train_for_model_init:
       assert train_state_metadata is not None
       train_state_global_shapes = train_state_metadata.padded_global_shapes
@@ -873,20 +875,10 @@ class _SpmdEvalRunner:
               var_weight_hparams, discard_opt_states=not use_ema))
       partitioned_specs = jax_task.create_train_state_partition_specs(
           var_weight_hparams, discard_opt_states=not use_ema)
-    partitioned_train_state = checkpoints.restore_checkpoint(
-        train_state_global_shapes,
-        checkpoint_dir,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type,
-        step=checkpoint_step,
-        state_specs=partitioned_specs,
-        use_orbax=use_orbax)
-    py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
-
-    init_key, step_key = jax.random.split(init_key)
-
-    if not jax_task.hparams.train.always_use_train_for_model_init:
       inputs_shape = input_shape_dtypes
+
+      # If auto sharding is enabled, we need to get the updated partition specs
+      # before using it to restore checkpoints.
       step_fn, inputs_partition_specs, partitioned_specs = (
           trainer_lib.get_partitioned_spmd_model_step_fn(
               jax_task,
@@ -898,6 +890,16 @@ class _SpmdEvalRunner:
               train_state_partition_spec=partitioned_specs.to_eval_state(),  # pytype: disable=attribute-error
               unpadded_global_batch_size=unpadded_global_batch_size,
               enable_auto_sharding=enable_auto_sharding))
+
+    partitioned_train_state = checkpoints.restore_checkpoint(
+        train_state_global_shapes,
+        checkpoint_dir,
+        global_mesh=global_mesh,
+        checkpoint_type=checkpoint_type,
+        step=checkpoint_step,
+        state_specs=partitioned_specs,
+        use_orbax=use_orbax)
+    py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
 
     if partitioned_train_state is None:
       _, partitioned_train_state = (
