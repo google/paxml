@@ -662,7 +662,17 @@ class ParameterSweepingExperiment(TuningExperiment):
   """Parameter sweeping experiment."""
 
 
-@automl.parameter_sweep(automl.Metric.train('total_loss'))
+@automl.parameter_sweep([
+    ('LEARNING_RATE', 'BATCH_SIZE'),
+    (0.1, 128),
+    (0.2, 256),
+    (0.3, 512),
+])
+class SparseParameterSweepingExperiment(TuningExperiment):
+  """Parameter sweeping experiment."""
+
+
+@automl.parameter_sweep(metric=automl.Metric.train('total_loss'))
 class ParameterSweepingWithReportingTrainLoss(TuningExperiment):
   """Parameter sweeping experiment with train loss as the objective."""
 
@@ -710,20 +720,101 @@ class ClassLevelHyperPrimitiveTest(absltest.TestCase):
         })
 
 
-class AutoMLDecoratorsTest(absltest.TestCase):
-  """Tests for AutoML decorators."""
+class ParameterSweepDecoratorTest(absltest.TestCase):
+  """Tests for `automl.parameter_sweep` decorator."""
 
-  def test_parameter_sweep(self):
+  def test_basics(self):
     search_hparams = ParameterSweepingExperiment().search()
     self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
     self.assertIsNone(search_hparams.search_reward)
+    self.assertEqual(
+        ParameterSweepingExperiment.__name__, 'ParameterSweepingExperiment')
+    self.assertEqual(
+        ParameterSweepingExperiment.__module__, self.__module__)
 
+  def test_specifying_metric(self):
     search_hparams = ParameterSweepingWithReportingTrainLoss().search()
     self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
     self.assertEqual(
         search_hparams.search_reward,
         automl.SingleObjective.HParams(
             metric=automl.Metric.train('total_loss')))
+
+  def test_combinations(self):
+    search_hparams = SparseParameterSweepingExperiment().search()
+    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertIsNone(search_hparams.search_reward)
+
+    exp = SparseParameterSweepingExperiment()
+    self.assertTrue(hasattr(exp, automl.COMBINED_DECISION_ATTR))
+    self.assertEqual(
+        getattr(exp, automl.COMBINED_DECISION_POINT_NAMES),
+        ('LEARNING_RATE', 'BATCH_SIZE'))
+    self.assertEqual(
+        getattr(exp, automl.COMBINED_DECISION_ATTR),
+        pg.oneof([(0.1, 128), (0.2, 256), (0.3, 512)],
+                 name=automl.COMBINED_DECISION_ATTR))
+
+    def test_first_combination():
+      self.assertEqual(
+          getattr(exp, automl.COMBINED_DECISION_ATTR),
+          (0.1, 128))
+      self.assertEqual(exp.LEARNING_RATE, 0.1)
+      self.assertEqual(exp.BATCH_SIZE, 128)
+
+    pg.hyper.trace(test_first_combination)
+
+  def test_bad_combinations(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        '`combinations` must be a list .* with at least two items.'):
+
+      @automl.parameter_sweep([
+          ('LEARNING_RATE', 'BATCH_SIZE'),
+      ])
+      class MissingParameterValues(TuningExperiment):  # pylint: disable=unused-variable
+        pass
+
+    with self.assertRaisesRegex(
+        ValueError, 'The first row .* must be a list of class attribute names'):
+
+      @automl.parameter_sweep([
+          (0.1, 44, 3),
+          (0.2, 43, 1),
+      ])
+      class MissingAttributeNamesToSweep(TuningExperiment):  # pylint: disable=unused-variable
+        pass
+
+    with self.assertRaisesRegex(
+        ValueError, '`combinations` must be a list of tuples of equal length'):
+
+      @automl.parameter_sweep([
+          ('LEARNING_RATE', 'BATCH_SIZE'),
+          (0.1, 44, 3),
+      ])
+      class ParameterCountMismatch(TuningExperiment):  # pylint: disable=unused-variable
+        pass
+
+    with self.assertRaisesRegex(
+        ValueError, '`combinations` must have at least 1 columns'):
+
+      @automl.parameter_sweep([
+          tuple(),
+          tuple(),
+      ])
+      class NothingToSweep(TuningExperiment):  # pylint: disable=unused-variable
+        pass
+
+    with self.assertRaisesRegex(ValueError, 'Attribute .* does not exist'):
+
+      @automl.parameter_sweep([
+          ('LEARNING_RATE', 'ATTRIBUTE_NOT_EXIST'),
+          (0.1, 128),
+          (0.2, 256),
+          (0.3, 512),
+      ])
+      class ClassAttributeDoesNotExist(TuningExperiment):  # pylint: disable=unused-variable
+        pass
 
 
 if __name__ == '__main__':

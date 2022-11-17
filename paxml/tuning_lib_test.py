@@ -16,7 +16,7 @@
 """Tests for automl."""
 
 import math
-from typing import Dict, Optional, Type
+from typing import Dict, List, Optional, Type
 from absl.testing import absltest
 from clu import platform
 from etils import epath
@@ -97,7 +97,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
 
 
 @automl.parameter_sweep()
-class TuningWithParameterSweep(base_experiment.BaseExperiment):
+class ParameterSweepingWithCartesianProduct(base_experiment.BaseExperiment):
   """Parameter sweep the search space."""
 
   LEARNING_RATE = pg.oneof([0.1, 0.01, 0.001])
@@ -113,6 +113,41 @@ class TuningWithParameterSweep(base_experiment.BaseExperiment):
     return [{
         'dataset_param1': self.DATASET_PARAM1,
     }]
+
+
+@automl.parameter_sweep([
+    ('LEARNING_RATE', 'BATCH_SIZE', 'DATASET_PARAM1'),
+    (0.1, 16, 'foo'),
+    (0.01, 32, 'foo'),
+    # Sparse specification will override the `pg.oneof` definition in class
+    # attribute, so its value can be different (e.g. 128 for batch_size).
+    (0.1, 128, 'bar'),
+])
+class ParameterSweepingWithCustomCombinations(
+    ParameterSweepingWithCartesianProduct):
+  """Parameter sweep with sparse combinations."""
+
+  BATCH_SIZE = pg.oneof([16, 32, 64])
+
+  def task(self):
+    return {
+        'learning_rate': self.LEARNING_RATE,
+        # Sparse parameter sweep does not support decision points defined
+        # within function body, thus we make it a class attribute.
+        'batch_size': self.BATCH_SIZE
+    }
+
+
+class TuningWithBadSearchSpace(TuningExperiment):
+  """A bad search space which has `oneof` on-the-fly without name."""
+
+  def task(self):
+    return {
+        'learning_rate': self.LEARNING_RATE,
+        # Bad decision point: a `pg.oneof` created on the fly without
+        # specifying a name.
+        'batch_size': pg.oneof([16, 32, 64])
+    }
 
 
 class TuningWithPerTrialEarlyStopping(TuningExperiment):
@@ -239,7 +274,7 @@ def run_experiment_without_reporting_metrics(
     work_unit: platform.WorkUnit, job_log_dir: epath.Path,
     early_stopping_fn: trainer_lib.EarlyStoppingFn):
   del work_unit, job_log_dir
-  task_p = experiment_config.task()
+  _ = experiment_config.task()
   _ = experiment_config.datasets()
   _ = experiment_config.decoder_datasets()
 
@@ -250,10 +285,10 @@ def run_experiment_without_reporting_metrics(
       is_last_ckpt=True)
 
 
-class TuningLibTest(absltest.TestCase):
-  """Tests for tuning_lib."""
+class GetSearchSpaceTest(absltest.TestCase):
+  """Tests for `tuning_lib.get_search_space`."""
 
-  def test_search_space(self):
+  def test_joint_space_from_class_attributes_and_runtime_call(self):
     search_space = tuning_lib.get_search_space(TuningExperiment())
     self.assertEqual(search_space.hyper_dict, pg.Dict({
         'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
@@ -266,6 +301,51 @@ class TuningLibTest(absltest.TestCase):
                                            name='decoder_dataset_param2')
     }))
     self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2 * 3 * 3 * 3)
+
+  def test_parameter_sweep_space_with_cartesian_product(self):
+    search_space = tuning_lib.get_search_space(
+        ParameterSweepingWithCartesianProduct())
+    self.assertEqual(search_space.hyper_dict, pg.Dict({
+        'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
+        'batch_size': pg.oneof([16, 32, 64], name='batch_size'),
+        'DATASET_PARAM1': pg.oneof(['foo', 'bar'], name='DATASET_PARAM1'),
+    }))
+    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2)
+
+  def test_parameter_sweep_space_with_custom_combinations(self):
+    search_space = tuning_lib.get_search_space(
+        ParameterSweepingWithCustomCombinations())
+    self.assertEqual(search_space.hyper_dict, pg.Dict({
+        automl.COMBINED_DECISION_ATTR: pg.oneof([
+            (0.1, 16, 'foo'),
+            (0.01, 32, 'foo'),
+            (0.1, 128, 'bar'),
+        ], name=automl.COMBINED_DECISION_ATTR)
+    }))
+    self.assertEqual(search_space.dna_spec.space_size, 3)
+
+  def test_bad_custom_combination_space(self):
+
+    @automl.parameter_sweep([
+        ('LEARNING_RATE', 'DATASET_PARAM1'),
+        (0.1, 'foo'),
+        (0.2, 'bar'),
+    ])
+    class CustomCombinationWithOnTheFlyDecisionPoints(
+        ParameterSweepingWithCartesianProduct):
+      pass
+
+    with self.assertRaisesRegex(ValueError, 'Found extra tuning parameters'):
+      tuning_lib.get_search_space(CustomCombinationWithOnTheFlyDecisionPoints())
+
+  def test_bad_search_space(self):
+    with self.assertRaisesRegex(
+        ValueError, '\'name\' must be specified for hyper primitive'):
+      tuning_lib.get_search_space(TuningWithBadSearchSpace())
+
+
+class TuneTest(absltest.TestCase):
+  """Tests for `tuning_lib.tune`."""
 
   def test_tune(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
@@ -286,20 +366,25 @@ class TuningLibTest(absltest.TestCase):
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 21, 21, 21, 21])
 
-  def test_parameter_sweep(self):
-    search_space = tuning_lib.get_search_space(TuningWithParameterSweep())
-    self.assertEqual(search_space.hyper_dict, pg.Dict({
-        'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
-        'batch_size': pg.oneof([16, 32, 64], name='batch_size'),
-        'DATASET_PARAM1': pg.oneof(['foo', 'bar'], name='DATASET_PARAM1'),
-    }))
-    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2)
-
+  def test_parameter_sweep_with_catesian_product(self):
+    search_space = tuning_lib.get_search_space(
+        ParameterSweepingWithCartesianProduct())
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
-    tuning_lib.tune(run_experiment, TuningWithParameterSweep(),
+    tuning_lib.tune(run_experiment, ParameterSweepingWithCartesianProduct(),
                     platform.work_unit(), job_log_dir,
-                    study='local_hp_sweep')
-    result = pg.tuning.poll_result('local_hp_sweep')
+                    study='local_hp_sweep_cartesian')
+    result = pg.tuning.poll_result('local_hp_sweep_cartesian')
+    self.assertLen(result.trials, search_space.dna_spec.space_size)
+
+  def test_parameter_sweep_with_custom_combinations(self):
+    search_space = tuning_lib.get_search_space(
+        ParameterSweepingWithCustomCombinations())
+    self.assertEqual(search_space.dna_spec.space_size, 3)
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment, ParameterSweepingWithCustomCombinations(),
+                    platform.work_unit(), job_log_dir,
+                    study='local_hp_sweep_custom')
+    result = pg.tuning.poll_result('local_hp_sweep_custom')
     self.assertLen(result.trials, search_space.dna_spec.space_size)
 
   def test_tune_without_reporting_metrics(self):
@@ -491,12 +576,14 @@ class TuningLibTest(absltest.TestCase):
 def get_trial_dirname(search_space_fun,
                       trial_id: int,
                       dna: pg.DNA,
+                      combined_parameter_names: Optional[List[str]] = None,
                       root_dir: str = 'root') -> epath.Path:
   search_space = pg.hyper.trace(search_space_fun, require_hyper_name=True)
   dirname_generator = tuning_lib.TrialDirectoryNameGenerator(
-      epath.Path(root_dir), search_space.dna_spec)
+      epath.Path(root_dir), search_space, combined_parameter_names)
   dna.use_spec(search_space.dna_spec)
-  return dirname_generator.dirname(trial_id, dna)
+  with search_space.apply(dna):
+    return dirname_generator.dirname(trial_id)
 
 
 class TrialDirnameTest(absltest.TestCase):
@@ -517,7 +604,7 @@ class TrialDirnameTest(absltest.TestCase):
           pg.oneof(['a', 'b?', 'c'], name='y'))
 
     self.assertEqual(
-        str(get_trial_dirname(_fn, 1, pg.DNA([0, 0]))), 'root/1/x=1|y=(0)')
+        str(get_trial_dirname(_fn, 1, pg.DNA([0, 0]))), 'root/1/x=1|y=a')
 
   def test_trial_with_decision_values(self):
     def _fn():
@@ -531,7 +618,20 @@ class TrialDirnameTest(absltest.TestCase):
         str(get_trial_dirname(_fn, 1, pg.DNA([0 for _ in range(10)]))),
         'root/1/1|1|1|1|1|1|1|1|1|1')
 
-  def test_trial_with_format_literal(self):
+  def test_trial_with_making_path_friendly(self):
+
+    @pg.members([('x', pg.typing.Any())])
+    class A(pg.Object):
+      pass
+
+    def _fn():
+      return (pg.oneof(['a/b/c  ???', '"???\t  e_f-12/3\\4"'], name='x'),
+              pg.oneof([A([A(A(1)), 1]), A([A(2)])], name='y'))
+    self.assertEqual(
+        str(get_trial_dirname(_fn, 1, pg.DNA([1, 0]))),
+        'root/1/x=e_f1234|y=A(x=[0=A(x=A(x=1)),1=1])')
+
+  def test_trial_with_class_values(self):
     class Foo:
       pass
 

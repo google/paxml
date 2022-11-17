@@ -373,7 +373,8 @@ def run(experiment_config: base_experiment.BaseExperiment,
         '--restore_checkpoint_dir and --restore_checkpoint_step only supported '
         'with --mode=decode_once or --mode=decode.')
 
-  if FLAGS.study is None:
+  search_space = tuning_lib.get_search_space(experiment_config)
+  if search_space.dna_spec.is_constant:
     # TODO(b/241666951): disable default_early_stopping_fn since this
     # breaks when training LaMDA models.
     run_experiment(

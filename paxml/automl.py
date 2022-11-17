@@ -683,31 +683,105 @@ def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
 # Decorators for parameter sweeping.
 #
 
+COMBINED_DECISION_ATTR = 'PARAMETER_SWEEP_COMBINATION'
+COMBINED_DECISION_POINT_NAMES = 'COMBINED_DECISION_POINT_NAMES'
+
 
 def parameter_sweep(
+    combinations: Optional[List[Tuple[Any, ...]]] = None,
+    *,
     metric: Optional[Metric] = None,
     goal: str = 'maximize') -> Callable[[Type[Any]], Type[Any]]:
   """Returns a decorator for enabling parameter sweeping on a PAX experiment.
 
   Args:
+    combinations: A list of tuples representing parameter combinations to
+      sweep. If None, the cartesian product from all `pg.oneof` will be swept.
+      When specified, the first row (`combinations[0]`) shall be a tuple of
+      strings, which are the names of the class attributes that will be swept.
+      Then it follows with one or multiple rows - each provides a combination
+      of parameter values for the header row, representing a single trial.
+
+      For example:
+
+        ```
+        @automl.parameter_sweep([
+            ('LEARNING_RATE', 'HIDDEN_DIMS'),
+            (0.1, 32),
+            (0.01, 64),
+            (0.001, 128),
+        ])
+        class MySweepingExperiment(MyExperiment):
+          pass
+        ```
+
     metric: Metric to use as trial objective. If None, trial objective will be
-      0, and users will be able to see all metrics in Vizier dashboard.
+      a constant 0, and users will be able to see all metrics in Vizier
+      dashboard.
     goal: Goal for optimization. By default, it's to maximize the metric.
 
   Returns:
-    A callable that adds the `search` method to the experiment class.
+    A new experiment class that is derived from the user class.
   """
+  if combinations is not None:
+    if not isinstance(combinations, list) or len(combinations) < 2:
+      raise ValueError(
+          f'`combinations` must be a list (of tuples) with at least two items. '
+          f'Encountered: {combinations}.')
+    num_attrs = None
+    for i, row in enumerate(combinations):
+      if not isinstance(row, tuple) or (
+          num_attrs is not None and len(row) != num_attrs):
+        raise ValueError(
+            f'`combinations` must be a list of tuples of equal length. '
+            f'Encountered bad row {row!r} (index={i}) from {combinations!r}')
+      num_attrs = len(row)
+      if num_attrs == 0:
+        raise ValueError(
+            f'`combinations` must have at least 1 columns. '
+            f'Encountered: {combinations!r}')
+      if i == 0:
+        if not all(isinstance(name, str) for name in row):
+          raise ValueError(
+              f'The first row of `combinations` must be a list '
+              f'of class attribute names. Encountered: {row!r}')
+
   if metric is None:
     search_reward = None
   else:
     search_reward = SingleObjective.HParams(metric=metric, goal=goal)
   def decorator(cls):
-    def search(self):
-      del self
-      return SearchHParams(
-          search_algorithm=Sweeping.HParams(),
-          search_reward=search_reward)
-    setattr(cls, 'search', search)
-    return cls
+
+    class _ParameterSweeping(cls):
+
+      def search(self):
+        del self
+        return SearchHParams(
+            search_algorithm=Sweeping.HParams(),
+            search_reward=search_reward)
+
+    new_cls = _ParameterSweeping
+    # Create a COMBINATION property and use it to set HP attributes' values.
+    if combinations:
+      attr_names = combinations[0]
+      assert attr_names
+      def create_getter(i: int):
+        def _getter(self):
+          return getattr(self, COMBINED_DECISION_ATTR)[i]
+        return _getter
+      for i, attr_name in enumerate(attr_names):
+        if not hasattr(cls, attr_name):
+          raise ValueError(f'Attribute {attr_name!r} does not exist in {cls!r}')
+        setattr(cls, attr_name, property(create_getter(i)))
+
+      setattr(new_cls, COMBINED_DECISION_ATTR, pg.oneof(combinations[1:]))
+      setattr(new_cls, COMBINED_DECISION_POINT_NAMES, attr_names)
+      enable_class_level_hyper_primitives(new_cls)
+
+    setattr(new_cls, '__name__', cls.__name__)
+    setattr(new_cls, '__module__', cls.__module__)
+    setattr(new_cls, '__qualname__', cls.__qualname__)
+    return new_cls
+
   return decorator
 
