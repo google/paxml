@@ -341,7 +341,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           init_key,
           input_specs,
           discard_opt_states=not self.use_ema,
-          is_eval=is_eval_for_init)
+          is_eval=is_eval_for_init,
+          checkpoint_type=self.checkpoint_type)
     elif not self.use_ema and not self.track_metric:
       model_states = model_states.to_eval_state()
     if self.use_ema:

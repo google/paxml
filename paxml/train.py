@@ -884,8 +884,11 @@ def train_and_evaluate_pmap(
       train_state_metadata.partitioned_specs)
   # Randomly initialized variables if no files in checkpoint dir.
   if model_states is None:
-    model_states = trainer_lib.initialize_model_state(jax_task, init_key,
-                                                      inputs_shape_dtype)
+    model_states = trainer_lib.initialize_model_state(
+        jax_task,
+        init_key,
+        inputs_shape_dtype,
+        checkpoint_type=checkpointer.checkpoint_type)
 
   logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
 

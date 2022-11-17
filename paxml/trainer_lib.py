@@ -305,12 +305,15 @@ def adjust_input_params_for_small_batch(
   return copy
 
 
-def initialize_model_state(jax_task: tasks_lib.SingleTask,
-                           prng_key: PRNGKey,
-                           inputs_shape_dtype: NestedShapeDtypeLike,
-                           discard_opt_states: bool = False,
-                           do_init_checkpoint_rules: bool = True,
-                           is_eval: bool = False) -> TrainState:
+def initialize_model_state(
+    jax_task: tasks_lib.SingleTask,
+    prng_key: PRNGKey,
+    inputs_shape_dtype: NestedShapeDtypeLike,
+    discard_opt_states: bool = False,
+    do_init_checkpoint_rules: bool = True,
+    is_eval: bool = False,
+    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED
+) -> TrainState:
   """Initializes the model states.
 
   Weights are random initialized first.
@@ -326,6 +329,8 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
     do_init_checkpoint_rules: Whether to apply init checkpoint rules or not.
     is_eval: whether to initialize in under eval context. Only used under the
       legacy model initialization flow.
+    checkpoint_type: The checkpoint type to use when restoring weights based on
+      the init_checkpoint_rules.
 
   Returns:
     TrainStates - training states.
@@ -366,10 +371,11 @@ def initialize_model_state(jax_task: tasks_lib.SingleTask,
                                             discard_opt_states)
   # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
-    if py_utils.pmap_use_tensorstore():
-      checkpoint_type = CheckpointType.CHECKPOINT_GDA
-    else:
-      checkpoint_type = CheckpointType.CHECKPOINT_FLAX
+    if checkpoint_type == CheckpointType.CHECKPOINT_UNSPECIFIED:
+      if py_utils.pmap_use_tensorstore():
+        checkpoint_type = CheckpointType.CHECKPOINT_GDA
+      else:
+        checkpoint_type = CheckpointType.CHECKPOINT_FLAX
     # Overwrite some parts if init_checkpoint_rules are set (warm-start)
     # Note that this assumes a pmap model with Flax checkpoint(s).
     train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
