@@ -31,6 +31,7 @@ from clu import platform
 from etils import epath
 from flax.core import frozen_dict
 import jax
+from jax import monitoring
 from jax.experimental import maps
 from jax.experimental import pjit
 from jax.experimental.gda_serialization import serialization as gda_serialization
@@ -69,6 +70,8 @@ PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
 
 _N_STEPS_WARMUP_LOGGING = 5
 
+_READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
+_WRITE_CHECKPOINT_EVENT: str = '/jax/checkpoint/write/durations_sec'
 
 def _checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
   """Returns the checkpoint directory from the root `job_log_dir`."""
@@ -169,24 +172,28 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
             partitioned_train_state,
             train_state_pspecs,
             is_final=False):
-    if not self._enable_checkpoint_saving:
-      return
+    with py_utils.timeit() as save_period:
+      if not self._enable_checkpoint_saving:
+        return
 
-    logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
-                 step_i)
-    py_utils.sync_global_devices(
-        f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
-    checkpoints.save_checkpoint(
-        partitioned_train_state,
-        self.checkpoint_dir,
-        checkpoint_type=self._checkpoint_type,
-        state_specs=train_state_pspecs,
-        async_ckpt_manager=self.async_ckpt_manager,
-        use_orbax=False,
-        async_checkpointer=self.async_checkpointer)
-    self.checkpoint_manager.save_metadata(global_step_id=step_i, force=is_final)
-    py_utils.sync_global_devices(
-        f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
+      logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
+                   step_i)
+      py_utils.sync_global_devices(
+          f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
+      checkpoints.save_checkpoint(
+          partitioned_train_state,
+          self.checkpoint_dir,
+          checkpoint_type=self._checkpoint_type,
+          state_specs=train_state_pspecs,
+          async_ckpt_manager=self.async_ckpt_manager,
+          use_orbax=False,
+          async_checkpointer=self.async_checkpointer)
+      self.checkpoint_manager.save_metadata(
+          global_step_id=step_i, force=is_final)
+      py_utils.sync_global_devices(
+          f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
+    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
+                                          save_period.elapsed)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if self.checkpoint_manager.should_save(step_i):
@@ -212,13 +219,17 @@ class _PjitTrainingCheckpointer(_TrainingCheckpointer):
           f'checkpointer:restored:{self.checkpoint_dir}')
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
-    return checkpoints.restore_checkpoint(
-        train_state_global_shapes,
-        self.checkpoint_dir,
-        global_mesh=global_mesh,
-        checkpoint_type=self._checkpoint_type,
-        state_specs=train_state_pspecs,
-        use_orbax=False)
+    with py_utils.timeit() as restore_period:
+      restored_checkpoint = checkpoints.restore_checkpoint(
+          train_state_global_shapes,
+          self.checkpoint_dir,
+          global_mesh=global_mesh,
+          checkpoint_type=self._checkpoint_type,
+          state_specs=train_state_pspecs,
+          use_orbax=False)
+    monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
+                                          restore_period.elapsed)
+    return restored_checkpoint
 
   @property
   def checkpoint_type(self) -> CheckpointType:
@@ -240,7 +251,10 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def _save_with_args(self, step_i, partitioned_train_state):
     if not self._enable_checkpoint_saving:
       return
-    self.checkpoint_manager.save(step_i, partitioned_train_state)
+    with py_utils.timeit() as save_period:
+      self.checkpoint_manager.save(step_i, partitioned_train_state)
+    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
+                                          save_period.elapsed)
 
   def _restore_with_args(self, step_i, train_state_global_shapes, global_mesh,
                          train_state_pspecs):
@@ -270,8 +284,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     if step is None:
       partitioned_train_state = None
     else:
-      partitioned_train_state = self._restore_with_args(
-          step, train_state_global_shapes, global_mesh, train_state_pspecs)
+      with py_utils.timeit() as restore_period:
+        partitioned_train_state = self._restore_with_args(
+            step, train_state_global_shapes, global_mesh, train_state_pspecs)
+      monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
+                                            restore_period.elapsed)
     return partitioned_train_state
 
   @property
@@ -307,56 +324,66 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
         checkpoint_type=self._checkpoint_type)
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
-    if py_utils.pmap_use_tensorstore():
-      return self._restore_from_tensorstore(train_state_global_shapes)
-    else:
-      return checkpoints.restore_checkpoint(
-          train_state_global_shapes,
-          self.checkpoint_dir,
-          checkpoint_type=self._checkpoint_type)
+    with py_utils.timeit() as restore_period:
+      if py_utils.pmap_use_tensorstore():
+        restored_checkpoint = self._restore_from_tensorstore(
+            train_state_global_shapes)
+      else:
+        restored_checkpoint = checkpoints.restore_checkpoint(
+            train_state_global_shapes,
+            self.checkpoint_dir,
+            checkpoint_type=self._checkpoint_type)
+    monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
+                                          restore_period.elapsed)
+    return restored_checkpoint
 
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
       return
-    logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
-                 step_i)
-    if py_utils.pmap_use_tensorstore():
-      logging.info('Pmap saving a TensorStore ckpt at step: %d', step_i)
-      py_utils.sync_global_devices(
-          f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
-      if jax.config.jax_array:
-        fully_replicated_gda_model_states = jax.tree_map(
-            py_utils.convert_host_local_array_to_global_array,
-            partitioned_train_state)
-      else:
-        fully_replicated_gda_model_states = jax.tree_map(
-            py_utils.convert_fully_replicated_sda_to_gda,
-            partitioned_train_state)
+    with py_utils.timeit() as save_period:
+      logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
+                   step_i)
+      if py_utils.pmap_use_tensorstore():
+        logging.info('Pmap saving a TensorStore ckpt at step: %d', step_i)
+        py_utils.sync_global_devices(
+            f'checkpointer:saving:{self.checkpoint_dir}:step-{step_i}')
+        if jax.config.jax_array:
+          fully_replicated_gda_model_states = jax.tree_map(
+              py_utils.convert_host_local_array_to_global_array,
+              partitioned_train_state)
+        else:
+          fully_replicated_gda_model_states = jax.tree_map(
+              py_utils.convert_fully_replicated_sda_to_gda,
+              partitioned_train_state)
 
-      fully_replicated_state_specs = jax.tree_map(
-          lambda x: pjit.PartitionSpec(None), fully_replicated_gda_model_states)
-      checkpoints.save_checkpoint(
-          fully_replicated_gda_model_states,
-          self.checkpoint_dir,
-          checkpoint_type=self._checkpoint_type,
-          state_specs=fully_replicated_state_specs,
-          async_ckpt_manager=self.async_ckpt_manager,
-          use_orbax=False,
-          async_checkpointer=self.async_checkpointer)
-      py_utils.sync_global_devices(
-          f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
-    else:
-      if jax.process_index() == 0:
-        # We just need to save the first model replica.
-        unreplicated_model_states = jax.tree_map(lambda x: x[0],
-                                                 partitioned_train_state)
+        fully_replicated_state_specs = jax.tree_map(
+            lambda x: pjit.PartitionSpec(None),
+            fully_replicated_gda_model_states)
         checkpoints.save_checkpoint(
-            unreplicated_model_states,
+            fully_replicated_gda_model_states,
             self.checkpoint_dir,
             checkpoint_type=self._checkpoint_type,
+            state_specs=fully_replicated_state_specs,
+            async_ckpt_manager=self.async_ckpt_manager,
             use_orbax=False,
             async_checkpointer=self.async_checkpointer)
-    self.checkpoint_manager.save_metadata(global_step_id=step_i, force=is_final)
+        py_utils.sync_global_devices(
+            f'checkpointer:saved:{self.checkpoint_dir}:step-{step_i}')
+      else:
+        if jax.process_index() == 0:
+          # We just need to save the first model replica.
+          unreplicated_model_states = jax.tree_map(lambda x: x[0],
+                                                   partitioned_train_state)
+          checkpoints.save_checkpoint(
+              unreplicated_model_states,
+              self.checkpoint_dir,
+              checkpoint_type=self._checkpoint_type,
+              use_orbax=False,
+              async_checkpointer=self.async_checkpointer)
+      self.checkpoint_manager.save_metadata(global_step_id=step_i, 
+                                            force=is_final)
+    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
+                                          save_period.elapsed)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if self.checkpoint_manager.should_save(step_i):
@@ -404,15 +431,18 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         use_orbax=True)
 
   def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
-    if py_utils.pmap_use_tensorstore():
-      return self._restore_from_tensorstore(train_state_global_shapes)
-    else:
-      step = self.checkpoint_manager.latest_step()
-      if step is None:
-        train_state = None
+    with py_utils.timeit() as restore_period:
+      if py_utils.pmap_use_tensorstore():
+        train_state = self._restore_from_tensorstore(train_state_global_shapes)
       else:
-        train_state = self.checkpoint_manager.restore(
-            step, items=train_state_global_shapes)
+        step = self.checkpoint_manager.latest_step()
+        if step is None:
+          train_state = None
+        else:
+          train_state = self.checkpoint_manager.restore(
+              step, items=train_state_global_shapes)
+    monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
+                                          restore_period.elapsed)
     return train_state
 
   def _save_with_args(self, step_i, train_state):
@@ -425,22 +455,25 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     if not self._enable_checkpoint_saving:
       return
 
-    if py_utils.pmap_use_tensorstore():
-      logging.info('Saving a ckpt at %sstep: %d', 'final ' if is_final else '',
-                   step_i)
-      if jax.config.jax_array:
-        fully_replicated_gda_train_state = jax.tree_map(
-            py_utils.convert_host_local_array_to_global_array,
-            partitioned_train_state)
+    with py_utils.timeit() as save_period:
+      if py_utils.pmap_use_tensorstore():
+        logging.info('Saving a ckpt at %sstep: %d',
+                     'final ' if is_final else '', step_i)
+        if jax.config.jax_array:
+          fully_replicated_gda_train_state = jax.tree_map(
+              py_utils.convert_host_local_array_to_global_array,
+              partitioned_train_state)
+        else:
+          fully_replicated_gda_train_state = jax.tree_map(
+              py_utils.convert_fully_replicated_sda_to_gda,
+              partitioned_train_state)
+        self._save_with_args(step_i, fully_replicated_gda_train_state)
       else:
-        fully_replicated_gda_train_state = jax.tree_map(
-            py_utils.convert_fully_replicated_sda_to_gda,
-            partitioned_train_state)
-      self._save_with_args(step_i, fully_replicated_gda_train_state)
-    else:
-      unreplicated_train_state = jax.tree_map(lambda x: x[0],
-                                              partitioned_train_state)
-      self._save_with_args(step_i, unreplicated_train_state)
+        unreplicated_train_state = jax.tree_map(lambda x: x[0],
+                                                partitioned_train_state)
+        self._save_with_args(step_i, unreplicated_train_state)
+    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
+                                          save_period.elapsed)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if not self.checkpoint_manager.should_save(step_i):
