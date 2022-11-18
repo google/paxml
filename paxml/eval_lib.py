@@ -807,7 +807,6 @@ class _SpmdEvalRunner:
                init_key: PRNGKey,
                partitioned_specs: train_states.TrainState,
                job_log_dir: epath.Path,
-               use_ema: bool = False,
                unpadded_global_batch_size: Optional[int] = None):
     self._eval_input_p = eval_input_p
     if not self._eval_input_p:
@@ -835,8 +834,6 @@ class _SpmdEvalRunner:
     # Will be populated by self.run_pjit() below.
     self._eval_step = None
     self._inputs_partition_specs = None
-    if use_ema:
-      partitioned_specs = partitioned_specs.to_eval_state()
     self._run_pjit(init_key, partitioned_specs, unpadded_global_batch_size)
 
   @classmethod
