@@ -30,7 +30,8 @@ class Profiler:
                num_steps: float = 2.,
                min_duration_sec: float = 1.,
                default_duration_sec: float = 5.,
-               tag: Optional[str] = None) -> None:
+               tag: Optional[str] = None,
+               max_num_hosts: Optional[int] = None) -> None:
     """Constructor.
 
     Args:
@@ -43,11 +44,15 @@ class Profiler:
         seconds. Used when no step duration were sampled by calling
         update_step_moving_mean().
       tag: An optional tag to be added to the profiler trace.
+      max_num_hosts: If max_num_hosts is unspecified, all hosts of devices will
+        be chosen. Otherwise, at most max_num_hosts will be chosen. This option
+        only works with pathways.
     """
     self._capture_num_steps = num_steps
     self._capture_min_duration_sec = min_duration_sec
     self._capture_default_duration_sec = default_duration_sec
     self._tag = tag
+    self._max_num_hosts = max_num_hosts
     self._step_duration_sec = 0.
     self._step_count = 0
 
