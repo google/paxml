@@ -353,13 +353,10 @@ def _restore_checkpoint_flax(
       'flattened_state': flattened_state,
       'str_pytree_state': str_pytree_state,
   }
-  # Flax restore_checkpoint throws error if
+  restored_target = flax_checkpoints.restore_checkpoint(
+      os.fspath(checkpoint_dir), input_target, step=step)
+  # Flax restore_checkpoint returned input_target unchanged if
   # no step specified and no checkpoint files present.
-  try:
-    restored_target = flax_checkpoints.restore_checkpoint(
-        os.fspath(checkpoint_dir), input_target, step=step)
-  except ValueError:
-    pass
   if restored_target is input_target:
     return None
   restored_state = restored_target['flattened_state']
