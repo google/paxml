@@ -16,12 +16,10 @@
 """Tests for input_generator."""
 
 from absl.testing import absltest
-from lingvo.core import base_input_generator
-from lingvo.core import test_utils
 from paxml.tasks.vision import input_generator
 
 
-class InputGeneratorTest(test_utils.TestCase):
+class InputGeneratorTest(absltest.TestCase):
 
   def _check_data_shape(self,
                         p,
@@ -30,16 +28,14 @@ class InputGeneratorTest(test_utils.TestCase):
                         image_size=33):
     p.data_shape = (image_size, image_size, 3)
     p.batch_size = batch_size
-    if isinstance(p.cls, base_input_generator.BaseInputGeneratorFromFiles):
-      p.num_batcher_threads = 1
-      p.file_parallelism = 1
-      p.file_buffer_size = 1
-    with self.session() as sess:
-      inp = p.Instantiate()
-      batch = sess.run(inp.GetPreprocessedInputBatch())
-      b, (h, w, d) = p.batch_size, p.data_shape
-      self.assertEqual(batch.image.shape, (b, h, w, d))
-      self.assertEqual(batch.label_probs.shape, (b, p.num_classes))
+    p.num_batcher_threads = 1
+    p.file_parallelism = 1
+    p.file_buffer_size = 1
+    inp = p.Instantiate()
+    batch = inp.GetPreprocessedInputBatch()
+    b, (h, w, d) = p.batch_size, p.data_shape
+    self.assertEqual(batch.image.shape, (b, h, w, d))
+    self.assertEqual(batch.label_probs.shape, (b, p.num_classes))
 
   def testImageNetValidation(self):
     p = input_generator.ImageNetValidation.Params()
