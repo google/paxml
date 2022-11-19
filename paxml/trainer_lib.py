@@ -272,10 +272,13 @@ def adjust_input_params_for_small_batch(
     copy.batch_padding_size = local_device_count - batch_size
 
   assert inp_p.num_infeed_hosts <= jax.process_count()
+  # LINT.IfChange(PspecSharding)
   if jax.process_count() == 1:
     # If there is only one host, valid examples are already contiguous so we can
     # use default GDA creation.
+    # Inputs use pspec sharding (see praxis.BaseInput.reshard_for_spmd).
     return copy
+  # LINT.ThenChange(trainer_lib.py:UsePspecOnArrayInputs)
   # Some hosts may produce duplicate data, but they will be discarded.
   copy.infeed_host_index = jax.process_index() % inp_p.num_infeed_hosts
   if copy.infeed_host_index >= inp_p.num_infeed_hosts:
@@ -1450,8 +1453,16 @@ class _SpmdModelPartitioner:
                                      list(fn_out_partition_specs[1:]))
 
     asserts.assert_same_structure(fn_out_partition_specs, out_padded_shapes)
-    partitioned_step_fn = self._pjit(step_fn, is_eval, fn_in_partition_specs,
-                                     fn_out_partition_specs)
+
+    # LINT.IfChange(UsePspecOnArrayInputs)
+    use_pspec_on_array_inputs = (jax.process_count() == 1)
+    # LINT.ThenChange(trainer_lib.py:PspecSharding)
+    partitioned_step_fn = self._pjit(
+        step_fn,
+        is_eval,
+        fn_in_partition_specs,
+        fn_out_partition_specs,
+        use_pspec_on_array_inputs=use_pspec_on_array_inputs)
     logging.info('step_fn inputs_partition_spec=%s', input_partition_spec)
     return (partitioned_step_fn, input_partition_spec,
             train_state_partition_spec)
