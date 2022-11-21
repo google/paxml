@@ -114,7 +114,7 @@ executing==1.2.0
     # via stack-data
 fastjsonschema==2.16.2
     # via nbformat
-fiddle @ git+https://github.com/google/fiddle
+fiddle==0.2.4
     # via -r praxis-requirements.in
 filelock==3.8.0
     # via
