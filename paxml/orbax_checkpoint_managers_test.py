@@ -131,8 +131,9 @@ class CheckpointManagerTest(parameterized.TestCase):
   @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
                             (CheckpointType.CHECKPOINT_FLAX,))
   def test_save_checkpoint_keep_interval_timedelta(self, checkpoint_type):
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    tz = datetime.timezone.utc
+    current_datetime = datetime.datetime.now(tz=tz)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=tz)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -171,8 +172,9 @@ class CheckpointManagerTest(parameterized.TestCase):
   @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
                             (CheckpointType.CHECKPOINT_FLAX,))
   def test_save_restore_manager_case_1_default(self, checkpoint_type):
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    tz = datetime.timezone.utc
+    current_datetime = datetime.datetime.now(tz=tz)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=tz)
 
     options = checkpoint_managers.CheckpointManagerOptions(
         save_interval_steps=2000, max_to_keep=4)
