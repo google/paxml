@@ -52,6 +52,7 @@ NestedShape = NestedMap
 PRNGKey = pytypes.PRNGKey
 ParamsT = pytypes.HParamsT
 PyTreeDef = pytypes.PyTreeDef
+NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedPartitionSpec = pytypes.NestedPartitionSpec
@@ -1240,7 +1241,8 @@ class _SpmdModelPartitioner:
       self._init_shape_dtype = train_inputs_shape_dtype
       self._abstract_init_with_train = True
 
-  def partition(self, step_fn, is_eval):
+  def partition(self, step_fn, is_eval) -> Tuple[
+      Callable[..., Any], NestedPartitionSpec, TrainState]:
     """Gets a sharded (pjit-ed) step function of the SPMD Model.
 
     Args:
@@ -1477,8 +1479,8 @@ def get_partitioned_spmd_model_step_fn(
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     train_state_partition_spec: Optional[TrainState] = None,
     unpadded_global_batch_size: Optional[int] = None,
-    enable_auto_sharding: bool = False
-) -> Tuple[Any, NestedPartitionSpec, NestedPartitionSpec]:
+    enable_auto_sharding: bool = False) -> Tuple[Any, NestedPartitionSpec,
+                                                 TrainState]:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
   Args:
@@ -1543,6 +1545,7 @@ def get_partitioned_spmd_model_step_fn(
   if enable_auto_sharding:
     sharding_info = None
   else:
+    assert train_state_partition_spec is not None
     sharding_info = _SpmdModelPartitioner.ShardingInfo(
         train_state_partition_spec, unpadded_global_batch_size)
 
@@ -1551,6 +1554,84 @@ def get_partitioned_spmd_model_step_fn(
                                       train_inputs_shape_dtype, sharding_info,
                                       auto_sharding_replicate_output)
   return partitioner.partition(step_fn, is_eval)
+
+
+def get_spmd_model_step_fns_from_inputs(
+    input_ps: Sequence[base_input.BaseInput.HParams],
+    unpadded_input_ps: Sequence[base_input.BaseInput.HParams],
+    jax_task: tasks_lib.SingleTask,
+    mode: RunningMode,
+    global_mesh: maps.Mesh,
+    init_key: PRNGKey,
+    train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+    train_state_partition_spec: Optional[TrainState] = None,
+    enable_auto_sharding: bool = False) -> Tuple[
+        Sequence[Callable[..., Any]], Sequence[NestedPartitionSpec],
+        Sequence[NestedShapeDtypeStruct], TrainState]:
+  """Helper for calling `get_partitioned_spmd_model_step_fn` with input_ps.
+
+  Note: This method instantiates all the input pipelines passed in `input_ps` to
+    get a sample input.
+
+  Args:
+    input_ps: inputs hparams list. May be padded unliked `unpadded_input_ps`.
+    unpadded_input_ps: inputs hparams list. Importantly these are inputs
+      *before* being called by `adjust_input_params_for_small_batch`. Thus,
+      `py_utils.get_global_batch_size(p)` returns the unpadded batch size.
+    jax_task: see docstring for `get_partitioned_spmd_model_step_fn`.
+    mode: see docstring for `get_partitioned_spmd_model_step_fn`.
+    global_mesh: see docstring for `get_partitioned_spmd_model_step_fn`.
+    init_key: see docstring for `get_partitioned_spmd_model_step_fn`.
+    train_inputs_shape_dtype: see docstring for
+      `get_partitioned_spmd_model_step_fn`.
+    train_state_partition_spec: see docstring for
+      `get_partitioned_spmd_model_step_fn`.
+    enable_auto_sharding: see docstring for
+      `get_partitioned_spmd_model_step_fn`.
+
+  Returns:
+    (step_fns, input_partition_specs, inputs_shape_dtypes,
+     train_state_partition_spec):
+    The partitioned step function and the partition spec for the inputs,
+    train state, and train_state_partition_spec. If auto-sharding is enabled,
+    train_state_partition_spec is automatically generated, otherwise it's the
+    same as the provided one.
+  """
+  if len(input_ps) != len(unpadded_input_ps):
+    raise ValueError(
+        'Length of padded and unpadded inputs must match and be 1-to-1: '
+        f'{len(input_ps)} != {len(unpadded_input_ps)}.')
+
+  step_fns = []
+  input_partition_specs = []
+  inputs_shape_dtypes = []
+  updated_train_state_partition_spec = train_state_partition_spec
+
+  for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
+    # TODO(pax-dev): Investigate if we can use model input specs
+    # instead of instantiating this input pipeline.
+    sample_inputs = instantiate(input_p).get_next_padded()
+    inputs_shape_dtype = jax.tree_util.tree_map(
+        py_utils.get_global_input_shape_dtype, sample_inputs)
+    step_fn, inputs_partition_spec, updated_train_state_partition_spec = (
+        get_partitioned_spmd_model_step_fn(
+            jax_task,
+            mode,
+            global_mesh,
+            init_key,
+            inputs_shape_dtype,
+            train_inputs_shape_dtype=train_inputs_shape_dtype,
+            train_state_partition_spec=train_state_partition_spec,
+            unpadded_global_batch_size=(
+                unpadded_input_p.cls.get_global_batch_size(unpadded_input_p)),
+            enable_auto_sharding=enable_auto_sharding))
+
+    inputs_shape_dtypes.append(inputs_shape_dtype)
+    step_fns.append(step_fn)
+    input_partition_specs.append(inputs_partition_spec)
+
+  return (step_fns, input_partition_specs, inputs_shape_dtypes,
+          updated_train_state_partition_spec)
 
 
 def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:
