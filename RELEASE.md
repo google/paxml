@@ -1,3 +1,12 @@
+# Version: 0.2.1
+## Bug fix
+* fix the HBM OOM error when loading the checkpoint using orbax
+## Note
+*   Version: 0.2.1
+*   Build Date: 20221121
+*   Paxml commit: c4628a21946dd13eb5a42b6f5862284088d90730
+*   Praxis version: 0.2.1
+*   Praxis commit: f7e98026c1c5ecbc6e4aff175621d443fa37fcf2
 # Version: 0.2.0
 ## Major Features and Improvements
 * Revamp training and evaluation/decoding loops in preparation of multi-task
