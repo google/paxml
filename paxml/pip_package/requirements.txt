@@ -73,6 +73,8 @@ clu==0.0.7
     #   seqio-nightly
 colorama==0.4.6
     # via sacrebleu
+comm==0.1.0
+    # via ipykernel
 commonmark==0.9.1
     # via rich
 contextlib2==21.6.0
@@ -81,8 +83,6 @@ contourpy==1.0.6
     # via matplotlib
 cycler==0.11.0
     # via matplotlib
-dataclasses==0.6
-    # via orbax
 debugpy==1.6.3
     # via ipykernel
 decorator==5.1.1
@@ -98,7 +98,9 @@ dm-tree==0.1.7
     #   chex
     #   tfds-nightly
 editdistance==0.6.1
-    # via t5
+    # via
+    #   seqio-nightly
+    #   t5
 einops==0.6.0
     # via -r praxis-requirements.in
 entrypoints==0.4
@@ -173,7 +175,7 @@ importlib-resources==5.10.0
     #   orbax
     #   tensorflow-datasets
     #   tfds-nightly
-ipykernel==6.17.1
+ipykernel==6.18.0
     # via
     #   ipywidgets
     #   jupyter
@@ -253,7 +255,7 @@ jupyter-core==5.0.0
     #   qtconsole
 jupyter-http-over-ws==0.0.8
     # via lingvo
-jupyter-server==1.23.2
+jupyter-server==1.23.3
     # via
     #   nbclassic
     #   notebook-shim
@@ -340,7 +342,7 @@ notebook==6.5.2
     #   jupyter-http-over-ws
 notebook-shim==0.2.2
     # via nbclassic
-numpy==1.23.4
+numpy==1.23.5
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -387,13 +389,13 @@ opt-einsum==3.3.0
     # via
     #   jax
     #   tensorflow
-optax==0.1.3
+optax==0.1.4
     # via
     #   -r praxis-requirements.in
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.0.16
+orbax==0.0.18
     # via -r paxml-requirements.in
 packaging==21.3
     # via
@@ -437,7 +439,7 @@ promise==2.3
     # via
     #   tensorflow-datasets
     #   tfds-nightly
-prompt-toolkit==3.0.32
+prompt-toolkit==3.0.33
     # via
     #   ipython
     #   jupyter-console
@@ -558,7 +560,7 @@ sentencepiece==0.1.97
     #   t5
 seqio==0.0.12
     # via t5
-seqio-nightly==0.0.12.dev20221116
+seqio-nightly==0.0.12.dev20221121
     # via -r paxml-requirements.in
 six==1.16.0
     # via
@@ -638,7 +640,7 @@ tensorstore==0.1.28
     #   -r paxml-requirements.in
     #   flax
     #   orbax
-termcolor==2.1.0
+termcolor==2.1.1
     # via
     #   tensorflow
     #   tensorflow-datasets
@@ -648,7 +650,7 @@ terminado==0.17.0
     #   jupyter-server
     #   nbclassic
     #   notebook
-tfds-nightly==4.7.0.dev202211160045
+tfds-nightly==4.7.0.dev202211210044
     # via
     #   seqio
     #   seqio-nightly
@@ -685,6 +687,7 @@ tqdm==4.64.1
     #   transformers
 traitlets==5.5.0
     # via
+    #   comm
     #   ipykernel
     #   ipython
     #   ipywidgets
