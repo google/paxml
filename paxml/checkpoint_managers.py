@@ -44,13 +44,16 @@ METRIC_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METRIC_ITEM_NAME
 
 def to_timestamp(datetime_instance: datetime.datetime) -> int:
   """Converts a datetime instance into an int timestamp."""
-  timedelta = datetime_instance - datetime.datetime.fromtimestamp(0)
+  tz = datetime.timezone.utc
+  timedelta = datetime_instance - datetime.datetime.fromtimestamp(0, tz=tz)
   return int(round(timedelta.total_seconds()))
 
 
 def from_timestamp(value: int) -> datetime.datetime:
   """Converts an int timestamp back into a datetime instance."""
-  return datetime.timedelta(seconds=value) + datetime.datetime.fromtimestamp(0)
+  tz = datetime.timezone.utc
+  return datetime.timedelta(seconds=value) + datetime.datetime.fromtimestamp(
+      0, tz=tz)
 
 
 def read_checkpoint_file(filename: str) -> checkpoint_pb2.CheckpointHistory:
@@ -195,7 +198,7 @@ class CheckpointManager:
           f'(last saved step: `{self._last_saved_checkpoint_step}` --'
           f' save interval steps: `{self._save_interval_steps}`).')
 
-    current_time = datetime.datetime.now()
+    current_time = datetime.datetime.now(tz=datetime.timezone.utc)
     self._last_saved_checkpoint_step = global_step_id
 
     # Use datetime.datetime directly rather than timestamp.GetCurrentTime()
@@ -247,7 +250,7 @@ class CheckpointManager:
 
     last_saved_timestamp = (
         self._checkpoint_history.checkpoints[-1].timestamp_sec)
-    current_datetime = datetime.datetime.now()
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
     if current_datetime < from_timestamp(last_saved_timestamp):
       # Time seems to have reversed itself.
       logging.warning(
@@ -468,9 +471,10 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     if not steps:
       return []
 
+    tz = datetime.timezone.utc
     times = [
         datetime.datetime.fromtimestamp(
-            (self.directory / self._checkpoint_name(step)).stat().mtime)
+            (self.directory / self._checkpoint_name(step)).stat().mtime, tz=tz)
         for step in steps
     ]
 

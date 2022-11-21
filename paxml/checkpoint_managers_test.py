@@ -100,7 +100,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     config_name = 'test.test_module.ConfigName'
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test1')
     steps = [100, 300, 700]
-    cdt = datetime.datetime.now()
+    cdt = datetime.datetime.now(tz=datetime.timezone.utc)
     datetimes = [
         cdt, cdt + datetime.timedelta(hours=1),
         cdt + datetime.timedelta(hours=2)
@@ -158,8 +158,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test2', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -212,8 +212,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test3', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -266,8 +266,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test4', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -324,8 +324,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test5', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -438,8 +438,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test6', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
@@ -531,8 +531,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     root_dir = os.path.join(FLAGS.test_tmpdir, 'test7', str(checkpoint_type),
                             'checkpoints')
     tf.io.gfile.makedirs(root_dir)
-    current_datetime = datetime.datetime.now()
-    zero_datetime = datetime.datetime.fromtimestamp(0)
+    current_datetime = datetime.datetime.now(tz=datetime.timezone.utc)
+    zero_datetime = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
     with mock.patch('datetime.datetime', autospec=True) as dt:
       dt.now.return_value = current_datetime
       dt.fromtimestamp.return_value = zero_datetime
