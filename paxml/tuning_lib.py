@@ -93,7 +93,8 @@ def tune(trial_fn: TrialFn,
          pythia_port: Optional[int] = None,
          is_metric_reporting_role: bool = True,
          tuner_group: Optional[str] = None,
-         max_num_trials: Optional[int] = None) -> None:
+         max_num_trials: Optional[int] = None,
+         controller_mode: str = 'auto') -> None:
   """Tune an experiment.
 
   An experiment can be tuned by running a tuning loop, with each iteration
@@ -134,6 +135,11 @@ def tune(trial_fn: TrialFn,
     max_num_trials: An optional max number of trials for current tuning.
       If not None, it will override the default max number of trials specified
       by the `search` method of the experiment.
+    controller_mode: One of 'primary', 'secondary', 'auto'.
+      If primary, current processs will only work as the controller, without
+      running tuning workload. If secondary, current process will only run
+      tuning workload. Otherwise, current process may elect controller role
+      in a background thread, and run the tuning workload in the main thread.
   """
   # Google-internal tuning infra init.
 
@@ -182,6 +188,12 @@ def tune(trial_fn: TrialFn,
                               str(early_stopping_policy_debug_file),
                               'early_stopping_policy')
 
+  if controller_mode == 'primary':
+    _run_dedicated_controller(
+        study, search_space.dna_spec,
+        search_algorithm, early_stopping_policy, max_num_trials)
+    return
+
   sub_experiments = experiment_config.sub_experiments()
   combined_decision_point_names = getattr(
       experiment_config, automl.COMBINED_DECISION_POINT_NAMES, None)
@@ -194,7 +206,8 @@ def tune(trial_fn: TrialFn,
       search_space, search_algorithm, max_num_trials,
       early_stopping_policy=early_stopping_policy,
       group=tuner_group,
-      name=study if study and study.startswith('local') else None):
+      name=study if study and study.startswith('local') else None,
+      is_chief=None if controller_mode == 'auto' else False):
 
   # Google-internal tuning infra logging.
 
@@ -230,6 +243,16 @@ def tune(trial_fn: TrialFn,
           break
       logging.info('Trial %d is now completed.', feedback.id)
   logging.info('Completed with all trials for study %r', study)
+
+
+def _run_dedicated_controller(
+    study_name: str,
+    search_space: pg.DNASpec,
+    search_algorithm: pg.DNAGenerator,
+    early_stopping_policy: pg.tuning.EarlyStoppingPolicy,
+    max_num_trials: Optional[int] = None) -> None:
+  """Runs dedicated controller and waits for its completion."""
+  raise NotImplementedError('Dedicated controller is not supported in OSS paxml.')
 
 
 class EarlyStoppingFn:

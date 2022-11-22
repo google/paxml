@@ -139,6 +139,13 @@ flags.DEFINE_string(
     'study', None,
     'Study name for current tuning. If None, the program will be running in '
     'standard training/evaluation mode. Otherwise, it will run in tuning mode.')
+flags.DEFINE_enum(
+    'controller_mode', 'auto', ['primary', 'secondary', 'auto'],
+    'Mode for tuning controller. If primary, current processs will only work '
+    'as the controller, without running tuning workload. If secondary, current '
+    'process will only run tuning workload. Otherwise, current process may '
+    'elect controller role in a background thread, and run the tuning workload '
+    'in the main thread.')
 flags.DEFINE_string(
     'tuner_group', None,
     'The identifier for the tuner group that current process belongs to. '
@@ -158,6 +165,7 @@ flags.DEFINE_integer(
     'pythia_port', None,
     'Port for hosting Pythia service when non-Vizier built-in algorithms '
     'is used')
+
 # Flags --jax_parallel_functions_output_gda, --jax_backend_target,
 # --jax_xla_backend, --jax_enable_checks are available through JAX.
 
@@ -396,7 +404,8 @@ def run(experiment_config: base_experiment.BaseExperiment,
         pythia_port=FLAGS.pythia_port,
         is_metric_reporting_role=(FLAGS.metrics_from == FLAGS.mode),
         tuner_group=FLAGS.tuner_group,
-        max_num_trials=FLAGS.num_trials)
+        max_num_trials=FLAGS.num_trials,
+        controller_mode=FLAGS.controller_mode)
 
 
 def main(argv: Sequence[str]) -> None:
