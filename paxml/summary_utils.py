@@ -60,6 +60,9 @@ MAX_IMAGES_PER_SUMMARY = 64
 MAX_AUDIOS_PER_SUMMARY = 64
 MAX_TEXTS_PER_SUMMARY = 64
 
+# Used by tf_summary.audio.
+AUDIO_SUMMARY_SAMPLE_RATE = 44_000
+
 
 # Copied from flax.core.FrozenDict and customized for lists.
 def pretty_repr(values: NestedJTensor, num_spaces: int = 4) -> str:
@@ -324,7 +327,8 @@ def write_summary_tensor(step_i: int, key: str,
       tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))
       # TODO(nanxinchen): Make the sampling rate configurable
       for i in range(min(tensor.shape[0], remaining_max_audios)):
-        tf_summary.audio(f'{key}/{i}', tensor[i:i + 1], 44000, step_i)
+        tf_summary.audio(f'{key}/{i}', tensor[i:i + 1],
+                         AUDIO_SUMMARY_SAMPLE_RATE, step_i)
       remaining_max_audios -= tensor.shape[0]
   elif base_layer.get_summary_base_type(summary_type) == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
