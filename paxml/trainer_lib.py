@@ -131,10 +131,10 @@ class TrainStateMetadata:
   partitioned_specs: Optional[TrainState] = None
 
 
-def create_train_state_metadata(
-    jax_task: tasks_lib.SingleTask,
-    train_shape_dtype: NestedShapeDtypeLike,
-    discard_opt_states: bool = False) -> TrainStateMetadata:
+def create_train_state_metadata(jax_task: tasks_lib.SingleTask,
+                                train_shape_dtype: NestedShapeDtypeLike,
+                                discard_opt_states: bool = False,
+                                do_eval: bool = False) -> TrainStateMetadata:
   """Creates a TrainStateMetadata instance.
 
   Args:
@@ -144,12 +144,13 @@ def create_train_state_metadata(
       for pmap models and global shapes for pjit ones.
     discard_opt_states: Whether to discard the part corresponding to the
       optimizer states or not.
+    do_eval: Whether this metadata is used for evaluation.
 
   Returns:
     A TrainStateMetadata instance.
   """
   var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      train_shape_dtype)
+      train_shape_dtype, do_eval=do_eval)
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states)
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
