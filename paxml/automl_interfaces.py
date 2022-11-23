@@ -95,8 +95,7 @@ class SearchHParams(BaseHyperParams):
       a single trial during training/evaluation.
     cross_step_metric_aggregator: Hyperparameters for cross-step metric
       aggregator. If None, `automl.LastReportedMetricValues` will be used.
-    max_num_trials: Max number of trials for the search. If None, there is no
-      limit.
+    max_num_trials: Max number of trials for the search.
     errors_to_skip: An optional field to specify on what errors the trial
       should be skipped. It's in the form of a list of (ExceptionType) or
       (ExceptionType, regexForError). For example, if users specify:
@@ -109,7 +108,7 @@ class SearchHParams(BaseHyperParams):
   early_stopping: Optional[BaseEarlyStoppingPolicy.HParams] = None
   cross_step_metric_aggregator: Optional[
       CrossStepMetricAggregator.HParams] = None
-  max_num_trials: int = None
+  max_num_trials: int = 1000000
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
 

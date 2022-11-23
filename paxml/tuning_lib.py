@@ -151,7 +151,7 @@ def tune(trial_fn: TrialFn,
     reward_fn = instantiate(reward_params)
   else:
     reward_fn = None
-  max_num_trials = max_num_trials or search_hparams.max_num_trials
+  max_num_trials = max_num_trials or search_hparams.max_num_trials or 1000000
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
       search_hparams.cross_step_metric_aggregator
@@ -164,6 +164,7 @@ def tune(trial_fn: TrialFn,
   if search_space.dna_spec.is_constant:
     raise ValueError(f'Aborting tuning: there is no tunable parameters in'
                      f'experiment {experiment_config.__class__.__name__!r}.')
+  max_num_trials = min(max_num_trials, search_space.dna_spec.space_size)
 
   job_log_dir.mkdir(parents=True, exist_ok=True)
   logging.info('Search space: %s', search_space.dna_spec)
