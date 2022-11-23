@@ -134,6 +134,30 @@ def _add_fake_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
   return ex
 
 
+def _enumerate_dataset(ds: tf.data.Dataset, is_training: bool,
+                       shard_info: seqio.ShardInfo) -> tf.data.Dataset:
+  """Add enumeration fields, only meaningful when is_training=False."""
+  if is_training:
+    return ds.map(_add_fake_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+
+  def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
+    ex[SHARD_INDEX_KEY] = tf.cast(shard_info.index, tf.int32)
+    ex[NUM_SHARDS_KEY] = tf.cast(shard_info.num_shards, tf.int32)
+    return ex
+
+  def _fold_in_local_enumeration(index_within_shard: tf.Tensor,
+                                 ex: Dict[str, Any]) -> Dict[str, Any]:
+    ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(index_within_shard, tf.int64)
+    return ex
+
+  ds = ds.map(_add_shard_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+  ds = ds.enumerate()
+  ds = ds.map(_fold_in_local_enumeration,
+              num_parallel_calls=tf.data.AUTOTUNE)
+
+  return ds
+
+
 def maybe_update_decode_output_keys(
     process_decode_output: Sequence[Tuple[str, Any]],
     decode_out: NestedMap) -> Sequence[Tuple[str, Any]]:
@@ -373,6 +397,10 @@ class SeqIOInput(base_input.BaseInput):
     self._dataset = self._get_dataset()
     self._iter = self._dataset.as_numpy_iterator()
 
+    # Populated by first call to `self._get_targets_with_enum_key`. Subsequent
+    # calls to it short circuit by returning the cached values.
+    self._cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = None
+
   def _validate_deterministic(self):
     if self.hparams.deterministic_input:
       raise ValueError('deterministic_input is not supported')
@@ -505,31 +533,6 @@ class SeqIOInput(base_input.BaseInput):
       ret.append(vocab.decode(row))
     return ret
 
-  def _enumerate(self, ds: tf.data.Dataset,
-                 shard_info: seqio.ShardInfo) -> tf.data.Dataset:
-    """Add enumeration fields, only meaningful when is_training=False."""
-    p = self.hparams
-
-    if p.is_training:
-      return ds.map(_add_fake_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
-
-    def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
-      ex[SHARD_INDEX_KEY] = tf.cast(shard_info.index, tf.int32)
-      ex[NUM_SHARDS_KEY] = tf.cast(shard_info.num_shards, tf.int32)
-      return ex
-
-    def _fold_in_local_enumeration(index_within_shard: tf.Tensor,
-                                   ex: Dict[str, Any]) -> Dict[str, Any]:
-      ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(index_within_shard, tf.int64)
-      return ex
-
-    ds = ds.map(_add_shard_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
-    ds = ds.enumerate()
-    ds = ds.map(_fold_in_local_enumeration,
-                num_parallel_calls=tf.data.AUTOTUNE)
-
-    return ds
-
   def _get_backing_ds(self,
                       shuffle: bool,
                       num_epochs: int,
@@ -551,7 +554,7 @@ class SeqIOInput(base_input.BaseInput):
       # We want to add enumeration provenance fields *after* applying all
       # feature converters since feature converters don't pass through
       # unrecognized fields by default
-      ds = self._enumerate(ds, shard_info)
+      ds = _enumerate_dataset(ds, p.is_training, shard_info)
 
     return ds
 
@@ -722,6 +725,9 @@ class SeqIOInput(base_input.BaseInput):
     return predictions_list, targets_list
 
   def _get_targets_with_enum_key(self) -> Mapping[str, NestedMap]:
+    if self._cached_targets_with_enum_key is not None:
+      return self._cached_targets_with_enum_key
+
     p = self.hparams
     inputs_length = p.task_feature_lengths['inputs']
     targets_length = p.eval_metrics_targets_length
@@ -743,7 +749,7 @@ class SeqIOInput(base_input.BaseInput):
           seed=p.input_random_seed,
           use_cached=p.use_cached,
           trim_output_features=p.trim_output_features)
-      targets_ds = self._enumerate(targets_ds, shard_info)
+      targets_ds = _enumerate_dataset(targets_ds, False, shard_info)
 
       for e in targets_ds.as_numpy_iterator():
         # remove enum related fields from example as seqio metric_fns API
@@ -751,6 +757,8 @@ class SeqIOInput(base_input.BaseInput):
         key = py_utils.get_enumeration_id(e, pop=True)
         assert key is not None and key not in targets
         targets[key] = e
+
+    self._cached_targets_with_enum_key = targets  # populate cache
 
     return targets
 
