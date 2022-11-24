@@ -380,8 +380,8 @@ class _PmapTrainingCheckpointer(_TrainingCheckpointer):
               checkpoint_type=self._checkpoint_type,
               use_orbax=False,
               async_checkpointer=self.async_checkpointer)
-      self.checkpoint_manager.save_metadata(global_step_id=step_i, 
-                                            force=is_final)
+      self.checkpoint_manager.save_metadata(
+          global_step_id=step_i, force=is_final)
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
@@ -732,9 +732,10 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir, checkpointer,
-                            checkpoint_type, eval_input_p, decode_input_p,
-                            early_stopping_fn, enable_auto_sharding)
+    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
+                                  checkpointer, checkpoint_type, eval_input_p,
+                                  decode_input_p, early_stopping_fn,
+                                  enable_auto_sharding)
   else:
     train_and_evaluate_pmap(task_p, train_input_p, job_log_dir, checkpointer,
                             eval_input_p, decode_input_p, early_stopping_fn)
@@ -1074,21 +1075,18 @@ def train_and_evaluate_spmd_model(
   create_gda_for_inputs = (
       py_utils.gda_or_jax_array() and
       checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
-  train_unpadded_global_batch_size = (
-      train_input_p.cls.get_batch_size(train_input_p) *
-      train_input_p.num_infeed_hosts)
+
   train_input_p = trainer_lib.adjust_input_params_for_small_batch(
       train_input_p, global_mesh)
-  train_input_for_shape = instantiate(train_input_p)
-  train_sample_inputs = train_input_for_shape.get_next_padded()
-  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
-  # input shapes from training input pipeline.
-  perhost_inputs_shape_dtype = jax.tree_map(
-      lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
-      train_sample_inputs)
+  train_input = instantiate(train_input_p)
+  jax_task = instantiate(task_p)
+
+  trainer = trainer_lib.SingleTaskPjitTrainer(jax_task, train_input,
+                                              global_mesh, enable_auto_sharding)
+
+  perhost_inputs_shape_dtype = trainer.perhost_inputs_shape_dtype
   _write_input_specs(perhost_inputs_shape_dtype, job_log_dir)
-  inputs_shape_dtype = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                    train_sample_inputs)
+  inputs_shape_dtype = trainer.inputs_shape_dtype
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if (create_gda_for_inputs or
@@ -1110,9 +1108,7 @@ def train_and_evaluate_spmd_model(
           eval_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
     return eval_inputs
 
-  jax_task = instantiate(task_p)
-  train_state_metadata = trainer_lib.create_train_state_metadata(
-      jax_task, inputs_shape_dtype)
+  train_state_metadata = trainer.train_state_metadata
 
   # Dump out model meta info for debugging.
   trainer_lib.write_post_init_model_hparams_file(
@@ -1148,15 +1144,7 @@ def train_and_evaluate_spmd_model(
           'Per-device batch size < 1 not supported for auto sharding.')
     logging.info('Auto sharding is enabled in PAX.')
   (p_train_step, inputs_pspecs,
-   partitioned_specs) = trainer_lib.get_partitioned_spmd_model_step_fn(
-       jax_task,
-       RunningMode.TRAIN,
-       global_mesh,
-       train_prng_seed,
-       inputs_shape_dtype,
-       train_state_partition_spec=train_state_metadata.partitioned_specs,
-       unpadded_global_batch_size=train_unpadded_global_batch_size,
-       enable_auto_sharding=enable_auto_sharding)
+   partitioned_specs) = trainer.compile_step(train_prng_seed)
   if (not enable_auto_sharding and
       train_state_metadata.partitioned_specs != partitioned_specs):
     raise ValueError(
@@ -1202,7 +1190,8 @@ def train_and_evaluate_spmd_model(
       inputs_shape_dtype,
       train_state_partition_spec=(
           train_state_metadata.partitioned_specs.to_eval_state()),
-      unpadded_global_batch_size=train_unpadded_global_batch_size)
+      # TODO(hthu): This should be from a evaluator?
+      unpadded_global_batch_size=trainer.train_unpadded_global_batch_size)
 
   p_eval_steps = []
   padded_eval_input_p = eval_input_p
@@ -1316,7 +1305,7 @@ def train_and_evaluate_spmd_model(
       partition_eval_input_fns, partition_decode_once_fns, job_log_dir,
       eval_prng_seed, reshard_inputs, train_p, prepare_eval_inputs,
       prepare_model_inputs, is_vars_replicated,
-      train_unpadded_global_batch_size, train_state_metadata,
+      trainer.train_unpadded_global_batch_size, trainer.train_state_metadata,
       train_input_pipeline, p_train_step, p_eval_steps, p_eval_on_train_step,
       global_mesh, create_gda_for_inputs, train_prng_seed)
 

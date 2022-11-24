@@ -18,7 +18,7 @@
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Protocol, Sequence, TYPE_CHECKING, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -1657,3 +1657,91 @@ def bind_mesh(pjitted_fn, global_mesh: maps.Mesh):
 
   call.lower = lower
   return call
+
+
+class SingleTaskPjitTrainer:
+  """Trainer that assumes a single taks on a single dataset."""
+
+  def __init__(self,
+               task: tasks_lib.SingleTask,
+               train_input: base_input.BaseInput,
+               mesh: maps.Mesh,
+               enable_auto_sharding: bool = False):
+    self._task = task
+    self._train_input = train_input
+    self._mesh = mesh
+    self._enable_auto_sharding = enable_auto_sharding
+    self._train_unpadded_global_batch_size = (
+        train_input.HParams.cls.get_batch_size(train_input.hparams) *
+        train_input.hparams.num_infeed_hosts)
+    # Has to initialize before train_state_metadata as the inputs_shape_dtype
+    # requires self._sample_inputs.
+    self._sample_inputs = train_input.get_next_padded()
+    self._train_state_metadata = create_train_state_metadata(
+        self._task, self.inputs_shape_dtype)
+    # Lazily initialized values after calling `initialize`.
+    self._step_fn = None
+    self._train_input_pipeline = None
+    self._input_pspecs = None
+    self._train_state_partition_spec = None
+
+  def compile_step(
+      self, prng_key: jax.random.KeyArray
+  ) -> Tuple[Any, NestedPartitionSpec, TrainState]:
+    """Compiles a partitioned step_fn under pjit.
+
+    Args:
+      prng_key: The jax random key to use for initializing model variables.
+
+    Returns:
+      A tuple of (partitioned step function, partitioned input spec,
+        partitioned train state specs).
+    """
+    if self._step_fn is None:
+      self._step_fn, self._input_pspecs, self._train_state_partition_spec = (
+          get_partitioned_spmd_model_step_fn(
+              self._task,
+              RunningMode.TRAIN,
+              self._mesh,
+              prng_key,
+              inputs_shape_dtype=self.inputs_shape_dtype,
+              train_state_partition_spec=(
+                  self._train_state_metadata.partitioned_specs),
+              unpadded_global_batch_size=self._train_unpadded_global_batch_size,
+              enable_auto_sharding=self._enable_auto_sharding))
+    return self._step_fn, self._input_pspecs, self._train_state_partition_spec
+
+  def train_step(self, state: TrainState, prng_key: jax.random.KeyArray,
+                 inputs: Any):
+    if self._step_fn is None:
+      # Compile and get the step_fn.
+      # NOTE: The compilation turns of auto sharding so the partition_spec is
+      # not modified upon returning.
+      self.compile_step(prng_key)
+    return self._step_fn(state, prng_key, inputs)
+
+  @property
+  def train_state_metadata(self) -> TrainStateMetadata:
+    return self._train_state_metadata
+
+  @property
+  def train_unpadded_global_batch_size(self) -> int:
+    return self._train_unpadded_global_batch_size
+
+  @property
+  def task(self) -> tasks_lib.SingleTask:
+    if self._task is None:
+      raise ValueError(
+          'initialize() method must be called before using Trainer.')
+    return self._task
+
+  @property
+  def inputs_shape_dtype(self) -> NestedShapeDtypeLike:
+    return jax.tree_map(py_utils.get_global_input_shape_dtype,
+                        self._sample_inputs)
+
+  @property
+  def perhost_inputs_shape_dtype(self) -> NestedShapeDtypeLike:
+    return jax.tree_map(
+        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+        self._sample_inputs)
