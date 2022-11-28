@@ -164,7 +164,12 @@ def tune(trial_fn: TrialFn,
   if search_space.dna_spec.is_constant:
     raise ValueError(f'Aborting tuning: there is no tunable parameters in'
                      f'experiment {experiment_config.__class__.__name__!r}.')
-  max_num_trials = min(max_num_trials, search_space.dna_spec.space_size)
+
+  # NOTE(daiyip): The size of a search space will be infinite (-1) when
+  # `pg.floatv` or `pg.hyper.CustomHyper` are used. Therefore, we only set
+  # the max number of trials when the search space is finite.
+  if search_space.dna_spec.space_size != -1:
+    max_num_trials = min(max_num_trials, search_space.dna_spec.space_size)
 
   job_log_dir.mkdir(parents=True, exist_ok=True)
   logging.info('Search space: %s', search_space.dna_spec)
