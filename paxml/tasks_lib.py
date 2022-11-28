@@ -622,6 +622,18 @@ class SingleTask(base_task.BaseTask):
     profiler_max_num_hosts: Optional[int] = None
     always_use_train_for_model_init: bool = True
 
+  class DecodeHParams(base_hyperparams.BaseHyperParams):
+    """Parameters for decoding.
+
+    Attributes:
+      prng_key_fold_with_batch_index: if True, folds the decode prng key per
+        decoding batch index. Only effective for pmap decoding.
+      prng_key_fold_with_global_step: if True, folds the decode prng key with
+        the checkpoint global step. Only effective for pmap decoding.
+    """
+    prng_key_fold_with_batch_index: bool = False
+    prng_key_fold_with_global_step: bool = True
+
   @enum.unique
   class TrackDecoderMetricMode(str, enum.Enum):
     """Two different modes for tracking a metric: min or max."""
@@ -635,6 +647,7 @@ class SingleTask(base_task.BaseTask):
       name: Name of this task object, must be a valid identifier.
       model: The underlying JAX model encapsulating all the layers.
       train: HParams to control how this task should be trained.
+      decode: HParams to control how this task should be decoded.
       metrics: A BaseMetrics aggregator class to determine how metrics are
         computed.
       loss_aggregator: A LossAggregator aggregator class to derermine how the
@@ -644,8 +657,6 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
       use_orbax: if True, enables checkpointing with Orbax.
-      fold_decode_prng_key_per_batch: if True, folds the decode prng key per
-        decoding batch index. Only effective for pmap decoding.
     """
     # TODO(b/249483164) Change this to just `= sub_config_field(None)` after
     # Fiddle migration is complete.
@@ -657,6 +668,8 @@ class SingleTask(base_task.BaseTask):
     # the global scope later.
     train: SingleTask.TrainHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.TrainHParams)
+    decode: SingleTask.DecodeHParams = sub_config_field(
+        lazy_ref=lambda: SingleTask.DecodeHParams)
     metrics: Any = None
     loss_aggregator: Any = None
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(
@@ -666,7 +679,6 @@ class SingleTask(base_task.BaseTask):
         SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
     use_orbax: bool = False
-    fold_decode_prng_key_per_batch: bool = False
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)

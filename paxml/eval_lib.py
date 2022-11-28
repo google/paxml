@@ -1438,7 +1438,7 @@ def decode_once_pmap_model(
   logging.info('step=%d', step_i)
 
   def decode_step(mdl_states, prng_key, inputs, batch_idx):
-    if task_p.fold_decode_prng_key_per_batch:
+    if task_p.decode.prng_key_fold_with_batch_index:
       prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
     else:
       prng_seed_decode = prng_key
@@ -1446,7 +1446,7 @@ def decode_once_pmap_model(
     (weighted_scalars, per_example_out,
      updated_metrics), updated_vars = trainer_lib.decode_step(
          model, mdl_states, prng_seed_decode, var_weight_hparams, inputs,
-         model_p.fprop_dtype)
+         model_p.fprop_dtype, task_p.decode.prng_key_fold_with_global_step)
 
     weighted_scalars = decode_metrics.aggregate(weighted_scalars)
     aggregated_per_example_out = jax.lax.all_gather(

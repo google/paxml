@@ -898,7 +898,8 @@ def decode_step(
     prng_key: JTensor,
     var_weight_hparams: NestedWeightHParams,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32
+    fprop_dtype: jnp.dtype = jnp.float32,
+    prng_key_fold_with_global_step: bool = True
 ) -> Tuple[Tuple[Any, Any, Any], NestedMap]:
   """Decodes a model for a single step.
 
@@ -909,15 +910,18 @@ def decode_step(
     var_weight_hparams: A pytree of WeightHParams for the model variables.
     inputs: A batch of inputs to model.decode().
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+    prng_key_fold_with_global_step: Boolean to decide whether to fold the
+      prng_key with the global step.
 
   Returns:
     A tuple of (weighted_scalars, results, eval_metrics) as computed
       by model.decode() and the updated weights.
   """
   context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
-  # Fold in global_step as part of the random seed key, so that random
-  # numbers depends on global step.
-  prng_key = jax.random.fold_in(prng_key, states.step)
+  if prng_key_fold_with_global_step:
+    # Fold in global_step as part of the random seed key, so that random
+    # numbers depends on global step.
+    prng_key = jax.random.fold_in(prng_key, states.step)
   mdl_vars = states.mdl_vars
 
   assert not states.opt_states
