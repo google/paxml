@@ -1125,7 +1125,8 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
                pack: bool = False,
                use_custom_packing_ops: bool = False,
                weights_on_targets_only: Optional[bool] = None,
-               apply_length_check: bool = True) -> None:
+               apply_length_check: bool = True,
+               bos_id: int = 0) -> None:
     """Args to construct a language model feature converter.
 
     Args:
@@ -1142,13 +1143,15 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
       apply_length_check: if True, it checks whether output feature lengths are
         less than the lengths given by `sequence_length` in the get_dataset
         function.
+      bos_id: bos id for decoder inputs.
     """
     self._weights_on_targets_only = weights_on_targets_only
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
         use_custom_packing_ops=use_custom_packing_ops,
-        apply_length_check=apply_length_check)
+        apply_length_check=apply_length_check,
+        bos_id=bos_id)
 
   @property
   def weights_on_targets_only(self) -> bool:
@@ -1230,8 +1233,11 @@ class SequenceModelFeatures(seqio.EncDecFeatureConverter):
 
   def __init__(self,
                pack: bool = False,
-               use_custom_packing_ops: bool = False) -> None:
-    super().__init__(pack=pack, use_custom_packing_ops=use_custom_packing_ops)
+               use_custom_packing_ops: bool = False,
+               bos_id: int = 0) -> None:
+    super().__init__(pack=pack,
+                     use_custom_packing_ops=use_custom_packing_ops,
+                     bos_id=bos_id)
 
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax SequenceModel."""
