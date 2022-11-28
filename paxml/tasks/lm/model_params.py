@@ -662,6 +662,11 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
   SUMMARY_INTERVAL_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
+  # Profiler related
+  PROFILER_NUM_STEPS = 2
+  PROFILER_MIN_DURATION_SEC = 1
+  PROFILER_CAPTURE_STEP = None
+
   # Pipeline related.
   NUM_STAGES = None
   CIRCULAR_REPEAT = 1
@@ -784,6 +789,9 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
     task_p.train.save_max_to_keep = self.CHECKPOINT_MAX_TO_KEEP
+    task_p.train.profiler_num_steps = self.PROFILER_NUM_STEPS
+    task_p.train.profiler_min_duration_sec = self.PROFILER_MIN_DURATION_SEC
+    task_p.train.profiler_capture_step = self.PROFILER_CAPTURE_STEP
     maybe_setup_moe_params(
         model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage)
 
