@@ -1065,7 +1065,8 @@ class SingleTask(base_task.BaseTask):
           ckpt_path,
           step=rules.step,
           global_mesh=global_mesh,
-          checkpoint_type=checkpoint_type)
+          checkpoint_type=checkpoint_type,
+          use_orbax=True)
     else:
       loaded_train_state = checkpoints.restore_checkpoint(
           ckpt_train_state,
@@ -1073,7 +1074,8 @@ class SingleTask(base_task.BaseTask):
           global_mesh=global_mesh,
           checkpoint_type=checkpoint_type,
           state_specs=train_state_pspecs,
-          step=rules.step)
+          step=rules.step,
+          use_orbax=True)
 
     if loaded_train_state is None:
       raise RuntimeError(f'Cannot find checkpoint from {ckpt_path}')
