@@ -1135,6 +1135,14 @@ def infer_partition_spec_based_on_rank_fn(
     return base_layer.to_partition_spec(mapping_dict[key], mesh_names)
 
 
+def get_input_shape_dtypes(
+    input_p: base_input.BaseInput.HParams
+) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
+  sample_inputs = instantiate(input_p).get_next_padded()
+  return jax.tree_map(
+      py_utils.get_global_input_shape_dtype, sample_inputs)
+
+
 def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
   # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
@@ -1615,9 +1623,9 @@ def get_spmd_model_step_fns_from_inputs(
   for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    sample_inputs = instantiate(input_p).get_next_padded()
-    inputs_shape_dtype = jax.tree_util.tree_map(
-        py_utils.get_global_input_shape_dtype, sample_inputs)
+    inputs_shape_dtype = get_input_shape_dtypes(input_p)
+    # TODO(pax-dev): Here it assumes all updated_train_state_partition_spec are
+    # the same, verify that.
     step_fn, inputs_partition_spec, updated_train_state_partition_spec = (
         get_partitioned_spmd_model_step_fn(
             jax_task,
