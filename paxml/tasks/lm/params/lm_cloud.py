@@ -125,6 +125,8 @@ class LmCloudSpmd(model_params.TransformerLmSpmdAdafactor, SyntheticDataset):
   ACTIVATION_CLS = layers.GELU
   USE_GATED_ACTIVATION = False
 
+  USE_REPEATED_LAYER = True
+
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
 
