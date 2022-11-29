@@ -217,14 +217,11 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
 
 class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
-  def __init__(self,
-               task_p: tasks_lib.SingleTask.HParams,
+  def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                job_log_dir: epath.Path,
-               maybe_use_persistence_checkpointing: bool,
-               mode: EvaluationMode,
+               maybe_use_persistence_checkpointing: bool, mode: EvaluationMode,
                restore_checkpoint_dir: epath.Path,
-               restore_checkpoint_step: int,
-               use_orbax: bool = False):
+               restore_checkpoint_step: int):
     del mode
     self.checkpoint_type = checkpoints.retrieve_checkpoint_type(
         maybe_use_persistence_checkpointing, task_p)
@@ -233,7 +230,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
-    self.use_orbax: bool = use_orbax
     self.use_ema: bool = has_ema(task_p)
 
   def load_checkpoint_for_step(
@@ -247,7 +243,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         checkpoint_type=self.checkpoint_type,
         state_specs=partitioned_specs,
         step=step,
-        use_orbax=self.use_orbax)
+        use_orbax=True)
     assert partitioned_train_state
     if self.use_ema:
       partitioned_train_state = extract_ema(partitioned_train_state)
@@ -258,14 +254,11 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
 
-  def __init__(self,
-               task_p: tasks_lib.SingleTask.HParams,
+  def __init__(self, task_p: tasks_lib.SingleTask.HParams,
                job_log_dir: epath.Path,
-               maybe_use_persistence_checkpointing: bool,
-               mode: EvaluationMode,
+               maybe_use_persistence_checkpointing: bool, mode: EvaluationMode,
                restore_checkpoint_dir: epath.Path,
-               restore_checkpoint_step: int,
-               use_orbax: bool = False):
+               restore_checkpoint_step: int):
     self.checkpoint_type = checkpoints.retrieve_checkpoint_type(
         maybe_use_persistence_checkpointing, task_p)
     self.task_p = task_p
@@ -273,7 +266,6 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
-    self.use_orbax: bool = use_orbax
     self.use_ema: bool = has_ema(task_p)
     self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
         task_p.track_decoder_metric)
@@ -286,15 +278,14 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           step=step,
-          checkpoint_type=self.checkpoint_type,
-          use_orbax=self.use_orbax)
+          checkpoint_type=self.checkpoint_type)
     else:
       return checkpoints.restore_checkpoint(
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           checkpoint_type=self.checkpoint_type,
           step=step,
-          use_orbax=self.use_orbax)
+          use_orbax=True)
 
   def load_checkpoint_for_step(
       self, step: int, train_state_global_shapes: train_states.TrainState,
@@ -353,13 +344,11 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     return replicated_model_states, train_state_metadata, prng_key
 
 
-def _create_checkpointer(task_p: tasks_lib.SingleTask.HParams,
-                         job_log_dir: epath.Path,
-                         maybe_use_persistence_checkpointing: bool,
-                         mode: Optional[EvaluationMode],
-                         restore_checkpoint_dir: Optional[epath.PathLike],
-                         restore_checkpoint_step: Optional[int],
-                         use_orbax: bool = False) -> _EvalCheckpointer:
+def _create_checkpointer(
+    task_p: tasks_lib.SingleTask.HParams, job_log_dir: epath.Path,
+    maybe_use_persistence_checkpointing: bool, mode: Optional[EvaluationMode],
+    restore_checkpoint_dir: Optional[epath.PathLike],
+    restore_checkpoint_step: Optional[int]) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
     restore_checkpoint_dir = job_log_dir / 'checkpoints'
@@ -375,12 +364,12 @@ def _create_checkpointer(task_p: tasks_lib.SingleTask.HParams,
     return _SpmdEvalCheckpointer(task_p, job_log_dir,
                                  maybe_use_persistence_checkpointing, mode,
                                  restore_checkpoint_dir,
-                                 restore_checkpoint_step, use_orbax)
+                                 restore_checkpoint_step)
   else:
     return _PmapEvalCheckpointer(task_p, job_log_dir,
                                  maybe_use_persistence_checkpointing, mode,
                                  restore_checkpoint_dir,
-                                 restore_checkpoint_step, use_orbax)
+                                 restore_checkpoint_step)
 
 
 def run_eval_loop_over_test_splits(
@@ -536,8 +525,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
              restore_checkpoint_dir: Optional[epath.Path] = None,
              restore_checkpoint_step: Optional[int] = None,
              early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-             enable_auto_sharding: bool = False,
-             use_orbax: bool = False) -> None:
+             enable_auto_sharding: bool = False) -> None:
   """Runs the evaluation loop on the entire eval data set.
 
   Args:
@@ -555,7 +543,6 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       should_stop_early.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
-    use_orbax: Enables checkpointing backed by Orbax.
   """
   del enable_auto_sharding
   task_p = experiment_config.task()
@@ -566,8 +553,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       maybe_use_persistence_checkpointing,
       EvaluationMode.EVAL,
       restore_checkpoint_dir=restore_checkpoint_dir,
-      restore_checkpoint_step=restore_checkpoint_step,
-      use_orbax=use_orbax)
+      restore_checkpoint_step=restore_checkpoint_step)
 
   model_p = task_p.model
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
@@ -862,7 +848,6 @@ class _SpmdEvalRunner:
       checkpoint_step: Optional[int] = None,
       use_ema: bool = False,
       is_decode: bool = False,
-      use_orbax: bool = False,
       enable_auto_sharding: bool = False,
       eval_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
       decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
@@ -927,7 +912,7 @@ class _SpmdEvalRunner:
         checkpoint_type=checkpoint_type,
         step=checkpoint_step,
         state_specs=partitioned_specs,
-        use_orbax=use_orbax)
+        use_orbax=True)
     py_utils.sync_global_devices(f'checkpointer:restored:{checkpoint_dir}')
 
     if partitioned_train_state is None:
@@ -1060,7 +1045,6 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
        checkpoint_step=checkpointer.restore_checkpoint_step,
        use_ema=checkpointer.use_ema,
        is_decode=False,
-       use_orbax=checkpointer.use_orbax,
        enable_auto_sharding=enable_auto_sharding,
        eval_input_ps=eval_input_p)
   logging.info('partitioned_train_state: %s',
@@ -1096,7 +1080,6 @@ def decode(experiment_config: base_experiment.BaseExperiment,
            run_eval: Optional[bool] = False,
            early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
            enable_auto_sharding: bool = False,
-           use_orbax: bool = False,
            enable_checkpoint_saving: bool = True,
            output_pickle: bool = True) -> None:
   """Runs decoding on the decoder datasets.
@@ -1119,7 +1102,6 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       should_stop_early.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
-    use_orbax: Enables checkpointing backed by Orbax.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
   """
@@ -1135,7 +1117,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
                                       maybe_use_persistence_checkpointing,
                                       EvaluationMode.DECODE,
                                       restore_checkpoint_dir,
-                                      restore_checkpoint_step, use_orbax)
+                                      restore_checkpoint_step)
 
   if continuous_decode:
     logging.info('running continuous_decode from %s',
@@ -2118,7 +2100,6 @@ def _maybe_update_tracked_metric(
     min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
     data_partition_name: str,
     replicated_model_states: train_states.TrainState,
-    use_orbax: bool = False,
     enable_checkpoint_saving: bool = True) -> None:
   """Updates tracked metric if new value (m_value) is lower that the stored one.
 
@@ -2136,7 +2117,6 @@ def _maybe_update_tracked_metric(
       being tracked.
     replicated_model_states: replicated model states used to save the best
       checkpoint.
-    use_orbax: Enables checkpointing backed by Orbax.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   if jax.process_index() == 0:
@@ -2170,7 +2150,7 @@ def _maybe_update_tracked_metric(
         unreplicated_model_states = jax.tree_map(lambda x: x[0],
                                                  replicated_model_states)
         checkpoints.save_checkpoint(
-            unreplicated_model_states, tracker_dir_path, use_orbax=use_orbax)
+            unreplicated_model_states, tracker_dir_path, use_orbax=True)
 
 
 def _find_and_maybe_update_tracked_metric(
@@ -2216,15 +2196,13 @@ def _find_and_maybe_update_tracked_metric(
 
 
 def infer_and_write(experiment_config: base_experiment.BaseExperiment,
-                    job_log_dir: epath.Path,
-                    use_orbax: bool = False) -> None:
+                    job_log_dir: epath.Path) -> None:
   """Generates output from a model and writes it out.
 
   Args:
     experiment_config: an instance of BaseExperiment for the experiment with
       output generators configured.
     job_log_dir: The base directory for writing the outputs.
-    use_orbax: Enables checkpointing backed by Orbax.
   """
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -2232,12 +2210,12 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   inputs_p = experiment_config.decoder_datasets()
 
   checkpointer = _create_checkpointer(
-      task_p, job_log_dir,
+      task_p,
+      job_log_dir,
       maybe_use_persistence_checkpointing=False,
       mode=None,
       restore_checkpoint_dir=task_p.infer_writer.restore_checkpoint_dir,
-      restore_checkpoint_step=task_p.infer_writer.restore_checkpoint_step,
-      use_orbax=use_orbax)
+      restore_checkpoint_step=task_p.infer_writer.restore_checkpoint_step)
   for inp in inputs_p:
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()

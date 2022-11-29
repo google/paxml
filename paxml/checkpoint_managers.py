@@ -441,6 +441,8 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       raise ValueError('Must specify checkpoint type.')
     self._checkpoint_type = checkpoint_type
     super().__init__(*args, **kwargs)
+    # Set to 1 if not provided or set to 0.
+    self._options.save_interval_steps = self._options.save_interval_steps or 1
 
   def _checkpoint_name(self, step: Union[int, str]) -> str:
     if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:

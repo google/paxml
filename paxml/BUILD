@@ -180,7 +180,6 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
-        "//praxis:base_model",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -270,7 +269,6 @@ pytype_strict_library(
         # Implicit fiddle dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
-        # Implicit jax.experimental.gda_serialization dependency.
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit pyglove dependency.
@@ -431,7 +429,6 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
-        # Implicit jax.experimental.gda_serialization dependency.
         "//paxml:checkpoints",
         "//paxml:profiling",
         "//praxis:base_hyperparams",
