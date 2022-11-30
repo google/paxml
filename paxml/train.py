@@ -55,8 +55,6 @@ from paxml import checkpoints  # mapped to internal
 from paxml import profiling  # mapped to internal
 
 Checkpointer = checkpoints.Checkpointer
-CheckpointManager = Union[checkpoint_managers.CheckpointManager,
-                          checkpoint_managers.OrbaxCheckpointManager]
 CheckpointType = checkpoint_pb2.CheckpointType
 instantiate = base_hyperparams.instantiate
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
@@ -223,7 +221,6 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def _restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
-    checkpoints.delete_temp_directories(self.checkpoint_dir)
     logging.info('Pmap restore from TensorStore checkpoint...')
     # Restored from GDA checkpoint dir.
     return tasks_lib.restore_pmap_from_tensorstore(

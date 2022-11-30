@@ -559,20 +559,6 @@ py_strict_test(
 )
 
 py_strict_test(
-    name = "checkpoint_managers_test",
-    srcs = ["checkpoint_managers_test.py"],
-    deps = [
-        ":checkpoint_managers",
-        ":checkpoint_py_pb2",
-        # Implicit absl.flags dependency.
-        # Implicit absl.testing.absltest.absltest dependency.
-        # Implicit absl.testing.parameterized dependency.
-        # Implicit jax dependency.
-        # Implicit tensorflow_no_contrib dependency.
-    ],
-)
-
-py_strict_test(
     name = "orbax_checkpoint_managers_test",
     srcs = ["orbax_checkpoint_managers_test.py"],
     deps = [
