@@ -659,6 +659,7 @@ py_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
+        "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
     ],
 )

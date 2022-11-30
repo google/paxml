@@ -67,8 +67,14 @@ def get_search_space(
   # issue.
   def inspect_search_space() -> None:
     _ = experiment_config.task()
-    _ = experiment_config.datasets()
-    _ = experiment_config.decoder_datasets()
+    # For SeqIO data mixtures, we use a lambda function to create a search space
+    # for mixture weights, however, the function will not be called until
+    # the input is instantiated. Therefore we instantiate them when inspecting
+    # the search space.
+    for d in experiment_config.datasets():
+      _ = instantiate(d)
+    for d in experiment_config.decoder_datasets():
+      _ = instantiate(d)
 
   search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
   if (automl.COMBINED_DECISION_ATTR in search_space.hyper_dict

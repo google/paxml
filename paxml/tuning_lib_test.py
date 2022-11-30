@@ -16,7 +16,7 @@
 """Tests for automl."""
 
 import math
-from typing import Dict, List, Optional, Type
+from typing import Callable, Dict, List, Optional, Type
 from absl.testing import absltest
 from clu import platform
 from etils import epath
@@ -24,6 +24,7 @@ from paxml import automl
 from paxml import base_experiment
 from paxml import trainer_lib
 from paxml import tuning_lib
+from praxis import base_hyperparams
 
 import pyglove as pg
 
@@ -59,6 +60,19 @@ class StopWithLowerMetric(automl.BaseReward):
     return [self._hparams.metric]
 
 
+class MockDataset(base_hyperparams.BaseParameterizable):
+
+  class HParams(base_hyperparams.BaseParameterizable.HParams):
+    dataset_param1: Optional[str] = None
+    dataset_param2: Optional[Callable[[], int]] = None
+
+  def __init__(self, hparams):
+    super().__init__(hparams)
+    self.param1 = hparams.dataset_param1
+    if callable(hparams.dataset_param2):
+      self.param2 = hparams.dataset_param2()
+
+
 class TuningExperiment(base_experiment.BaseExperiment):
   """A faked tuning experiment for testing."""
 
@@ -74,18 +88,15 @@ class TuningExperiment(base_experiment.BaseExperiment):
     }
 
   def datasets(self):
-    return [{
-        'dataset_param1': self.DATASET_PARAM1,
-        'dataset_param2': pg.oneof(range(3), name='dataset_param2')
-    }]
+    return [MockDataset.HParams(
+        dataset_param1=self.DATASET_PARAM1,
+        dataset_param2=lambda: pg.oneof(range(3), name='dataset_param2'))]
 
   def decoder_datasets(self):
-    return [{
-        'decoder_dataset_param1':
-            self.DECODER_DATASET_PARAM1,
-        'decoder_dataset_param2':
-            pg.oneof(range(3), name='decoder_dataset_param2')
-    }]
+    return [MockDataset.HParams(
+        dataset_param1=self.DECODER_DATASET_PARAM1,
+        dataset_param2=(
+            lambda: pg.oneof(range(3), name='decoder_dataset_param2')))]
 
   def search(self):
     return automl.SearchHParams(
@@ -110,9 +121,7 @@ class ParameterSweepingWithCartesianProduct(base_experiment.BaseExperiment):
     }
 
   def datasets(self):
-    return [{
-        'dataset_param1': self.DATASET_PARAM1,
-    }]
+    return [MockDataset.HParams(dataset_param1=self.DATASET_PARAM1)]
 
 
 @automl.parameter_sweep([
