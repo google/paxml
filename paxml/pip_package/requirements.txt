@@ -17,7 +17,6 @@ absl-py==1.3.0
     #   orbax
     #   rouge-score
     #   seqio
-    #   seqio-nightly
     #   t5
     #   tensorboard
     #   tensorflow
@@ -33,7 +32,7 @@ argon2-cffi==21.3.0
     #   notebook
 argon2-cffi-bindings==21.2.0
     # via argon2-cffi
-asttokens==2.1.0
+asttokens==2.2.0
     # via stack-data
 astunparse==1.6.3
     # via tensorflow
@@ -70,9 +69,10 @@ clu==0.0.7
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   seqio
-    #   seqio-nightly
 colorama==0.4.6
     # via sacrebleu
+comm==0.1.1
+    # via ipykernel
 commonmark==0.9.1
     # via rich
 contextlib2==21.6.0
@@ -81,7 +81,7 @@ contourpy==1.0.6
     # via matplotlib
 cycler==0.11.0
     # via matplotlib
-debugpy==1.6.3
+debugpy==1.6.4
     # via ipykernel
 decorator==5.1.1
     # via ipython
@@ -97,7 +97,7 @@ dm-tree==0.1.7
     #   tfds-nightly
 editdistance==0.6.1
     # via
-    #   seqio-nightly
+    #   seqio
     #   t5
 einops==0.6.0
     # via -r praxis-requirements.in
@@ -150,13 +150,13 @@ googleapis-common-protos==1.57.0
     # via tensorflow-metadata
 graph-compression-google-research==0.0.4
     # via lingvo
-grpcio==1.50.0
+grpcio==1.51.1
     # via
     #   tensorboard
     #   tensorflow
 h5py==3.7.0
     # via tensorflow
-huggingface-hub==0.11.0
+huggingface-hub==0.11.1
     # via transformers
 idna==3.4
     # via
@@ -173,7 +173,7 @@ importlib-resources==5.10.0
     #   orbax
     #   tensorflow-datasets
     #   tfds-nightly
-ipykernel==6.17.1
+ipykernel==6.18.3
     # via
     #   ipywidgets
     #   jupyter
@@ -182,7 +182,7 @@ ipykernel==6.17.1
     #   nbclassic
     #   notebook
     #   qtconsole
-ipython==8.6.0
+ipython==8.7.0
     # via
     #   ipykernel
     #   ipywidgets
@@ -204,7 +204,6 @@ jax==0.3.25
     #   optax
     #   orbax
     #   seqio
-    #   seqio-nightly
 jax-bitempered-loss==0.0.2
     # via -r praxis-requirements.in
 jaxlib==0.3.25
@@ -214,7 +213,6 @@ jaxlib==0.3.25
     #   optax
     #   orbax
     #   seqio
-    #   seqio-nightly
 jedi==0.18.2
     # via ipython
 jinja2==3.1.2
@@ -227,7 +225,7 @@ joblib==1.2.0
     # via
     #   nltk
     #   scikit-learn
-jsonschema==4.17.1
+jsonschema==4.17.3
     # via nbformat
 jupyter==1.0.0
     # via lingvo
@@ -242,11 +240,12 @@ jupyter-client==7.4.7
     #   qtconsole
 jupyter-console==6.4.4
     # via jupyter
-jupyter-core==5.0.0
+jupyter-core==5.1.0
     # via
     #   jupyter-client
     #   jupyter-server
     #   nbclassic
+    #   nbclient
     #   nbconvert
     #   nbformat
     #   notebook
@@ -308,7 +307,7 @@ mypy-extensions==0.4.3
     # via typing-inspect
 nbclassic==0.4.8
     # via notebook
-nbclient==0.7.0
+nbclient==0.7.2
     # via nbconvert
 nbconvert==7.2.5
     # via
@@ -328,7 +327,6 @@ nest-asyncio==1.5.6
     #   ipykernel
     #   jupyter-client
     #   nbclassic
-    #   nbclient
     #   notebook
 nltk==3.7
     # via
@@ -362,7 +360,6 @@ numpy==1.23.5
     #   scikit-learn
     #   scipy
     #   seqio
-    #   seqio-nightly
     #   t5
     #   tensorboard
     #   tensorflow
@@ -405,7 +402,6 @@ packaging==21.3
     #   nbconvert
     #   qtpy
     #   seqio
-    #   seqio-nightly
     #   tensorflow
     #   transformers
 pandas==1.5.2
@@ -554,12 +550,11 @@ sentencepiece==0.1.97
     # via
     #   lingvo
     #   seqio
-    #   seqio-nightly
     #   t5
-seqio==0.0.12
-    # via t5
-seqio-nightly==0.0.12.dev20221127
-    # via -r paxml-requirements.in
+seqio @ git+https://github.com/google/seqio
+    # via
+    #   -r paxml-requirements.in
+    #   t5
 six==1.16.0
     # via
     #   asttokens
@@ -567,7 +562,6 @@ six==1.16.0
     #   bleach
     #   google-auth
     #   google-pasta
-    #   grpcio
     #   jupyter-http-over-ws
     #   keras-preprocessing
     #   mesh-tensorflow
@@ -631,7 +625,6 @@ tensorflow-text==2.9.0
     #   -r praxis-requirements.in
     #   lingvo
     #   seqio
-    #   seqio-nightly
     #   t5
 tensorstore==0.1.28
     # via
@@ -648,10 +641,9 @@ terminado==0.17.0
     #   jupyter-server
     #   nbclassic
     #   notebook
-tfds-nightly==4.7.0.dev202211280045
+tfds-nightly==4.7.0.dev202211300044
     # via
     #   seqio
-    #   seqio-nightly
     #   t5
 threadpoolctl==3.1.0
     # via scikit-learn
@@ -683,8 +675,9 @@ tqdm==4.64.1
     #   tensorflow-datasets
     #   tfds-nightly
     #   transformers
-traitlets==5.5.0
+traitlets==5.6.0
     # via
+    #   comm
     #   ipykernel
     #   ipython
     #   ipywidgets

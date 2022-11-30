@@ -7,6 +7,7 @@ COPY . /paxml_new
 RUN git clone https://github.com/google/praxis.git
 RUN mv /praxis/praxis /paxml/ && mv /paxml_new/paxml /paxml/
 RUN pip3 uninstall -y fiddle
+RUN pip3 uninstall -y seqio
 RUN pip3 install -r /paxml/paxml/pip_package/requirements.txt
 RUN cd /paxml && bazel build ...
 
