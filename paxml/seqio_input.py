@@ -327,8 +327,8 @@ class SeqIOInput(base_input.BaseInput):
         training data, otherwise False. Users can override this by setting this
         explicitly.
       repeat: Whether to repeat the data. Note that None means this feature is
-        decided automatically: True for and only for non-deterministic training
-        data, otherwise False. Users can override this by setting this field
+        decided automatically: True only for non-deterministic training data,
+        otherwise False. Users can override this by setting this field
         explicitly.
       use_cached: Whether to read from the cached directory, if supported by
         the underlying SeqIO task/mixture. Users can set to False to test out
@@ -464,6 +464,12 @@ class SeqIOInput(base_input.BaseInput):
     if not p.is_training and isinstance(self.mixture_or_task, seqio.Task):
       self._validate_eval_task()
 
+    if p.eval_loop_num_batches is None and p.repeat:
+      raise ValueError(
+          'Dataset has eval_loop_num_batches set to None while repeat is True. '
+          'This would lead to an endless eval.'
+      )
+
   @property
   def is_deterministic(self) -> bool:
     """Indicates whether this SeqIOInput is deterministic or not."""
@@ -588,7 +594,10 @@ class SeqIOInput(base_input.BaseInput):
 
     ds = ds.map(_add_weight)
     p = self.hparams
-    if p.is_training or not p.reset_for_eval or not p.eval_auto_pad:
+    if (p.is_training or
+        not p.reset_for_eval or
+        not p.eval_auto_pad or
+        self.repeat):
       return ds
 
     # p.reset_for_eval=True: We are running eval over exactly one epoch.
