@@ -69,6 +69,7 @@ NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 _N_STEPS_WARMUP_LOGGING = 5
 
+_INIT_TIME = time.time()
 _READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
 _WRITE_CHECKPOINT_EVENT: str = '/jax/checkpoint/write/durations_sec'
 
@@ -1130,6 +1131,7 @@ def _train_and_evaluate_common(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
     initial_step = step_i
+    init_duration_set = False
 
     # Start the train loop. Make sure all at the same step.
     py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
@@ -1170,6 +1172,8 @@ def _train_and_evaluate_common(
                                            train_prng_seed, model_inputs)
       logging.debug('  Completed train_step() in %f seconds.',
                     train_period.elapsed)
+      if step_i == initial_step:
+        first_step_completion_time = time.time()
 
       if do_profile and step_i - initial_step < train_p.profiler_capture_step:
         profiler.update_step_moving_mean(train_period.elapsed)
@@ -1195,6 +1199,18 @@ def _train_and_evaluate_common(
         logging.info('steps/sec: %f', steps_per_sec)
         summary_last_time = time.time()
         summary_last_step = step_i
+        if not init_duration_set:
+          # Find estimated timestamp before the first execution call.
+          # This enables us to include the first step's compile time but exclude
+          # its execution time from the init duration.
+          estimated_execute_duration = 1 / steps_per_sec
+          first_step_execute_time = (
+              first_step_completion_time - estimated_execute_duration)
+          init_duration = first_step_execute_time - _INIT_TIME
+          monitoring.record_event_duration_secs(
+              '/jax/pax/init/time_before_first_step_secs', init_duration)
+          init_duration_set = True
+
       train_summary_handler.process(
           step_i,
           loss,
