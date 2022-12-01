@@ -82,10 +82,12 @@ class TuningExperiment(base_experiment.BaseExperiment):
   DECODER_DATASET_PARAM1 = pg.oneof(['x', 'y', 'z'])
 
   def task(self):
-    return {
-        'learning_rate': self.LEARNING_RATE,
-        'batch_size': pg.oneof([16, 32, 64], name='batch_size')
-    }
+    return pg.Dict(
+        learning_rate=self.LEARNING_RATE,
+        batch_size=pg.oneof([16, 32, 64], name='batch_size'),
+        train=pg.Dict(
+            eval_interval_steps=100,
+            decode_interval_steps=100))
 
   def datasets(self):
     return [MockDataset.HParams(
@@ -105,6 +107,24 @@ class TuningExperiment(base_experiment.BaseExperiment):
             metric=automl.Metric.eval('reward')),
         cross_step_metric_aggregator=automl.AverageMetricValues.HParams(),
         max_num_trials=10)
+
+
+class TuningWithTrainMetricsOnly(TuningExperiment):
+  """Tuning experiment based on train metrics only."""
+
+  def search(self):
+    search_p = super().search()
+    search_p.search_reward.metric = automl.Metric.train_steps_per_second()
+    return search_p
+
+
+class TuningWithDecodeMetricsOnly(TuningExperiment):
+  """Tuning experiment based on train metrics only."""
+
+  def search(self):
+    search_p = super().search()
+    search_p.search_reward.metric = automl.Metric.decode('f1')
+    return search_p
 
 
 @automl.parameter_sweep()
@@ -278,6 +298,28 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
     return
 
 
+def run_experiment_with_train_metrics_only(
+    experiment_config: base_experiment.BaseExperiment,
+    work_unit: platform.WorkUnit, job_log_dir: epath.Path,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn):
+  del work_unit, job_log_dir
+  _ = experiment_config.task()
+  _ = experiment_config.datasets()
+  _ = experiment_config.decoder_datasets()
+
+  _ = tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=10,
+      train_steps_per_sec=2.5,
+      is_last_ckpt=False)
+
+  _ = tuning_lib.should_early_stop(
+      early_stopping_fn,
+      global_step=20,
+      train_steps_per_sec=3.0,
+      is_last_ckpt=True)
+
+
 def run_experiment_without_reporting_metrics(
     experiment_config: base_experiment.BaseExperiment,
     work_unit: platform.WorkUnit, job_log_dir: epath.Path,
@@ -395,6 +437,24 @@ class TuneTest(absltest.TestCase):
                     study='local_hp_sweep_custom')
     result = pg.tuning.poll_result('local_hp_sweep_custom')
     self.assertLen(result.trials, search_space.dna_spec.space_size)
+
+  def test_tune_with_train_metrics_only(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment_with_train_metrics_only,
+                    TuningWithTrainMetricsOnly(),
+                    platform.work_unit(),
+                    job_log_dir,
+                    study='local_train_metrics_only',
+                    max_num_trials=2)
+    result = pg.tuning.poll_result('local_train_metrics_only')
+    self.assertLen(result.trials, 2)
+    self.assertEqual([t.status for t in result.trials], ['COMPLETED'] * 2)
+    self.assertEqual([t.infeasible for t in result.trials], [False] * 2)
+    # There will be two measurements, one reported at the last step, and
+    # one aggregated by cross-step metric aggregator.
+    self.assertEqual([len(t.measurements) for t in result.trials], [2] * 2)
+    self.assertEqual([t.final_measurement.reward for t in result.trials],
+                     [3.0] * 2)
 
   def test_tune_without_reporting_metrics(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
@@ -524,6 +584,28 @@ class TuneTest(absltest.TestCase):
                      # Used aggregator='max' for computing the reward.
                      [0.0, 0.64 + 1.28 + 2.56 + 5.12,
                       0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0])
+
+  def test_bad_running_mode(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    with self.assertRaisesRegex(
+        ValueError,
+        'Tuning uses training metrics but the reporting role is \'eval\''):
+      tuning_lib.tune(run_experiment,
+                      TuningWithTrainMetricsOnly(),
+                      platform.work_unit(),
+                      job_log_dir,
+                      study='local_bad_running_mode1',
+                      running_mode='eval')
+
+    with self.assertRaisesRegex(
+        ValueError,
+        'Tuning uses decode metrics but the reporting role is \'eval\''):
+      tuning_lib.tune(run_experiment,
+                      TuningWithDecodeMetricsOnly(),
+                      platform.work_unit(),
+                      job_log_dir,
+                      study='local_bad_running_mode2',
+                      running_mode='eval')
 
   def test_is_last_checkpoint(self):
     # Training step has reached.

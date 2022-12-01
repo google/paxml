@@ -100,7 +100,8 @@ def tune(trial_fn: TrialFn,
          is_metric_reporting_role: bool = True,
          tuner_group: Optional[str] = None,
          max_num_trials: Optional[int] = None,
-         controller_mode: str = 'auto') -> None:
+         controller_mode: str = 'auto',
+         running_mode: str = 'train') -> None:
   """Tune an experiment.
 
   An experiment can be tuned by running a tuning loop, with each iteration
@@ -146,18 +147,20 @@ def tune(trial_fn: TrialFn,
       running tuning workload. If secondary, current process will only run
       tuning workload. Otherwise, current process may elect controller role
       in a background thread, and run the tuning workload in the main thread.
+    running_mode: One of 'train', 'eval', 'decode', 'decode_once' and 'infer',
+      Indicating the running mode that the worker is in.
   """
   # Google-internal tuning infra init.
 
   search_hparams = experiment_config.search()
-  search_algorithm = instantiate(search_hparams.search_algorithm)()
-
   reward_params = search_hparams.search_reward
-  if reward_params:
-    reward_fn = instantiate(reward_params)
-  else:
-    reward_fn = None
-  max_num_trials = max_num_trials or search_hparams.max_num_trials or 1000000
+  reward_fn = instantiate(reward_params) if reward_params else None
+
+  # Make sure tuning is launched with the right running mode.
+  _verify_running_mode(reward_fn, running_mode, is_metric_reporting_role)
+
+  search_algorithm = instantiate(search_hparams.search_algorithm)()
+  max_num_trials = max_num_trials or search_hparams.max_num_trials
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
       search_hparams.cross_step_metric_aggregator
@@ -267,6 +270,37 @@ def _run_dedicated_controller(
   raise NotImplementedError('Dedicated controller is not supported in OSS paxml.')
 
 
+def _verify_running_mode(
+    reward_fn: Optional[automl.BaseReward],
+    running_mode: str,
+    is_metric_reporting_role: bool) -> None:
+  """Makes sure tuning is running in the right mode and config."""
+  if reward_fn is None:
+    return
+
+  if is_metric_reporting_role:
+    if reward_fn.needs_train and running_mode != 'train':
+      raise ValueError(
+          f'Tuning uses training metrics but the reporting role is '
+          f'{running_mode!r}')
+    if reward_fn.needs_decode and running_mode not in ['train', 'decode']:
+      raise ValueError(
+          f'Tuning uses decode metrics but the reporting role is '
+          f'{running_mode!r}')
+
+  if reward_fn.needs_eval or reward_fn.needs_decode:
+    metric_type = ' and '.join(
+        x[0] for x in zip(
+            ['eval', 'decode'], [reward_fn.needs_eval, reward_fn.needs_decode])
+        if x[1])
+    logging.info(
+        'Tuning will be performed based on the %s metrics', metric_type)
+  else:
+    logging.info(
+        'Tuning will be performed based on the training metrics from the last '
+        'training step.')
+
+
 class EarlyStoppingFn:
   """Early stopping function for a sub-experiment."""
 
@@ -286,6 +320,14 @@ class EarlyStoppingFn:
     self._is_metric_reporting_role = is_metric_reporting_role
     self._is_last_experiment = is_last_experiment
     self._tuning_step_start = tuning_step_start
+    if reward_fn is None:
+      self._needs_train = False
+      self._needs_eval = False
+      self._needs_decode = False
+    else:
+      self._needs_train = reward_fn.needs_train
+      self._needs_eval = reward_fn.needs_eval
+      self._needs_decode = reward_fn.needs_decode
 
   def __call__(self,
                metrics: Dict[str, float],
@@ -316,12 +358,20 @@ class EarlyStoppingFn:
             f'Sync on trial {self._feedback.id} after {action_str} '
             f'at tuning step {tuning_step}.')
       elif is_last_ckpt:
-        if jax.process_index() == 0:
-          trial = self._feedback.get_trial()
-          if not trial.measurements:
-            self._feedback.skip(
-                f'No eval/decode has taken place before training ended. '
-                f'(trial={self._feedback.id}, step={global_step})')
+        if self._needs_eval or self._needs_decode:
+          if jax.process_index() == 0:
+            trial = self._feedback.get_trial()
+            if not trial.measurements:
+              self._feedback.skip(
+                  f'No eval/decode has taken place before training ended. '
+                  f'(trial={self._feedback.id}, step={global_step})')
+        else:
+          if jax.process_index() == 0:
+            self._update_metrics(
+                metrics, running_mode, tuning_step, is_last_ckpt)
+          py_utils.sync_global_devices(
+              f'Sync on trial {self._feedback.id} with training metrics at '
+              f'the last step {tuning_step}.')
       else:
         return False
 
@@ -558,7 +608,7 @@ def _aggregate_metrics(
     _add_input_based_metrics(eval_input_p, eval_metrics.metrics_list,
                              'eval_test', 'metrics')
     _add_input_based_metrics(eval_input_p, eval_metrics.scoring_metrics_list,
-                             'eval_test', 'scoring_eval')
+                             'eval_test', 'metrics')
   if decode_metrics:
     decode_input_p = decode_metrics.input_p
     _add_input_based_metrics(decode_input_p, decode_metrics.metrics_list,

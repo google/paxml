@@ -382,7 +382,8 @@ def run(experiment_config: base_experiment.BaseExperiment,
         is_metric_reporting_role=(FLAGS.metrics_from == FLAGS.mode),
         tuner_group=FLAGS.tuner_group,
         max_num_trials=FLAGS.num_trials,
-        controller_mode=FLAGS.controller_mode)
+        controller_mode=FLAGS.controller_mode,
+        running_mode=FLAGS.mode)
 
 
 def main(argv: Sequence[str]) -> None:

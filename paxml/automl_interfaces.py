@@ -57,6 +57,21 @@ class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
   def used_metrics(self) -> Sequence['Metric']:
     """Returns `automl.Metric` objects used for computing current reward."""
 
+  @property
+  def needs_train(self) -> bool:
+    """Returns True if current reward needs training metrics."""
+    return any(m.is_train_metric for m in self.used_metrics)
+
+  @property
+  def needs_eval(self) -> bool:
+    """Returns True if current reward needs eval metrics."""
+    return any(m.is_eval_metric for m in self.used_metrics)
+
+  @property
+  def needs_decode(self) -> bool:
+    """Returns True if current reward needs decoding metrics."""
+    return any(m.is_decode_metric for m in self.used_metrics)
+
 
 class CrossStepMetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
   """Aggregator for gathering metrics across multiple steps."""
@@ -226,6 +241,29 @@ class Metric:
     else:
       suffix = f':{self.sub_experiment_id}'
     return f'^{prefix}{self.metric_name}{suffix}$'
+
+  @property
+  def is_train_metric(self) -> bool:
+    """Returns True if current metric is train metric."""
+    p = self.pattern
+    return p.startswith(('^train', '^num_params'))
+
+  @property
+  def is_eval_train_metric(self) -> bool:
+    """Returns True if current metric is eval train metric."""
+    return self.pattern.startswith('^eval_train')
+
+  @property
+  def is_eval_metric(self) -> bool:
+    """Returns True if current metric is eval metric."""
+    p = self.pattern
+    return p.startswith(('^eval_test', '^eval_steps'))
+
+  @property
+  def is_decode_metric(self) -> bool:
+    """Returns True if current metric is decode metric."""
+    p = self.pattern
+    return p.startswith(('^decode_test', '^decode_steps'))
 
   @property
   def applies_to_multiple_datasets(self):
