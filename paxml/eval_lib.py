@@ -208,9 +208,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
 
   @abc.abstractmethod
   def load_checkpoint_for_step(
-      self, new_checkpoint_step: int,
-      train_state_global_shapes: train_states.TrainState,
-      partitioned_specs: Optional[train_states.TrainState],
+      self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata,
       global_mesh: Optional[maps.Mesh]) -> train_states.TrainState:
     raise NotImplementedError
 
@@ -233,15 +231,14 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     self.use_ema: bool = has_ema(task_p)
 
   def load_checkpoint_for_step(
-      self, step: int, train_state_global_shapes: train_states.TrainState,
-      partitioned_specs: Optional[train_states.TrainState],
+      self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata,
       global_mesh: Optional[maps.Mesh]) -> train_states.TrainState:
     partitioned_train_state = checkpoints.restore_checkpoint(
-        train_state_global_shapes,
+        train_state_metadata.padded_global_shapes,
         self.restore_checkpoint_dir,
         global_mesh=global_mesh,
         checkpoint_type=self.checkpoint_type,
-        state_specs=partitioned_specs,
+        state_specs=train_state_metadata.partitioned_specs,
         step=step)
     assert partitioned_train_state
     if self.use_ema:
@@ -286,10 +283,11 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step)
 
   def load_checkpoint_for_step(
-      self, step: int, train_state_global_shapes: train_states.TrainState,
-      partitioned_specs: Optional[train_states.TrainState],
+      self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata,
       global_mesh: Optional[maps.Mesh]) -> train_states.TrainState:
-    model_states = self._restore(step, train_state_global_shapes)
+    del global_mesh
+    model_states = self._restore(step,
+                                 train_state_metadata.unpadded_global_shapes)
     if self.use_ema:
       model_states = extract_ema(model_states)
     elif not self.track_metric:
@@ -728,7 +726,6 @@ def evaluate_pmap_model(
     return
 
   jax_task = instantiate(task_p)
-  partitioned_specs = None
   global_mesh = None
   prng_key = jax.random.PRNGKey(1234)
   # TODO(pax-dev): Investigate if we can use model input specs
@@ -748,11 +745,11 @@ def evaluate_pmap_model(
   decode_once_fn = None
   input_p = None
   continuous_decode = True
-  _common_eval_or_decode_loop(
-      EvaluationMode.EVAL, checkpointer, task_p, job_log_dir, global_mesh,
-      input_p, eval_input_p, eval_one_step_fn, decode_once_fn,
-      partitioned_train_state, train_state_metadata.unpadded_global_shapes,
-      partitioned_specs, early_stopping_fn, continuous_decode)
+  _common_eval_or_decode_loop(EvaluationMode.EVAL, checkpointer, task_p,
+                              job_log_dir, global_mesh, input_p, eval_input_p,
+                              eval_one_step_fn, decode_once_fn,
+                              partitioned_train_state, train_state_metadata,
+                              early_stopping_fn, continuous_decode)
 
 
 class _SpmdEvalRunner:
@@ -1062,9 +1059,7 @@ def evaluate_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   _common_eval_or_decode_loop(EvaluationMode.EVAL, checkpointer, task_p,
                               job_log_dir, global_mesh, input_p, eval_input_p,
                               eval_one_step_fn, decode_once_fn,
-                              partitioned_train_state,
-                              train_state_metadata.padded_global_shapes,
-                              train_state_metadata.partitioned_specs,
+                              partitioned_train_state, train_state_metadata,
                               early_stopping_fn, continuous_decode)
 
 
@@ -1215,7 +1210,6 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   jax_task = instantiate(task_p)
-  partitioned_specs = None
   global_mesh = None
 
   # TODO(shafey): Retrieve the seeds from the model definition instead.
@@ -1280,11 +1274,11 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
       output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving)
 
-  _common_eval_or_decode_loop(
-      EvaluationMode.DECODE, checkpointer, task_p, job_log_dir, global_mesh,
-      input_p, eval_input_p, eval_one_step_fn, decode_once_fn,
-      partitioned_train_state, train_state_metadata.unpadded_global_shapes,
-      partitioned_specs, early_stopping_fn, continuous_decode)
+  _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
+                              job_log_dir, global_mesh, input_p, eval_input_p,
+                              eval_one_step_fn, decode_once_fn,
+                              partitioned_train_state, train_state_metadata,
+                              early_stopping_fn, continuous_decode)
 
 
 def partition_decode_once_pmap_model(
@@ -1694,9 +1688,7 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   _common_eval_or_decode_loop(EvaluationMode.DECODE, checkpointer, task_p,
                               job_log_dir, global_mesh, input_p, eval_input_p,
                               eval_one_step_fn, decode_once_fn,
-                              partitioned_train_state,
-                              train_state_metadata.padded_global_shapes,
-                              train_state_metadata.partitioned_specs,
+                              partitioned_train_state, train_state_metadata,
                               early_stopping_fn, continuous_decode)
 
 
@@ -2021,8 +2013,7 @@ def _common_eval_or_decode_loop(
     eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: train_states.TrainState,
-    train_state_global_shapes: train_states.TrainState,
-    partitioned_specs: Optional[train_states.TrainState],
+    train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
 ):
@@ -2084,8 +2075,7 @@ def _common_eval_or_decode_loop(
       del partitioned_train_state
       new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
       partitioned_train_state = checkpointer.load_checkpoint_for_step(
-          new_checkpoint_step, train_state_global_shapes, partitioned_specs,
-          global_mesh)
+          new_checkpoint_step, train_state_metadata, global_mesh)
       last_checkpoint_step = new_checkpoint_step
 
 
