@@ -17,6 +17,7 @@
 #   Vision modeling model configurations.
 
 load("//paxml:paxml.bzl", "pytype_library")
+# Import for Google-internal testing code.
 load("//paxml:build_defs.bzl", "pax_targets")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
@@ -49,3 +50,5 @@ pax_targets(
         ":params",
     ],
 )
+
+# Google-internal testing code.
