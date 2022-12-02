@@ -26,6 +26,10 @@ flags.DEFINE_list(
     'Exclusion regexes of experiment configurations to be passed to the smoke '
     'test. The matching experiment configurations will be disabled from the '
     'smoke test.')
+flags.DEFINE_list(
+    'include_only_regexes', [],
+    'If provided, only experiments with names matching these regexes will be '
+    'tested.')
 
 FLAGS = flags.FLAGS
 
@@ -40,7 +44,8 @@ def main(args):
   n = Test.create_test_methods_for_all_registered_experiments(
       experiment_registry,
       task_regexes=[''],
-      exclude_regexes=FLAGS.exclude_regexes)
+      exclude_regexes=FLAGS.exclude_regexes,
+      include_only_regexes=FLAGS.include_only_regexes)
   assert n > 0, 'No experiment registered!'
 
   absltest.main()

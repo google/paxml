@@ -78,9 +78,14 @@ class ExperimentImportsTestHelper(absltest.TestCase):
 
   @classmethod
   def create_test_methods_for_all_registered_experiments(
-      cls, registry, task_regexes=None, exclude_regexes=None):
+      cls,
+      registry,
+      task_regexes=None,
+      exclude_regexes=None,
+      include_only_regexes=None):
     """Programmatically defines test methods for each registered experiment."""
     task_regexes = task_regexes or []
+    include_only_regexes = include_only_regexes or []
     exclude_regexes = exclude_regexes or []
     experiment_names = list(registry.get_all().keys())
     print(f'Creating tests for {task_regexes}, excluding {exclude_regexes}')
@@ -88,6 +93,12 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     for experiment_name in sorted(experiment_names):
       if not any([re.search(regex, experiment_name) for regex in task_regexes]):
         print(f'Skipping tests for registered experiment {experiment_name}')
+        continue
+      if include_only_regexes and not any(
+          [re.search(regex, experiment_name)
+           for regex in include_only_regexes]):
+        print(f'Skipping tests for experiment {experiment_name}, since '
+              'include_only_regexes was provided and this does not match.')
         continue
       if any([re.search(regex, experiment_name) for regex in exclude_regexes]):
         print('Explicitly excluding tests for registered experiment '

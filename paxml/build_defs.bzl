@@ -71,6 +71,7 @@ def pax_targets(
         name = "",
         add_main_gpu_target = True,
         smoke_test_exclude_regexes = "",
+        smoke_test_include_only_regexes = "",
         smoke_test_kwargs = None,
         main_src = "//paxml:main.py"):
     """Macro to define a collection of Pax targets with custom dependencies.
@@ -97,6 +98,8 @@ def pax_targets(
       smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
           passed to the smoke test. The matching experiment configurations will
           be disabled from the smoke test.
+      smoke_test_include_only_regexes: If provided, then any experiment name must
+          match one of these regexes in order to be smoke tested.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
       main_src: The src file for the ":main" target created.
@@ -148,6 +151,8 @@ def pax_targets(
         args = ["--exclude_regexes=" + _shell_quote(smoke_test_exclude_regexes)]
     else:
         args = []
+    if smoke_test_include_only_regexes:
+        args.append("--include_only_regexes=" + _shell_quote(smoke_test_include_only_regexes))
     smoke_test_kwargs = smoke_test_kwargs or {}
     _export_test(
         name = test_name,
