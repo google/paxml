@@ -341,22 +341,28 @@ class EarlyStoppingFn:
       # stopping should always return False.
       if running_mode.has_eval or running_mode.has_decode:
 
-        # We only handle metric updates on main host.
-        if jax.process_index() == 0:
-          self._update_metrics(metrics, running_mode, tuning_step, is_last_ckpt)
-
-        # NOTE(daiyip): we synchronize all hosts after each eval/decode step so
-        # all of them can move to the next train step or stop uniformly. This is
-        # necessary since `sync_global_devices` will be called during
-        # checkpointing, which requires all hosts to arrive at that point with
-        # the same sequence of `sync_global_devices` calls.
-        action_str = ' and '.join(
-            [s for s, mode in zip(
-                ['evaluation', 'decoding'],
-                [running_mode.has_eval, running_mode.has_decode])])
-        py_utils.sync_global_devices(
-            f'Sync on trial {self._feedback.id} after {action_str} '
-            f'at tuning step {tuning_step}.')
+        # NOTE(daiyip): the process of updating metrics may raises errors
+        # (e.g. FloatPointError) which will be caught at higher level and
+        # treats current trial as infeasible. Nevertheless, we want to always
+        # trigger the `sync_global_devices` on all replicas uniformly here.
+        try:
+          # We only handle metric updates on main host.
+          if jax.process_index() == 0:
+            self._update_metrics(
+                metrics, running_mode, tuning_step, is_last_ckpt)
+        finally:
+          # NOTE(daiyip): we synchronize all hosts after each eval/decode step
+          # so all of them can move to the next train step or stop uniformly.
+          # This is necessary since `sync_global_devices` will be called during
+          # checkpointing, which requires all hosts to arrive at that point with
+          # the same sequence of `sync_global_devices` calls.
+          action_str = ' and '.join(
+              [s for s, mode in zip(
+                  ['evaluation', 'decoding'],
+                  [running_mode.has_eval, running_mode.has_decode])])
+          py_utils.sync_global_devices(
+              f'Sync on trial {self._feedback.id} after {action_str} '
+              f'at tuning step {tuning_step}.')
       elif is_last_ckpt:
         if self._needs_eval or self._needs_decode:
           if jax.process_index() == 0:
@@ -366,12 +372,14 @@ class EarlyStoppingFn:
                   f'No eval/decode has taken place before training ended. '
                   f'(trial={self._feedback.id}, step={global_step})')
         else:
-          if jax.process_index() == 0:
-            self._update_metrics(
-                metrics, running_mode, tuning_step, is_last_ckpt)
-          py_utils.sync_global_devices(
-              f'Sync on trial {self._feedback.id} with training metrics at '
-              f'the last step {tuning_step}.')
+          try:
+            if jax.process_index() == 0:
+              self._update_metrics(
+                  metrics, running_mode, tuning_step, is_last_ckpt)
+          finally:
+            py_utils.sync_global_devices(
+                f'Sync on trial {self._feedback.id} with training metrics at '
+                f'the last step {tuning_step}.')
       else:
         return False
 
