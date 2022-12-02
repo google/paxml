@@ -88,17 +88,14 @@ class LMInputSpecsProvider(base_input.BaseInputSpecsProvider):
 
 
 class TestModel01(base_model.BaseModel):
-  """Simple model for testing."""
+  """Simple model for testing.
 
-  class HParams(BaseHParams):
-    """Associated hyper-params for this layer class.
-
-    Attributes:
-      input_dims: Depth of the input.
-      output_dims: Depth of the output.
-    """
-    input_dims: int = 0
-    output_dims: int = 0
+  Attributes:
+    input_dims: Depth of the input.
+    output_dims: Depth of the output.
+  """
+  input_dims: int = 0
+  output_dims: int = 0
 
   def setup(self) -> None:
     p = self.hparams

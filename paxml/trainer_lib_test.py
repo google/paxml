@@ -15,7 +15,6 @@
 
 """Tests for trainer_lib."""
 import os
-
 from typing import Any, Dict, Tuple, Union
 
 from absl.testing import absltest
@@ -24,7 +23,6 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import maps
 import numpy as np
-
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_input
@@ -32,6 +30,7 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import schedules
@@ -60,11 +59,14 @@ class TestInput(base_input.BaseInput):
         image=jnp.zeros((p.batch_size, p.seq_length), dtype=jnp.float32))
 
 
-class TestModel(base_model.BaseModel):
+@pax_fiddle.auto_config
+def _test_model_layer_default():
+  return pax_fiddle.Config(layers.FeedForward, input_dims=2, output_dims=1)
 
-  class HParams(BaseLayer.HParams):
-    layer: BaseLayer.HParams = layers.FeedForward.HParams(
-        input_dims=2, output_dims=1)
+
+class TestModel(base_model.BaseModel):
+  layer: pax_fiddle.Config[BaseLayer] = pax_fiddle.fdl_field(
+      default_factory=_test_model_layer_default, tags=pax_fiddle.DoNotBuild)
 
   def setup(self):
     self.create_child('layer_a', self.hparams.layer)
