@@ -311,10 +311,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     if jax_task.hparams.train.always_use_train_for_model_init:
       input_shape_dtypes = None
     else:
-      assert ((is_decode and decode_input_ps) or
-              (not is_decode and eval_input_ps))
       input_shape_dtypes = _SpmdEvalRunner.get_input_shape_dtypes_for_init(
-          padded_decode_input_ps if is_decode else padded_eval_input_ps)
+          padded_decode_input_ps + padded_eval_input_ps)
 
     train_state_metadata, is_eval_for_init = self._get_train_state_metadata(
         jax_task,
