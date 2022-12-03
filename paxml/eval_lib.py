@@ -1631,10 +1631,6 @@ def decode_spmd_model(task_p: tasks_lib.SingleTask.HParams,
   # We assume that either eval_input or decoder_input can be used to retrieve
   # all the model variable shapes.
 
-  # TODO(pax-dev): enable auto-sharding for this case.
-  if jax_task.hparams.train.always_use_train_for_model_init:
-    enable_auto_sharding = False
-
   prng_key, init_key = jax.random.split(prng_key, 2)
   # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
   # same regardless of which eval_input or decoder_input we use to draw the
