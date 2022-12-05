@@ -746,7 +746,11 @@ class TrialDirectoryNameGenerator:
     return self._make_path_friendly(str(value))
 
   def _make_path_friendly(self, s: str) -> str:
-    return self._NON_PATH_FRIENDLY_CHAR_SET.sub('', s.replace(':', '='))
+    replacements = [(':', '='), ('[', '{'), (']', '}')]
+    for src, replacement in replacements:
+      s = s.replace(src, replacement)
+
+    return self._NON_PATH_FRIENDLY_CHAR_SET.sub('', s)
 
   def dirname(self, trial_id: int) -> epath.Path:
     """Gets the directory name for a trial."""

@@ -720,7 +720,7 @@ class TrialDirnameTest(absltest.TestCase):
               pg.oneof([A([A(A(1)), 1]), A([A(2)])], name='y'))
     self.assertEqual(
         str(get_trial_dirname(_fn, 1, pg.DNA([1, 0]))),
-        'root/1/x=e_f1234|y=A(x=[0=A(x=A(x=1)),1=1])')
+        'root/1/x=e_f1234|y=A(x={0=A(x=A(x=1)),1=1})')
 
   def test_trial_with_class_values(self):
     class Foo:
