@@ -133,7 +133,7 @@ def save_checkpoint(
       async_checkpointer.save(checkpoint_step_dir, train_state)
     else:
       checkpointer = orbax.checkpoint.Checkpointer(
-          PaxCheckpointHandler(enable_aggregation=False))
+          PaxCheckpointHandler())
       checkpointer.save(checkpoint_step_dir, train_state)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     checkpointer = FlaxCheckpointer()
@@ -236,7 +236,7 @@ def restore_checkpoint(
         return None
     checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
     checkpointer = orbax.checkpoint.Checkpointer(
-        PaxCheckpointHandler(enable_aggregation=False))
+        PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
         checkpoint_step_dir,
         item=state_global_shapes,
@@ -448,6 +448,12 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
 
   def _get_param_names(self, item: PyTreeDef) -> PyTreeDef:
     return self._param_names
+
+  async def _write_aggregate_file(self, directory: epath.Path, item: PyTreeDef,
+                                  param_infos: PyTreeDef, save_args: PyTreeDef):
+    """Skip writing msgpack file for Pax since this file would be unused."""
+    pass
+
 
   async def async_save(self,
                        directory: epath.Path,

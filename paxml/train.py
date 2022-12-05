@@ -315,7 +315,7 @@ def _create_checkpointer(
   if checkpointer is None:
     if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
       checkpointer = Checkpointer(
-          PaxCheckpointHandler(enable_aggregation=False))
+          PaxCheckpointHandler())
     elif checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
       raise ValueError('Checkpointer must already be initialized.')
     else:

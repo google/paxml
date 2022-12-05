@@ -252,7 +252,7 @@ def run_experiment(
         async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
       else:
         async_checkpointer = checkpoints.AsyncCheckpointer(
-            checkpoints.PaxCheckpointHandler(enable_aggregation=False),
+            checkpoints.PaxCheckpointHandler(),
             timeout_secs=600)
 
     train.train_and_evaluate(
