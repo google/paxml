@@ -504,7 +504,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
 
   def structure(self, directory: epath.Path) -> PyTreeDef:
     return jax.tree_util.tree_map(
-        orbax.checkpoint.utils.aggregated_placeholder,
+        orbax.checkpoint.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names))
 
 
