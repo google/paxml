@@ -565,11 +565,12 @@ class SingleTask(base_task.BaseTask):
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
-      inputs_split_mapping: The PartitionSpec for inputssuch as inputs, labels,
-        targets, paddings, num words etc. This is onlyrelevant for SPMD sharded
-        models. By default it is None, which meansall the inputs are replicated.
-        For sharding inputs, this is a `NestedMap` with keys `map_1d`, `map_2d`,
-        ..., etc.,which specifies how to shard the inputs of that dimension.
+      inputs_split_mapping: The PartitionSpec for inputs such as inputs, labels,
+        targets, paddings, num words etc. This is only relevant for SPMD sharded
+        models. By default it is None, which means all the inputs are
+        replicated. For sharding inputs, this is a `NestedMap` with keys
+        `map_1d`, `map_2d`, ..., etc., which specifies how to shard the inputs
+        of that dimension.
       init_from_checkpoint_rules: A dict with str-valued keys corresponding to
         checkpoint dir paths and values corresponding to instances of
         `CheckpointLoadingRules`. See doc string on CheckpointLoadingRules on
