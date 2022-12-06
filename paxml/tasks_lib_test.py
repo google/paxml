@@ -46,8 +46,6 @@ WeightInit = base_layer.WeightInit
 
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
-BaseHParams = base_layer.BaseLayer.HParams
-
 RANDOM = base_layer.RANDOM
 PARAMS = base_layer.PARAMS
 
