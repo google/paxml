@@ -535,9 +535,9 @@ def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
       return var_grad
     elif var_grad.dtype == jax.dtypes.float0:
       # Gradient of an integer-valued input cannot be consumed by jnp operation.
-      # Zerso dtype should be int32 same as the original input that produced
+      # Zeros dtype should be int32 same as the original input that produced
       # float0.
-      return jnp.zeros((), dtype=jnp.int32)
+      return jnp.zeros_like(var_grad, dtype=jnp.int32)
     else:
       return jnp.zeros_like(var_grad)
 
@@ -603,6 +603,10 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     """
     assert base_layer.var_not_trainable(var_param)
     assert base_layer.is_running_under_pmap()
+
+    if old_var.dtype == jnp.bool_ or jnp.issubdtype(old_var, jnp.integer):
+      # For integers we don't sync it
+      return old_var
 
     if base_layer.var_requires_mean_sync(var_param):
       return _synchronize_vars_using_mean(old_var, new_var)
