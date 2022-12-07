@@ -387,9 +387,10 @@ class SeqIOInput(base_input.BaseInput):
     # Modify hparams in-place before freezing hparams
     if not hparams.name:
       hparams.name = f'{hparams.mixture_name}_{hparams.split_name}'
-    if hparams.input_random_seed is None and hparams.use_enumeration:
+    if (not hparams.is_training and hparams.input_random_seed is None
+        and hparams.use_enumeration):
       # Since we want the enumeration to be deterministic, in the case that
-      # there's no explicit seed set, we default to a fixed seed
+      # there's no explicit seed set, we default to a fixed seed for evals.
       hparams.input_random_seed = 42
 
     super().__init__(hparams)
