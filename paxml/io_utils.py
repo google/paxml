@@ -186,6 +186,8 @@ class JnpEncoder(json.JSONEncoder):
       return o.decode('utf-8')
     elif dataclasses.is_dataclass(o):
       return dataclasses.asdict(o)
+    elif isinstance(o, np.bool_):
+      return bool(o)
     else:
       return super().default(o)
 
