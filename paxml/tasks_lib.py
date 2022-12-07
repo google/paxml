@@ -42,16 +42,16 @@ from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
 from paxml import io_utils
+from paxml import learners as learners_lib
+from paxml import train_states
 from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
-from praxis import learners as learners_lib
 from praxis import optimizers
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 
 from paxml import checkpoints  # mapped to internal
 

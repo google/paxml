@@ -23,13 +23,13 @@ from absl.testing import absltest
 import jax
 import numpy as np
 from paxml import base_inference_runner
+from paxml import train_states
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
 from praxis import test_utils
-from praxis import train_states
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 

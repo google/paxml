@@ -21,12 +21,12 @@ import jax
 import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import experiment_registry
+from paxml import learners
 from paxml import tasks_lib
 from paxml.tasks.vision import input_generator
 from praxis import base_input
 from praxis import base_layer
 from praxis import layers
-from praxis import learners
 from praxis import optimizers
 from praxis import py_utils
 from praxis import pytypes

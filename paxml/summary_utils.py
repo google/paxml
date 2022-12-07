@@ -32,10 +32,10 @@ import flax
 import jax
 from jax import numpy as jnp
 import numpy as np
+from paxml import train_states
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 import tensorflow.compat.v2 as tf
 from tensorflow.compat.v2 import summary as tf_summary
 

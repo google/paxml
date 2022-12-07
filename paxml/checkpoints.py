@@ -32,9 +32,9 @@ import optax
 import orbax.checkpoint
 from paxml import base_task
 from paxml import checkpoint_pb2
+from paxml import train_states
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 TMP_PREFIX = 'tmp_'

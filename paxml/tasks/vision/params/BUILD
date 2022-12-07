@@ -32,14 +32,18 @@ pytype_library(
     ],
     srcs_version = "PY3",
     deps = [
+        # Implicit absl.flags dependency.
         # Implicit jax dependency.
         "//paxml:base_experiment",
         "//paxml:experiment_registry",
-        "//paxml/tasks/lm:model_params",
+        "//paxml:learners",
+        "//paxml:tasks_lib",
         "//paxml/tasks/vision:input_generator",
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:optimizers",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
         "//praxis:schedules",
         "//praxis/layers",
     ],

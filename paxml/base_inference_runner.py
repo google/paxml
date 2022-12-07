@@ -20,12 +20,12 @@ from __future__ import annotations
 import abc
 from typing import List
 
+from paxml import train_states
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 import tensorflow_datasets as tfds
 
 NestedMap = py_utils.NestedMap

@@ -44,6 +44,7 @@ from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import trainer_lib
+from paxml import train_states
 from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
@@ -51,7 +52,6 @@ from praxis import base_layer
 from praxis import optimizer_prefix_vectorization
 from praxis import py_utils
 from praxis import pytypes
-from praxis import train_states
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
