@@ -1226,11 +1226,21 @@ def _train_and_evaluate_common(
           step_i % train_p.eval_interval_steps == 0):
 
         logging.debug('  Starting eval_step().')
+
+        if train_p.eval_use_ema_state:
+          if not eval_lib.has_ema(task_p):
+            raise ValueError('eval_use_ema_state is requested but the '
+                             'learner does not seem to have ema enabled')
+          eval_partitioned_train_state = eval_lib.extract_ema(
+              partitioned_train_state).to_eval_state()
+          logging.debug('  Performing eval_step() with ema states.')
+        else:
+          eval_partitioned_train_state = partitioned_train_state.to_eval_state()
         # If we have eval test then also evaluate on test.
         if eval_input_p:
           logging.debug('  Performing eval_step() runs on test splits.')
           eval_step_fns = [functools.partial(
-              step_fn, partitioned_train_state.to_eval_state(),
+              step_fn, eval_partitioned_train_state,
               eval_prng_seed) for step_fn in p_eval_steps]
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
@@ -1267,8 +1277,10 @@ def _train_and_evaluate_common(
             logging.debug('  Retrieved eval model_inputs.')
             logging.debug('  Performing eval_step() runs on training split.')
             eval_inputs = prepare_eval_inputs(train_input_pipeline, eval_inputs)
+
             eval_on_train_step_fn = functools.partial(
-                p_eval_on_train_step, partitioned_train_state.to_eval_state(),
+                p_eval_on_train_step,
+                eval_partitioned_train_state,
                 eval_prng_seed)
             loss, weighted_scalars, _, summary_tensors = eval_on_train_step_fn(
                 eval_inputs)
@@ -1287,6 +1299,7 @@ def _train_and_evaluate_common(
                              'learner does not seem to have ema enabled')
           decode_partitioned_train_state = eval_lib.extract_ema(
               partitioned_train_state)
+          logging.debug('  Performing decode_once_fn() with ema states.')
         else:
           decode_partitioned_train_state = partitioned_train_state
         decode_metrics = decode_once_fn(decode_partitioned_train_state,

@@ -565,6 +565,8 @@ class SingleTask(base_task.BaseTask):
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
+      eval_use_ema_state: If True, use ema states to run eval during train,
+        note that in this case ema MUST be enabled in the learner.
       inputs_split_mapping: The PartitionSpec for inputs such as inputs, labels,
         targets, paddings, num words etc. This is only relevant for SPMD sharded
         models. By default it is None, which means all the inputs are
@@ -608,6 +610,7 @@ class SingleTask(base_task.BaseTask):
     variable_norm_summary: bool = True
     eval_interval_steps: int = 100
     eval_skip_train: bool = False
+    eval_use_ema_state: bool = False
     inputs_split_mapping: Optional[PartitionSpec] = None
     init_from_checkpoint_rules: Dict[
         str, CheckpointLoadingRules] = dataclasses.field(default_factory=dict)
