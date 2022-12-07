@@ -150,8 +150,6 @@ def tune(trial_fn: TrialFn,
     running_mode: One of 'train', 'eval', 'decode', 'decode_once' and 'infer',
       Indicating the running mode that the worker is in.
   """
-  # Google-internal tuning infra init.
-
   search_hparams = experiment_config.search()
   reward_params = search_hparams.search_reward
   reward_fn = instantiate(reward_params) if reward_params else None
@@ -216,13 +214,17 @@ def tune(trial_fn: TrialFn,
   trial_dirname_generator = TrialDirectoryNameGenerator(
       job_log_dir, search_space, combined_decision_point_names)
 
+  sample_kwargs = {}
+  # Google-internal tuning infra init.
+
   published_study_link = False
   for example, feedback in pg.sample(
       search_space, search_algorithm, max_num_trials,
       early_stopping_policy=early_stopping_policy,
       group=tuner_group,
       name=study if study and study.startswith('local') else None,
-      is_chief=None if controller_mode == 'auto' else False):
+      is_chief=None if controller_mode == 'auto' else False,
+      **sample_kwargs):
 
   # Google-internal tuning infra logging.
 

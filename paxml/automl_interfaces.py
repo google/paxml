@@ -117,6 +117,11 @@ class SearchHParams(BaseHyperParams):
       `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
       RuntimeError or errors that match 'XLACompilation.*' will be treated as
       to skip.
+    prior_study_ids: An optional list of Vizier study GUIDs to warm up current
+      search. All completed trials from previous studies will be feedback to
+      the controller via the `pg.DNAGenerator.recover` interface.
+    add_prior_trials: If True, trials from previous studies will be copied to
+      current study. Effective only when `prior_study_ids` is set.
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
@@ -126,6 +131,8 @@ class SearchHParams(BaseHyperParams):
   max_num_trials: int = 1000000
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
+  prior_study_ids: Optional[List[int]] = None
+  add_prior_trials: bool = True
 
 
 class MetricType(enum.Enum):
