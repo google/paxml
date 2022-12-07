@@ -656,10 +656,7 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
     """
-    # TODO(b/249483164) Change this to just `= sub_config_field(None)` after
-    # Fiddle migration is complete.
-    model: Optional[base_model.BaseModel.HParams] = (None if issubclass(
-        base_model.BaseModel, base_layer.BaseLayer) else sub_config_field(None))
+    model: Optional[base_model.BaseModel.HParams] = sub_config_field(None)
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
