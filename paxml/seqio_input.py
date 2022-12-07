@@ -1099,7 +1099,8 @@ class SeqIOInput(base_input.BaseInput):
 ###############################################################################
 
 
-class LanguageModelFeatures(seqio.DecoderFeatureConverter):
+class LanguageModelFeatures(seqio.DecoderFeatureConverter,
+                            base_hyperparams.StrOverride):
   """A feature converter for a language model.
 
   The output nested map for each map contains:
@@ -1157,13 +1158,24 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter):
         function.
       bos_id: bos id for decoder inputs.
     """
+    self._pack = pack
+    self._use_custom_packing_ops = use_custom_packing_ops
     self._weights_on_targets_only = weights_on_targets_only
+    self._apply_length_check = apply_length_check
+    self._bos_id = bos_id
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
         use_custom_packing_ops=use_custom_packing_ops,
         apply_length_check=apply_length_check,
         bos_id=bos_id)
+
+  def __str__(self) -> str:
+    return (f'{self.__class__.__name__}(pack={self._pack}, '
+            f'use_custom_packing_ops={self._use_custom_packing_ops}, '
+            f'weights_on_targets_only={self._weights_on_targets_only}, '
+            f'apply_length_check={self._apply_length_check}, '
+            f'bos_id={self._bos_id})')
 
   @property
   def weights_on_targets_only(self) -> bool:
