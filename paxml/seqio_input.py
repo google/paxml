@@ -134,6 +134,11 @@ def _add_fake_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
   return ex
 
 
+def _is_padding(ex: Dict[str, Any]) -> bool:
+  return (ex[INDEX_WITHIN_SHARD_KEY] == -1 and ex[SHARD_INDEX_KEY] == -1
+          and ex[NUM_SHARDS_KEY] == -1)
+
+
 def _enumerate_dataset(ds: tf.data.Dataset, is_training: bool,
                        shard_info: seqio.ShardInfo) -> tf.data.Dataset:
   """Add enumeration fields, only meaningful when is_training=False."""
@@ -1071,7 +1076,7 @@ class SeqIOInput(base_input.BaseInput):
       return []
 
     if p.use_enumeration:
-      answers = dict(eval_outputs)
+      answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
       scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
           answers, verbose_entries)
     else:
