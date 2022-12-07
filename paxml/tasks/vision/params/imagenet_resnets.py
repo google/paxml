@@ -28,6 +28,7 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import schedules
@@ -37,6 +38,7 @@ FLAGS = flags.FLAGS
 WeightInit = base_layer.WeightInit
 NestedMap = py_utils.NestedMap
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
+LayerTpl = pax_fiddle.Config[base_layer.FiddleBaseLayer]
 
 
 class ImageClassificationInputSpecsProvider(base_input.BaseInputSpecsProvider):
@@ -142,7 +144,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     """Returns a list of dataset configs."""
     return [self._dataset_train(), self._dataset_test()]
 
-  def _network(self) -> base_layer.BaseLayer.HParams:
+  def _network(self) -> LayerTpl:
     net = layers.ResNet.HParamsResNet50()
     # Zero-init BN-gamma in the residual branch, needed to support larger
     # batch size training. See Table 2(b) in "ImageNet in 1 hour".
