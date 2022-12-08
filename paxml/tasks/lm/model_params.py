@@ -164,7 +164,7 @@ def maybe_setup_moe_params(model_p: base_model.BaseModel.HParams) -> None:
   moe_p = model_p.moe_layer_tpl
   # pytype: enable=attribute-error  # enable-nested-classes
   # Copy over the base params.
-  base_layer.BaseLayer.copy_base_hparams(ff_p, moe_p)
+  base_layer.BaseLayerApi.copy_base_hparams(ff_p, moe_p)
   # Copy over othe params.
   moe_p.name = ff_p.name
   moe_p.input_dims = ff_p.input_dims
