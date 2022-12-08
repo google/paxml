@@ -653,6 +653,8 @@ class SeqIOInput(base_input.BaseInput):
     # to inputs_length).
     inputs_length = p.task_feature_lengths['inputs']
     targets_length = p.eval_metrics_targets_length
+    assert inputs_length is not None
+    assert targets_length is not None
     targets_ds = self.mixture_or_task.get_dataset(
         sequence_length={
             'inputs': inputs_length,
