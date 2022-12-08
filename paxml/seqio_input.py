@@ -1264,9 +1264,17 @@ class SequenceModelFeatures(seqio.EncDecFeatureConverter):
                pack: bool = False,
                use_custom_packing_ops: bool = False,
                bos_id: int = 0) -> None:
+    self._pack = pack
+    self._use_custom_packing_ops = use_custom_packing_ops
+    self._bos_id = bos_id
     super().__init__(pack=pack,
                      use_custom_packing_ops=use_custom_packing_ops,
                      bos_id=bos_id)
+
+  def __str__(self) -> str:
+    return (f'{self.__class__.__name__}(pack={self._pack}, '
+            f'use_custom_packing_ops={self._use_custom_packing_ops}, '
+            f'bos_id={self._bos_id})')
 
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax SequenceModel."""
