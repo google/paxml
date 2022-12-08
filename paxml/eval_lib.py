@@ -184,6 +184,25 @@ def extract_ema(
                    model_states.opt_states)
 
 
+def _get_train_input_specs(task_p: tasks_lib.SingleTask.HParams,
+                           experiment_config: base_experiment.BaseExperiment):
+  """Gets the shape/dtype of the inputs to the model."""
+  if not task_p.train.always_use_train_for_model_init:
+    return None
+
+  input_specs_provider = instantiate(
+      experiment_config.get_input_specs_provider_params())
+  train_input_specs = input_specs_provider.get_input_specs()
+  if task_p.model.mesh_shape is not None:
+    train_input_specs = jax.tree_map(
+        py_utils.get_global_input_shape_dtype, train_input_specs)
+  if train_input_specs is None:
+    raise ValueError(
+        'No training input specs available, while enabling '
+        '`task_p.train.always_use_train_for_model_init` requires it.')
+  return train_input_specs
+
+
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
   """Adapts particular implementations of checkpointing into a common API."""
 
@@ -209,13 +228,10 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       jax_task: tasks_lib.SingleTask,
       train_input_shape_dtypes: Optional[NestedShapeDtypeLike],
       input_shape_dtypes: Optional[NestedShapeDtypeLike],
-      discard_opt_states: bool = False
+      discard_opt_states: bool = False,
   ) -> Tuple[trainer_lib.TrainStateMetadata, bool]:
     if jax_task.hparams.train.always_use_train_for_model_init:
-      if train_input_shape_dtypes is None:
-        raise ValueError(
-            'No training input specs available, while enabling '
-            '`task_p.train.always_use_train_for_model_init` requires it.')
+      assert train_input_shape_dtypes is not None
       init_shape_dtypes = train_input_shape_dtypes
       is_eval_for_init = False
     else:
@@ -292,9 +308,13 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
       enable_auto_sharding: bool = False,
       eval_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
       decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-  ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata,
-             Sequence[Callable[..., Any]], Sequence[NestedPartitionSpec],
-             Sequence[NestedShapeDtypeLike]]:
+  ) -> Tuple[
+      train_states.TrainState,
+      trainer_lib.TrainStateMetadata,
+      Sequence[Callable[..., Any]],
+      Sequence[NestedPartitionSpec],
+      Sequence[NestedShapeDtypeLike],
+  ]:
     """Gets a partitioned model states and the step function."""
     _, step_key = jax.random.split(init_key)
     padded_eval_input_ps = [
@@ -332,8 +352,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
             step_key,
             None if is_eval_for_init else train_input_shape_dtypes,
             train_state_partition_spec=partitioned_specs.to_eval_state(),
-            enable_auto_sharding=enable_auto_sharding,
-        ))
+            enable_auto_sharding=enable_auto_sharding))
     # Replace the partition spec. This only has effect when enable_auto_sharding
     # is on.
     train_state_metadata = dataclasses.replace(
@@ -383,17 +402,23 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       self, step: int, train_state_global_shapes: train_states.TrainState
   ) -> Optional[train_states.TrainState]:
     if py_utils.pmap_use_tensorstore():
-      return tasks_lib.restore_pmap_from_tensorstore(
+      model_states = tasks_lib.restore_pmap_from_tensorstore(
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           step=step,
           checkpoint_type=self.checkpoint_type)
     else:
-      return checkpoints.restore_checkpoint(
+      model_states = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           checkpoint_type=self.checkpoint_type,
           step=step)
+    if model_states:
+      if self.use_ema:
+        model_states = extract_ema(model_states)
+      elif not self.track_metric:
+        model_states = model_states.to_eval_state()
+    return model_states
 
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata,
@@ -401,18 +426,16 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     del global_mesh
     model_states = self._restore(step,
                                  train_state_metadata.unpadded_global_shapes)
-    if self.use_ema:
-      model_states = extract_ema(model_states)
-    elif not self.track_metric:
-      model_states = model_states.to_eval_state()
     replicated_model_states = trainer_lib.replicate_model_state(model_states)
     del model_states  # Unused at that point.
     return replicated_model_states
 
   def get_model_states(
-      self, jax_task: tasks_lib.SingleTask, prng_key: PRNGKey,
+      self,
+      jax_task: tasks_lib.SingleTask,
+      prng_key: PRNGKey,
       train_input_shape_dtypes: Optional[NestedShapeDtypeLike],
-      input_shape_dtypes: Optional[NestedShapeDtypeLike]
+      input_shape_dtypes: Optional[NestedShapeDtypeLike],
   ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     train_state_metadata, is_eval_for_init = self._get_train_state_metadata(
         jax_task, train_input_shape_dtypes, input_shape_dtypes)
@@ -429,10 +452,6 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           discard_opt_states=not self.use_ema,
           is_eval=is_eval_for_init,
           checkpoint_type=self.checkpoint_type)
-    elif not self.use_ema and not self.track_metric:
-      model_states = model_states.to_eval_state()
-    if self.use_ema:
-      model_states = extract_ema(model_states)
     replicated_model_states = trainer_lib.replicate_model_state(model_states)
     logging.info('replicated_model_states: %s',
                  jax.tree_map(lambda x: x.shape, replicated_model_states))
@@ -666,22 +685,15 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
 
-  train_input_specs = None
-  if task_p.train.always_use_train_for_model_init:
-    input_specs_provider = instantiate(
-        experiment_config.get_input_specs_provider_params())
-    train_input_specs = input_specs_provider.get_input_specs()
-
+  train_input_specs = _get_train_input_specs(task_p, experiment_config)
   if model_p.mesh_shape is not None:
-    train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                     train_input_specs)
-    evaluate_spmd_model(task_p, train_input_specs, eval_input_p, job_log_dir,
-                        typing.cast(_SpmdEvalCheckpointer, checkpointer),
-                        early_stopping_fn)
+    eval_method = evaluate_spmd_model
+    checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
   else:
-    evaluate_pmap_model(task_p, train_input_specs, eval_input_p, job_log_dir,
-                        typing.cast(_PmapEvalCheckpointer, checkpointer),
-                        early_stopping_fn)
+    eval_method = evaluate_pmap_model
+    checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
+  eval_method(task_p, train_input_specs, eval_input_p, job_log_dir,
+              checkpointer, early_stopping_fn)
 
 
 class _PmapEvalRunner:
@@ -691,7 +703,7 @@ class _PmapEvalRunner:
 
     (replicated_model_states, train_state_metadata,
      prng_key) = checkpointer.get_model_states(
-        jax_task, prng_key, train_input_shape_dtypes, input_shape_dtypes)
+        jax_task, prng_key, train_input_specs, input_shape_dtypes)
 
     runner = _PmapEvalRunner(eval_input_params, jax_task, prng_key)
     metrics_list, eval_scoring_metrics_list, num_eval_steps = (
@@ -815,11 +827,9 @@ def evaluate_pmap_model(
   input_shape_dtypes = (None if task_p.train.always_use_train_for_model_init
                         else instantiate(eval_input_p[0]).get_next_padded())
 
-  (partitioned_train_state, train_state_metadata,
-   prng_key) = checkpointer.get_model_states(jax_task, prng_key,
-                                             train_input_specs,
-                                             input_shape_dtypes)
-
+  partitioned_train_state, train_state_metadata, prng_key = (
+      checkpointer.get_model_states(jax_task, prng_key, train_input_specs,
+                                    input_shape_dtypes))
   eval_one_step_fn = _PmapEvalRunner(
       eval_input_p, jax_task, prng_key,
       job_log_dir).get_partition_run_one_step_fn()
@@ -842,8 +852,7 @@ class _SpmdEvalRunner:
     (partitioned_train_state, train_state_metadata, step_fns,
      inputs_partition_specs, inputs_shape_dtypes) = (
          checkpointer.get_model_states(
-            jax_task, global_mesh, init_key, train_state_metadata,
-            eval_input_ps))
+            jax_task, global_mesh, init_key, train_input_specs, eval_input_ps))
 
     runner = _SpmdEvalRunner(
         eval_input_ps, jax_task, global_mesh, init_key,
@@ -1112,17 +1121,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
 
-  try:
-    input_specs_provider = instantiate(
-        experiment_config.get_input_specs_provider_params())
-    train_input_specs = input_specs_provider.get_input_specs()
-  except ValueError:
-    logging.warning('No training input specs defined.')
-    train_input_specs = None
-
+  train_input_specs = _get_train_input_specs(task_p, experiment_config)
   if model_p.mesh_shape is not None:
-    train_input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                     train_input_specs)
     decode_spmd_model(
         task_p,
         train_input_specs,
@@ -1218,10 +1218,9 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
     _wait_until_step(checkpointer,
                      jax_task.hparams.train.decode_start_after_n_steps)
 
-  (partitioned_train_state, train_state_metadata,
-   prng_key) = checkpointer.get_model_states(jax_task, prng_key,
-                                             train_input_specs,
-                                             input_shape_dtypes)
+  partitioned_train_state, train_state_metadata, prng_key = (
+      checkpointer.get_model_states(jax_task, prng_key, train_input_specs,
+                                    input_shape_dtypes))
 
   eval_one_step_fn = _PmapEvalRunner(
       eval_input_p, jax_task, eval_key,
@@ -1235,7 +1234,6 @@ def decode_pmap_model(task_p: tasks_lib.SingleTask.HParams,
         train_state_metadata.var_weight_hparams,
         job_log_dir / 'decoder_out',
     )
-
 
   prng_key, decode_key = jax.random.split(prng_key)
   prng_seed = jax.random.split(decode_key, num=jax.local_device_count())
@@ -2180,14 +2178,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
 
-  try:
-    input_specs_provider = instantiate(
-        experiment_config.get_input_specs_provider_params())
-    train_input_specs = input_specs_provider.get_input_specs()
-  except ValueError:
-    logging.warning('No training input specs defined.')
-    train_input_specs = None
-
+  train_input_specs = _get_train_input_specs(task_p, experiment_config)
   if model_p.mesh_shape is not None:
     # TODO(b/238416854): add support for SPMD models
     raise NotImplementedError('SPMD infer_and_write not implemented yet')
