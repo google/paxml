@@ -326,7 +326,8 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.task_feature_lengths = {'targets': 12}
     p.feature_converter = seqio_input.LanguageModelFeatures(pack=True)
     p.batch_size = 1
-    p.is_training = False
+    p.shuffle = False
+    p.is_training = True
     inp = instantiate(p)
     batch = inp.get_next()
     self.assertArraysEqual(
@@ -383,7 +384,8 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.task_feature_lengths = {'inputs': 6, 'targets': 3}
     p.feature_converter = seqio_input.SequenceModelFeatures(pack=False)
     p.batch_size = 2
-    p.is_training = False
+    p.shuffle = False
+    p.is_training = True
     inp = instantiate(p)
     batch = inp.get_next()
     self.assertSameElements(batch.src.keys(),
@@ -465,7 +467,8 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.feature_converter = seqio_input.SequenceModelFeaturesWithTaskInfo(
         pack=False)
     p.batch_size = 2
-    p.is_training = False
+    p.shuffle = False
+    p.is_training = True
     inp = instantiate(p)
     batch = inp.get_next()
     self.assertSameElements(
@@ -733,6 +736,30 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
     err_msg_rgx = (
         'Dataset has eval_loop_num_batches set to None while repeat is True.')
+    with self.assertRaisesRegex(ValueError, err_msg_rgx):
+      _ = instantiate(p)
+
+  def test_pack_eval_fails(self):
+    self._setup_seqio_test_registry()
+    p = seqio_input.SeqIOInput.HParams(
+        mixture_name='pred_and_score_task',
+        is_training=False,
+        split_name='eval',
+        task_feature_lengths={
+            'inputs': 1024,
+            'targets': 256
+        },
+        feature_converter=seqio_input.LanguageModelFeatures(
+            pack=True, weights_on_targets_only=True),
+        batch_size=4,
+        reset_for_eval=True,
+        eval_loop_num_batches=None,
+        eval_auto_pad=False,
+        repeat=True,
+    )
+
+    err_msg_rgx = (
+        'Feature converter for eval must set pack=False')
     with self.assertRaisesRegex(ValueError, err_msg_rgx):
       _ = instantiate(p)
 
