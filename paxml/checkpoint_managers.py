@@ -28,6 +28,7 @@ from jax.experimental import multihost_utils
 import orbax.checkpoint
 from paxml import checkpoint_pb2
 from paxml import checkpoints
+from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
 
@@ -145,6 +146,9 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
           f'Unrecognized item {key_name} is not currently supported.')
 
   def _cleanup_tmp_directories(self):
+    if py_utils.is_mock_tpu_backend():
+      return
+
     if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
       if jax.process_index() == 0:
         tmp_files = self.directory.glob(self._checkpoint_name('tmp'))
