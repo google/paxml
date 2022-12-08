@@ -115,15 +115,13 @@ def _can_load_written_outputs(basedir: epath.Path, pname: str,
 
 
 def _maybe_write_scoring_outputs(
-    job_log_dir: epath.Path, step: int, input_name: str,
+    output_dir: epath.Path, step: int,
     scoring_outputs: Sequence[Tuple[str, Any]]) -> None:
   """Writes model scoring outputs to disk from leader process."""
   if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
     return
 
-  mode_str = EvaluationMode.EVAL.value
-  basedir = job_log_dir / f'{mode_str}_out'
-  fq_fname = basedir / input_name / _get_filename(step, mode_str)
+  fq_fname = output_dir / _get_filename(step, EvaluationMode.EVAL.value)
   fq_fname.parent.mkdir(parents=True, exist_ok=True)
 
   logging.info('Writing eval outputs to %s with %d entries',
@@ -592,10 +590,12 @@ def run_eval_loop_over_test_splits(
       for ex in py_utils.tree_unstack(batch, 0):
         flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
     eval_scoring_metrics = None
+    output_dir = (job_log_dir / f'{EvaluationMode.EVAL.value}_out'
+                  / model_inputs[split].hparams.name)
     if seqio_input.should_process_outputs(model_inputs[split]):
       eval_scoring_metrics = seqio_input.process_outputs(
-          model_inputs[split], flat_scoring_outputs,
-          summary_writers[split], seqio_input.MetricType.SCORE, step)
+          model_inputs[split], flat_scoring_outputs, summary_writers[split],
+          seqio_input.MetricType.SCORE, step, output_dir)
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -615,9 +615,7 @@ def run_eval_loop_over_test_splits(
     eval_scoring_metrics_list.append(eval_scoring_metrics)
     num_eval_steps.append(step_num)
 
-    _maybe_write_scoring_outputs(job_log_dir, step,
-                                 model_inputs[split].hparams.name,
-                                 flat_scoring_outputs)
+    _maybe_write_scoring_outputs(output_dir, step, flat_scoring_outputs)
 
   return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 
@@ -1512,6 +1510,7 @@ def decode_once_pmap_model(
           summary_writers[split],
           seqio_input.MetricType.PREDICT,
           step_i,
+          basedir / dirnames[split],
           plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
@@ -1924,6 +1923,7 @@ def decode_once_spmd_model(
           summary_writers[split],
           seqio_input.MetricType.PREDICT,
           step_i,
+          basedir / dirnames[split],
           plain_text_output_fname=f'{filenames[split]}.txt')
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.

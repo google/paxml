@@ -332,6 +332,7 @@ pytype_strict_library(
     deps = [
         ":metric_utils",
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit jax.experimental dependency.
         # Implicit numpy dependency.

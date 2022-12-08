@@ -25,6 +25,7 @@ import typing
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
+from etils import epath
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
@@ -226,6 +227,7 @@ def process_outputs(
     summary_writer: SummaryWriter,
     metric_type: MetricType,
     step: int,
+    output_dir: epath.Path,
     verbose_entries: int = 1,
     plain_text_output_fname: Optional[str] = None) -> Dict[str, float]:
   """Computes SeqIO task-defined metric, write to TB, and returns mapping."""
@@ -234,7 +236,6 @@ def process_outputs(
 
   if metric_type is MetricType.SCORE:
     metric_name_prefix = EVAL_METRICS_PREFIX
-    # model_outputs = typing.cast(List[Mapping[str, Any]], model_outputs)
     seqio_metrics = inp.compute_metrics_eval(
         model_outputs, verbose_entries=verbose_entries)
     logging.info('Eval metrics from seqio: %s.', seqio_metrics)
@@ -253,18 +254,25 @@ def process_outputs(
     with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
       f.write(plain_text_output.getvalue())
 
-    # Write out seqio metrics with JSON logger to JSONL file
-    logger = seqio.loggers.JSONLogger(dirname)
-    merged_seqio_metrics = {}
-    for sm in seqio_metrics:
-      merged_seqio_metrics.update(sm)
-
-    logger(task_name=inp.mixture_or_task.name, step=step,
-           metrics=merged_seqio_metrics, dataset=None, inferences=None,
-           targets=None)
-
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
+
+  # Write out seqio metrics with JSON logger to JSONL file.
+  output_dir.mkdir(parents=True, exist_ok=True)
+  logger = seqio.loggers.JSONLogger(output_dir.as_posix())
+  merged_seqio_metrics = {}
+  for sm in seqio_metrics:
+    merged_seqio_metrics.update(sm)
+
+  # JSON logger only takes MetricValue instances whereas some might be floats.
+  merged_seqio_metrics = {
+      k: seqio.metrics.Scalar(v)
+         if not isinstance(v, seqio.metrics.MetricValue) else v
+      for k, v in merged_seqio_metrics.items()
+  }
+  logger(task_name=inp.mixture_or_task.name, step=step,
+         metrics=merged_seqio_metrics, dataset=None, inferences=None,
+         targets=None)
 
   # write metrics to tensorboard
   with summary_writer.as_default():
