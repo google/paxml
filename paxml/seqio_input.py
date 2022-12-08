@@ -1439,7 +1439,7 @@ def get_eval_hparams_for_seqio(
   >>>   batch_size = 32
   >>>   feature_lengths={'inputs': 1024, 'targets': 256}
   >>>   seed = 75303
-  >>>   return create_eval_hparams_for_seqio(
+  >>>   return get_eval_hparams_for_seqio(
   >>>       mixture_name, batch_size, feature_lengths, MetricType.PREDICT, seed)
 
   Args:
