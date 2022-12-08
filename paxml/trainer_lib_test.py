@@ -36,7 +36,7 @@ from praxis import pytypes
 from praxis import schedules
 
 BaseModel = base_model.BaseModel
-BaseLayer = base_layer.BaseLayer
+BaseLayer = base_layer.FiddleBaseLayer
 BaseInput = base_input.BaseInput
 NestedMap = py_utils.NestedMap
 Predictions = base_model.Predictions
