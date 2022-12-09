@@ -201,10 +201,14 @@ def tune(trial_fn: TrialFn,
                               str(early_stopping_policy_debug_file),
                               'early_stopping_policy')
 
+  sample_kwargs = {}
+  # Google-internal tuning infra init.
+
   if controller_mode == 'primary':
     _run_dedicated_controller(
         study, search_space.dna_spec,
-        search_algorithm, early_stopping_policy, max_num_trials)
+        search_algorithm, early_stopping_policy, max_num_trials,
+        search_hparams.prior_study_ids, search_hparams.add_prior_trials)
     return
 
   sub_experiments = experiment_config.sub_experiments()
@@ -213,9 +217,6 @@ def tune(trial_fn: TrialFn,
 
   trial_dirname_generator = TrialDirectoryNameGenerator(
       job_log_dir, search_space, combined_decision_point_names)
-
-  sample_kwargs = {}
-  # Google-internal tuning infra init.
 
   published_study_link = False
   for example, feedback in pg.sample(
@@ -267,7 +268,10 @@ def _run_dedicated_controller(
     search_space: pg.DNASpec,
     search_algorithm: pg.DNAGenerator,
     early_stopping_policy: pg.tuning.EarlyStoppingPolicy,
-    max_num_trials: Optional[int] = None) -> None:
+    max_num_trials: Optional[int] = None,
+    prior_study_ids: Optional[List[int]] = None,
+    add_prior_trials: bool = False
+    ) -> None:
   """Runs dedicated controller and waits for its completion."""
   raise NotImplementedError('Dedicated controller is not supported in OSS paxml.')
 
