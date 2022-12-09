@@ -49,6 +49,7 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:optimizers",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:schedules",
         "//praxis/layers",

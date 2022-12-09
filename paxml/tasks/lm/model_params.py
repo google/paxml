@@ -27,6 +27,7 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import schedules
 from praxis.layers import activations
@@ -208,8 +209,9 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = tasks_lib.SingleTask.HParams(name='classification_task')
-    task_p.model = models.ClassificationMLPModel.HParams(
-        name='classification_model')
+    task_p.model = pax_fiddle.Config(
+        models.ClassificationMLPModel, name='classification_model'
+    )
     model_p = task_p.model
     model_p.mlp_tpl.ff_tpl.input_dims = self.INPUT_DIM  # pytype: disable=attribute-error  # enable-nested-classes
     model_p.mlp_tpl.ff_tpl.output_dims = self.OUTPUT_DIM  # pytype: disable=attribute-error  # enable-nested-classes
@@ -255,7 +257,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = tasks_lib.SingleTask.HParams(name='bert_task')
-    task_p.model = models.BertModel.HParams(name='bert_lm')
+    task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
     model_p = task_p.model
     model_p.lm_tpl.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
     model_p.lm_tpl.packed_input = True
@@ -265,7 +267,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
-    stacked_transformer_tpl = layers.StackedTransformer.HParams()
+    stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
 
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
     stacked_transformer_tpl.hidden_dims = self.HIDDEN_DIMS
@@ -281,8 +283,9 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm_tpl.stacked_transformer_tpl = (
-          layers.StackedTransformerRepeated.HParams())
+      model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+          layers.StackedTransformerRepeated
+      )
       stacked_transformer_tpl.num_layers = 1
       model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
       model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
@@ -339,7 +342,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = tasks_lib.SingleTask.HParams(name='bert_task')
-    task_p.model = models.BertModel.HParams(name='bert_lm')
+    task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
     model_p = task_p.model
     model_p.mask_token_id = self.MASK_TOKEN_ID
     model_p.lm_tpl.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
@@ -350,7 +353,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
-    stacked_transformer_tpl = layers.StackedTransformer.HParams()
+    stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
     stacked_transformer_tpl.hidden_dims = self.HIDDEN_DIMS
     stacked_transformer_tpl.num_layers = self.NUM_LAYERS
@@ -366,8 +369,9 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm_tpl.stacked_transformer_tpl = (
-          layers.StackedTransformerRepeated.HParams())
+      model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+          layers.StackedTransformerRepeated
+      )
       stacked_transformer_tpl.num_layers = 1
       model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
       model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
@@ -422,7 +426,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
-    task_p.model = models.LanguageModel.HParams(name='xformer_lm')
+    task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
@@ -430,7 +434,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
 
-    stacked_transformer_tpl = layers.StackedTransformer.HParams()
+    stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
     stacked_transformer_tpl.hidden_dims = self.HIDDEN_DIMS
     stacked_transformer_tpl.num_layers = self.NUM_LAYERS
@@ -449,14 +453,15 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
         self.USE_GATED_ACTIVATION)
 
     if self.REL_POS_EMB_DIM is not None:
-      atten_xl_p = layers.DotProductAttentionXL.HParams()
+      atten_xl_p = pax_fiddle.Config(layers.DotProductAttentionXL)
       atten_xl_p.copy_fields_from(transformer_layer_p.tr_atten_tpl)
       atten_xl_p.set(rel_pos_emb_dim=self.REL_POS_EMB_DIM)
       transformer_layer_p.tr_atten_tpl = atten_xl_p
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm_tpl.stacked_transformer_tpl = (
-          layers.StackedTransformerRepeated.HParams())
+      model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+          layers.StackedTransformerRepeated
+      )
       stacked_transformer_tpl.num_layers = 1
       model_p.lm_tpl.stacked_transformer_tpl.block = (stacked_transformer_tpl)
       model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
@@ -535,15 +540,17 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
       num_heads = self.NUM_HEADS
 
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
-    task_p.model = models.LanguageModel.HParams(name='xformer_lm')
+    task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
     model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
 
     if self.SEPARATE_EMBEDDING:
-      model_p.lm_tpl.separate_embedding_tpl = (layers.Embedding.HParams())
-      model_p.lm_tpl.softmax_tpl = (layers.FullSoftmax.HParams())
+      model_p.lm_tpl.separate_embedding_tpl = pax_fiddle.Config(
+          layers.Embedding
+      )
+      model_p.lm_tpl.softmax_tpl = pax_fiddle.Config(layers.FullSoftmax)
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     # pytype: disable=attribute-error  # enable-nested-classes
@@ -555,11 +562,12 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
-      model_p.lm_tpl.position_emb_tpl = (
-          layers.TrainablePositionalEmbedding.HParams(
-              max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN))
+      model_p.lm_tpl.position_emb_tpl = pax_fiddle.Config(
+          layers.TrainablePositionalEmbedding,
+          max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN,
+      )
 
-    stacked_transformer_tpl = layers.StackedTransformer.HParams()
+    stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
     stacked_transformer_tpl.hidden_dims = self.HIDDEN_DIMS
     stacked_transformer_tpl.num_layers = self.NUM_LAYERS
@@ -584,14 +592,16 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     # Only one of RELATIVE_BIAS or USE_ROTARY_POSITION_EMB can be True.
     assert (not self.RELATIVE_BIAS) or (not self.USE_ROTARY_POSITION_EMB)
     if self.RELATIVE_BIAS:
-      transformer_layer_p.tr_atten_tpl.relative_bias_tpl = (
-          layers.RelativeBias.HParams())
+      transformer_layer_p.tr_atten_tpl.relative_bias_tpl = pax_fiddle.Config(
+          layers.RelativeBias
+      )
     if self.USE_ROTARY_POSITION_EMB:
       transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
 
     if self.USE_REPEATED_LAYER:
-      model_p.lm_tpl.stacked_transformer_tpl = (
-          layers.StackedTransformerRepeated.HParams())
+      model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+          layers.StackedTransformerRepeated
+      )
       stacked_transformer_tpl.num_layers = 1
       model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
       model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
@@ -709,7 +719,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     assert self.ICI_MESH_SHAPE[0] * self.DCN_MESH_SHAPE[0] == self.NUM_STAGES
 
     task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
-    task_p.model = models.LanguageModel.HParams(name='xformer_lm')
+    task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = True
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
@@ -722,11 +732,12 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
-      model_p.lm_tpl.position_emb_tpl = (
-          layers.TrainablePositionalEmbedding.HParams(
-              max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN))
+      model_p.lm_tpl.position_emb_tpl = pax_fiddle.Config(
+          layers.TrainablePositionalEmbedding,
+          max_seq_length=self.TRAINABLE_PE_MAX_SEQ_LEN,
+      )
 
-    stacked_transformer_tpl = layers.StackedTransformer.HParams()
+    stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
     stacked_transformer_tpl.model_dims = self.MODEL_DIMS
     stacked_transformer_tpl.hidden_dims = self.HIDDEN_DIMS
     stacked_transformer_tpl.num_layers = self.NUM_LAYERS // (
@@ -752,21 +763,24 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     # Only one of RELATIVE_BIAS or USE_ROTARY_POSITION_EMB can be True.
     assert (not self.RELATIVE_BIAS) or (not self.USE_ROTARY_POSITION_EMB)
     if self.RELATIVE_BIAS:
-      transformer_layer_p.tr_atten_tpl.relative_bias_tpl = (
-          layers.RelativeBias.HParams())
+      transformer_layer_p.tr_atten_tpl.relative_bias_tpl = pax_fiddle.Config(
+          layers.RelativeBias
+      )
     if self.USE_ROTARY_POSITION_EMB:
       transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
 
     if self.USE_REPEATED_LAYER:
       stacked_transformer_tpl.num_layers = 1
-      stacked_transformer_tpl = layers.StackedTransformerRepeated.HParams(
-          block=stacked_transformer_tpl)
+      stacked_transformer_tpl = pax_fiddle.Config(
+          layers.StackedTransformerRepeated, block=stacked_transformer_tpl
+      )
       stacked_transformer_tpl.x_times = self.NUM_LAYERS // (
           self.NUM_STAGES * self.CIRCULAR_REPEAT)
       stacked_transformer_tpl.checkpoint_policy = self.CHECKPOINT_POLICY
 
     # Wrap it with a pipeline layer.
-    model_p.lm_tpl.stacked_transformer_tpl = layers.PipelinedTransformer.HParams(
+    model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+        layers.PipelinedTransformer,
         pipeline_stage=stacked_transformer_tpl,
         num_pipeline_stages=self.NUM_STAGES,
         circular_repeat=self.CIRCULAR_REPEAT,
@@ -774,7 +788,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         pipeline_microbatch_size=self.MICROBATCH_SIZE,
         stream_io=self.STREAM_IO,
         checkpoint_policy=self.CHECKPOINT_POLICY,
-        pipeline_broadcast_inputs=self.PIPELINE_BROADCAST_INPUTS)
+        pipeline_broadcast_inputs=self.PIPELINE_BROADCAST_INPUTS,
+    )
 
     # Enable bf16.
     model_p.fprop_dtype = self.FPROP_DTYPE

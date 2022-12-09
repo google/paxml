@@ -16,7 +16,6 @@
 """Unit tests for tasks_lib."""
 
 from __future__ import annotations
-
 from typing import Tuple
 
 from absl.testing import absltest
@@ -34,6 +33,7 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import schedules
@@ -140,8 +140,9 @@ class BaseTaskTest(test_utils.TestCase):
     output_dims = 32
     vn_start_step = 5
     task_p = tasks_lib.SingleTask.HParams(name='task')
-    task_p.model = TestModel01.HParams(
-        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
     task_p.model.params_init = WeightInit.Constant(0.0)
 
     # Use VN on all params
@@ -214,8 +215,9 @@ class BaseTaskTest(test_utils.TestCase):
     decay = 0.9999
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
-    task_p.model = TestModel01.HParams(
-        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
 
     lp = task_p.train.learner
     lp.loss_name = 'loss'
@@ -280,8 +282,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Initialize external task and save checkpoint
     ext_task_p = tasks_lib.SingleTask.HParams(name='task')
-    ext_task_p.model = TestModel01.HParams(
-        name='mdl_ext', input_dims=input_dims, output_dims=output_dims)
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
     lp.optimizer = optimizers.Adam.HParams()
@@ -312,8 +318,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Create task with warm-start
     task_p = tasks_lib.SingleTask.HParams(name='task')
-    task_p.model = TestModel01.HParams(
-        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
     task_p.train.learner = lp.clone()
     load_rules = [(r'params/(.*)', 'params/{}')]
     if partial_load_opt_states:
@@ -359,8 +366,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Initialize external task and save checkpoint
     ext_task_p = tasks_lib.SingleTask.HParams(name='task')
-    ext_task_p.model = TestModel01.HParams(
-        name='mdl_ext', input_dims=input_dims, output_dims=output_dims)
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
     lp.optimizer = optimizers.Adam.HParams()
@@ -384,8 +395,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Create task with incorrect load_rules and safe_load=True.
     task_p = tasks_lib.SingleTask.HParams(name='task')
-    task_p.model = TestModel01.HParams(
-        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
     task_p.train.learner = lp.clone()
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
@@ -413,15 +425,16 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Initialize external task and save checkpoint
     ext_task_p = tasks_lib.SingleTask.HParams(name='task')
-    ext_task_p.model = layers.LanguageModel.HParams(name='lm')
+    ext_task_p.model = pax_fiddle.Config(layers.LanguageModel, name='lm')
     model_p = ext_task_p.model
     model_p.lm_tpl.model_dims = model_dims
     stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl.clone()
     stacked_transformer_tpl.hidden_dims = model_dims * 4
     stacked_transformer_tpl.num_layers = 1
     stacked_transformer_tpl.num_heads = 4
-    model_p.lm_tpl.stacked_transformer_tpl = (
-        layers.StackedTransformerRepeated.HParams())
+    model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+        layers.StackedTransformerRepeated
+    )
     model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
     model_p.lm_tpl.stacked_transformer_tpl.x_times = 2
     model_p.lm_tpl.vocab_size = 64
@@ -507,8 +520,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Initialize external task and save checkpoint
     ext_task_p = tasks_lib.SingleTask.HParams(name='task')
-    ext_task_p.model = TestModel01.HParams(
-        name='mdl_ext', input_dims=input_dims, output_dims=output_dims)
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
     lp.optimizer = optimizers.Adam.HParams()
@@ -531,8 +548,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
-    task_p.model = TestModel01.HParams(
-        name='mdl', input_dims=input_dims, output_dims=output_dims)
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
     task_p.train.learner = lp.clone()
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:

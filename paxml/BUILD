@@ -580,6 +580,7 @@ py_strict_test(
         ":experiment_registry",
         # Implicit absl.testing.absltest.absltest dependency.
         "//paxml/tasks/test:synthetic",
+        "//praxis:pax_fiddle",
         "//praxis/layers",
     ],
 )
@@ -677,6 +678,7 @@ py_strict_test(
         "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:optimizers",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:schedules",

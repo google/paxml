@@ -32,6 +32,7 @@ py_library(
     deps = [
         "//paxml:base_experiment",
         "//paxml:experiment_registry",
+        "//praxis:pax_fiddle",
         "//praxis/layers",
     ],
 )

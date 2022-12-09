@@ -99,7 +99,7 @@ class TrainLibTest(parameterized.TestCase):
     cls.train_input = instantiate(train_input_p)
     # Set up the task.
     task_p = tasks_lib.SingleTask.HParams(name='test_task')
-    task_p.model = TestModel.HParams(name='test_ffn')
+    task_p.model = pax_fiddle.Config(TestModel, name='test_ffn')
     task_p.model.ici_mesh_shape = cls._mesh.shape
     task_p.model.mesh_axis_names = cls._mesh.axis_names
     lp = task_p.train.learner

@@ -18,6 +18,7 @@
 from paxml import base_experiment
 from paxml import experiment_registry
 from praxis import layers
+from praxis import pax_fiddle
 
 
 @experiment_registry.register
@@ -28,7 +29,7 @@ class SyntheticClassifier(base_experiment.BaseExperiment):
     return []
 
   def task(self):
-    act_p = layers.Identity.HParams()
+    act_p = pax_fiddle.Config(layers.Identity)
     return act_p
 
 

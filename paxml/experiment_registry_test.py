@@ -19,6 +19,7 @@ from paxml import base_experiment
 from paxml import experiment_registry
 from paxml.tasks.test import synthetic  # pylint: disable=unused-import
 from praxis import layers
+from praxis import pax_fiddle
 
 
 @experiment_registry.register
@@ -28,7 +29,7 @@ class DummyExperiment(base_experiment.BaseExperiment):
     return []
 
   def task(self):
-    act_p = layers.Identity.HParams()
+    act_p = pax_fiddle.Config(layers.Identity)
     return act_p
 
 
