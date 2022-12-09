@@ -38,7 +38,7 @@ FLAGS = flags.FLAGS
 WeightInit = base_layer.WeightInit
 NestedMap = py_utils.NestedMap
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
-LayerTpl = pax_fiddle.Config[base_layer.FiddleBaseLayer]
+LayerTpl = pax_fiddle.Config[base_layer.BaseLayer]
 
 
 class ImageClassificationInputSpecsProvider(base_input.BaseInputSpecsProvider):
