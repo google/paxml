@@ -440,7 +440,7 @@ class SeqIOInput(base_input.BaseInput):
   def _validate_eval_task(self):
     assert isinstance(self.mixture_or_task, seqio.Task)
     p = self.hparams
-    if p.feature_converter.pack:
+    if hasattr(p.feature_converter, '_pack') and p.feature_converter.pack:
       raise ValueError('Feature converter for eval must set pack=False')
     # weights_on_targets_only must be true if computing scoring metric fns and
     # using LanguageModelFeatures as feature converter.
