@@ -18,7 +18,7 @@
 import dataclasses
 import enum
 import functools
-from typing import Any, Callable, Dict, Optional, Protocol, Sequence, TYPE_CHECKING, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -28,9 +28,9 @@ from jax.experimental import maps
 from jax.experimental import pjit
 from jax.interpreters import pxla
 from paxml import base_metrics
+from paxml import sgf
 from paxml import summary_utils
 from paxml import tasks_lib
-from paxml import sgf
 from paxml import train_states
 from praxis import asserts
 from praxis import base_hyperparams

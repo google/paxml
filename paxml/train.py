@@ -24,7 +24,7 @@ import json
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, Type
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from clu import platform

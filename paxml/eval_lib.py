@@ -43,8 +43,8 @@ from paxml import metric_utils
 from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
-from paxml import trainer_lib
 from paxml import train_states
+from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
@@ -269,7 +269,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         maybe_use_persistence_checkpointing, task_p)
     self.task_p = task_p
     self.job_log_dir = job_log_dir
-    self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
+    self.maybe_use_persistence_checkpointing = (
+        maybe_use_persistence_checkpointing)
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = has_ema(task_p)
@@ -391,7 +392,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         maybe_use_persistence_checkpointing, task_p)
     self.task_p = task_p
     self.job_log_dir = job_log_dir
-    self.maybe_use_persistence_checkpointing = maybe_use_persistence_checkpointing
+    self.maybe_use_persistence_checkpointing = (
+        maybe_use_persistence_checkpointing)
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = has_ema(task_p)

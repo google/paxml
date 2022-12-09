@@ -19,7 +19,7 @@ TODO(b/259501483): This is is currently aliasing Praxis learner.py's module
 symbols, until learner.py gets fully migrated into Paxml.
 """
 
-from praxis import learners as learners
+from praxis import learners
 
 Learner = learners.Learner
 MultiOptimizerLearner = learners.MultiOptimizerLearner

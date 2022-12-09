@@ -27,7 +27,7 @@ import random
 import re
 import time
 import typing
-from typing import Dict, Optional, Sequence
+from typing import Optional, Sequence
 
 from absl import app
 from absl import flags
