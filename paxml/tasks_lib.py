@@ -390,7 +390,9 @@ def restore_pmap_from_tensorstore(
         global_mesh=restore_global_mesh,
         checkpoint_type=checkpoint_type,
         state_specs=fully_replicated_state_specs,
-        step=step)
+        step=step,
+        use_orbax=True,
+    )
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
@@ -1082,7 +1084,9 @@ class SingleTask(base_task.BaseTask):
           global_mesh=global_mesh,
           checkpoint_type=checkpoint_type,
           state_specs=train_state_pspecs,
-          step=rules.step)
+          step=rules.step,
+          use_orbax=True,
+      )
 
     if loaded_train_state is None:
       raise RuntimeError(f'Cannot find checkpoint from {ckpt_path}')

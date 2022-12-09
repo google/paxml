@@ -144,11 +144,13 @@ pytype_strict_library(
         # Implicit flax.core dependency.
         # Implicit flax.training dependency.
         # Implicit jax dependency.
+        # Implicit jax.experimental.gda_serialization dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
@@ -550,6 +552,20 @@ py_strict_test(
         "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:test_utils",
+    ],
+)
+
+py_strict_test(
+    name = "checkpoint_managers_test",
+    srcs = ["checkpoint_managers_test.py"],
+    deps = [
+        ":checkpoint_managers",
+        ":checkpoint_py_pb2",
+        # Implicit absl.flags dependency.
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
