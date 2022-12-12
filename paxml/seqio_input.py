@@ -164,6 +164,10 @@ def _enumerate_dataset(ds: tf.data.Dataset, is_training: bool,
   return ds
 
 
+def _is_packing_on(fc: seqio.FeatureConverter) -> bool:
+  return hasattr(fc, '_pack') and fc.pack
+
+
 def maybe_update_decode_output_keys(
     process_decode_output: Sequence[Tuple[str, Any]],
     decode_out: NestedMap) -> Sequence[Tuple[str, Any]]:
@@ -440,8 +444,6 @@ class SeqIOInput(base_input.BaseInput):
   def _validate_eval_task(self):
     assert isinstance(self.mixture_or_task, seqio.Task)
     p = self.hparams
-    if hasattr(p.feature_converter, '_pack') and p.feature_converter.pack:
-      raise ValueError('Feature converter for eval must set pack=False')
     # weights_on_targets_only must be true if computing scoring metric fns and
     # using LanguageModelFeatures as feature converter.
     if (self.mixture_or_task.score_metric_fns
@@ -990,12 +992,14 @@ class SeqIOInput(base_input.BaseInput):
     task = self.mixture_or_task
     if not isinstance(task, seqio.Task):
       raise ValueError('compute_metrics() is only supported for seqio.Tasks, '
-                       f'got {type(self.mixture_or_task)} for {p.name}.')
-
+                       f'got {type(task)} for {p.name}.')
     # If there are no seqio decode/predict metrics to compute return empty list
     if not task.predict_metric_fns:
-      logging.info('no predict_metric_fns defined on task: %s',
-                   self.mixture_or_task.name)
+      logging.info('no predict_metric_fns defined on task: %s', task.name)
+      return []
+    if _is_packing_on(p.feature_converter):
+      logging.error('Will not compute metrics on %s since using a '
+                    'FeatureConverter with pack=True.', task.name)
       return []
 
     self._validate_compute_metrics_config(raise_exception=True)
@@ -1069,10 +1073,13 @@ class SeqIOInput(base_input.BaseInput):
     if not isinstance(task, seqio.Task):
       raise ValueError(
           'compute_metrics_eval() is only supported for seqio.Tasks, '
-          f'got {type(self.mixture_or_task)} for {p.name}.')
+          f'got {type(task)} for {p.name}.')
     if not task.score_metric_fns:
-      logging.info('no score_metric_fns defined on task: %s',
-                   self.mixture_or_task.name)
+      logging.info('no score_metric_fns defined on task: %s', task.name)
+      return []
+    if _is_packing_on(p.feature_converter):
+      logging.error('Will not compute metrics on %s since using a '
+                    'FeatureConverter with pack=True.', task.name)
       return []
 
     self._validate_compute_metrics_config(raise_exception=True)
