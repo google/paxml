@@ -307,6 +307,43 @@ class CheckpointManagerTest(parameterized.TestCase):
         _actual_checkpoint_filenames(self.directory))
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
+  def test_cleanup(self):
+    def _fake_on_commit_callback(*args, **kwargs):
+      del args, kwargs
+      pass  # Do nothing to simulate failure of finalization.
+
+    options = checkpoint_managers.CheckpointManagerOptions(
+        save_interval_steps=1
+    )
+
+    with mock.patch.object(
+        orbax.checkpoint.utils, 'ensure_atomic_save', autospec=True
+    ) as commit_callback:
+      commit_callback.side_effect = _fake_on_commit_callback
+      checkpoint_manager = self.create_checkpoint_manager(options)
+      self.save_with_args(checkpoint_manager, 0, self.train_state)
+      # Step 0 not finalized.
+      tmp_checkpoint_pattern = (
+          checkpoints.CHECKPOINT_PREFIX
+          + '*'
+          + orbax.checkpoint.utils.TMP_DIR_SUFFIX
+          + '*'
+      )
+      self.assertNotEmpty(
+          list(checkpoint_manager.directory.glob(tmp_checkpoint_pattern))
+      )
+
+    checkpoint_manager = self.create_checkpoint_manager(options)
+    self.assertEmpty(
+        list(checkpoint_manager.directory.glob(tmp_checkpoint_pattern))
+    )
+    self.save_with_args(checkpoint_manager, 0, self.train_state)
+    self.assertSameElements(
+        _expected_checkpoint_filenames([0]),
+        _actual_checkpoint_filenames(checkpoint_manager.directory),
+    )
+    self.assertSameElements([0], checkpoint_manager.all_steps())
+
   @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
                             (CheckpointType.CHECKPOINT_FLAX,))
   def test_todelete_subdir(self, checkpoint_type):

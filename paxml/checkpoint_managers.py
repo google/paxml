@@ -559,19 +559,19 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     if py_utils.is_mock_tpu_backend():
       return
 
+    tmp_files = []
     if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      if jax.process_index() == 0:
-        tmp_files = self.directory.glob(self._checkpoint_name('tmp'))
-        for tmp_file in tmp_files:
-          if tmp_file.is_file():
-            tmp_file.unlink()
-          else:
-            msg = ('Unrecognized directory matching tmp file pattern. Skipping '
-                   'deletion.')
-            logging.warning(msg)
-      multihost_utils.sync_global_devices('cleanup_tmp_dirs')
+      tmp_files = self.directory.glob(self._checkpoint_name('tmp'))
     else:
-      super()._cleanup_tmp_directories()
+      tmp_files = [
+          f
+          for f in self.directory.glob(CHECKPOINT_PREFIX + '*')
+          if not orbax.checkpoint.utils.is_checkpoint_item_finalized(f)
+      ]
+    if jax.process_index() == 0:
+      for tmp_file in tmp_files:
+        tmp_file.rmtree()
+    py_utils.sync_global_devices('cleanup_tmp_dirs')
 
   def _delete_directory(self, step: int):
     if jax.process_index() != 0:
@@ -589,8 +589,10 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       # TODO(pax-team): Check if dst already exists?
       tf.io.gfile.rename(src, dst)
     else:
-      if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX and jax.process_index(
-      ) == 0:
+      if (
+          self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX
+          and jax.process_index() == 0
+      ):
         delete_path = self.directory / checkpoint_name
         assert delete_path.is_file()
         delete_path.unlink()
