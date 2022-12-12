@@ -634,7 +634,8 @@ def train_step_single_learner(
     states: TrainState,
     prng_key: PRNGKey,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32
+    fprop_dtype: jnp.dtype = jnp.float32,
+    var_weight_hparams: Optional[NestedWeightHParams] = None,
 ) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
   """Trains a model for a single step.
 
@@ -650,6 +651,7 @@ def train_step_single_learner(
     prng_key: A PRNGKey, of shape [2], of type np.uint32.
     inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+    var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
     A tuple of the following elements.
@@ -672,13 +674,11 @@ def train_step_single_learner(
   # TODO(yonghui): also fold in the replica id.
   prng_key = jax.random.fold_in(prng_key, states.step)
 
-  with base_layer.JaxContext.new_context(hparams=context_p):
-    var_weight_hparams = model.abstract_init_with_metadata(inputs)
-
-  updated_mdl_vars = jax_task.maybe_adjust_train_state(states.step,
-                                                       states.mdl_vars,
-                                                       var_weight_hparams,
-                                                       prng_key)
+  if not var_weight_hparams:
+    with base_layer.JaxContext.new_context(hparams=context_p):
+      var_weight_hparams = model.abstract_init_with_metadata(inputs)
+  updated_mdl_vars = jax_task.maybe_adjust_train_state(
+      states.step, states.mdl_vars, var_weight_hparams, prng_key)
 
   def _loss_fn(
       mdl_vars: NestedJTensor, inputs: NestedMap, prng_key
@@ -816,7 +816,9 @@ def eval_step_single_learner(
     states: TrainState,
     prng_key: JTensor,
     inputs: Union[JTensor, NestedMap],
-    fprop_dtype: jnp.dtype = jnp.float32) -> Tuple[Any, Any, Any, SummaryDict]:
+    fprop_dtype: jnp.dtype = jnp.float32,
+    var_weight_hparams: Optional[NestedWeightHParams] = None,
+) -> Tuple[Any, Any, Any, SummaryDict]:
   """Evaluates a model for a single step.
 
   This utility is specialized for the single learner case.
@@ -827,6 +829,7 @@ def eval_step_single_learner(
     prng_key: A prng seed, of shape [2], of type np.uint32.
     inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+    var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
     A tuple of the following elements.
@@ -845,12 +848,10 @@ def eval_step_single_learner(
   mdl_vars = states.mdl_vars
   # assert not states.opt_states
 
-  if jax_task.hparams.train.always_use_train_for_model_init:
-    do_eval_for_init = False
-  else:
-    do_eval_for_init = True
-  var_weight_hparams = model.abstract_init_with_metadata(
-      inputs, do_eval=do_eval_for_init)
+  if not var_weight_hparams:
+    var_weight_hparams = model.abstract_init_with_metadata(
+        inputs,
+        do_eval=not jax_task.hparams.train.always_use_train_for_model_init)
 
   if fprop_dtype == jnp.float32:
     pass
@@ -1335,7 +1336,8 @@ class _SpmdModelPartitioner:
           state,
           prng_key,
           inputs,
-          fprop_dtype=model_p.fprop_dtype)
+          fprop_dtype=model_p.fprop_dtype,
+          var_weight_hparams=self._get_var_weight_hparams(is_eval))
 
       if is_eval:
         return fn_out
@@ -1541,21 +1543,8 @@ def get_partitioned_spmd_model_step_fn(
     is_eval = True
     auto_sharding_replicate_output = True
 
-    if jax_task.hparams.train.always_use_train_for_model_init:
-      if train_inputs_shape_dtype is None:
-        raise ValueError(
-            'No training input specs available, while enabling '
-            '`task_p.train.always_use_train_for_model_init` requires it.')
-      var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-          train_inputs_shape_dtype)
-    else:
-      train_inputs_shape_dtype = None
-      var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-          inputs_shape_dtype, do_eval=True)
-
-    # TODO(laigd): train/eval/decode step functions should have the same
-    # signature.
-    def step_fn(task, states, prng_key, inputs, fprop_dtype):
+    def step_fn(
+        task, states, prng_key, inputs, fprop_dtype, var_weight_hparams):
       return decode_step(task.model, states, prng_key, var_weight_hparams,
                          inputs, fprop_dtype)
 
