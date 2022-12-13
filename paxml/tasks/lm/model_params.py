@@ -19,6 +19,7 @@ import math
 import typing
 from typing import Optional, Sequence
 
+import fiddle as fdl
 from jax import numpy as jnp
 from paxml import base_experiment
 from paxml import tasks_lib
@@ -156,14 +157,14 @@ def maybe_setup_moe_params(
 ) -> None:
   """Convert a FeedforwardLayer to a MoE Layer for StackedTransformer."""
   # pytype: disable=attribute-error  # enable-nested-classes
-  if model_p.cls == layers.StackedTransformerRepeated:
+  if fdl.get_callable(model_p) == layers.StackedTransformerRepeated:
     model_p = model_p.block
 
   if model_p.num_experts == 0:
     return
 
   ff_p = model_p.transformer_layer_params_tpl.tr_fflayer_tpl
-  assert issubclass(ff_p.cls, layers.TransformerFeedForward)
+  assert issubclass(fdl.get_callable(ff_p), layers.TransformerFeedForward)
   moe_p = model_p.moe_layer_tpl
   # pytype: enable=attribute-error  # enable-nested-classes
   # Copy over the base params.
@@ -848,14 +849,21 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         batch_dims, None, mdl_axis
     ]
     softmax_p.activation_split_dims_mapping.out = [batch_dims, None, mdl_axis]
-    if softmax_p.cls == embedding_softmax.GShardSharedEmbeddingSoftmax:
+    if (
+        fdl.get_callable(softmax_p)
+        == embedding_softmax.GShardSharedEmbeddingSoftmax
+    ):
       # Softmax weight is of shape [vocab_size, input_dim].
       softmax_p.weight_split_dims_mapping.wt = [mdl_axis, self.EMB_W_DATA_DIMS]
-    elif softmax_p.cls == embedding_softmax.SharedEmbeddingSoftmax:
+    elif (
+        fdl.get_callable(softmax_p) == embedding_softmax.SharedEmbeddingSoftmax
+    ):
       # Softmax weight is of shape [input_dim, vocab_size].
       softmax_p.weight_split_dims_mapping.wt = [self.EMB_W_DATA_DIMS, mdl_axis]
     else:
-      raise NotImplementedError(f'softmax class {softmax_p.cls} not supported')
+      raise NotImplementedError(
+          f'softmax class {fdl.get_callable(softmax_p)} not supported'
+      )
 
     pipeline_layer_p = model_p.lm_tpl.stacked_transformer_tpl
     pipeline_layer_p.weight_split_dims_mapping.stages = [stage_axis]

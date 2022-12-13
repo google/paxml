@@ -42,6 +42,7 @@ pytype_strict_library(
     name = "model_params",
     srcs = ["model_params.py"],
     deps = [
+        # Implicit fiddle dependency.
         # Implicit jax dependency.
         "//paxml:base_experiment",
         "//paxml:tasks_lib",
