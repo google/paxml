@@ -121,20 +121,21 @@ class TrainLibTest(parameterized.TestCase):
     train_state_metadata = trainer_lib.create_train_state_metadata(
         self.task, inputs_shape_dtype)
 
-    sharding_info = None
-    if not use_auto_shard:
-      sharding_info = trainer_lib._SpmdModelPartitioner.ShardingInfo(
-          train_state_metadata.partitioned_specs, 2)
+    auto_sharding_info = None
+    if use_auto_shard:
+      auto_sharding_info = trainer_lib._PjitPartitioner.AutoShardingInfo(
+          trainer_lib.train_step_single_learner)
 
-    partitioner = trainer_lib._SpmdModelPartitioner(
+    partitioner = trainer_lib._PjitPartitioner(
         self.task,
-        self._mesh,
         prng_key,
-        inputs_shape_dtype,
-        train_inputs_shape_dtype=None,
-        sharding_info=sharding_info)
-    _, _, train_state_partition_spec = partitioner.partition(
-        trainer_lib.train_step_single_learner, is_eval=False)
+        self._mesh,
+        train_inputs_shape_dtype=inputs_shape_dtype,
+        auto_sharding_info=auto_sharding_info,
+    )
+    train_state_partition_spec = partitioner.get_train_state_metadata(
+        inputs_shape_dtype, is_eval=False
+    ).partitioned_specs
     if use_auto_shard:
       self.assertIsNotNone(train_state_partition_spec)
       self.assertNotEqual(train_state_metadata.partitioned_specs,
