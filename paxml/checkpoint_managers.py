@@ -20,7 +20,7 @@ import datetime
 import itertools
 import os
 import typing
-from typing import Any, Optional, List, Union, Mapping
+from typing import Any, Optional, List, Union, Mapping, Sequence
 
 from absl import logging
 from etils import epath
@@ -496,8 +496,10 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     else:
       return checkpoints.checkpoint_name(step)
 
+  # TODO(b/262389151) Rely on superclass logic when possible.
   def _create_checkpoints(
-      self) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
+      self,
+  ) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
     """Create a list of CheckpointInfo for existing checkpoints.
 
     If none are present, returns empty list.
