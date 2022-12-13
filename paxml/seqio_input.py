@@ -403,7 +403,8 @@ class SeqIOInput(base_input.BaseInput):
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
     if not hparams.name:
-      hparams.name = f'{hparams.mixture_name}_{hparams.split_name}'
+      mixture_name = hparams.mixture_name or hparams.mixture_or_task.name
+      hparams.name = f'{mixture_name}_{hparams.split_name}'
     if (not hparams.is_training and hparams.input_random_seed is None
         and hparams.use_enumeration):
       # Since we want the enumeration to be deterministic, in the case that
