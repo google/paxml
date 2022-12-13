@@ -873,9 +873,12 @@ def train_and_evaluate_spmd_model(
 
   train_state_metadata = trainer.train_state_metadata
 
-  # Dump out model meta info for debugging.
-  trainer_lib.write_post_init_model_hparams_file(
-      jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir)
+  # JaxContext needed for shared layer lookup from global scope.
+  with base_layer.JaxContext.new_context():
+    # Dump out model meta info for debugging.
+    trainer_lib.write_post_init_model_hparams_file(
+        jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
+    )
 
   # The prng keys are already created on device with jax.random.split. We
   # broadcast it with an identity pjit function to avoid doing it in the loop
