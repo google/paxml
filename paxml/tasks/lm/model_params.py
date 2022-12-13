@@ -151,7 +151,9 @@ def set_default_adafactor(task_p: tasks_lib.SingleTask.HParams,
           max=1.0))
 
 
-def maybe_setup_moe_params(model_p: base_model.BaseModel.HParams) -> None:
+def maybe_setup_moe_params(
+    model_p: pax_fiddle.Config[base_layer.BaseLayer],
+) -> None:
   """Convert a FeedforwardLayer to a MoE Layer for StackedTransformer."""
   # pytype: disable=attribute-error  # enable-nested-classes
   if model_p.cls == layers.StackedTransformerRepeated:

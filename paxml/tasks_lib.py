@@ -20,7 +20,6 @@ the `tasks` Python submodule.
 """
 
 from __future__ import annotations
-
 import dataclasses
 import enum
 import itertools
@@ -50,6 +49,7 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
@@ -661,7 +661,9 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
     """
-    model: Optional[base_model.BaseModel.HParams] = sub_config_field(None)
+    model: Optional[pax_fiddle.Config[base_model.BaseModel]] = sub_config_field(
+        None
+    )
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
