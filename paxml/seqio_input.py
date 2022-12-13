@@ -885,10 +885,12 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       target = targets[k]
       score = ans[_LM_SCORE_KEY]
+      prefix_targets_list = []
       for e in targets[k]:
         target_post = self.mixture_or_task.postprocess_fn(
             target, example=e, is_target=True)
         targets_list.append(target_post)
+        prefix_targets_list.append(target_post)
         scores_list.append(score)
         if verbose_entries_idx < verbose_entries:
           logging.info(
@@ -898,7 +900,9 @@ class SeqIOInput(base_input.BaseInput):
               e.get('targets_pretokenized', 'None'), e.get('is_correct', 'N/A'),
               target_post, score)
           verbose_entries_idx += 1
-      ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
+      ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(
+          prefix_targets_list
+      )
 
     eval_data_size = len(list(targets_ds.as_numpy_iterator()))
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
