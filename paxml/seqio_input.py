@@ -221,8 +221,7 @@ def maybe_update_decode_output_keys(
 
 def should_process_outputs(inp: base_input.BaseInput) -> bool:
   """Whether the current (input, process_index) pair should process outputs."""
-  return (inp.hparams.reset_for_eval and isinstance(inp, SeqIOInput)
-          and jax.process_index() == 0)
+  return (isinstance(inp, SeqIOInput) and jax.process_index() == 0)
 
 
 def process_outputs(
@@ -386,7 +385,7 @@ class SeqIOInput(base_input.BaseInput):
     repeat: Optional[bool] = None
     use_cached: bool = False
     eval_auto_pad: bool = True
-    # trim_output_features flag allow passing this arg to seqio.get_datset
+    # trim_output_features flag allow passing this arg to seqio.get_dataset
     # the default value is True so this change will not affect any current
     # behaviour. the main purpose is for prefixlm to not problematically
     # pack on the inputs.
@@ -413,6 +412,7 @@ class SeqIOInput(base_input.BaseInput):
 
     super().__init__(hparams)
     self._validate_hparams()
+    self._num_eval_examples = self._get_eval_num_examples()
     self._dataset = self._get_dataset()
     self._iter = self._dataset.as_numpy_iterator()
 
@@ -423,24 +423,6 @@ class SeqIOInput(base_input.BaseInput):
   def _validate_deterministic(self):
     if self.hparams.deterministic_input:
       raise ValueError('deterministic_input is not supported')
-
-  def _validate_compute_metrics_config(self, raise_exception: bool):
-    """Computing metrics with eval_loop_num_batches is not supported."""
-    p = self.hparams
-    # eval_loop_num_batches gets ignored if reset_for_eval is True
-    if not (not p.is_training
-            and not p.reset_for_eval
-            and p.eval_loop_num_batches is not None):
-      return
-
-    message = (
-        'eval_loop_num_batches is not supported for eval SeqIOInput when '
-        'computing metrics - both self.compute_metrics() and '
-        'self.compute_metrics_eval() will fail if called')
-    if raise_exception:
-      raise ValueError(message)
-    else:
-      logging.info(message)
 
   def _validate_eval_task(self):
     assert isinstance(self.mixture_or_task, seqio.Task)
@@ -466,9 +448,6 @@ class SeqIOInput(base_input.BaseInput):
       logging.warn(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
-
-    # Not raising during construction since some users don't compute metrics
-    self._validate_compute_metrics_config(raise_exception=False)
 
     self._mixture_or_task = p.mixture_or_task or seqio.get_mixture_or_task(
         p.mixture_name)
@@ -512,6 +491,21 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def mixture_or_task(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task
+
+  def _get_eval_num_examples(self) -> int:
+    """
+    Returns the number of eval examples corresponding to the eval_loop_num_batches.
+    If not specified or if reset_for_eval=True, eval will run on full dataset.
+    """
+    p = self.hparams
+    if (
+        not p.is_training
+        and p.batch_size
+        and p.eval_loop_num_batches
+        and not p.reset_for_eval
+    ):
+      return p.batch_size * p.eval_loop_num_batches
+    return -1
 
   def _get_dataset(self) -> tf.data.Dataset:
     p = self.hparams
@@ -571,7 +565,6 @@ class SeqIOInput(base_input.BaseInput):
         use_cached=p.use_cached,
         seed=p.input_random_seed,
         trim_output_features=p.trim_output_features)
-
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
 
     if p.use_enumeration:
@@ -671,6 +664,7 @@ class SeqIOInput(base_input.BaseInput):
         use_cached=p.use_cached,
         trim_output_features=p.trim_output_features)
 
+    targets_ds = targets_ds.take(self._num_eval_examples)
     # customized input may contain ragged tensor, which may cause errors in
     # decoding when calling 'as_numpy_iterator()' below. We filter out
     # RaggedTensor here.
@@ -778,6 +772,7 @@ class SeqIOInput(base_input.BaseInput):
           seed=p.input_random_seed,
           use_cached=p.use_cached,
           trim_output_features=p.trim_output_features)
+      targets_ds = targets_ds.take(self._num_eval_examples)
       targets_ds = _enumerate_dataset(targets_ds, False, shard_info)
 
       for e in targets_ds.as_numpy_iterator():
@@ -865,6 +860,7 @@ class SeqIOInput(base_input.BaseInput):
         seed=p.input_random_seed,
         use_cached=p.use_cached,
         trim_output_features=p.trim_output_features)
+    targets_ds = targets_ds.take(self._num_eval_examples)
     converted_targets_ds = p.feature_converter(targets_ds,
                                                p.task_feature_lengths)
     targets = collections.defaultdict(list)
@@ -1007,8 +1003,6 @@ class SeqIOInput(base_input.BaseInput):
                     'FeatureConverter with pack=True.', task.name)
       return []
 
-    self._validate_compute_metrics_config(raise_exception=True)
-
     if not decoder_outputs:
       return []
     if _LM_DECODER_OUT_KEY not in decoder_outputs[0][1]:
@@ -1086,8 +1080,6 @@ class SeqIOInput(base_input.BaseInput):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
-
-    self._validate_compute_metrics_config(raise_exception=True)
 
     if not eval_outputs:
       return []
