@@ -19,7 +19,7 @@ import inspect
 import math
 import re
 
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, Text
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, Text, Type
 from absl import logging
 from clu import platform
 from etils import epath
@@ -235,6 +235,10 @@ def tune(trial_fn: TrialFn,
     # in each trial.
     with example():
       trial_dirname = trial_dirname_generator.dirname(feedback.id)
+      if (search_hparams.add_experiment_config_to_metadata
+          and is_metric_reporting_role
+          and jax.process_index() == 0):
+        _record_experiment_config(sub_experiments, feedback)
 
       for i, (sub_experiment_id, sub_experiment_cls) in enumerate(
           sub_experiments.items()):
@@ -261,6 +265,34 @@ def tune(trial_fn: TrialFn,
           break
       logging.info('Trial %d is now completed.', feedback.id)
   logging.info('Completed with all trials for study %r', study)
+
+
+def _record_experiment_config(
+    sub_experiments: Dict[str, Type[base_experiment.BaseExperiment]],
+    feedback: pg.tuning.Feedback) -> None:
+  """Record experiment config as trial metadata."""
+  exp_configs = {}
+  for subexp_id, subexp_cls in sub_experiments.items():
+    subexp = subexp_cls()  # pytype: disable=not-instantiable
+    exp_configs[subexp_id] = {
+        # TODO(daiyip): We shall have more machine parse-able format such as
+        # JSON or Fiddle config. But we start with raw texts to collect data
+        # as early as possible.
+        'datasets': [ds.to_text() for ds in subexp.datasets()],
+        'decoder_datasets': [
+            ds.to_text() for ds in subexp.decoder_datasets()],
+        'task': subexp.task().to_text()
+    }
+
+  feedback.set_metadata(
+      'experiment_config', {
+          # We might change the format of serialized configurations in future.
+          # It will be easy for us to filter out metadata of old format based
+          # on this format version.
+          'format_version': 1.0,
+          'source': 'pax',
+          'config': exp_configs
+      }, per_trial=True)
 
 
 def _run_dedicated_controller(

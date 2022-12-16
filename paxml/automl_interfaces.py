@@ -122,6 +122,10 @@ class SearchHParams(BaseHyperParams):
       the controller via the `pg.DNAGenerator.recover` interface.
     add_prior_trials: If True, trials from previous studies will be copied to
       current study. Effective only when `prior_study_ids` is set.
+    add_experiment_config_to_metadata: If True (default), serialized experiment
+      config will be added to trial metadata for helping meta-learning later.
+      If the study will be very large and users don't want to store the
+      experiment config, set it to False.
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
@@ -132,7 +136,8 @@ class SearchHParams(BaseHyperParams):
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
   prior_study_ids: Optional[List[int]] = None
-  add_prior_trials: bool = True
+  add_prior_trials: bool = False
+  add_experiment_config_to_metadata: bool = True
 
 
 class MetricType(enum.Enum):

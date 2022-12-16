@@ -60,11 +60,20 @@ class StopWithLowerMetric(automl.BaseReward):
     return [self._hparams.metric]
 
 
+class MockTask(pg.Dict):
+
+  def to_text(self) -> str:
+    return 'MOCK_TASK_CONFIG'
+
+
 class MockDataset(base_hyperparams.BaseParameterizable):
 
   class HParams(base_hyperparams.BaseParameterizable.HParams):
     dataset_param1: Optional[str] = None
     dataset_param2: Optional[Callable[[], int]] = None
+
+    def to_text(self) -> str:
+      return 'MOCK_DATASET_CONFIG'
 
   def __init__(self, hparams):
     super().__init__(hparams)
@@ -82,7 +91,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
   DECODER_DATASET_PARAM1 = pg.oneof(['x', 'y', 'z'])
 
   def task(self):
-    return pg.Dict(
+    return MockTask(
         learning_rate=self.LEARNING_RATE,
         batch_size=pg.oneof([16, 32, 64], name='batch_size'),
         train=pg.Dict(
@@ -135,10 +144,9 @@ class ParameterSweepingWithCartesianProduct(base_experiment.BaseExperiment):
   DATASET_PARAM1 = pg.oneof(['foo', 'bar'])
 
   def task(self):
-    return {
-        'learning_rate': self.LEARNING_RATE,
-        'batch_size': pg.oneof([16, 32, 64], name='batch_size')
-    }
+    return MockTask(
+        learning_rate=self.LEARNING_RATE,
+        batch_size=pg.oneof([16, 32, 64], name='batch_size'))
 
   def datasets(self):
     return [MockDataset.HParams(dataset_param1=self.DATASET_PARAM1)]
@@ -159,24 +167,22 @@ class ParameterSweepingWithCustomCombinations(
   BATCH_SIZE = pg.oneof([16, 32, 64])
 
   def task(self):
-    return {
-        'learning_rate': self.LEARNING_RATE,
+    return MockTask(
+        learning_rate=self.LEARNING_RATE,
         # Sparse parameter sweep does not support decision points defined
         # within function body, thus we make it a class attribute.
-        'batch_size': self.BATCH_SIZE
-    }
+        batch_size=self.BATCH_SIZE)
 
 
 class TuningWithBadSearchSpace(TuningExperiment):
   """A bad search space which has `oneof` on-the-fly without name."""
 
   def task(self):
-    return {
-        'learning_rate': self.LEARNING_RATE,
+    return MockTask(
+        learning_rate=self.LEARNING_RATE,
         # Bad decision point: a `pg.oneof` created on the fly without
         # specifying a name.
-        'batch_size': pg.oneof([16, 32, 64])
-    }
+        batch_size=pg.oneof([16, 32, 64]))
 
 
 class TuningWithPerTrialEarlyStopping(TuningExperiment):
@@ -416,6 +422,19 @@ class TuneTest(absltest.TestCase):
     # We added an extra measurement for the final report, with final step + 1.
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 21, 21, 21, 21])
+    # Make sure experiment config is saved as trial metadata.
+    self.assertEqual(
+        result.trials[0].metadata.get('experiment_config'),
+        {
+            'format_version': 1.0,
+            'source': 'pax',
+            'config': {
+                '': pg.Dict(
+                    datasets=['MOCK_DATASET_CONFIG'],
+                    decoder_datasets=['MOCK_DATASET_CONFIG'],
+                    task='MOCK_TASK_CONFIG')
+            }
+        })
 
   def test_parameter_sweep_with_catesian_product(self):
     search_space = tuning_lib.get_search_space(
