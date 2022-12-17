@@ -280,8 +280,9 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     transformer_layer_p = (stacked_transformer_tpl.transformer_layer_params_tpl)
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = 50.0
     transformer_layer_p.tr_atten_tpl.use_bias = False
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
-        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
+        self.ACTIVATION_CLS
+    )
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
 
@@ -366,8 +367,9 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = 50.0
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = True
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
-        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
+        self.ACTIVATION_CLS
+    )
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
 
@@ -451,8 +453,9 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     )
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
-        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
+        self.ACTIVATION_CLS
+    )
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
 
@@ -587,8 +590,9 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
-        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
+        self.ACTIVATION_CLS
+    )
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
@@ -759,8 +763,9 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl = (
-        getattr(self.ACTIVATION_CLS, 'HParams')())
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
+        self.ACTIVATION_CLS
+    )
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
