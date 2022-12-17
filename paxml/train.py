@@ -653,8 +653,7 @@ def train_and_evaluate_pmap(
     logging.warning('--jax_array is set to True')
   jax_task = instantiate(task_p)
 
-  # TODO(shafey): Retrieve the seeds from the model definition instead.
-  prng_key = jax.random.PRNGKey(1234)
+  prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
@@ -824,8 +823,7 @@ def train_and_evaluate_spmd_model(
   model_p = task_p.model
   local_device_count = jax.local_device_count()
 
-  # TODO(bf-jax): Retrieve the seeds from the model definition instead.
-  prng_key = jax.random.PRNGKey(1234)
+  prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
   device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,

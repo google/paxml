@@ -567,8 +567,8 @@ class SingleTask(base_task.BaseTask):
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
-      eval_use_ema_state: If True, use ema states to run eval during train,
-        note that in this case ema MUST be enabled in the learner.
+      eval_use_ema_state: If True, use ema states to run eval during train, note
+        that in this case ema MUST be enabled in the learner.
       inputs_split_mapping: The PartitionSpec for inputs such as inputs, labels,
         targets, paddings, num words etc. This is only relevant for SPMD sharded
         models. By default it is None, which means all the inputs are
@@ -598,6 +598,7 @@ class SingleTask(base_task.BaseTask):
       always_use_train_for_model_init: Boolean indicating whether to use the new
         flow for model initialization. With this new flow, dedicated evaluation
         and decoding-only jobs rely on training inputs for model initialization.
+      random_seed: Random seed to use at the beginning of the training.
     """
     learner: learners_lib.Learner.HParams = sub_config_field(
         learners_lib.Learner.HParams)
@@ -625,6 +626,7 @@ class SingleTask(base_task.BaseTask):
     profiler_capture_step: Optional[int] = None
     profiler_max_num_hosts: Optional[int] = None
     always_use_train_for_model_init: bool = True
+    random_seed: int = 1234
 
   class DecodeHParams(base_hyperparams.BaseHyperParams):
     """Parameters for decoding.
@@ -634,9 +636,29 @@ class SingleTask(base_task.BaseTask):
         decoding batch index. Only effective for pmap decoding.
       prng_key_fold_with_global_step: if True, folds the decode prng key with
         the checkpoint global step. Only effective for pmap decoding.
+      random_seed: Random seed to use at the beginning of the decoding.
     """
     prng_key_fold_with_batch_index: bool = False
     prng_key_fold_with_global_step: bool = True
+    random_seed: int = 1234
+
+  class EvaluateHParams(base_hyperparams.BaseHyperParams):
+    """Parameters for evaluation.
+
+    Attributes:
+      random_seed: Random seed to use at the beginning of the evaluation.
+    """
+
+    random_seed: int = 1234
+
+  class InferHParams(base_hyperparams.BaseHyperParams):
+    """Parameters for inference.
+
+    Attributes:
+      random_seed: Random seed to use at the beginning of the inference.
+    """
+
+    random_seed: int = 1234
 
   @enum.unique
   class TrackDecoderMetricMode(str, enum.Enum):
@@ -672,6 +694,13 @@ class SingleTask(base_task.BaseTask):
         lazy_ref=lambda: SingleTask.TrainHParams)
     decode: SingleTask.DecodeHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.DecodeHParams)
+    evaluate: SingleTask.EvaluateHParams = sub_config_field(
+        lazy_ref=lambda: SingleTask.EvaluateHParams
+    )
+    infer: SingleTask.InferHParams = sub_config_field(
+        lazy_ref=lambda: SingleTask.InferHParams
+    )
+
     metrics: Any = None
     loss_aggregator: Any = None
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(

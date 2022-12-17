@@ -692,8 +692,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
-  # TODO(pax-dev): Retrieve the seeds from the model definition instead.
-  prng_key = jax.random.PRNGKey(1234)
+  prng_key = jax.random.PRNGKey(task_p.evaluate.random_seed)
 
   checkpointer = _create_checkpointer(
       jax_task,
@@ -1129,8 +1128,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   jax_task = instantiate(task_p)
-  # TODO(pax-dev): Retrieve the seeds from the model definition instead.
-  prng_key = jax.random.PRNGKey(1234)
+  prng_key = jax.random.PRNGKey(task_p.decode.random_seed)
 
   checkpointer = _create_checkpointer(
       jax_task,
@@ -2207,7 +2205,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   task = instantiate(task_p)
   model_p = task_p.model
   inputs_p = experiment_config.decoder_datasets()
-  prng_key = jax.random.PRNGKey(0)
+  prng_key = jax.random.PRNGKey(task_p.infer.random_seed)
 
   checkpointer = _create_checkpointer(
       task,
