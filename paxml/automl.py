@@ -238,7 +238,7 @@ class SingleObjective(BaseReward):
     """Hyperparameters for SingleObjective.
 
     Attributes:
-      metric_key: The key of metric whose value will be used as reward.
+      metric: The key of metric whose value will be used as reward.
       goal: Defines how the metric should be optimized. Acceptable values are
         'maximize' or 'minimize'.
       reward_for_nan: An optional float used as the reward when metric value is
@@ -291,15 +291,18 @@ class MultiObjective(BaseReward):
     """Hyperparameters for SingleObjective.
 
     Attributes:
-      metric_keys: The keys of metric whose value will be used as reward.
+      metrics: The keys of metric whose value will be used as reward.
       aggregator: Multi-objective aggregator for coupling multiple values into a
         single float value.
+      goal: Defines how the metric should be optimized. Acceptable values are
+        'maximize' or 'minimize'.
       reward_for_nan: An optional float used as the reward when metric value is
         NaN. If not specified, the reward will remain NaN so the trial will be
         skipped by the search algorithm.
     """
     metrics: Optional[Sequence[Metric]] = None
     aggregator: Optional[MultiObjectiveAggregator.HParams] = None
+    goal: str = 'maximize'
     reward_for_nan: Optional[float] = None
 
     def __post_init__(self):
@@ -322,14 +325,63 @@ class MultiObjective(BaseReward):
         and any(math.isnan(m) for m in metric_values)):
       return self._hparams.reward_for_nan
     if len(metric_values) == 1:
-      return metric_values[0]
-    assert self._aggregator is not None
-    return self._aggregator(metric_values)
+      reward = metric_values[0]
+    else:
+      assert self._aggregator is not None
+      reward = self._aggregator(metric_values)
+    if self._hparams.goal == 'minimize':
+      reward *= -1
+    return reward
 
   @property
   def used_metrics(self) -> Sequence[Metric]:
     assert self._hparams.metrics is not None
     return self._hparams.metrics
+
+
+class WeightedSumAggregator(MultiObjectiveAggregator):
+  """Weighted sum multiple objectives."""
+
+  class HParams(MultiObjectiveAggregator.HParams):
+    """Hyperparameters for WeightedSumAggregator.
+
+    Attributes:
+      weights: A sequence of float as the weights for the objectives to
+        optimize. Its value does not need to sum to 1.
+    """
+
+    weights: Optional[Sequence[float]] = None
+
+  def __init__(self, hparams: HParams):
+    super().__init__(hparams)
+    weights = self._hparams.weights
+    if not weights or sum(weights) == 0:
+      raise ValueError(f'Invalid value for `weights`: {weights}')
+    self._sum_of_weights = sum(weights) * 1.0
+
+  def __call__(self, values: Sequence[float]) -> float:
+    """Aggregate multiple values into a single value."""
+    if len(values) != len(self._hparams.weights):
+      raise ValueError(
+          f'The length of weights ({self._hparams.weights}) does not match '
+          f'the length of objective values {values!r}.')
+    return sum([w * v for w, v in zip(
+        self._hparams.weights, values)]) / self._sum_of_weights
+
+
+def weighted_sum_reward(
+    metrics_and_weights: Sequence[Tuple[Metric, float]],
+    goal: str = 'maximize',
+    reward_for_nan: Optional[float] = None
+    ) -> MultiObjective.HParams:
+  """Returns a reward by weighted summing multiple metrics."""
+  metrics = [m for m, _ in metrics_and_weights]
+  weights = [w for _, w in metrics_and_weights]
+  return MultiObjective.HParams(
+      metrics=metrics,
+      goal=goal,
+      aggregator=WeightedSumAggregator.HParams(weights=weights),
+      reward_for_nan=reward_for_nan)
 
 
 class TwoObjectiveAggregator(MultiObjectiveAggregator):

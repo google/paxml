@@ -434,6 +434,7 @@ class RewardsTest(absltest.TestCase):
             automl.Metric.train_steps_per_second()
         ],
         aggregator=automl.MnasHard.HParams(cost_objective=150),
+        goal='minimize',
         reward_for_nan=-1.0))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(reward_fn.used_metrics, [
@@ -447,7 +448,7 @@ class RewardsTest(absltest.TestCase):
             {
                 'decode_test_abc/f1': 0.9,
                 'train_steps_per_sec': 140
-            }, 0), 0.9)
+            }, 0), -0.9)
     self.assertEqual(
         reward_fn(
             {
@@ -469,6 +470,21 @@ class RewardsTest(absltest.TestCase):
     with self.assertRaisesRegex(KeyError,
                                 'Metric .* does not match with any metrics'):
       _ = reward_fn({'cost': 0.1}, 0)
+
+  def test_weighted_sum_reward(self):
+    reward_fn = instantiate(automl.weighted_sum_reward([
+        (automl.Metric.eval('accuracy', 'task1'), 0.2),
+        (automl.Metric.eval('accuracy', 'task2'), 0.8),
+    ]))
+    self.assertIsInstance(reward_fn, automl.MultiObjective)
+    self.assertEqual(reward_fn({
+        'eval_test_task1/metrics/accuracy': 0.9,
+        'eval_test_task2/metrics/accuracy': 0.8
+    }, 0), 0.9 * 0.2 + 0.8 * 0.8)
+    self.assertEqual(reward_fn.used_metrics, [
+        automl.Metric.eval('accuracy', 'task1'),
+        automl.Metric.eval('accuracy', 'task2')
+    ])
 
 
 class MultiObjectiveAggregatorTest(absltest.TestCase):
@@ -493,6 +509,22 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
   def test_mnas_soft(self):
     aggregator = instantiate(automl.MnasSoft.HParams(cost_objective=2.))
     self.assertEqual(aggregator([2., 1.]), 2.0994333672461347)
+
+  def test_weighted_sum(self):
+    aggregator = instantiate(
+        automl.WeightedSumAggregator.HParams(weights=[1.0, 1.0]))
+    self.assertEqual(aggregator([1.0, 3.0]), 2.0)
+
+    with self.assertRaisesRegex(
+        ValueError,
+        'The length of weights .* does not match the length of objective'):
+      aggregator([1.0, 3.0, 5.0])
+
+    with self.assertRaisesRegex(ValueError, 'Invalid value for `weights`'):
+      instantiate(automl.WeightedSumAggregator.HParams())
+
+    with self.assertRaisesRegex(ValueError, 'Invalid value for `weights`'):
+      instantiate(automl.WeightedSumAggregator.HParams(weights=[0.]))
 
 
 class CrossStepMetricAggregatorTest(absltest.TestCase):
