@@ -1429,6 +1429,7 @@ def get_eval_hparams_for_seqio(
     num_infeed_hosts: int = 0,
     use_enumeration: bool = False,
     use_cached: bool = False,
+    shuffle: bool = None,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1470,6 +1471,7 @@ def get_eval_hparams_for_seqio(
     use_enumeration: whether to use enumeration in both batch generation
       (get_next()) and metrics computation. For details, see SeqIOInput.HParams.
     use_cached: whether to use cached data.
+    shuffle: whether to shuffle data.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1482,6 +1484,7 @@ def get_eval_hparams_for_seqio(
       is_training=False,
       eval_loop_num_batches=None,
       reset_for_eval=True,
+      shuffle=shuffle,
       batch_size=batch_size,
       num_infeed_hosts=num_infeed_hosts,
       input_random_seed=seed)
