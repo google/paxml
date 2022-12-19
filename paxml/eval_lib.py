@@ -1177,6 +1177,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       checkpointer,
       continuous_decode,
       early_stopping_fn,
+      **extra_kwargs,
   )
 
 
