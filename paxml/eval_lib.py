@@ -289,9 +289,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         global_mesh=global_mesh,
         checkpoint_type=self.checkpoint_type,
         state_specs=train_state_metadata.partitioned_specs,
-        step=step,
-        use_orbax=True,
-    )
+        step=step)
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}')
     if partitioned_train_state and self.use_ema:
@@ -426,9 +424,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           checkpoint_type=self.checkpoint_type,
-          step=step,
-          use_orbax=True,
-      )
+          step=step)
     if model_states:
       if self.use_ema:
         model_states = extract_ema(model_states)
@@ -2144,9 +2140,7 @@ def _maybe_update_tracked_metric(
       if enable_checkpoint_saving:
         unreplicated_model_states = jax.tree_map(lambda x: x[0],
                                                  replicated_model_states)
-        checkpoints.save_checkpoint(
-            unreplicated_model_states, tracker_dir_path, use_orbax=True
-        )
+        checkpoints.save_checkpoint(unreplicated_model_states, tracker_dir_path)
 
 
 def _find_and_maybe_update_tracked_metric(
