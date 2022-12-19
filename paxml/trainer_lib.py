@@ -554,6 +554,9 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
   Each non-learnable variable declares how it should be synchronized across
   model replicas during training. Currently, we only support mean aggregation.
 
+  If the input is bool_ we will keep new var.
+  If the input is integer and mean aggregation is required, we will round it.
+
   Args:
     old_vars: a nested structure containing value of all variables before a
       training step. old_vars is expected to only contain non-learnable vars.
@@ -605,12 +608,16 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     assert base_layer.var_not_trainable(var_param)
     assert base_layer.is_running_under_pmap()
 
-    if old_var.dtype == jnp.bool_ or jnp.issubdtype(old_var, jnp.integer):
-      # For integers we don't sync it
-      return old_var
+    if old_var.dtype == jnp.bool_:
+      # bool doesn't support subtraction so cannot sum/mean
+      return new_var
 
     if base_layer.var_requires_mean_sync(var_param):
-      return _synchronize_vars_using_mean(old_var, new_var)
+      # Possible to get float from integer
+      output = _synchronize_vars_using_mean(old_var, new_var)
+      if jnp.issubdtype(old_var, jnp.integer):
+        output = jnp.round(output).astype(new_var.dtype)
+      return output
     elif base_layer.var_requires_sum_sync(var_param):
       return _synchronize_vars_using_sum(old_var, new_var)
     else:
