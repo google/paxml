@@ -31,6 +31,8 @@ from paxml import checkpoints
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
+from paxml import preemption  # mapped to internal
+
 
 CheckpointType = checkpoint_pb2.CheckpointType
 
@@ -85,6 +87,23 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       return f'{CHECKPOINT_PREFIX}{step}'
     else:
       return checkpoints.checkpoint_name(step)
+
+  def should_save(self, step: int) -> bool:
+    """Indicates whether there is a need to save a checkpoint."""
+    # Whether to save an on-demand checkpoint due to preemption
+    if preemption.reached_preemption_sync_point(step):
+      return True
+    last_checkpoint_step = (
+        self._last_checkpoint.step if self._last_checkpoint else None)
+    # Ensure current step is between the last step and next step (accounting for
+    # save interval). The `last_checkpoint_step` may not be initialized, in
+    # which case we should save. Otherwise, step must fall on the specified
+    # save interval. This condition accounts for the possibility of saving
+    # on preemption, in which case we want to maintain the same save period as
+    # if preemption had not happened.
+    return last_checkpoint_step is None or (
+        last_checkpoint_step < step and
+        step % self._options.save_interval_steps == 0)
 
   # TODO(b/262389151) Rely on superclass logic when possible.
   def _create_checkpoints(

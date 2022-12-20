@@ -80,6 +80,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit orbax.checkpoint dependency.
+        "//paxml:preemption",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -314,6 +315,14 @@ pytype_strict_library(
         "//praxis:pytypes",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "preemption",
+    srcs = ["preemption.py"],
+    deps = [
+        # Implicit jax dependency.
     ],
 )
 
