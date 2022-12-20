@@ -97,16 +97,18 @@ class TrainLibTestBase(parameterized.TestCase):
     # Construct a 1d mesh with 2 devices on x.
     devices = np.array(jax.local_devices()[:2]).reshape((2,))
     cls.mesh = maps.Mesh(devices, 'x')
+
     # Set up input data
     train_input_p = TestInput.HParams(batch_size=2)
     train_input_p = trainer_lib.adjust_input_params_for_small_batch(
         train_input_p, cls.mesh
     )
     cls.train_input = instantiate(train_input_p)
+
     # Set up the task.
     task_p = tasks_lib.SingleTask.HParams(name='test_task')
     task_p.model = pax_fiddle.Config(TestModel, name='test_ffn')
-    task_p.model.ici_mesh_shape = cls.mesh.shape
+    task_p.model.ici_mesh_shape = [2]
     task_p.model.mesh_axis_names = cls.mesh.axis_names
     lp = task_p.train.learner
     lp.loss_name = 'loss'
@@ -135,7 +137,6 @@ class PjitPartitionerTest(TrainLibTestBase):
     return trainer_lib._PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
-        self.mesh,
         train_inputs_shape_dtype=self._inputs_shape_dtype,
         auto_sharding_info=auto_sharding_info,
     )

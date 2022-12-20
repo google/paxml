@@ -1258,6 +1258,11 @@ class Partitioner(metaclass=abc.ABCMeta):
   def always_use_train_for_model_init(self):
     return self._jax_task.hparams.train.always_use_train_for_model_init
 
+  @property
+  def global_mesh(self) -> Optional[maps.Mesh]:
+    """The global mesh."""
+    return None
+
   @abc.abstractmethod
   def get_train_state_metadata(
       self,
@@ -1356,7 +1361,6 @@ class _PjitPartitioner(Partitioner):
       self,
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
-      global_mesh: maps.Mesh,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       auto_sharding_info: Optional[AutoShardingInfo] = None,
   ):
@@ -1365,7 +1369,6 @@ class _PjitPartitioner(Partitioner):
     Args:
       jax_task: The task which is an instance of tasks.SingleTask.
       init_key: PRNGKey for initializing the model variables.
-      global_mesh: The global mesh.
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. This is used
         only when self.always_use_train_for_model_init is True.
@@ -1373,11 +1376,20 @@ class _PjitPartitioner(Partitioner):
         use the sharding information provided by the model config instead.
     """
     super().__init__(jax_task, init_key, train_inputs_shape_dtype)
-    self._global_mesh = global_mesh
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
     self._enable_auto_sharding = auto_sharding_info is not None
     self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
+
+    model_p = self._jax_task.hparams.model
+    device_mesh = py_utils.create_device_mesh(
+        model_p.ici_mesh_shape, model_p.dcn_mesh_shape
+    )
+    self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+
+  @property
+  def global_mesh(self) -> Optional[maps.Mesh]:
+    return self._global_mesh
 
   def get_train_state_metadata(
       self,
@@ -1434,7 +1446,7 @@ class _PjitPartitioner(Partitioner):
           train_state_metadata,
           input_partition_spec=input_partition_spec,
       )
-      with self._global_mesh:
+      with self.global_mesh:
         partitioned_step_fn, input_pspec, train_state_pspec = (
             self._partition_auto_shard(
                 wrapped_step_fn,
@@ -1509,7 +1521,7 @@ class _PjitPartitioner(Partitioner):
         input_partition_spec,
         unpadded_global_batch_size,
     )
-    with self._global_mesh:
+    with self.global_mesh:
       return (
           self._partition_manual_shard(
               wrapped_step_fn,
@@ -1608,7 +1620,7 @@ class _PjitPartitioner(Partitioner):
         donate_argnums=() if is_eval else (0,),
         **extra_kwargs,
     )
-    return bind_mesh(pjitted_fn, self._global_mesh)
+    return bind_mesh(pjitted_fn, self.global_mesh)
 
   def _get_state_unpadded_shapes(self, metadata: TrainStateMetadata):
     return jax.tree_map(lambda x: x.shape, metadata.unpadded_global_shapes)
@@ -1776,7 +1788,6 @@ def get_step_fn(mode: RunningMode) -> Tuple[Callable[..., Any], bool]:
 
 def create_partitioner(
     jax_task: tasks_lib.SingleTask,
-    global_mesh: maps.Mesh,
     init_key: PRNGKey,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     auto_sharding_mode: Optional[RunningMode] = None,
@@ -1785,13 +1796,12 @@ def create_partitioner(
 
   Args:
     jax_task: The task which is an instance of tasks.SingleTask.
-    global_mesh: The global mesh.
     init_key: PRNGKey for initializing the model variables.
     train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
       model.init, for use in getting params of model variables.
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
-      function to use for auto-sharding. If None, it means to disable
-      auto-sharding.
+      function to use for auto-sharding (when pjit is used). If None, it means
+      to disable auto-sharding.
 
   Returns:
     A Partitioner instance.
@@ -1807,11 +1817,7 @@ def create_partitioner(
           step_fn, replicate_output
       )
     partitioner = _PjitPartitioner(
-        jax_task,
-        init_key,
-        global_mesh,
-        train_inputs_shape_dtype,
-        auto_sharding_info,
+        jax_task, init_key, train_inputs_shape_dtype, auto_sharding_info
     )
   return partitioner
 
@@ -1833,7 +1839,7 @@ def get_partitioned_spmd_model_step_fn(
     jax_task: The task which is an instance of tasks.SingleTask.
     mode: One of TRAIN, EVAL, and DECODE, that determines the step function to
       use.
-    global_mesh: The global mesh.
+    global_mesh: Depreacated. TODO(laigd): remove this.
     init_key: PRNGKey for initializing the model variables.
     inputs_shape_dtype: Shape/dtype attributes of the inputs to the step
       function, for use in pjit sharding.
@@ -1862,7 +1868,6 @@ def get_partitioned_spmd_model_step_fn(
 
   partitioner = create_partitioner(
       jax_task,
-      global_mesh,
       init_key,
       train_inputs_shape_dtype,
       mode if enable_auto_sharding else None,
