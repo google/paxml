@@ -17,7 +17,7 @@
 
 import math
 import typing
-from typing import Optional, Sequence
+from typing import Optional, Sequence, cast, Type
 
 import fiddle as fdl
 from jax import numpy as jnp
@@ -70,7 +70,10 @@ def set_sharding_annotations_v1(
       map_2d=((replica_axis, data_axis), None))
   model_p.mesh_axis_names = mesh_axis_names
   if hasattr(model_p, 'lm_tpl'):
-    model_p.lm_tpl = model_p.lm_tpl.cls.set_sharding_params_v1(
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(model_p.lm_tpl)
+    )
+    model_p.lm_tpl = lm_cls.set_sharding_params_v1(
         model_p.lm_tpl,
         replica_axis=replica_axis,
         data_axis=data_axis,
@@ -78,7 +81,8 @@ def set_sharding_annotations_v1(
         ici_mesh_shape=model_p.ici_mesh_shape,
         dcn_mesh_shape=model_p.dcn_mesh_shape,
         mesh_axis_names=mesh_axis_names,
-        training_optimized=training_optimized)
+        training_optimized=training_optimized,
+    )
 
 
 def set_default_adam(task_p: tasks_lib.SingleTask.HParams,
@@ -832,7 +836,10 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     model_p.mesh_axis_names = mesh_axis_names
 
     # Set in-stage layer shardings.
-    model_p.lm_tpl = model_p.lm_tpl.cls.set_sharding_params_v1(
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(model_p.lm_tpl)
+    )
+    model_p.lm_tpl = lm_cls.set_sharding_params_v1(
         model_p.lm_tpl,
         replica_axis=replica_axis,
         data_axis=data_axis,
@@ -840,7 +847,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         ici_mesh_shape=model_p.ici_mesh_shape,
         dcn_mesh_shape=model_p.dcn_mesh_shape,
         mesh_axis_names=mesh_axis_names,
-        training_optimized=self.TRAINING_OPTIMIZED_SHARDING)
+        training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+    )
 
     # Include stage_axis in input partitioning to allow full data parallelism in
     # embedding layers.
