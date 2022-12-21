@@ -140,15 +140,21 @@ def _is_padding(ex: Dict[str, Any]) -> bool:
           and ex[NUM_SHARDS_KEY] == -1)
 
 
-def _enumerate_dataset(ds: tf.data.Dataset, is_training: bool,
-                       shard_info: seqio.ShardInfo) -> tf.data.Dataset:
+def _enumerate_dataset(
+    ds: tf.data.Dataset, is_training: bool,
+    shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
   """Add enumeration fields, only meaningful when is_training=False."""
   if is_training:
     return ds.map(_add_fake_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
 
   def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
-    ex[SHARD_INDEX_KEY] = tf.cast(shard_info.index, tf.int32)
-    ex[NUM_SHARDS_KEY] = tf.cast(shard_info.num_shards, tf.int32)
+    shard_index, num_shards = 0, 1
+    if shard_info:
+      shard_index, num_shards = shard_info.index, shard_info.num_shards
+
+    ex[SHARD_INDEX_KEY] = tf.cast(shard_index, tf.int32)
+    ex[NUM_SHARDS_KEY] = tf.cast(num_shards, tf.int32)
+
     return ex
 
   def _fold_in_local_enumeration(index_within_shard: tf.Tensor,
