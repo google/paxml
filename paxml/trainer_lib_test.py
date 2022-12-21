@@ -70,7 +70,7 @@ class TestModel(base_model.BaseModel):
       default_factory=_test_model_layer_default, tags=pax_fiddle.DoNotBuild)
 
   def setup(self):
-    self.create_child('layer_a', self.hparams.layer)
+    self.create_child('layer_a', self.layer)
 
   def compute_predictions(self, input_batch: NestedMap) -> Predictions:
     return self.layer_a(input_batch['image'])

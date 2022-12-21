@@ -96,9 +96,8 @@ class TestModel01(base_model.BaseModel):
   output_dims: int = 0
 
   def setup(self) -> None:
-    p = self.hparams
     self.create_variable(
-        'var01', base_layer.WeightHParams(shape=[p.input_dims, p.output_dims]))
+        'var01', base_layer.WeightHParams(shape=[self.input_dims, self.output_dims]))
 
   def compute_predictions(self, input_batch: NestedMap) -> JTensor:
     return jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01)
