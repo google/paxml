@@ -1383,7 +1383,9 @@ class _PjitPartitioner(Partitioner):
 
     model_p = self._jax_task.hparams.model
     device_mesh = py_utils.create_device_mesh(
-        model_p.ici_mesh_shape, model_p.dcn_mesh_shape
+        model_p.ici_mesh_shape,
+        model_p.dcn_mesh_shape,
+        contiguous_submeshes=model_p.contiguous_submeshes,
     )
     self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
 

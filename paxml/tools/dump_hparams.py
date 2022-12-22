@@ -166,8 +166,11 @@ def main(argv) -> None:
     input_specs = input_specs_provider.get_input_specs()
 
     if task_p.model.dcn_mesh_shape is not None:
-      device_mesh = py_utils.create_device_mesh(task_p.model.ici_mesh_shape,
-                                                task_p.model.dcn_mesh_shape)
+      device_mesh = py_utils.create_device_mesh(
+          task_p.model.ici_mesh_shape,
+          task_p.model.dcn_mesh_shape,
+          contiguous_submeshes=task_p.model.contiguous_submeshes,
+      )
       context_manager = maps.Mesh(device_mesh, task_p.model.mesh_axis_names)
     else:
       context_manager = contextlib.nullcontext()

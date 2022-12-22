@@ -821,8 +821,11 @@ def train_and_evaluate_spmd_model(
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
-  device_mesh = py_utils.create_device_mesh(model_p.ici_mesh_shape,
-                                            model_p.dcn_mesh_shape)
+  device_mesh = py_utils.create_device_mesh(
+      model_p.ici_mesh_shape,
+      model_p.dcn_mesh_shape,
+      contiguous_submeshes=model_p.contiguous_submeshes,
+  )
   logging.info('device_mesh: %s', device_mesh)
 
   global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
