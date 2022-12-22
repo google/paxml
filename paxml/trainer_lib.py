@@ -999,7 +999,7 @@ def initialize_partitioned_model_states(
     global_input_shapes: NestedShapeDtypeLike,
     discard_opt_states: bool = False,
     global_mesh: Optional[maps.Mesh] = None,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
+    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_GDA,
     state_specs: Optional[TrainState] = None,
     do_init_checkpoint_rules: bool = True) -> Tuple[TrainState, TrainState]:
   """Initializes model vars that are partitioned over TPU devices.
