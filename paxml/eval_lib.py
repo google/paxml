@@ -325,7 +325,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
             decode_input_ps if is_decode else eval_input_ps,
             self._jax_task,
             RunningMode.DECODE if is_decode else RunningMode.EVAL,
-            global_mesh,
             step_key,
             train_input_shape_dtypes
             if self._partitioner.always_use_train_for_model_init
@@ -941,7 +940,6 @@ class _SpmdEvalRunner:
                self._unpadded_eval_input_ps,
                self._jax_task,
                RunningMode.EVAL,
-               partitioner.global_mesh,
                init_key,
                train_inputs_shape_dtype=init_input_shape_dtypes,
                train_state_partition_spec=partitioned_specs.to_eval_state()))

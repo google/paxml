@@ -1827,7 +1827,6 @@ def create_partitioner(
 def get_partitioned_spmd_model_step_fn(
     jax_task: tasks_lib.SingleTask,
     mode: RunningMode,
-    global_mesh: maps.Mesh,
     init_key: PRNGKey,
     inputs_shape_dtype: NestedShapeDtypeLike,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
@@ -1841,7 +1840,6 @@ def get_partitioned_spmd_model_step_fn(
     jax_task: The task which is an instance of tasks.SingleTask.
     mode: One of TRAIN, EVAL, and DECODE, that determines the step function to
       use.
-    global_mesh: Depreacated. TODO(laigd): remove this.
     init_key: PRNGKey for initializing the model variables.
     inputs_shape_dtype: Shape/dtype attributes of the inputs to the step
       function, for use in pjit sharding.
@@ -1896,7 +1894,6 @@ def get_spmd_model_step_fns_from_inputs(
     unpadded_input_ps: Sequence[base_input.BaseInput.HParams],
     jax_task: tasks_lib.SingleTask,
     mode: RunningMode,
-    global_mesh: maps.Mesh,
     init_key: PRNGKey,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     train_state_partition_spec: Optional[TrainState] = None,
@@ -1915,7 +1912,6 @@ def get_spmd_model_step_fns_from_inputs(
       `py_utils.get_global_batch_size(p)` returns the unpadded batch size.
     jax_task: see docstring for `get_partitioned_spmd_model_step_fn`.
     mode: see docstring for `get_partitioned_spmd_model_step_fn`.
-    global_mesh: see docstring for `get_partitioned_spmd_model_step_fn`.
     init_key: see docstring for `get_partitioned_spmd_model_step_fn`.
     train_inputs_shape_dtype: see docstring for
       `get_partitioned_spmd_model_step_fn`.
@@ -1952,7 +1948,6 @@ def get_spmd_model_step_fns_from_inputs(
         get_partitioned_spmd_model_step_fn(
             jax_task,
             mode,
-            global_mesh,
             init_key,
             inputs_shape_dtype,
             train_inputs_shape_dtype=train_inputs_shape_dtype,
@@ -2036,7 +2031,6 @@ class SingleTaskPjitTrainer:
           get_partitioned_spmd_model_step_fn(
               self._task,
               RunningMode.TRAIN,
-              self._mesh,
               prng_key,
               inputs_shape_dtype=self.inputs_shape_dtype,
               train_state_partition_spec=(

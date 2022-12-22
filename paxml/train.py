@@ -947,7 +947,6 @@ def train_and_evaluate_spmd_model(
   p_eval_on_train_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
       jax_task,
       RunningMode.EVAL,
-      global_mesh,
       init_key,
       inputs_shape_dtype,
       train_state_partition_spec=(
@@ -967,7 +966,6 @@ def train_and_evaluate_spmd_model(
         eval_input_p,
         jax_task,
         RunningMode.EVAL,
-        global_mesh,
         init_key,
         inputs_shape_dtype,
         train_state_partition_spec=(
@@ -1047,7 +1045,6 @@ def train_and_evaluate_spmd_model(
              decode_input_ps,
              jax_task,
              RunningMode.DECODE,
-             global_mesh,
              init_key,
              inputs_shape_dtype,
              train_state_partition_spec=(
