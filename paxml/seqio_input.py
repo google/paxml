@@ -642,6 +642,31 @@ class SeqIOInput(base_input.BaseInput):
     pad_ds = self._get_one_example_ds(ds).map(_add_pad).repeat(pad_num)
     return ds.concatenate(pad_ds)
 
+  def _filter_ragged_tensor(self, targets_ds: tf.data.Dataset) -> Tuple[
+      tf.data.Dataset, tf.data.Dataset, List[str], List[str]]:
+    # customized input may contain ragged tensor, which may cause errors in
+    # decoding when calling 'as_numpy_iterator()' below. We filter out
+    # RaggedTensor here.
+    ds_ragged_tensor_keys = []
+    ds_non_ragged_element_keys = []
+    for ds_element_key, ds_element_value in targets_ds.element_spec.items():
+      if isinstance(ds_element_value, tf.RaggedTensorSpec):
+        ds_ragged_tensor_keys.append(ds_element_key)
+      else:
+        ds_non_ragged_element_keys.append(ds_element_key)
+    # keep the original target ds before filtering because if inputs is a
+    # ragged tensor, we need both the inputs and targets_pretokenized.
+    ori_targets_ds = targets_ds
+    targets_ds = targets_ds.map(
+        lambda x: {i: x[i] for i in ds_non_ragged_element_keys}
+    )
+    return (
+        targets_ds,
+        ori_targets_ds,
+        ds_non_ragged_element_keys,
+        ds_ragged_tensor_keys,
+    )
+
   def _build_predict_metric_inputs_with_prefix(
       self, answers: Dict[str, NestedMap], verbose_entries: int,
       plain_text_output: Optional[TextIO] = None) -> Tuple[
@@ -671,29 +696,36 @@ class SeqIOInput(base_input.BaseInput):
         trim_output_features=p.trim_output_features)
 
     targets_ds = targets_ds.take(self._num_eval_examples)
-    # customized input may contain ragged tensor, which may cause errors in
-    # decoding when calling 'as_numpy_iterator()' below. We filter out
-    # RaggedTensor here.
-    ds_non_ragged_element_keys = []
-    for ds_element_key, ds_element_value in targets_ds.element_spec.items():
-      if not isinstance(ds_element_value, tf.RaggedTensorSpec):
-        ds_non_ragged_element_keys.append(ds_element_key)
-    targets_ds = targets_ds.map(
-        lambda x: {i: x[i] for i in ds_non_ragged_element_keys})
+    targets_ds, ori_targets_ds, ds_non_ragged_element_keys, _ = (
+        self._filter_ragged_tensor(targets_ds)
+    )
 
     # Note that lists are used per prefix since there may be duplicates
     targets = collections.defaultdict(list)
     examples = collections.defaultdict(list)
-    for e in targets_ds.as_numpy_iterator():
+    if 'inputs' in ds_non_ragged_element_keys:
       # Note that we intentionally do not use 'inputs_pretokenized' here because
       # it might be very different from the round-trip results below, which
       # wouldn't match with the keys we get from the model inference path.
-      key = self.ids_to_strings(e['inputs'][np.newaxis, :],
-                                lengths=[inputs_length], key='src')[0]
-      t = _get_targets_str(e, self.mixture_or_task)
-      targets[key].append(self.mixture_or_task.postprocess_fn(
-          t, example=e, is_target=True))
-      examples[key].append(e)
+      for e in targets_ds.as_numpy_iterator():
+        key = self.ids_to_strings(e['inputs'][np.newaxis, :],
+                                  lengths=[inputs_length], key='src')[0]
+        t = _get_targets_str(e, self.mixture_or_task)
+        targets[key].append(self.mixture_or_task.postprocess_fn(
+            t, example=e, is_target=True))
+        examples[key].append(e)
+    else:
+      for e in list(iter(ori_targets_ds)):
+        # ragged tensor may have multiple elements of various lengths. We
+        # linearize all inputs into one array.
+        assert 'inputs' in e, '"inputs" field is required but not found'
+        inputs = e['inputs'].flat_values.numpy()[np.newaxis, :]
+        key = self.ids_to_strings(inputs,
+                                  lengths=[inputs_length], key='src')[0]
+        t = _get_targets_str(e, self.mixture_or_task)
+        targets[key].append(self.mixture_or_task.postprocess_fn(
+            t, example=e, is_target=True))
+        examples[key].append(e)
 
     # In case the prefix returned by the model are prefixes of the keys
     # re-constructed here. This can sometimes be needed due to truncation of
@@ -781,12 +813,29 @@ class SeqIOInput(base_input.BaseInput):
       targets_ds = targets_ds.take(self._num_eval_examples)
       targets_ds = _enumerate_dataset(targets_ds, False, shard_info)
 
+      targets_ds, ori_targets_ds, _, ds_ragged_tensor_keys = (
+          self._filter_ragged_tensor(targets_ds)
+      )
+
       for e in targets_ds.as_numpy_iterator():
         # remove enum related fields from example as seqio metric_fns API
         # expects the output from the task dataset directly.
         key = py_utils.get_enumeration_id(e, pop=True)
         assert key is not None and key not in targets
         targets[key] = e
+
+      if ds_ragged_tensor_keys:
+        # we keep the ragged tensors and add them into the targets.
+        # ragged tensor may have multiple elements of various lengths. We
+        # linearize all inputs into one array.
+        for e in list(iter(ori_targets_ds)):
+          key = py_utils.get_enumeration_id(e, pop=True)
+          non_ragged_values = targets[key]
+          for field, field_value in e.items():
+            if field not in non_ragged_values:
+              linearized_field_value = field_value.flat_values.numpy()
+              linearized_field_value = linearized_field_value[np.newaxis, :]
+              targets[key][field] = linearized_field_value
 
     self._cached_targets_with_enum_key = targets  # populate cache
 
