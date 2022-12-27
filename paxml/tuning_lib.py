@@ -654,7 +654,7 @@ def _aggregate_metrics(
     _add_input_based_metrics(eval_input_p, eval_metrics.metrics_list,
                              'eval_test', 'metrics')
     _add_input_based_metrics(eval_input_p, eval_metrics.scoring_metrics_list,
-                             'eval_test', 'metrics')
+                             'eval_test', 'scoring_eval')
   if decode_metrics:
     decode_input_p = decode_metrics.input_p
     _add_input_based_metrics(decode_input_p, decode_metrics.metrics_list,
