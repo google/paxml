@@ -316,6 +316,11 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partitioned_specs = train_state_metadata.partitioned_specs
     assert partitioned_specs is not None, 'must be in pjit mode'
 
+    # Make a copy of opt_states that is needed for ema
+    # opt_states is only needed to restore the ema state so it is removed in
+    # get_spmd_model_step_fns_from_inputs. Thus here we make a copy of it
+    backup = partitioned_specs.opt_states
+
     # If auto sharding is enabled, we need to get the updated partition specs
     # before using it to restore checkpoints.
     # TODO(laigd): avoid re-creating the partitioner here.
@@ -335,8 +340,22 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     )
     # Replace the partition spec. This only has effect when enable_auto_sharding
     # is on.
-    train_state_metadata = dataclasses.replace(
-        train_state_metadata, partitioned_specs=partitioned_specs)
+    if not self.use_ema:
+      train_state_metadata = dataclasses.replace(
+          train_state_metadata, partitioned_specs=partitioned_specs
+      )
+    else:
+      # Add opt_states back for restoring when ema is enabled
+      train_state_metadata = dataclasses.replace(
+          train_state_metadata,
+          partitioned_specs=partitioned_specs.replace(opt_states=backup),
+      )
+      # Make sure the opt_states exists before restoring
+      # This is combined with the decoding test
+      if train_state_metadata.partitioned_specs.opt_states == {}:
+        raise ValueError(
+            "The partition spec doesn't include opt states but ema is enabled."
+        )
 
     partitioned_train_state = self._restore(
         self.restore_checkpoint_step, train_state_metadata
