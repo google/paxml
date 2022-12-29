@@ -1485,6 +1485,7 @@ def get_eval_hparams_for_seqio(
     use_enumeration: bool = False,
     use_cached: bool = False,
     shuffle: bool = None,
+    require_metric_fns: bool = True,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1527,6 +1528,7 @@ def get_eval_hparams_for_seqio(
       (get_next()) and metrics computation. For details, see SeqIOInput.HParams.
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
+    require_metric_fns: whether to require that SeqIO tasks have metric_fns.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1570,9 +1572,13 @@ def get_eval_hparams_for_seqio(
     # tasks with varying splits.
     hp.split_name = _select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
-    if task.predict_metric_fns and metric_type is MetricType.PREDICT:
-      hparams.append(hp)
-    if task.score_metric_fns and metric_type is MetricType.SCORE:
-      hparams.append(hp)
-
+    if require_metric_fns:
+      if task.predict_metric_fns and metric_type is MetricType.PREDICT:
+        hparams.append(hp)
+      if task.score_metric_fns and metric_type is MetricType.SCORE:
+        hparams.append(hp)
+    else:
+      if not task.score_metric_fns and not task.predict_metric_fns:
+        # Show PPLX
+        hparams.append(hp)
   return hparams
