@@ -550,3 +550,85 @@ class C4SpmdGpt3L16AdamOrgHP32Replicas(C4SpmdGpt3AdamOrgHP):
   FPROP_DTYPE = jnp.bfloat16
   PERCORE_BATCH_SIZE = 8
   ICI_MESH_SHAPE = [1, 2, 16]
+
+
+@experiment_registry.register
+class C4Spmd2BAdam4Replicas(C4SpmdAdam):
+  r"""GPT-3 config with 2B params.
+
+  Model Parameters: Global batch size = 1 * 4 * 1 * 32 = 128.
+  """
+  NUM_LAYERS = 18
+  MODEL_DIMS = 3072
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 24
+  DIMS_PER_HEAD = 128
+  PERCORE_BATCH_SIZE = 32
+  MAX_SEQ_LEN = 1024
+  VOCAB_SIZE = 32000
+  FPROP_DTYPE = jnp.bfloat16
+  USE_REPEATED_LAYER = True
+
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+  ICI_MESH_SHAPE = [1, 4, 1]
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    task_p.train.learner.repeat_prefix_sep = '_'
+    return task_p
+
+
+@experiment_registry.register
+class C4Spmd16BAdam32Replicas(C4SpmdAdam):
+  r"""GPT-3 config with 16B params.
+
+  Model Parameters: Global batch size = 1 * 2 * 16 * 16 = 512.
+  """
+  NUM_LAYERS = 36
+  MODEL_DIMS = 6144
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 48
+  DIMS_PER_HEAD = 128
+  PERCORE_BATCH_SIZE = 16
+  MAX_SEQ_LEN = 1024
+  VOCAB_SIZE = 32000
+  FPROP_DTYPE = jnp.bfloat16
+  USE_REPEATED_LAYER = True
+
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+  ICI_MESH_SHAPE = [1, 16, 2]
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    task_p.train.learner.repeat_prefix_sep = '_'
+    return task_p
+
+@experiment_registry.register
+class C4Spmd32BAdam64Replicas(C4SpmdAdam):
+  r"""GPT-3 config with 32B params.
+
+  Model Parameters: Global batch size = 1 * 16 * 4 * 8 = 512."""
+  NUM_LAYERS = 40
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  PERCORE_BATCH_SIZE = 8
+  MAX_SEQ_LEN = 1024
+  VOCAB_SIZE = 32000
+  FPROP_DTYPE = jnp.bfloat16
+  USE_REPEATED_LAYER = True
+
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+  ICI_MESH_SHAPE = [1, 16, 4]
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    task_p.train.learner.repeat_prefix_sep = '_'
+    return task_p
