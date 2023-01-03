@@ -42,6 +42,7 @@ from paxml import experiment_utils
 from paxml import metric_utils
 from paxml import summary_utils
 from paxml import tasks_lib
+from paxml import train_states
 from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import base_hyperparams
@@ -59,10 +60,12 @@ CheckpointType = checkpoint_pb2.CheckpointType
 instantiate = base_hyperparams.instantiate
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 FlaxCheckpointer = checkpoints.FlaxCheckpointer
-PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
 FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
+PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
+PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
+TrainState = train_states.TrainState
 
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
@@ -136,11 +139,25 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
     raise NotImplementedError
 
   @abc.abstractmethod
-  def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
-    raise NotImplementedError
+  def get_model_states(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      global_mesh: Optional[maps.Mesh],
+      metadata: trainer_lib.TrainStateMetadata,
+      init_key: PRNGKey,
+  ) -> Tuple[TrainState, int]:
+    """Restores TrainState from checkpoint or initializes it.
 
-  def maybe_sync_multihostcheckpointing(self):
-    pass
+    Args:
+      jax_task: A SingleTask instance.
+      global_mesh: Use this mesh to restore the checkpoint.
+      metadata: A TrainStateMetadata instance.
+      init_key: PRNGKey for initializing the model variables.
+
+    Returns:
+      (train_state, total_num_params).
+    """
+    raise NotImplementedError
 
   @property
   @abc.abstractmethod
@@ -191,17 +208,51 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     self._save_with_args(step_i, partitioned_train_state)
     self.checkpoint_manager.check_for_errors()
 
-  def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
+  # TODO(laigd): merge this with _SpmdEvalCheckpointer.get_model_states().
+  def get_model_states(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      global_mesh: Optional[maps.Mesh],
+      metadata: trainer_lib.TrainStateMetadata,
+      init_key: PRNGKey,
+  ) -> Tuple[TrainState, int]:
     step = self.checkpoint_manager.latest_step()
     if step is None:
       partitioned_train_state = None
     else:
       with py_utils.timeit() as restore_period:
         partitioned_train_state = self._restore_with_args(
-            step, train_state_global_shapes, global_mesh, train_state_pspecs)
+            step,
+            metadata.padded_global_shapes,
+            global_mesh,
+            metadata.partitioned_specs,
+        )
       monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                             restore_period.elapsed)
-    return partitioned_train_state
+
+    # Randomly initialized variables if no files in checkpoint dir.
+    if partitioned_train_state is None:
+      _, partitioned_train_state = (
+          trainer_lib.initialize_partitioned_model_states(
+              jax_task,
+              init_key,
+              metadata.input_shape_dtype,
+              global_mesh=global_mesh,
+              # Note: We currently enforce that the checkpoint to reload via
+              # init_checkpoint_rules are in the same format as the checkpoint
+              # solution used by the experiment.
+              checkpoint_type=self.checkpoint_type,
+              state_specs=metadata.partitioned_specs,
+          )
+      )
+
+    logging.info(
+        'partitioned_train_state shapes '
+        '(global shape for GDA, host-local shape for non-GDA: %s',
+        jax.tree_map(lambda x: x.shape, partitioned_train_state))
+
+    total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
+    return partitioned_train_state, total_num_params
 
   @property
   def checkpoint_type(self) -> CheckpointType:
@@ -230,7 +281,15 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         self.checkpoint_dir,
         checkpoint_type=self._checkpoint_type)
 
-  def restore(self, train_state_global_shapes, global_mesh, train_state_pspecs):
+  # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
+  def get_model_states(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      global_mesh: Optional[maps.Mesh],
+      metadata: trainer_lib.TrainStateMetadata,
+      init_key: PRNGKey,
+  ) -> Tuple[TrainState, int]:
+    train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       if py_utils.pmap_use_tensorstore():
         train_state = self._restore_from_tensorstore(train_state_global_shapes)
@@ -243,7 +302,28 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
               step, items=train_state_global_shapes)
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
-    return train_state
+    # Randomly initialized variables if no files in checkpoint dir.
+    if train_state is None:
+      train_state = trainer_lib.initialize_model_state(
+          jax_task,
+          init_key,
+          metadata.input_shape_dtype,
+          checkpoint_type=self.checkpoint_type,
+      )
+    logging.info('train_state=%s', jax.tree_map(lambda x: x.shape, train_state))
+
+    partitioned_train_state = trainer_lib.replicate_model_state(train_state)
+    logging.info(
+        'partitioned_train_state shapes: %s',
+        jax.tree_map(lambda x: x.shape, partitioned_train_state),
+    )
+    # Unreplicated model states are not needed anymore at that point.
+    del train_state
+
+    total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
+    assert total_num_params % jax.local_device_count() == 0
+    total_num_params = total_num_params // jax.local_device_count()
+    return partitioned_train_state, total_num_params
 
   def _save_with_args(self, step_i, train_state):
     self.checkpoint_manager.save(step_i, train_state)
@@ -668,23 +748,8 @@ def train_and_evaluate_pmap(
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir)
 
-  model_states = checkpointer.restore(
-      train_state_metadata.unpadded_global_shapes, None,
-      train_state_metadata.partitioned_specs)
-  # Randomly initialized variables if no files in checkpoint dir.
-  if model_states is None:
-    model_states = trainer_lib.initialize_model_state(
-        jax_task,
-        init_key,
-        inputs_shape_dtype,
-        checkpoint_type=checkpointer.checkpoint_type)
-
-  logging.info('model_states=%s', jax.tree_map(lambda x: x.shape, model_states))
-
-  partitioned_train_state = trainer_lib.replicate_model_state(model_states)
-  total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
-  assert total_num_params % jax.local_device_count() == 0
-  total_num_params = total_num_params // jax.local_device_count()
+  partitioned_train_state, total_num_params = checkpointer.get_model_states(
+      jax_task, None, train_state_metadata, init_key)
 
   train_p = task_p.train
   initial_global_step = int(
@@ -693,11 +758,6 @@ def train_and_evaluate_pmap(
   logging.info('Model initial global_step=%d', initial_global_step)
   _update_latest_model_step(train_input_p, initial_global_step)
 
-  # Unreplicated model states are not needed anymore at that point.
-  del model_states
-
-  logging.info('partitioned_train_state shapes: %s',
-               jax.tree_map(lambda x: x.shape, partitioned_train_state))
   # From now on, different replicas should use different random seeds.
   # Here, each process will have its unique prng_key.
   # prng_key will be further split so that each core on a host will get
@@ -920,25 +980,9 @@ def train_and_evaluate_spmd_model(
       train_state_metadata, partitioned_specs=partitioned_specs)
 
   # Try to restore from checkpoint.
-  partitioned_train_state = checkpointer.restore(
-      train_state_metadata.padded_global_shapes, global_mesh,
-      train_state_metadata.partitioned_specs)
+  partitioned_train_state, total_num_params = checkpointer.get_model_states(
+      jax_task, global_mesh, train_state_metadata, init_key)
 
-  # Randomly initialized variables if no files in checkpoint dir.
-  if partitioned_train_state is None:
-    _, partitioned_train_state = (
-        trainer_lib.initialize_partitioned_model_states(
-            jax_task,
-            init_key,
-            inputs_shape_dtype,
-            global_mesh=global_mesh,
-            # Note: We currently enforce that the checkpoint to reload via
-            # init_checkpoint_rules are in the same format as the checkpoint
-            # solution used by the experiment.
-            checkpoint_type=checkpoint_type,
-            state_specs=train_state_metadata.partitioned_specs))
-
-  total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
   # TODO(pax): Support auto-sharding for eval step. In this case, we would
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
@@ -969,12 +1013,6 @@ def train_and_evaluate_spmd_model(
         inputs_shape_dtype,
         train_state_partition_spec=(
             train_state_metadata.partitioned_specs.to_eval_state()))
-
-  logging.info(
-      'partitioned_train_state shapes '
-      '(global shape for GDA, host-local shape for non-GDA: %s',
-      jax.tree_map(lambda x: x.shape, partitioned_train_state))
-  checkpointer.maybe_sync_multihostcheckpointing()
 
   train_p = task_p.train
   initial_global_step = int(

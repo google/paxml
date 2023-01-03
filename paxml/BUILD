@@ -440,6 +440,7 @@ pytype_strict_library(
         ":metric_utils",
         ":summary_utils",
         ":tasks_lib",
+        ":train_states",
         ":trainer_lib",
         ":tuning_lib",
         # Implicit absl.logging dependency.
