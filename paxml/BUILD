@@ -75,8 +75,6 @@ pytype_strict_library(
     deps = [
         ":checkpoint_py_pb2",
         ":checkpoints",
-        # Implicit python proto dependency.
-        # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit orbax.checkpoint dependency.
@@ -143,7 +141,6 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit flax.core dependency.
-        # Implicit flax.training dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
@@ -448,7 +445,6 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
-        # Implicit fiddle dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",

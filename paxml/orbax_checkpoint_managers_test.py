@@ -68,19 +68,11 @@ class CheckpointManagerTest(parameterized.TestCase):
         'b': np.arange(42),
     }
 
-  def save_with_args(self,
-                     checkpoint_manager,
-                     step,
-                     train_state,
-                     checkpoint_type=CheckpointType.CHECKPOINT_GDA):
-    save_args = {}
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      save_args = {'step': step}
-    checkpoint_manager.save(step, train_state, save_kwargs=save_args)
-
   def create_checkpointer(self, checkpoint_type: CheckpointType):
     if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      checkpointer = checkpoints.FlaxCheckpointer()
+      checkpointer = checkpoints.FlaxCheckpointer(
+          checkpoints.FlaxCheckpointHandler()
+      )
     elif checkpoint_type == CheckpointType.CHECKPOINT_GDA:
       checkpointer = orbax.checkpoint.Checkpointer(
           orbax.checkpoint.PyTreeCheckpointHandler())
@@ -111,11 +103,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         options, checkpoint_type=checkpoint_type)
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save_with_args(
-          checkpoint_manager,
-          step,
-          self.train_state,
-          checkpoint_type=checkpoint_type)
+      checkpoint_manager.save(step, self.train_state)
 
     if max_to_keep is None:
       expected_steps = steps
@@ -153,11 +141,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        self.save_with_args(
-            checkpoint_manager,
-            step,
-            self.train_state,
-            checkpoint_type=checkpoint_type)
+        checkpoint_manager.save(step, self.train_state)
         checkpoint_datetimes.append(current_datetime)
         current_datetime += datetime.timedelta(hours=1)
 
@@ -183,11 +167,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save_with_args(
-          checkpoint_manager,
-          step,
-          self.train_state,
-          checkpoint_type=checkpoint_type)
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = [2000, 4000, 6000, 8000]
 
@@ -224,11 +204,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        self.save_with_args(
-            checkpoint_manager,
-            step,
-            self.train_state,
-            checkpoint_type=checkpoint_type)
+        checkpoint_manager.save(step, self.train_state)
         current_datetime += datetime.timedelta(hours=1)
 
     # expect saved steps at multipliers of 3000.
@@ -250,11 +226,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save_with_args(
-          checkpoint_manager,
-          step,
-          self.train_state,
-          checkpoint_type=checkpoint_type)
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = steps
 
@@ -273,11 +245,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     step = 10000
     steps.append(step)
-    self.save_with_args(
-        checkpoint_manager,
-        step,
-        self.train_state,
-        checkpoint_type=checkpoint_type)
+    checkpoint_manager.save(step, self.train_state)
 
     saved_steps_2 = steps[-max_to_keep:]
 
@@ -298,7 +266,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         lambda step_id: step_id == save_step)
 
     for step in range(save_step + 1):
-      self.save_with_args(checkpoint_manager, step, self.train_state)
+      checkpoint_manager.save(step, self.train_state)
 
     saved_steps = [0, save_step]
 
@@ -321,7 +289,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     ) as commit_callback:
       commit_callback.side_effect = _fake_on_commit_callback
       checkpoint_manager = self.create_checkpoint_manager(options)
-      self.save_with_args(checkpoint_manager, 0, self.train_state)
+      checkpoint_manager.save(0, self.train_state)
       # Step 0 not finalized.
       tmp_checkpoint_pattern = (
           checkpoints.CHECKPOINT_PREFIX
@@ -337,7 +305,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertEmpty(
         list(checkpoint_manager.directory.glob(tmp_checkpoint_pattern))
     )
-    self.save_with_args(checkpoint_manager, 0, self.train_state)
+    checkpoint_manager.save(0, self.train_state)
     self.assertSameElements(
         _expected_checkpoint_filenames([0]),
         _actual_checkpoint_filenames(checkpoint_manager.directory),
@@ -353,11 +321,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         options, checkpoint_type=checkpoint_type)
 
     for step in range(4):
-      self.save_with_args(
-          checkpoint_manager,
-          step,
-          self.train_state,
-          checkpoint_type=checkpoint_type)
+      checkpoint_manager.save(step, self.train_state)
 
     self.assertSameElements(
         _expected_checkpoint_filenames([0, 1], checkpoint_type=checkpoint_type),

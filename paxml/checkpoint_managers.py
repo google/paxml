@@ -19,12 +19,10 @@ import dataclasses
 import datetime
 import os
 import typing
-from typing import Any, Optional, List, Union, Mapping, Sequence
+from typing import Any, Optional, List, Union, Mapping
 
-from absl import logging
 from etils import epath
 import jax
-from jax.experimental import multihost_utils
 import orbax.checkpoint
 from paxml import checkpoint_pb2
 from paxml import checkpoints
@@ -158,10 +156,9 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
                           key_name: Optional[str] = None) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
     if key_name is None or key_name == DEFAULT_ITEM_NAME:
-      if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-        return directory
-      else:
-        return checkpoints._make_checkpoint_step_dir(directory, step)  # pylint: disable=protected-access
+      return checkpoints._make_checkpoint_step_dir(  # pylint: disable=protected-access
+          directory, step, checkpoint_type=self._checkpoint_type
+      )
     else:
       raise ValueError(
           f'Unrecognized item {key_name} is not currently supported.')
@@ -170,18 +167,15 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     if py_utils.is_mock_tpu_backend():
       return
 
-    tmp_files = []
-    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      tmp_files = self.directory.glob(self._checkpoint_name('tmp'))
-    else:
-      tmp_files = [
-          f
-          for f in self.directory.glob(CHECKPOINT_PREFIX + '*')
-          if not orbax.checkpoint.utils.is_checkpoint_item_finalized(f)
-      ]
+    tmp_dirs = [
+        f
+        for f in self.directory.glob(CHECKPOINT_PREFIX + '*')
+        if not orbax.checkpoint.utils.is_checkpoint_item_finalized(f)
+    ]
     if jax.process_index() == 0:
-      for tmp_file in tmp_files:
-        tmp_file.rmtree()
+      for tmp_dir in tmp_dirs:
+        assert tmp_dir.is_dir()
+        tmp_dir.rmtree()
     py_utils.sync_global_devices('cleanup_tmp_dirs')
 
   def _delete_directory(self, step: int):
@@ -200,15 +194,7 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
       # TODO(pax-team): Check if dst already exists?
       tf.io.gfile.rename(src, dst)
     else:
-      if (
-          self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX
-          and jax.process_index() == 0
-      ):
-        delete_path = self.directory / checkpoint_name
-        assert delete_path.is_file()
-        delete_path.unlink()
-      else:
-        super()._delete_directory(step)
+      super()._delete_directory(step)
 
   def structure(self) -> Union[Any, Mapping[str, Any]]:
     if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:

@@ -17,12 +17,11 @@
 
 import os
 import re
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple, cast
 
 from absl import logging
 from etils import epath
 import flax.serialization
-from flax.training import checkpoints as flax_checkpoints
 import jax
 from jax.experimental import maps
 from jax.experimental import multihost_utils
@@ -61,13 +60,22 @@ def _is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   return bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
 
 
-def checkpoint_name(step: int) -> str:
-  return f'{CHECKPOINT_PREFIX}{step:08d}'
+def checkpoint_name(
+    step: int,
+    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+) -> str:
+  if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    return f'{CHECKPOINT_PREFIX}{step}'
+  else:
+    return f'{CHECKPOINT_PREFIX}{step:08d}'
 
 
-def _make_checkpoint_step_dir(checkpoint_dir: epath.Path,
-                              step: int) -> epath.Path:
-  return checkpoint_dir / checkpoint_name(step)
+def _make_checkpoint_step_dir(
+    checkpoint_dir: epath.Path,
+    step: int,
+    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+) -> epath.Path:
+  return checkpoint_dir / checkpoint_name(step, checkpoint_type=checkpoint_type)
 
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
@@ -127,8 +135,10 @@ def save_checkpoint(
   checkpoint_dir = epath.Path(checkpoint_dir)
   step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
 
+  checkpoint_step_dir = _make_checkpoint_step_dir(
+      checkpoint_dir, step, checkpoint_type=checkpoint_type
+  )
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
-    checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
     if async_checkpointer is not None:
       async_checkpointer.save(checkpoint_step_dir, train_state)
     else:
@@ -136,8 +146,8 @@ def save_checkpoint(
           PaxCheckpointHandler())
       checkpointer.save(checkpoint_step_dir, train_state)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-    checkpointer = FlaxCheckpointer()
-    checkpointer.save(checkpoint_dir, train_state, force=overwrite, step=step)
+    checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
+    checkpointer.save(checkpoint_step_dir, train_state, force=overwrite)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
@@ -228,13 +238,16 @@ def restore_checkpoint(
     the saved checkpoint one is detected.
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
-  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+  if step is None:
+    step = retrieve_latest_checkpoint_step(checkpoint_dir)
     if step is None:
-      step = retrieve_latest_checkpoint_step(checkpoint_dir)
-      if step is None:
-        logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
-        return None
-    checkpoint_step_dir = _make_checkpoint_step_dir(checkpoint_dir, step)
+      logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
+      return None
+  checkpoint_step_dir = _make_checkpoint_step_dir(
+      checkpoint_dir, step, checkpoint_type=checkpoint_type
+  )
+
+  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
@@ -244,77 +257,10 @@ def restore_checkpoint(
         mesh=global_mesh)
     return restored_train_state
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-    checkpointer = FlaxCheckpointer()
-    return checkpointer.restore(
-        checkpoint_dir, item=state_global_shapes, step=step)
+    checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
+    return checkpointer.restore(checkpoint_step_dir, item=state_global_shapes)
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
-
-
-def _save_checkpoint_flax(train_state: train_states.TrainState,
-                          checkpoint_dir: epath.Path, overwrite: bool,
-                          step: int) -> None:
-  """Saves a checkpoint using Flax serialization mechanism."""
-  if not overwrite:
-    previous_filename = latest_checkpoint(checkpoint_dir)
-    if previous_filename:
-      previous_step = int(str(previous_filename).rsplit('_', 1)[-1])
-      if previous_step >= step:
-        logging.warning(
-            'A more recent checkpoint `%d` has already been saved compared '
-            'to the current timestep `%d`. Skip saving a checkpoint.',
-            previous_step, step)
-        return
-
-  # Extract/flatten data structure to store to disk. Flax requires a flattened
-  # data structure to be passed to the checkpointer.
-  flattened_state, pytree_state = jax.tree_util.tree_flatten(
-      jax.device_get(train_state))
-  checkpoint_target = {
-      'flattened_state': flattened_state,
-      # Saves a serialized version of the pytree structure to detect potential
-      # mismatch caused by different versions of saver/restorer.
-      'str_pytree_state': str(pytree_state),
-  }
-
-  flax_checkpoints.save_checkpoint(
-      checkpoint_dir,
-      checkpoint_target,
-      step,
-      prefix=CHECKPOINT_PREFIX,
-      keep=_MAX_CHECKPOINT_FLAX,
-      overwrite=overwrite)
-
-
-def _restore_checkpoint_flax(
-    state_global_shapes: train_states.TrainState,
-    checkpoint_dir: epath.Path,
-    step: Optional[int] = None) -> Optional[train_states.TrainState]:
-  """Restores a checkpoint using Flax serialization mechanism."""
-  # Input the same data structure as in save_checkpoint().
-  flattened_state, pytree_state = jax.tree_util.tree_flatten(
-      state_global_shapes)
-  str_pytree_state = str(pytree_state)
-  input_target = {
-      'flattened_state': flattened_state,
-      'str_pytree_state': str_pytree_state,
-  }
-  restored_target = flax_checkpoints.restore_checkpoint(
-      os.fspath(checkpoint_dir), input_target, step=step)
-  # Flax restore_checkpoint returned input_target unchanged if
-  # no step specified and no checkpoint files present.
-  if restored_target is input_target:
-    return None
-  restored_state = restored_target['flattened_state']
-  restored_str_pytree_state = restored_target['str_pytree_state']
-  if restored_str_pytree_state != str_pytree_state:
-    # Could be spurious due to abbreviation of treedef printing added in
-    # https://github.com/tensorflow/tensorflow/commit/aa21adc148c98c76f54ba5932ce34cf59da538c4
-    logging.warning(
-        'A possible mismatch (could be spurious) between the saved '
-        'checkpoint structure and the current one has been detected '
-        '(%s vs %s).', restored_str_pytree_state, str_pytree_state)
-  return jax.tree_util.tree_unflatten(pytree_state, restored_state)
 
 
 def _extract_nested_prefix_names(
@@ -454,7 +400,6 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
 
-
   async def async_save(self,
                        directory: epath.Path,
                        item: PyTreeDef,
@@ -508,34 +453,101 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
         flax.serialization.to_state_dict(self._param_names))
 
 
-class FlaxCheckpointer(orbax.checkpoint.AbstractCheckpointer):
-  """Thin Orbax-compatible wrapper around flax_checkpoints.
+class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
+  """Override to process checkpoints in Flax format.
 
-  Since Flax-checkpoint support in Pax will eventually be deprecated, we do not
-  plan to provide a more well-integrated interface.
+  Should only be used in conjunction with FlaxCheckpointer.
   """
 
-  def save(self,
-           directory: epath.PathLike,
-           item: Any,
-           force: bool = False,
-           step: Optional[int] = None):
-    if not py_utils.pmap_use_tensorstore() and jax.process_index() != 0:
-      return
+  async def async_save(
+      self,
+      directory: epath.Path,
+      item: PyTreeDef,
+      save_args: Optional[PyTreeDef] = None,
+  ) -> Any:
+    # Extract/flatten data structure to store to disk. Flax requires a flattened
+    # data structure to be passed to the checkpointer.
+    flattened_state, pytree_state = jax.tree_util.tree_flatten(
+        jax.device_get(item)
+    )
+    checkpoint_target = {
+        'flattened_state': flattened_state,
+        # Saves a serialized version of the pytree structure to detect potential
+        # mismatch caused by different versions of saver/restorer.
+        'str_pytree_state': str(pytree_state),
+    }
+    assert save_args is None
+    save_args = jax.tree_util.tree_map(
+        lambda _: orbax.checkpoint.SaveArgs(aggregate=True), checkpoint_target
+    )
+    return await super().async_save(
+        directory, checkpoint_target, save_args=save_args
+    )
 
-    if step is None:
-      raise ValueError('Required argument `step` for `FlaxCheckpointer.save`')
-    _save_checkpoint_flax(item, epath.Path(directory), force, step)
+  def restore(
+      self,
+      directory: epath.Path,
+      item: Optional[PyTreeDef] = None,
+      restore_args: Optional[PyTreeDef] = None,
+      transforms: Optional[PyTreeDef] = None,
+      transforms_default_to_original: bool = True,
+  ) -> PyTreeDef:
+    # Input the same data structure as in save_checkpoint().
+    flattened_state, pytree_state = jax.tree_util.tree_flatten(item)
+    str_pytree_state = str(pytree_state)
+    input_target = {
+        'flattened_state': flattened_state,
+        'str_pytree_state': str_pytree_state,
+    }
+    restored_target = super().restore(directory, input_target)
+    # Flax restore_checkpoint returned input_target unchanged if
+    # no step specified and no checkpoint files present.
+    if restored_target is input_target:
+      return None
+    restored_state = restored_target['flattened_state']
+    restored_str_pytree_state = restored_target['str_pytree_state']
+    if restored_str_pytree_state != str_pytree_state:
+      # Could be spurious due to abbreviation of treedef printing added in
+      # https://github.com/tensorflow/tensorflow/commit/aa21adc148c98c76f54ba5932ce34cf59da538c4
+      logging.warning(
+          (
+              'A possible mismatch (could be spurious) between the saved '
+              'checkpoint structure and the current one has been detected '
+              '(%s vs %s).'
+          ),
+          restored_str_pytree_state,
+          str_pytree_state,
+      )
+    return jax.tree_util.tree_unflatten(pytree_state, restored_state)
 
-  def restore(self,
-              directory: epath.PathLike,
-              *args: Any,
-              item: Optional[Any] = None,
-              step: Optional[int] = None) -> Any:
-    if item is None:
-      raise ValueError(
-          'Required argument `item` for `FlaxCheckpointer.restore`')
-    return _restore_checkpoint_flax(item, epath.Path(directory), step=step)
 
-  def structure(self, directory: epath.PathLike) -> Optional[Any]:
-    return NotImplementedError
+class FlaxCheckpointer(orbax.checkpoint.Checkpointer):
+  """Allows restoring legacy Flax checkpoints, which are not directories.
+
+  Should only be used in conjunction with FlaxCheckpointHandler.
+  """
+
+  def restore(
+      self,
+      directory: epath.PathLike,
+      *args,
+      item: Optional[Any] = None,
+      **kwargs,
+  ) -> Any:
+    if not isinstance(self._handler, FlaxCheckpointHandler):
+      raise ValueError('Unsupported handler for FlaxCheckpointer.')
+    self._handler = cast(FlaxCheckpointHandler, self._handler)
+    directory = epath.Path(directory)
+    original_aggregate_filename = self._handler._aggregate_filename  # pylint: disable=protected-access
+    # If is_file, then the checkpoint is in legacy format, not saved with orbax.
+    # Orbax checkpoints are directories containing a file called 'checkpoint'.
+    if directory.is_file():
+      # The msgpack file is actually the "directory".
+      self._handler._aggregate_filename = directory.name  # pylint: disable=protected-access
+      directory = directory.parent
+    result = super().restore(directory, *args, item=item, **kwargs)
+    # Reset aggregate_filename back to normal.
+    self._handler._aggregate_filename = (  # pylint: disable=protected-access
+        original_aggregate_filename
+    )
+    return result

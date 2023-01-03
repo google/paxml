@@ -58,7 +58,9 @@ Checkpointer = checkpoints.Checkpointer
 CheckpointType = checkpoint_pb2.CheckpointType
 instantiate = base_hyperparams.instantiate
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
+FlaxCheckpointer = checkpoints.FlaxCheckpointer
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
+FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
 
@@ -244,10 +246,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     return train_state
 
   def _save_with_args(self, step_i, train_state):
-    save_args = {}
-    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      save_args = {'step': step_i}
-    self.checkpoint_manager.save(step_i, train_state, save_kwargs=save_args)
+    self.checkpoint_manager.save(step_i, train_state)
 
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
@@ -311,7 +310,7 @@ def _create_checkpointer(
       todelete_subdir=todelete_subdir)
   checkpointer = async_checkpointer
   if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-    checkpointer = checkpoints.FlaxCheckpointer()
+    checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
   if checkpointer is None:
     if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
       checkpointer = Checkpointer(
