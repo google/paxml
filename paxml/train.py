@@ -1180,14 +1180,16 @@ def _train_and_evaluate_common(
         profiler.update_step_moving_mean(train_period.elapsed)
 
       logging.debug('  Writing summaries (attempt).')
-      step_i += 1
+      new_step_i = step_i + 1
 
       # Train metrics.
       train_weighted_scalars = weighted_scalars
       if train_p.device_sync_interval_steps:
-        should_sync_device = (step_i % train_p.device_sync_interval_steps) == 0
+        should_sync_device = (
+            new_step_i % train_p.device_sync_interval_steps
+        ) == 0
       else:
-        should_sync_device = train_summary_handler.should_write(step_i)
+        should_sync_device = train_summary_handler.should_write(new_step_i)
       steps_per_sec = None
       if should_sync_device:
         # Synchronize step_i. This is performed at a fixed interval to avoid
@@ -1212,6 +1214,8 @@ def _train_and_evaluate_common(
               '/jax/pax/init/time_before_first_step_secs', init_duration)
           init_duration_set = True
 
+      # Train metrics are reported at step_i. These training metrics/summaries
+      # are pre-model weight updates.
       train_summary_handler.process(
           step_i,
           loss,
@@ -1219,9 +1223,11 @@ def _train_and_evaluate_common(
           summary_tensors,
           per_example_out=per_example_out,
           steps_per_sec=steps_per_sec)
-      if should_sync_device:
-        step_i = new_step_i
       logging.debug('  Wrote summaries (attempted).')
+
+      # While the eval ones below are post-model weight updates, hence the step
+      # counter is incremented in between.
+      step_i = new_step_i
 
       eval_train_metrics = None
       eval_metrics: Optional[tuning_lib.EvalMetrics] = None
