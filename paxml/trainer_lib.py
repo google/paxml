@@ -19,10 +19,13 @@ import abc
 import dataclasses
 import enum
 import functools
+import json
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
+from clu import platform
 from etils import epath
+from flax.core import frozen_dict
 import jax
 from jax import numpy as jnp
 from jax.experimental import maps
@@ -53,6 +56,7 @@ NestedShape = NestedMap
 PRNGKey = pytypes.PRNGKey
 ParamsT = pytypes.HParamsT
 PyTreeDef = pytypes.PyTreeDef
+Nested = pytypes.Nested
 NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
@@ -1160,9 +1164,18 @@ def infer_partition_spec_based_on_rank_fn(
 def get_input_shape_dtypes(
     input_p: base_input.BaseInput.HParams
 ) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
+  """Returns the per-host and global shape/dtype information of the input."""
   sample_inputs = instantiate(input_p).get_next_padded()
-  return jax.tree_map(
-      py_utils.get_global_input_shape_dtype, sample_inputs)
+  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
+  # input shapes from training input pipeline.
+  perhost_inputs_shape_dtype = jax.tree_map(
+      lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+      sample_inputs,
+  )
+  global_inputs_shape_dtype = jax.tree_map(
+      py_utils.get_global_input_shape_dtype, sample_inputs
+  )
+  return perhost_inputs_shape_dtype, global_inputs_shape_dtype
 
 
 def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
@@ -1224,6 +1237,34 @@ def _remove_input_padding(inputs: NestedJTensor,
   return jax.tree_map(_remove_padding, inputs)
 
 
+def _write_input_specs(
+    input_specs: NestedShapeDtypeLike, job_log_dir: epath.Path
+) -> None:
+  """Writes input specs as JSON to a file."""
+  if jax.process_index() != 0:
+    return
+
+  def _to_dict(array_like: Any) -> Dict[str, Any]:
+    return {
+        '_array': {
+            'shape': list(array_like.shape),
+            'dtype': str(array_like.dtype),
+        }
+    }
+
+  input_specs_dict = frozen_dict.unfreeze(
+      jax.tree_util.tree_map(_to_dict, input_specs)
+  )
+  fpath = job_log_dir / 'input_specs.json'
+  with fpath.open('w') as f:
+    json.dump(input_specs_dict, f, indent=2, sort_keys=True)
+
+  work_unit = platform.work_unit()
+  work_unit.create_artifact(
+      platform.ArtifactType.FILE, str(fpath), 'Input specs'
+  )
+
+
 class Partitioner(metaclass=abc.ABCMeta):
   """Interface for partitioning computations."""
 
@@ -1250,18 +1291,49 @@ class Partitioner(metaclass=abc.ABCMeta):
             'No training input specs available, while enabling '
             '`task_p.train.always_use_train_for_model_init` requires it.'
         )
-      self._train_input_shape_dtypes = train_inputs_shape_dtype
-    else:
-      self._train_input_shape_dtypes = None
+    self._train_inputs_shape_dtype = train_inputs_shape_dtype
 
   @property
   def always_use_train_for_model_init(self):
     return self._jax_task.hparams.train.always_use_train_for_model_init
 
   @property
+  def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
+    """Shape/dtype attributes of the training inputs to model.init."""
+    return self._train_inputs_shape_dtype
+
+  @property
   def global_mesh(self) -> Optional[maps.Mesh]:
     """The global mesh."""
     return None
+
+  @abc.abstractmethod
+  def preprocess_input_params(
+      self, input_ps: base_input.BaseInput.HParams
+  ) -> base_input.BaseInput.HParams:
+    """Preprocess input hparam(s) if necessary.
+
+    This is necessary before using the hparam to create the input pipeline, so
+    that the generated input batch can be used to run the partitioned function.
+
+    Args:
+      input_ps: The input hparam(s) to adjust.
+
+    Returns:
+      The adjusted input hparam(s), with the same nested structure.
+    """
+
+  @abc.abstractmethod
+  def preprocess_prng_key(self, prng_key: PRNGKey):
+    """Preprocess the key before using it to run the partitioned function.
+
+    Args:
+      prng_key: The prng key to preprocess.
+
+    Returns:
+      The preprocessed prng key that's ready to be used to run the partitioned
+      function.
+    """
 
   @abc.abstractmethod
   def get_train_state_metadata(
@@ -1282,6 +1354,9 @@ class Partitioner(metaclass=abc.ABCMeta):
       is_eval: Whether this metadata is used for evaluation.
       discard_opt_states: Whether to discard the part corresponding to the
         optimizer states or not.
+
+    Returns:
+      The TrainStateMetadata.
     """
 
   def _get_train_state_metadata_default(
@@ -1293,10 +1368,10 @@ class Partitioner(metaclass=abc.ABCMeta):
   ) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
     if self.always_use_train_for_model_init:
-      assert self._train_input_shape_dtypes
+      assert self._train_inputs_shape_dtype
     train_state_metadata = create_train_state_metadata(
         self._jax_task,
-        self._train_input_shape_dtypes
+        self._train_inputs_shape_dtype
         if self.always_use_train_for_model_init
         else inputs_shape_dtype,
         discard_opt_states=discard_opt_states,
@@ -1308,8 +1383,78 @@ class Partitioner(metaclass=abc.ABCMeta):
       )
     return train_state_metadata
 
+  @abc.abstractmethod
+  def partition(
+      self,
+      step_fn: Callable[..., Any],
+      inputs_shape_dtype: NestedShapeDtypeLike,
+      is_eval: bool,
+      metadata: TrainStateMetadata,
+      unpadded_global_batch_size: Optional[int] = None,
+  ) -> Tuple[Callable[..., Any], NestedPartitionSpec]:
+    """Partitions the step function.
+
+    Args:
+      step_fn: Training or eval step function to partition.
+      inputs_shape_dtype: Shape/dtype attributes of the inputs of step_fn.
+      is_eval: A boolean indicating if it's a eval/decode task or not.
+      metadata: TrainStateMetadata returned by self.get_train_state_metadata()
+        using the same inputs_shape_dtype and is_eval values.
+      unpadded_global_batch_size: If not None, the unpadded size of global
+        batch, and the padding is on the right side of each input.
+
+    Returns:
+      (partitioned_step_fn, input_partition_spec):
+
+      - partitioned_step_fn: The partitioned step function.
+      - input_partition_spec: The partition spec for the inputs of the step
+        function.
+    """
+
 
 class _PmapPartitioner(Partitioner):
+
+  def __init__(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      init_key: PRNGKey,
+      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      train_input_p: Optional[base_input.BaseInput.HParams] = None,
+  ):
+    """Constructor.
+
+    Args:
+      jax_task: The task which is an instance of tasks.SingleTask.
+      init_key: PRNGKey for initializing the model variables.
+      train_inputs_shape_dtype: Shape/dtype attributes of the training inputs to
+        model.init, for use in getting params of model variables.
+      train_input_p: The hparams for training input pipeline. At most one of
+        train_inputs_shape_dtype and train_input_p can be provided.
+    """
+    assert not (train_inputs_shape_dtype and train_input_p), (
+        'At most one of train_inputs_shape_dtype and train_input_p can be '
+        'provided.'
+    )
+
+    # Get shape/dtype information for global training inputs, if not provided.
+    # TODO(pax-dev): switch to train_inputs_shape_dtype once all experiments
+    # provide input specs.
+    if train_input_p:
+      _, train_inputs_shape_dtype = get_input_shape_dtypes(train_input_p)
+
+    super().__init__(jax_task, init_key, train_inputs_shape_dtype)
+
+  def preprocess_input_params(
+      self, input_ps: base_input.BaseInput.HParams
+  ) -> base_input.BaseInput.HParams:
+    """Preprocess input hparam(s) if necessary."""
+    return input_ps
+
+  def preprocess_prng_key(self, prng_key: PRNGKey):
+    """Preprocess the key before using it to run the partitioned function."""
+    # TODO(laigd): follow train_and_evaluate_pmap() and split the key into
+    # jax.local_device_count() pieces.
+    return prng_key
 
   def get_train_state_metadata(
       self,
@@ -1323,7 +1468,17 @@ class _PmapPartitioner(Partitioner):
         inputs_shape_dtype, partition_specs, is_eval, discard_opt_states
     )
 
-  # TODO(laigd): Implement the partition() method.
+  def partition(
+      self,
+      step_fn: Callable[..., Any],
+      inputs_shape_dtype: NestedShapeDtypeLike,
+      is_eval: bool,
+      metadata: TrainStateMetadata,
+      unpadded_global_batch_size: Optional[int] = None,
+  ) -> Tuple[Callable[..., Any], NestedPartitionSpec]:
+    """Partitions the step function."""
+    # TODO(laigd): Implement this.
+    raise NotImplementedError
 
 
 class _PjitPartitioner(Partitioner):
@@ -1362,7 +1517,9 @@ class _PjitPartitioner(Partitioner):
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      train_input_p: Optional[base_input.BaseInput.HParams] = None,
       auto_sharding_info: Optional[AutoShardingInfo] = None,
+      job_log_dir: Optional[epath.Path] = None,
   ):
     """Constructor.
 
@@ -1372,26 +1529,89 @@ class _PjitPartitioner(Partitioner):
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. This is used
         only when self.always_use_train_for_model_init is True.
+      train_input_p: The hparams for training input pipeline. At most one of
+        train_inputs_shape_dtype and train_input_p can be provided.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
+      job_log_dir: Directory for the job logs.
     """
+    assert not (train_inputs_shape_dtype and train_input_p), (
+        'At most one of train_inputs_shape_dtype and train_input_p can be '
+        'provided.'
+    )
+    # Create global mesh.
+    model_p = jax_task.hparams.model
+    device_mesh = py_utils.create_device_mesh(
+        model_p.ici_mesh_shape,
+        model_p.dcn_mesh_shape,
+        contiguous_submeshes=model_p.contiguous_submeshes,
+    )
+    logging.info('device_mesh: %s', device_mesh)
+    self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+
+    # Get shape/dtype information for global training inputs, if not provided.
+    # TODO(pax-dev): switch to train_inputs_shape_dtype once all experiments
+    # provide input specs.
+    if train_input_p:
+      # TODO(laigd):  what to do with train_unpadded_global_batch_size: both
+      # pmap and pjit needs this, so do it outside! that's also why we want to
+      # leave the original train_input_p to the loop!!
+      train_input_p = self.preprocess_input_params(train_input_p)
+      perhost_inputs_shape_dtype, train_inputs_shape_dtype = (
+          get_input_shape_dtypes(train_input_p)
+      )
+      _write_input_specs(perhost_inputs_shape_dtype, job_log_dir)
+
+      if auto_sharding_info:
+        if train_input_p.num_infeed_hosts < jax.process_count() or (
+            train_input_p.cls.get_batch_size(train_input_p)
+            < jax.local_device_count()
+        ):
+          raise NotImplementedError(
+              'Per-device batch size < 1 not supported for auto sharding.'
+          )
+        logging.info('Auto sharding is enabled in PAX.')
+
+    # Initialize the remaining parts.
     super().__init__(jax_task, init_key, train_inputs_shape_dtype)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
     self._enable_auto_sharding = auto_sharding_info is not None
     self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
 
-    model_p = self._jax_task.hparams.model
-    device_mesh = py_utils.create_device_mesh(
-        model_p.ici_mesh_shape,
-        model_p.dcn_mesh_shape,
-        contiguous_submeshes=model_p.contiguous_submeshes,
-    )
-    self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+    self._broadcast_key_fn = None
 
   @property
   def global_mesh(self) -> Optional[maps.Mesh]:
     return self._global_mesh
+
+  def preprocess_input_params(
+      self, input_ps: base_input.BaseInput.HParams
+  ) -> base_input.BaseInput.HParams:
+    """Preprocess input hparam(s) if necessary."""
+    return jax.tree_util.tree_map(
+        lambda p: adjust_input_params_for_small_batch(p, self.global_mesh),
+        input_ps,
+    )
+
+  def preprocess_prng_key(self, prng_key: PRNGKey):
+    """Preprocess the key before using it to run the partitioned function."""
+    if not self._broadcast_key_fn:
+      # The prng keys are already created on device with jax.random.split. We
+      # broadcast it with an identity pjit function to avoid doing it in the
+      # loop where a multi-slice program could be generated.
+      def _broadcast_key(k):
+        def _identity(x):
+          return x
+
+        with self._global_mesh:
+          return pjit.pjit(
+              _identity, in_axis_resources=None, out_axis_resources=None
+          )(k)
+
+      self._broadcast_key_fn = _broadcast_key
+
+    return self._broadcast_key_fn(prng_key)
 
   def get_train_state_metadata(
       self,
@@ -1792,7 +2012,9 @@ def create_partitioner(
     jax_task: tasks_lib.SingleTask,
     init_key: PRNGKey,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+    train_input_p: Optional[base_input.BaseInput.HParams] = None,
     auto_sharding_mode: Optional[RunningMode] = None,
+    job_log_dir: Optional[epath.Path] = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
@@ -1800,16 +2022,22 @@ def create_partitioner(
     jax_task: The task which is an instance of tasks.SingleTask.
     init_key: PRNGKey for initializing the model variables.
     train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
-      model.init, for use in getting params of model variables.
+      model.init, for use in getting params of model variables. At most one of
+      train_inputs_shape_dtype and train_input_p can be provided.
+    train_input_p: The hparams for training input pipeline. At most one of
+      train_inputs_shape_dtype and train_input_p can be provided.
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
       function to use for auto-sharding (when pjit is used). If None, it means
       to disable auto-sharding.
+    job_log_dir: Directory for the job logs.
 
   Returns:
     A Partitioner instance.
   """
   if jax_task.hparams.model.ici_mesh_shape is None:
-    partitioner = _PmapPartitioner(jax_task, init_key, train_inputs_shape_dtype)
+    partitioner = _PmapPartitioner(
+        jax_task, init_key, train_inputs_shape_dtype, train_input_p
+    )
   else:
     auto_sharding_info = None
     if auto_sharding_mode:
@@ -1819,7 +2047,12 @@ def create_partitioner(
           step_fn, replicate_output
       )
     partitioner = _PjitPartitioner(
-        jax_task, init_key, train_inputs_shape_dtype, auto_sharding_info
+        jax_task,
+        init_key,
+        train_inputs_shape_dtype,
+        train_input_p,
+        auto_sharding_info,
+        job_log_dir,
     )
   return partitioner
 
@@ -1870,7 +2103,7 @@ def get_partitioned_spmd_model_step_fn(
       jax_task,
       init_key,
       train_inputs_shape_dtype,
-      mode if enable_auto_sharding else None,
+      auto_sharding_mode=mode if enable_auto_sharding else None,
   )
 
   step_fn, is_eval = get_step_fn(mode)
@@ -1941,7 +2174,7 @@ def get_spmd_model_step_fns_from_inputs(
   for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    inputs_shape_dtype = get_input_shape_dtypes(input_p)
+    _, inputs_shape_dtype = get_input_shape_dtypes(input_p)
     # TODO(pax-dev): Here it assumes all updated_train_state_partition_spec are
     # the same, verify that.
     step_fn, inputs_partition_spec, updated_train_state_partition_spec = (
@@ -2001,8 +2234,8 @@ class SingleTaskPjitTrainer:
     self._mesh = mesh
     self._enable_auto_sharding = enable_auto_sharding
     self._train_unpadded_global_batch_size = (
-        train_input.HParams.cls.get_batch_size(train_input.hparams) *
-        train_input.hparams.num_infeed_hosts)
+        train_input.HParams.cls.get_global_batch_size(train_input.hparams)
+    )
     # Has to initialize before train_state_metadata as the inputs_shape_dtype
     # requires self._sample_inputs.
     self._sample_inputs = train_input.get_next_padded()

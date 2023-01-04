@@ -444,9 +444,7 @@ pytype_strict_library(
         ":trainer_lib",
         ":tuning_lib",
         # Implicit absl.logging dependency.
-        # Implicit clu.platform dependency.
         # Implicit etils dependency.
-        # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//paxml:profiling",
@@ -470,8 +468,10 @@ pytype_strict_library(
         ":tasks_lib",
         ":train_states",
         # Implicit absl.logging dependency.
+        # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit fiddle dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//praxis:asserts",

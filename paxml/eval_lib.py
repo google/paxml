@@ -971,7 +971,7 @@ class _SpmdEvalRunner:
     assert inputs_p
     # We use first input_p to get sample for initializing the model as bsz
     # differences don't make a difference for initialized vars.
-    return trainer_lib.get_input_shape_dtypes(inputs_p[0])
+    return trainer_lib.get_input_shape_dtypes(inputs_p[0])[1]
 
   def run_one_step(
       self, partitioned_train_state: train_states.TrainState,
