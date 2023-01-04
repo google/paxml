@@ -1047,8 +1047,9 @@ class SeqIOInput(base_input.BaseInput):
     p = self.hparams
     task = self.mixture_or_task
     if not isinstance(task, seqio.Task):
-      raise ValueError('compute_metrics() is only supported for seqio.Tasks, '
-                       f'got {type(task)} for {p.name}.')
+      logging.warning('compute_metrics is only supported for seqio.Tasks, '
+                      'got %s for %s.', type(task), p.name)
+      return []
     # If there are no seqio decode/predict metrics to compute return empty list
     if not task.predict_metric_fns:
       logging.info('no predict_metric_fns defined on task: %s', task.name)
@@ -1125,9 +1126,10 @@ class SeqIOInput(base_input.BaseInput):
     p = self.hparams
     task = self.mixture_or_task
     if not isinstance(task, seqio.Task):
-      raise ValueError(
+      logging.warning(
           'compute_metrics_eval() is only supported for seqio.Tasks, '
-          f'got {type(task)} for {p.name}.')
+          'got %s for %s.', type(task), p.name)
+      return []
     if not task.score_metric_fns:
       logging.info('no score_metric_fns defined on task: %s', task.name)
       return []
