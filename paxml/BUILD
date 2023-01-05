@@ -365,7 +365,12 @@ pytype_strict_library(
 pytype_strict_library(
     name = "sgf",
     srcs = ["sgf.py"],
-    deps = ["//praxis:sgf"],
+    deps = [
+        # Implicit jax dependency.
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:sgf",
+    ],
 )
 
 pytype_strict_library(
