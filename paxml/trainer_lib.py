@@ -203,7 +203,7 @@ def compile_for_auto_sharding(step_fn: Any,
 
   inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
   compiled = step_fn.lower(
-      train_state, step_key, inputs_shape_dtype, _global_avals=True).compile()
+      train_state, step_key, inputs_shape_dtype).compile()
   return compiled, compiled.input_shardings[0]
 
 
