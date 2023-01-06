@@ -71,6 +71,7 @@ class MockDataset(base_hyperparams.BaseParameterizable):
   class HParams(base_hyperparams.BaseParameterizable.HParams):
     dataset_param1: Optional[str] = None
     dataset_param2: Optional[Callable[[], int]] = None
+    is_training: bool = False
 
     def to_text(self) -> str:
       return 'MOCK_DATASET_CONFIG'
@@ -99,11 +100,18 @@ class TuningExperiment(base_experiment.BaseExperiment):
             decode_interval_steps=100))
 
   def datasets(self):
+    # NOTE(daiyip): `dataset_param2` shall appear in the search
+    # space: though its evaluation is delayed until instantiation,
+    # datasets will be instantiated during search space inspection.
     return [MockDataset.HParams(
         dataset_param1=self.DATASET_PARAM1,
-        dataset_param2=lambda: pg.oneof(range(3), name='dataset_param2'))]
+        dataset_param2=lambda: pg.oneof(range(3), name='dataset_param2'),
+        is_training=True)]
 
   def decoder_datasets(self):
+    # NOTE(daiyip): `decoder_dataset_param2` shall NOT appear in the search
+    # space: its evaluation is delayed until instantiation, and decoder
+    # datasets are not instantiated during search space inspection.
     return [MockDataset.HParams(
         dataset_param1=self.DECODER_DATASET_PARAM1,
         dataset_param2=(
@@ -354,10 +362,8 @@ class GetSearchSpaceTest(absltest.TestCase):
         'dataset_param2': pg.oneof(range(3), name='dataset_param2'),
         'DECODER_DATASET_PARAM1': pg.oneof(['x', 'y', 'z'],
                                            name='DECODER_DATASET_PARAM1'),
-        'decoder_dataset_param2': pg.oneof(range(3),
-                                           name='decoder_dataset_param2')
     }))
-    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2 * 3 * 3 * 3)
+    self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2 * 3 * 3)
 
   def test_parameter_sweep_space_with_cartesian_product(self):
     search_space = tuning_lib.get_search_space(
@@ -414,7 +420,7 @@ class TuneTest(absltest.TestCase):
                      [True, False, False, False, False])
     # We use the average of the metrics across steps as the final measurement.
     self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     [0.0, 0.32 * 2, 3.2 * 2, 0.32 * 2, 1.6 * 2])
+                     [0.0, 0.32 * 2, 1.6 * 2, 0.64 * 2, 0.64 * 2])
     # Make sure unused metric does not appear in reported metrics.
     self.assertEqual(result.trials[1].final_measurement.metrics, {
         'eval_test_abc/metrics/reward': 0.64,
@@ -501,11 +507,11 @@ class TuneTest(absltest.TestCase):
     reward_at_step0 = (
         lambda t: t.measurements[0].reward if t.measurements else None)
     self.assertEqual([reward_at_step0(t) for t in result.trials],
-                     [None, None, 3.2, None, 1.6])
+                     [None, None, 1.6, None, None])
     self.assertEqual([len(t.measurements) for t in result.trials],
-                     [0, 0, 3, 0, 3])
+                     [0, 0, 3, 0, 0])
     self.assertEqual([t.infeasible for t in result.trials],
-                     [True, True, False, True, False])
+                     [True, True, False, True, True])
 
   def test_tune_with_per_trial_early_stopping_and_reward_replacement(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
@@ -522,9 +528,9 @@ class TuneTest(absltest.TestCase):
     reward_at_step0 = (
         lambda t: t.measurements[0].reward if t.measurements else None)
     self.assertEqual([reward_at_step0(t) for t in result.trials],
-                     [None, -1.0, 3.2, -1.0, 1.6])
+                     [None, -1.0, 1.6, -1.0, -1.0])
     self.assertEqual([len(t.measurements) for t in result.trials],
-                     [0, 1, 3, 1, 3])
+                     [0, 1, 3, 1, 1])
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, False, False, False])
 
@@ -543,11 +549,11 @@ class TuneTest(absltest.TestCase):
     reward_at_step0 = (
         lambda t: t.measurements[0].reward if t.measurements else None)
     self.assertEqual([reward_at_step0(t) for t in result.trials],
-                     [None, 100., 3.2, 100., 1.6])
+                     [None, 100., 1.6, 100., 100.0])
     self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     [0., 100., 6.4, 100., 3.2])
+                     [0., 100., 3.2, 100., 100.0])
     self.assertEqual([len(t.measurements) for t in result.trials],
-                     [0, 1, 3, 1, 3])
+                     [0, 1, 3, 1, 1])
     self.assertEqual([t.infeasible for t in result.trials],
                      [True, False, False, False, False])
 
@@ -565,14 +571,14 @@ class TuneTest(absltest.TestCase):
     reward_at_step0 = (
         lambda t: t.measurements[0].reward if t.measurements else None)
     self.assertEqual([reward_at_step0(t) for t in result.trials],
-                     [None, 0.32, 3.2, 0.32, 1.6])
+                     [None, 0.32, 1.6, 0.64, 0.64])
     self.assertEqual([len(t.measurements) for t in result.trials],
-                     [0, 1, 3, 1, 3])
+                     [0, 1, 3, 1, 1])
     self.assertEqual([t.infeasible for t in result.trials],
-                     [True, True, False, True, False])
+                     [True, True, False, True, True])
     # We use the average of the metrics across steps as the final measurement.
     self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     [0.0, 0.0, 3.2 * 2, 0.0, 1.6 * 2])
+                     [0.0, 0.0, 1.6 * 2, 0.0, 0.0])
 
   def test_tune_with_subexperiments(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
@@ -585,14 +591,8 @@ class TuneTest(absltest.TestCase):
     result = pg.tuning.poll_result('local_subexperiments')
     self.assertLen(result.trials, 5)
     self.assertEqual([t.infeasible for t in result.trials],
-                     [True, False, True, False, True])
+                     [True, False, True, True, True])
     self.assertEqual(result.trials[1].final_measurement.metrics, {
-        'eval_test_abc/metrics/reward:1x': 0.64,
-        'eval_test_abc/metrics/reward:2x': 1.28,
-        'eval_test_abc/metrics/reward:4x': 2.56,
-        'eval_test_abc/metrics/reward:8x': 5.12
-    })
-    self.assertEqual(result.trials[3].final_measurement.metrics, {
         'eval_test_abc/metrics/reward:1x': 0.64,
         'eval_test_abc/metrics/reward:2x': 1.28,
         'eval_test_abc/metrics/reward:4x': 2.56,
@@ -601,8 +601,7 @@ class TuneTest(absltest.TestCase):
     # We use the average of the metrics across steps as the final measurement.
     self.assertEqual([t.final_measurement.reward for t in result.trials],
                      # Used aggregator='max' for computing the reward.
-                     [0.0, 0.64 + 1.28 + 2.56 + 5.12,
-                      0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0])
+                     [0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0, 0.0, 0.0])
 
   def test_bad_running_mode(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
