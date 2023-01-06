@@ -1214,10 +1214,11 @@ def _train_and_evaluate_common(
               '/jax/pax/init/time_before_first_step_secs', init_duration)
           init_duration_set = True
 
-      # Train metrics are reported at step_i. These training metrics/summaries
-      # are pre-model weight updates.
+      # Note: Train metrics are currently reported at step_i + 1, while these
+      # training metrics/summaries are pre-model weight updates.
+      # TODO(b/264635784): Update the logic to pass step_i instead.
       train_summary_handler.process(
-          step_i,
+          new_step_i,
           loss,
           weighted_scalars,
           summary_tensors,
