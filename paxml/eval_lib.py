@@ -682,15 +682,14 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
   """
-  del enable_auto_sharding
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
   prng_key = jax.random.PRNGKey(task_p.evaluate.random_seed)
 
-  # TODO(pax-dev): enable_auto_sharding is deleted above. Set auto_sharding_mode
-  # to RunningMode.EVAL if we want to enable it again.
+  # TODO(laigd): use RunningMode.EVAL after
+  # get_spmd_model_step_fns_from_inputs takes the partitioner as input.
   partitioner = trainer_lib.create_partitioner(
       jax_task, prng_key, train_input_specs, auto_sharding_mode=None
   )
@@ -716,7 +715,10 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   if task_p.model.mesh_shape is not None:
     eval_method = evaluate_spmd_model
     checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
-    extra_kwargs = dict(train_input_specs=train_input_specs)
+    extra_kwargs = dict(
+        train_input_specs=train_input_specs,
+        enable_auto_sharding=enable_auto_sharding,
+    )
   else:
     eval_method = evaluate_pmap_model
     checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
@@ -1037,6 +1039,7 @@ def evaluate_spmd_model(
     job_log_dir: epath.Path,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     train_input_specs: Optional[NestedShapeDtypeLike] = None,
+    enable_auto_sharding: bool = False,
 ) -> None:
   """Runs the evaluation loop on the entire test dataset for SPMD model.
 
@@ -1052,6 +1055,8 @@ def evaluate_spmd_model(
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     train_input_specs: Training input specs for model initialization.
+    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
+      shardings.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   if not eval_input_p:
@@ -1071,7 +1076,8 @@ def evaluate_spmd_model(
        init_key,
        train_input_specs,
        is_decode=False,
-       enable_auto_sharding=False,  # TODO(laigd): remove this option.
+       # TODO(laigd): remove this option.
+       enable_auto_sharding=enable_auto_sharding,
        eval_input_ps=eval_input_p)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
