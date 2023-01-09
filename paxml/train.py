@@ -514,6 +514,7 @@ def train_and_evaluate(
       happens in a different thread.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
+  jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
 

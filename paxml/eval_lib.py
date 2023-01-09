@@ -1150,6 +1150,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
   """
+  jax.monitoring.record_event('/jax/pax/decode/beacon')
   job_log_dir = epath.Path(job_log_dir)
   if restore_checkpoint_dir:
     restore_checkpoint_dir = epath.Path(restore_checkpoint_dir)
@@ -2265,6 +2266,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
       output generators configured.
     job_log_dir: The base directory for writing the outputs.
   """
+  jax.monitoring.record_event('/jax/pax/infer_and_write/beacon')
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   task = instantiate(task_p)
