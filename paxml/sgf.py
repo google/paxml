@@ -39,7 +39,12 @@ DpSgdStochasticGradient = sgf.DpSgdStochasticGradient
 
 
 class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
-  """DP-SGD stochastic gradient function with microbatch."""
+  """DP-SGD stochastic gradient function with microbatch.
+
+  **NOTE** on setting `noise_multiplier` when training with multiple devices:
+  the `noise_multiplier` parameter should be divided by `sqrt(num_devices)`.
+  See the docstring of `DpSgdStochasticGradient` for more details.
+  """
 
   class HParams(DpSgdStochasticGradient.HParams):
     """Returns the PrivateGradient params."""
@@ -77,6 +82,10 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
 
 class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
   """DP-SGD with Augmentation Multiplicity.
+
+  **NOTE** on setting `noise_multiplier` when training with multiple devices:
+  the `noise_multiplier` parameter should be divided by `sqrt(num_devices)`.
+  See the docstring of `DpSgdStochasticGradient` for more details.
 
   Augmentation multiplicity generates multiple different augmentations for each
   training example, and do the l2-norm clipping on the average gradient for
