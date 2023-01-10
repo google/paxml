@@ -355,9 +355,9 @@ class WeightedSumAggregator(MultiObjectiveAggregator):
   def __init__(self, hparams: HParams):
     super().__init__(hparams)
     weights = self._hparams.weights
-    if not weights or sum(weights) == 0:
+    if not weights or sum([abs(w) for w in weights]) == 0:
       raise ValueError(f'Invalid value for `weights`: {weights}')
-    self._sum_of_weights = sum(weights) * 1.0
+    self._sum_of_weights = sum([abs(w) for w in weights]) * 1.0
 
   def __call__(self, values: Sequence[float]) -> float:
     """Aggregate multiple values into a single value."""

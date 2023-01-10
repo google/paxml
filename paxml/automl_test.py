@@ -486,6 +486,20 @@ class RewardsTest(absltest.TestCase):
         automl.Metric.eval('accuracy', 'task2')
     ])
 
+    reward_fn = instantiate(automl.weighted_sum_reward([
+        (automl.Metric.eval('accuracy', 'task1'), 0.5),
+        (automl.Metric.eval('accuracy', 'task2'), -0.5),
+    ]))
+    self.assertIsInstance(reward_fn, automl.MultiObjective)
+    self.assertEqual(reward_fn({
+        'eval_test_task1/metrics/accuracy': 0.9,
+        'eval_test_task2/metrics/accuracy': 0.8
+    }, 0), 0.9 * 0.5 - 0.8 * 0.5)
+    self.assertEqual(reward_fn.used_metrics, [
+        automl.Metric.eval('accuracy', 'task1'),
+        automl.Metric.eval('accuracy', 'task2')
+    ])
+
 
 class MultiObjectiveAggregatorTest(absltest.TestCase):
   """Tests for multi-objective aggregators."""
