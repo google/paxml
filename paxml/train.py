@@ -863,10 +863,16 @@ def train_and_evaluate_spmd_model(
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
-      train_input_p=train_input_p,
       auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
+  train_unpadded_global_batch_size = train_input_p.cls.get_global_batch_size(
+      train_input_p
+  )
+  train_input_p = partitioner.preprocess_input_params(train_input_p)
+  train_input_for_shape = _PeekableInput(instantiate(train_input_p))
+  partitioner.set_train_inputs_shape_dtype(train_input_for_shape)
+
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
   global_mesh = partitioner.global_mesh
 
@@ -880,10 +886,6 @@ def train_and_evaluate_spmd_model(
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
 
-  train_unpadded_global_batch_size = train_input_p.cls.get_global_batch_size(
-      train_input_p
-  )
-  train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_state_metadata = partitioner.get_train_state_metadata(
       inputs_shape_dtype
   )
