@@ -75,6 +75,19 @@ instantiate = base_hyperparams.instantiate
 # e.g. load_rules = [LOAD_ALL]
 LOAD_ALL = ('(.*)', '{}')
 
+TRAIN_DEFAULT_MUTABLE_LIST = [
+    base_layer.AUX_LOSS,
+    base_layer.SUMMARIES,
+    base_layer.NON_TRAINABLE,
+] + base_layer.NON_PAX_VAR_COLLECTION
+
+
+EVAL_DEFAULT_MUTABLE_LIST = [
+    base_layer.AUX_LOSS,
+    base_layer.SUMMARIES,
+    base_layer.NON_TRAINABLE,
+]
+
 
 def _flatten_dict(
     node: Dict[str, Any],
@@ -597,6 +610,8 @@ class SingleTask(base_task.BaseTask):
         flow for model initialization. With this new flow, dedicated evaluation
         and decoding-only jobs rely on training inputs for model initialization.
       random_seed: Random seed to use at the beginning of the training.
+      apply_mutable_list: A list of allowed collections to be mutated during
+        train apply.
     """
     learner: learners_lib.Learner.HParams = sub_config_field(
         learners_lib.Learner.HParams)
@@ -625,6 +640,9 @@ class SingleTask(base_task.BaseTask):
     profiler_max_num_hosts: Optional[int] = None
     always_use_train_for_model_init: bool = True
     random_seed: int = 1234
+    apply_mutable_list: List[str] = dataclasses.field(
+        default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST
+    )
 
   class DecodeHParams(base_hyperparams.BaseHyperParams):
     """Parameters for decoding.
@@ -645,9 +663,14 @@ class SingleTask(base_task.BaseTask):
 
     Attributes:
       random_seed: Random seed to use at the beginning of the evaluation.
+      apply_mutable_list: A list of allowed collections to be mutated during
+        evaluation apply.
     """
 
     random_seed: int = 1234
+    apply_mutable_list: List[str] = dataclasses.field(
+        default_factory=lambda: EVAL_DEFAULT_MUTABLE_LIST
+    )
 
   class InferHParams(base_hyperparams.BaseHyperParams):
     """Parameters for inference.

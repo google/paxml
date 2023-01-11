@@ -710,7 +710,7 @@ def train_step_single_learner(
       (weighted_scalars, per_example_output), updated_vars = model.apply(
           mdl_vars,
           inputs,
-          mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE] + NON_PAX_VAR_COLLECTION,
+          mutable=jax_task.hparams.train.apply_mutable_list,
           method=model.__call__,
           rngs=apply_rng_keys)
 
@@ -881,7 +881,7 @@ def eval_step_single_learner(
     (weighted_scalars, per_example_out), updated_vars = model.apply(
         mdl_vars,
         inputs,
-        mutable=[AUX_LOSS, SUMMARIES, NON_TRAINABLE],
+        mutable=jax_task.hparams.evaluate.apply_mutable_list,
         method=model.__call__,
         rngs=apply_rng_keys)
 
