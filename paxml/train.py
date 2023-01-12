@@ -417,15 +417,6 @@ def _create_checkpointer(
   return checkpointer
 
 
-def _update_latest_model_step(train_input_p: base_input.BaseInput.HParams,
-                              initial_global_step: int) -> None:
-  """Updates `train_input_p` in place its latest model step."""
-  if not hasattr(train_input_p, 'deterministic_input_start_index'):
-    return
-  dp = train_input_p.deterministic_input_start_index
-  dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
-
-
 def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
   """Computes the number of training steps per second."""
   # Note: This function doesn't account for the time spent on running
@@ -610,6 +601,20 @@ class _PeekableInput:
                                       pspecs)
 
 
+def _maybe_update_latest_model_step(
+    train_input: _PeekableInput,
+    train_input_p: base_input.BaseInput.HParams,
+    initial_global_step: int,
+) -> _PeekableInput:
+  """Updates `train_input_p` in place its latest model step."""
+  if not hasattr(train_input_p, 'deterministic_input_start_index'):
+    return train_input
+  dp = train_input_p.deterministic_input_start_index
+  dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
+  logging.info('Reinstanting input because _latest_model_step is updated.')
+  return _PeekableInput(instantiate(train_input_p))
+
+
 class _SummaryContextManager(contextlib.ExitStack):
   """Manage summary writers."""
 
@@ -729,7 +734,9 @@ def train_and_evaluate_pmap(
       py_utils.maybe_unreplicate_for_fully_replicated(
           partitioned_train_state.step))
   logging.info('Model initial global_step=%d', initial_global_step)
-  _update_latest_model_step(train_input_p, initial_global_step)
+  train_input_pipeline = _maybe_update_latest_model_step(
+      train_input_pipeline, train_input_p, initial_global_step
+  )
 
   # From now on, different replicas should use different random seeds.
   # Here, each process will have its unique prng_key.
@@ -870,8 +877,8 @@ def train_and_evaluate_spmd_model(
       train_input_p
   )
   train_input_p = partitioner.preprocess_input_params(train_input_p)
-  train_input_for_shape = _PeekableInput(instantiate(train_input_p))
-  partitioner.set_train_inputs_shape_dtype(train_input_for_shape)
+  train_input_pipeline = _PeekableInput(instantiate(train_input_p))
+  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
 
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
   global_mesh = partitioner.global_mesh
@@ -969,8 +976,9 @@ def train_and_evaluate_spmd_model(
       py_utils.maybe_unreplicate_for_fully_replicated(
           partitioned_train_state.step))
   logging.info('Model initial global_step=%d', initial_global_step)
-  _update_latest_model_step(train_input_p, initial_global_step)
-  train_input_pipeline = _PeekableInput(instantiate(train_input_p))
+  train_input_pipeline = _maybe_update_latest_model_step(
+      train_input_pipeline, train_input_p, initial_global_step
+  )
   reshard_inputs = False
   is_vars_replicated = False
 
