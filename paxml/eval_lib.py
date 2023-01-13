@@ -20,6 +20,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import gc
 import sys
 import time
 import typing
@@ -2113,6 +2114,11 @@ def _common_eval_or_decode_loop(
         for d in summary_eval_dirs
     ]
 
+    # Collect then freeze GC, so that GC in the eval loop will not touch the
+    # python objects used to initialize the model. Unfreeze at the end of the
+    # loop.
+    gc.collect()
+    gc.freeze()
     while True:
       with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
                                         mode):
@@ -2153,6 +2159,7 @@ def _common_eval_or_decode_loop(
           new_checkpoint_step, train_state_metadata
       )
       last_checkpoint_step = new_checkpoint_step
+    gc.unfreeze()
 
 
 def _maybe_update_tracked_metric(

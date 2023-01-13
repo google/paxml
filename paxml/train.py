@@ -20,6 +20,7 @@ import contextlib
 import dataclasses
 import datetime
 import functools
+import gc
 import re
 import time
 import typing
@@ -1154,6 +1155,11 @@ def _train_and_evaluate_common(
 
     # Start the train loop. Make sure all at the same step.
     py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
+    # Collect then freeze GC, so that GC in the training loop will not touch the
+    # python objects used to initialize the model. Unfreeze at the end of the
+    # loop.
+    gc.collect()
+    gc.freeze()
     while True:
       logging.debug('step=`%d`: Beginning', step_i)
 
@@ -1359,7 +1365,7 @@ def _train_and_evaluate_common(
               'tuner, while num_train_step is `%d`.', step_i,
               train_p.num_train_steps)
           break
-
+    gc.unfreeze()
     # Save checkpoint for the last step.
     checkpointer.save_final(step_i, partitioned_train_state,
                             train_state_metadata.partitioned_specs)
