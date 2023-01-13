@@ -1273,6 +1273,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      job_log_dir: Optional[epath.Path] = None,
   ):
     """Constructor.
 
@@ -1283,10 +1284,12 @@ class Partitioner(metaclass=abc.ABCMeta):
         model.init, for use in getting params of model variables. Can also be
         set using self.set_train_inputs_shape_dtype() if not provided during
         construction.
+      job_log_dir: Directory for the job logs.
     """
     self._jax_task = jax_task
     self._init_key = init_key
     self._train_inputs_shape_dtype = train_inputs_shape_dtype
+    self._job_log_dir = job_log_dir
 
   @property
   def always_use_train_for_model_init(self):
@@ -1432,6 +1435,7 @@ class _PmapPartitioner(Partitioner):
     self._train_inputs_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
+    _write_input_specs(self._train_inputs_shape_dtype, self._job_log_dir)
 
   def preprocess_input_params(
       self, input_ps: base_input.BaseInput.HParams
@@ -1466,8 +1470,28 @@ class _PmapPartitioner(Partitioner):
       unpadded_global_batch_size: Optional[int] = None,
   ) -> Tuple[Callable[..., Any], NestedPartitionSpec]:
     """Partitions the step function."""
-    # TODO(laigd): Implement this.
-    raise NotImplementedError
+    del inputs_shape_dtype, unpadded_global_batch_size
+
+    def _wrapped_step_fn(state, prng_key, inputs):
+      return step_fn(
+          self._jax_task,
+          state,
+          prng_key,
+          inputs,
+          fprop_dtype=self._jax_task.hparams.model.fprop_dtype,
+          var_weight_hparams=metadata.var_weight_hparams,
+      )
+
+    return (
+        jax.pmap(
+            _wrapped_step_fn,
+            # For training, TrainState is the first argument and return value.
+            # We setup donation/alias to minimize device memory usage.
+            donate_argnums=() if is_eval else (0,),
+            axis_name=base_layer.PMAP_PARALLEL_AXIS_NAME,
+        ),
+        None,  # Input partition spec.
+    )
 
 
 class _PjitPartitioner(Partitioner):
@@ -1532,12 +1556,11 @@ class _PjitPartitioner(Partitioner):
     self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
 
     # Initialize the remaining parts.
-    super().__init__(jax_task, init_key, train_inputs_shape_dtype)
+    super().__init__(jax_task, init_key, train_inputs_shape_dtype, job_log_dir)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
     self._enable_auto_sharding = auto_sharding_info is not None
     self._mesh_names = self._jax_task.hparams.model.mesh_axis_names
-    self._job_log_dir = job_log_dir  # TODO(laigd): move this to Partitioner.
 
     self._broadcast_key_fn = None
 
@@ -1822,8 +1845,8 @@ class _PjitPartitioner(Partitioner):
     pjitted_fn = pjit.pjit(
         step_fn,
         out_axis_resources=fn_out_partition_specs,
-        # For training we don't need the original TrainState after running the
-        # train step.
+        # For training, TrainState is the first argument and return value. We
+        # setup donation/alias to minimize device memory usage.
         donate_argnums=() if is_eval else (0,),
         **extra_kwargs,
     )
@@ -2016,7 +2039,9 @@ def create_partitioner(
     A Partitioner instance.
   """
   if jax_task.hparams.model.ici_mesh_shape is None:
-    partitioner = _PmapPartitioner(jax_task, init_key, train_inputs_shape_dtype)
+    partitioner = _PmapPartitioner(
+        jax_task, init_key, train_inputs_shape_dtype, job_log_dir,
+    )
   else:
     auto_sharding_info = None
     if auto_sharding_mode:

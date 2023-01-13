@@ -708,17 +708,20 @@ def train_and_evaluate_pmap(
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
+  partitioner = trainer_lib.create_partitioner(
+      jax_task, init_key, job_log_dir=job_log_dir,
+  )
+  assert partitioner.global_mesh is None
+  train_unpadded_global_batch_size = train_input_p.cls.get_global_batch_size(
+      train_input_p
+  )
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
+  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
 
-  # Get shape and dtype of model_inputs.
-  inputs_shape_dtype = train_input_pipeline.peek_padded()
-  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
-  # input shapes from training input pipeline.
-  train_state_metadata = trainer_lib.create_train_state_metadata(
-      jax_task, inputs_shape_dtype)
-
-  # Write sample inputs.
-  trainer_lib._write_input_specs(inputs_shape_dtype, job_log_dir)
+  inputs_shape_dtype = partitioner.train_inputs_shape_dtype
+  train_state_metadata = partitioner.get_train_state_metadata(
+      inputs_shape_dtype
+  )
 
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():
@@ -726,8 +729,10 @@ def train_and_evaluate_pmap(
     trainer_lib.write_post_init_model_hparams_file(
         jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir)
 
+  # Restore TrainState from checkpoint or initialize it.
   partitioned_train_state, total_num_params = checkpointer.get_model_states(
-      jax_task, None, train_state_metadata, init_key)
+      jax_task, None, train_state_metadata, init_key
+  )
 
   train_p = task_p.train
   initial_global_step = int(
@@ -744,25 +749,6 @@ def train_and_evaluate_pmap(
   # different prng_key.
   prng_key = jax.random.fold_in(prng_key, jax.process_index())
   logging.info('root prng_key: %s', prng_key)
-
-  fprop_dtype = task_p.model.fprop_dtype
-
-  def train_step(states, prng_key, inputs):
-    """Train model for a single step."""
-    return trainer_lib.train_step_single_learner(
-        jax_task, states, prng_key, inputs, fprop_dtype=fprop_dtype)
-
-  def eval_step(eval_states, prng_key, inputs):
-    return trainer_lib.eval_step_single_learner(
-        jax_task, eval_states, prng_key, inputs, fprop_dtype=fprop_dtype)
-
-  def prepare_model_inputs(train_input_pipeline, model_inputs, step_counter):
-    del step_counter  # Unused in pmap flow
-    return train_input_pipeline.reshard_for_pmap(model_inputs)
-
-  def prepare_eval_inputs(train_input_pipeline, eval_inputs):
-    return train_input_pipeline.reshard_for_pmap(eval_inputs)
-
   num_devices = jax.local_device_count()
   prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
   train_prng_seed = jax.random.split(train_key, num=num_devices)
@@ -770,18 +756,35 @@ def train_and_evaluate_pmap(
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
 
-  train_unpadded_global_batch_size = train_input_p.cls.get_global_batch_size(
-      train_input_p
+  train_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.TRAIN)
+  assert not is_eval
+  p_train_step, _ = partitioner.partition(
+      train_step_fn,
+      inputs_shape_dtype,  # TODO(laigd): this is not needed by pmap.
+      is_eval,
+      train_state_metadata,
   )
 
-  p_train_step = jax.pmap(
-      train_step, donate_argnums=(0,), axis_name=PMAP_PARALLEL_AXIS_NAME)
+  fprop_dtype = task_p.model.fprop_dtype
+
+  def eval_step(eval_states, prng_key, inputs):
+    return trainer_lib.eval_step_single_learner(
+        jax_task, eval_states, prng_key, inputs, fprop_dtype=fprop_dtype)
+
   p_eval_step = jax.pmap(eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
   p_eval_steps = [p_eval_step] * len(eval_input_p)
+
   global_mesh = None
   reshard_inputs = True
   create_gda_for_inputs = False
   is_vars_replicated = True
+
+  def prepare_model_inputs(train_input_pipeline, model_inputs, step_counter):
+    del step_counter  # Unused in pmap flow
+    return train_input_pipeline.reshard_for_pmap(model_inputs)
+
+  def prepare_eval_inputs(train_input_pipeline, eval_inputs):
+    return train_input_pipeline.reshard_for_pmap(eval_inputs)
 
   def partition_eval_input_fns(eval_input_p):
     eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
@@ -854,22 +857,17 @@ def train_and_evaluate_spmd_model(
   logging.info('Using SPMD sharding for model parallelism.')
   assert py_utils.gda_or_jax_array(), 'GDA or jax.Array must be enabled'
 
-  model_p = task_p.model
-  prng_key = jax.random.PRNGKey(task_p.train.random_seed)
-  prng_key, init_key = jax.random.split(prng_key)
-
   logging.info('Retrieving model inputs for shape info.')
-  create_gda_for_inputs = (
-      py_utils.gda_or_jax_array() and
-      checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
 
   jax_task = instantiate(task_p)
+  prng_key = jax.random.PRNGKey(task_p.train.random_seed)
+  prng_key, init_key = jax.random.split(prng_key)
 
   # The partitioner only needs shape/dtype information of the prng key.
   # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
   partitioner = trainer_lib.create_partitioner(
       jax_task,
-      prng_key,
+      init_key,
       auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -881,7 +879,32 @@ def train_and_evaluate_spmd_model(
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
 
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
-  global_mesh = partitioner.global_mesh
+  train_state_metadata = partitioner.get_train_state_metadata(
+      inputs_shape_dtype
+  )
+
+  # JaxContext needed for shared layer lookup from global scope.
+  with base_layer.JaxContext.new_context():
+    # Dump out model meta info for debugging.
+    trainer_lib.write_post_init_model_hparams_file(
+        jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
+    )
+
+  # Restore TrainState from checkpoint or initialize it.
+  partitioned_train_state, total_num_params = checkpointer.get_model_states(
+      jax_task, partitioner.global_mesh, train_state_metadata, init_key
+  )
+
+  train_p = task_p.train
+  initial_global_step = int(
+      py_utils.maybe_unreplicate_for_fully_replicated(
+          partitioned_train_state.step
+      )
+  )
+  logging.info('Model initial global_step=%d', initial_global_step)
+  train_input_pipeline = _maybe_update_latest_model_step(
+      train_input_pipeline, train_input_p, initial_global_step
+  )
 
   # We do not fold in jax.process_index in contrast to the pmap version and
   # use a single global key instead to rely on pjit to split for different
@@ -893,9 +916,55 @@ def train_and_evaluate_spmd_model(
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
 
-  train_state_metadata = partitioner.get_train_state_metadata(
-      inputs_shape_dtype
+  train_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.TRAIN)
+  assert not is_eval
+  p_train_step, inputs_pspecs = partitioner.partition(
+      train_step_fn,
+      inputs_shape_dtype,
+      is_eval,
+      train_state_metadata,
+      train_unpadded_global_batch_size,
   )
+
+  # TODO(pax): Support auto-sharding for eval step. In this case, we would
+  # have to fix the sharding of the input to be the same as what's derived
+  # from the train_step.
+
+  p_eval_on_train_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
+      jax_task,
+      RunningMode.EVAL,
+      init_key,
+      inputs_shape_dtype,
+      train_state_partition_spec=(
+          train_state_metadata.partitioned_specs.to_eval_state()
+      ),
+      # TODO(hthu): This should be from a evaluator?
+      unpadded_global_batch_size=train_unpadded_global_batch_size,
+  )
+
+  global_mesh = partitioner.global_mesh
+  create_gda_for_inputs = (
+      py_utils.gda_or_jax_array() and
+      checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
+  reshard_inputs = False
+  is_vars_replicated = False
+
+  p_eval_steps = []
+  padded_eval_input_p = eval_input_p
+  if eval_input_p:
+    padded_eval_input_p = [
+        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
+        for input_p in eval_input_p
+    ]
+    p_eval_steps, _, _, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
+        padded_eval_input_p,
+        eval_input_p,
+        jax_task,
+        RunningMode.EVAL,
+        init_key,
+        inputs_shape_dtype,
+        train_state_partition_spec=(
+            train_state_metadata.partitioned_specs.to_eval_state()))
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if (create_gda_for_inputs or
@@ -917,71 +986,6 @@ def train_and_evaluate_spmd_model(
           eval_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
     return eval_inputs
 
-  # JaxContext needed for shared layer lookup from global scope.
-  with base_layer.JaxContext.new_context():
-    # Dump out model meta info for debugging.
-    trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
-    )
-
-  train_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.TRAIN)
-  assert not is_eval
-  p_train_step, inputs_pspecs = partitioner.partition(
-      train_step_fn,
-      inputs_shape_dtype,
-      is_eval,
-      train_state_metadata,
-      train_unpadded_global_batch_size,
-  )
-
-  # Try to restore from checkpoint.
-  partitioned_train_state, total_num_params = checkpointer.get_model_states(
-      jax_task, global_mesh, train_state_metadata, init_key)
-
-  # TODO(pax): Support auto-sharding for eval step. In this case, we would
-  # have to fix the sharding of the input to be the same as what's derived
-  # from the train_step.
-
-  p_eval_on_train_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
-      jax_task,
-      RunningMode.EVAL,
-      init_key,
-      inputs_shape_dtype,
-      train_state_partition_spec=(
-          train_state_metadata.partitioned_specs.to_eval_state()
-      ),
-      # TODO(hthu): This should be from a evaluator?
-      unpadded_global_batch_size=train_unpadded_global_batch_size,
-  )
-
-  p_eval_steps = []
-  padded_eval_input_p = eval_input_p
-  if eval_input_p:
-    padded_eval_input_p = [
-        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
-        for input_p in eval_input_p
-    ]
-    p_eval_steps, _, _, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
-        padded_eval_input_p,
-        eval_input_p,
-        jax_task,
-        RunningMode.EVAL,
-        init_key,
-        inputs_shape_dtype,
-        train_state_partition_spec=(
-            train_state_metadata.partitioned_specs.to_eval_state()))
-
-  train_p = task_p.train
-  initial_global_step = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(
-          partitioned_train_state.step))
-  logging.info('Model initial global_step=%d', initial_global_step)
-  train_input_pipeline = _maybe_update_latest_model_step(
-      train_input_pipeline, train_input_p, initial_global_step
-  )
-  reshard_inputs = False
-  is_vars_replicated = False
-
   def partition_eval_input_fns(padded_eval_input_ps):
     assert padded_eval_input_ps, 'padded_eval_input_ps must not be empty'
     eval_input_pipelines = [
@@ -998,8 +1002,11 @@ def train_and_evaluate_spmd_model(
       inputs_shape_dtype = jax.tree_util.tree_map(
           py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
       eval_test_inputs_shape_dtypes.append(inputs_shape_dtype)
-      eval_test_inputs_pspecs.append(trainer_lib.get_input_partition_specs(
-          model_p.mesh_axis_names, inputs_shape_dtype))
+      eval_test_inputs_pspecs.append(
+          trainer_lib.get_input_partition_specs(
+              task_p.model.mesh_axis_names, inputs_shape_dtype
+          )
+      )
 
       # We either run p.eval_loop_num_batches steps or one epoch (when supported
       # by a resettable input) per eval loop during training. When
