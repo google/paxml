@@ -259,12 +259,16 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
   CHECKPOINT_EVERY_N_STEPS = 5000
   DECAY_END = 300000
 
+  FORCE_MASK_GENERATION = False
+
   ENABLE_BFLOAT16 = True
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = tasks_lib.SingleTask.HParams(name='bert_task')
-    task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
+    task_p.model = pax_fiddle.Config(
+        models.BertModel, name='bert_lm',
+        force_mask_generation=self.FORCE_MASK_GENERATION)
     model_p = task_p.model
     model_p.lm_tpl.model_type = transformer_models.LanguageModelType.BIDIRECTIONAL
     model_p.lm_tpl.packed_input = True
