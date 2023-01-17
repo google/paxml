@@ -493,6 +493,7 @@ class CheckpointLoadingRules(NamedTuple):
     load_step: whether to load the step from this checkpoint.
     load_opt_states: whether to load opt_states (in its entirety) from this
       checkpoint.
+    load_ema_state: whether to load EMA state.
     partial_load_opt_states: whether to enable experimental partial opt_states
       loading from this checkpoint.
     input_specs_provider_p: A `BaseInputSpecsProvider.HParams` used to provide
@@ -505,6 +506,7 @@ class CheckpointLoadingRules(NamedTuple):
   step: Optional[int] = None
   load_step: bool = False
   load_opt_states: bool = False
+  load_ema_state: bool = True
   partial_load_opt_states: bool = False
   input_specs_provider_p: Optional[
       base_input.BaseInputSpecsProvider.HParams] = None
@@ -1091,8 +1093,9 @@ class SingleTask(base_task.BaseTask):
         var_weight_hparams)
 
     load_ema_state = (
-        hasattr(rules.task_p, 'train') and
-        rules.task_p.train.learner.optimizer.ema_decay > 0.0)
+        hasattr(rules.task_p, 'train')
+        and rules.task_p.train.learner.optimizer.ema_decay > 0.0
+    ) and rules.load_ema_state
 
     loading_rules = [
         (re.compile(pattern), ref) for pattern, ref in rules.load_rules
