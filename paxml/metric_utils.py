@@ -26,6 +26,7 @@ from jax import numpy as jnp
 from jax.experimental import global_device_array
 import numpy as np
 from paxml import summary_utils
+# Internal platform import
 from praxis import py_utils
 from praxis import pytypes
 import seqio
@@ -169,7 +170,10 @@ def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[
 
 def is_scalar(v: Any) -> bool:
   """Returns True if input is a scalar."""
-  return isinstance(v, (numbers.Number, np.ndarray, jnp.ndarray, global_device_array.GlobalDeviceArray, jax.Array))
+  scalar_types = [numbers.Number, np.ndarray, jnp.ndarray,
+                  global_device_array.GlobalDeviceArray, jax.Array]
+  # Internal scalar types
+  return isinstance(v, tuple(scalar_types))
 
 
 def is_weighted_scalar(v: Any) -> bool:

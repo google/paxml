@@ -302,17 +302,22 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":summary_utils",
-        # Implicit internal Jax runtime dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.values dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit internal platform check dependency.
         "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
-    ],
+    ] + select({
+        # Internal empty GCE platform
+        "//conditions:default": [
+            # Implicit internal Jax runtime dependency.
+        ],
+    }),
 )
 
 pytype_strict_library(
@@ -638,8 +643,14 @@ py_strict_test(
         # Implicit clu.values dependency.
         # Implicit flax dependency.
         # Implicit numpy dependency.
+        # Implicit internal platform check dependency.
         # Implicit seqio dependency.
-    ],
+    ] + select({
+        # Internal empty GCE platform
+        "//conditions:default": [
+            # Implicit internal Jax runtime dependency.
+        ],
+    }),
 )
 
 py_strict_test(
