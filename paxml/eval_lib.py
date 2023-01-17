@@ -18,7 +18,6 @@
 import abc
 import collections
 import contextlib
-import dataclasses
 import functools
 import gc
 import sys
@@ -281,9 +280,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       init_key: PRNGKey,
-      train_input_shape_dtypes: Optional[NestedShapeDtypeLike],
       is_decode: bool = False,
-      enable_auto_sharding: bool = False,
       eval_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
       decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
   ) -> Tuple[
@@ -305,55 +302,36 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         for input_p in (decode_input_ps or [])
     ]
 
-    if self._jax_task.hparams.train.always_use_train_for_model_init:
+    # TODO(laigd): maybe add enable_auto_sharding as an attr to Partitioner.
+    if (
+        self._partitioner.always_use_train_for_model_init
+        and not getattr(self._partitioner, '_enable_auto_sharding', False)
+    ):
       input_shape_dtypes = None
     else:
       input_shape_dtypes = _SpmdEvalRunner.get_input_shape_dtypes_for_init(
           padded_decode_input_ps + padded_eval_input_ps)
-
     train_state_metadata = self._partitioner.get_train_state_metadata(
         input_shape_dtypes, is_eval=True, discard_opt_states=not self.use_ema
     )
     partitioned_specs = train_state_metadata.partitioned_specs
     assert partitioned_specs is not None, 'must be in pjit mode'
 
-    # Make a copy of opt_states that is needed for ema
-    # opt_states is only needed to restore the ema state so it is removed in
-    # get_spmd_model_step_fns_from_inputs. Thus here we make a copy of it
-    backup = partitioned_specs.opt_states
-
     # If auto sharding is enabled, we need to get the updated partition specs
     # before using it to restore checkpoints.
-    # TODO(laigd): avoid re-creating the partitioner here.
-    step_fns, inputs_partition_specs, inputs_shape_dtypes, partitioned_specs = (
+    step_fns, inputs_partition_specs, inputs_shape_dtypes = (
         trainer_lib.get_spmd_model_step_fns_from_inputs(
             padded_decode_input_ps if is_decode else padded_eval_input_ps,
             decode_input_ps if is_decode else eval_input_ps,
-            self._jax_task,
+            self._partitioner,
             RunningMode.DECODE if is_decode else RunningMode.EVAL,
-            step_key,
-            train_input_shape_dtypes
-            if self._partitioner.always_use_train_for_model_init
-            else None,
-            train_state_partition_spec=partitioned_specs.to_eval_state(),
-            enable_auto_sharding=enable_auto_sharding,
+            partitioned_specs.to_eval_state(),
         )
     )
-    # Replace the partition spec. This only has effect when enable_auto_sharding
-    # is on.
-    if not self.use_ema:
-      train_state_metadata = dataclasses.replace(
-          train_state_metadata, partitioned_specs=partitioned_specs
-      )
-    else:
-      # Add opt_states back for restoring when ema is enabled
-      train_state_metadata = dataclasses.replace(
-          train_state_metadata,
-          partitioned_specs=partitioned_specs.replace(opt_states=backup),
-      )
+    if self.use_ema:
       # Make sure the opt_states exists before restoring
       # This is combined with the decoding test
-      if train_state_metadata.partitioned_specs.opt_states == {}:
+      if not partitioned_specs.opt_states:
         raise ValueError(
             "The partition spec doesn't include opt states but ema is enabled."
         )
@@ -689,10 +667,11 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
   prng_key = jax.random.PRNGKey(task_p.evaluate.random_seed)
 
-  # TODO(laigd): use RunningMode.EVAL after
-  # get_spmd_model_step_fns_from_inputs takes the partitioner as input.
   partitioner = trainer_lib.create_partitioner(
-      jax_task, prng_key, train_input_specs, auto_sharding_mode=None
+      jax_task,
+      prng_key,
+      train_input_specs,
+      auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
   )
   checkpointer = _create_checkpointer(
       jax_task,
@@ -716,14 +695,9 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   if task_p.model.mesh_shape is not None:
     eval_method = evaluate_spmd_model
     checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
-    extra_kwargs = dict(
-        train_input_specs=train_input_specs,
-        enable_auto_sharding=enable_auto_sharding,
-    )
   else:
     eval_method = evaluate_pmap_model
     checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
-    extra_kwargs = {}
   eval_method(
       jax_task,
       prng_key,
@@ -732,7 +706,6 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       eval_input_p,
       job_log_dir,
       early_stopping_fn,
-      **extra_kwargs,
   )
 
 
@@ -905,7 +878,7 @@ class _SpmdEvalRunner:
          init_key, train_input_specs, eval_input_ps=eval_input_ps))
 
     runner = _SpmdEvalRunner(
-        eval_input_ps, jax_task, partitioner, init_key,
+        eval_input_ps, jax_task, partitioner,
         partitioned_specs, job_log_dir)
     eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
         runner.run_one_step(partitioned_train_state, eval_summary_writers,
@@ -917,7 +890,6 @@ class _SpmdEvalRunner:
       eval_input_ps: Sequence[base_input.BaseInput.HParams],
       jax_task: tasks_lib.SingleTask,
       partitioner: trainer_lib.Partitioner,
-      init_key: PRNGKey,
       partitioned_specs: train_states.TrainState,
       job_log_dir: epath.Path,
       partitioned_eval_step_fns: Optional[Sequence[Callable[..., Any]]] = None,
@@ -945,9 +917,6 @@ class _SpmdEvalRunner:
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner
 
-    init_input_shape_dtypes = _SpmdEvalRunner.get_input_shape_dtypes_for_init(
-        self._padded_eval_input_ps)
-
     if partitioned_eval_step_fns:
       assert inputs_partition_specs is not None
       assert inputs_shape_dtypes is not None
@@ -955,16 +924,17 @@ class _SpmdEvalRunner:
       self._inputs_partition_specs = inputs_partition_specs
       self._inputs_shape_dtypes = inputs_shape_dtypes
     else:
-      (self._eval_steps, self._inputs_partition_specs,
-       self._inputs_shape_dtypes, _) = (
-           trainer_lib.get_spmd_model_step_fns_from_inputs(
-               self._padded_eval_input_ps,
-               self._unpadded_eval_input_ps,
-               self._jax_task,
-               RunningMode.EVAL,
-               init_key,
-               train_inputs_shape_dtype=init_input_shape_dtypes,
-               train_state_partition_spec=partitioned_specs.to_eval_state()))
+      (
+          self._eval_steps,
+          self._inputs_partition_specs,
+          self._inputs_shape_dtypes,
+      ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
+          self._padded_eval_input_ps,
+          self._unpadded_eval_input_ps,
+          self._partitioner,
+          RunningMode.EVAL,
+          partitioned_specs.to_eval_state(),
+      )
 
   @classmethod
   def get_input_shape_dtypes_for_init(
@@ -1039,8 +1009,6 @@ def evaluate_spmd_model(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-    train_input_specs: Optional[NestedShapeDtypeLike] = None,
-    enable_auto_sharding: bool = False,
 ) -> None:
   """Runs the evaluation loop on the entire test dataset for SPMD model.
 
@@ -1055,9 +1023,6 @@ def evaluate_spmd_model(
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    train_input_specs: Training input specs for model initialization.
-    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
-      shardings.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   if not eval_input_p:
@@ -1075,10 +1040,7 @@ def evaluate_spmd_model(
   (partitioned_train_state, train_state_metadata, step_fns,
    inputs_partition_specs, inputs_shape_dtypes) = checkpointer.get_model_states(
        init_key,
-       train_input_specs,
        is_decode=False,
-       # TODO(laigd): remove this option.
-       enable_auto_sharding=enable_auto_sharding,
        eval_input_ps=eval_input_p)
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
@@ -1090,7 +1052,6 @@ def evaluate_spmd_model(
       eval_input_p,
       jax_task,
       partitioner,
-      init_key,
       train_state_metadata.partitioned_specs,
       job_log_dir,
       step_fns,
@@ -1174,9 +1135,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       jax_task,
       prng_key,
       train_input_specs,
-      # TODO(laigd): use RunningMode.DECODE after
-      # get_spmd_model_step_fns_from_inputs takes the partitioner as input.
-      auto_sharding_mode=None,
+      auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
   )
   checkpointer = _create_checkpointer(
       jax_task,
@@ -1203,10 +1162,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   if task_p.model.mesh_shape is not None:
     decode_method = decode_spmd_model
     checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
-    extra_kwargs = dict(
-        train_input_specs=train_input_specs,
-        enable_auto_sharding=enable_auto_sharding,
-    )
+    extra_kwargs = {}
   else:
     decode_method = decode_pmap_model
     checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
@@ -1666,8 +1622,6 @@ def decode_spmd_model(
     job_log_dir: epath.Path,
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-    train_input_specs: Optional[NestedShapeDtypeLike] = None,
-    enable_auto_sharding: bool = False,
 ) -> None:
   """Runs the decoding on the entire decoder datasets for SPMD model.
 
@@ -1684,9 +1638,6 @@ def decode_spmd_model(
       determining whether to early stop current training. The callable object
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    train_input_specs: Training input specs for model initialization.
-    enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
-      shardings.
   """
   prng_key, init_key, eval_key = jax.random.split(prng_key, 3)
   task_p = jax_task.hparams
@@ -1722,9 +1673,7 @@ def decode_spmd_model(
   (partitioned_train_state, train_state_metadata, decode_step_fns,
    inputs_partition_specs, input_shape_dtypes) = checkpointer.get_model_states(
        init_key,
-       train_input_specs,
        is_decode=True,
-       enable_auto_sharding=enable_auto_sharding,
        decode_input_ps=input_p,
        eval_input_ps=eval_input_p)
   decode_once_fn = partition_decode_once_spmd_model(
@@ -1744,7 +1693,6 @@ def decode_spmd_model(
       eval_input_p,
       jax_task,
       partitioner,
-      init_key,
       train_state_metadata.partitioned_specs,
       job_log_dir,
   ).get_partition_run_one_step_fn(eval_key, use_gda)

@@ -899,15 +899,13 @@ def train_and_evaluate_spmd_model(
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
         for input_p in eval_input_p
     ]
-    p_eval_steps, _, _, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
+    p_eval_steps, _, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
         padded_eval_input_p,
         eval_input_p,
-        jax_task,
+        partitioner,
         RunningMode.EVAL,
-        init_key,
-        inputs_shape_dtype,
-        train_state_partition_spec=(
-            train_state_metadata.partitioned_specs.to_eval_state()))
+        train_state_metadata.partitioned_specs.to_eval_state(),
+    )
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
     if (create_gda_for_inputs or
@@ -983,17 +981,17 @@ def train_and_evaluate_spmd_model(
     trainer_lib.check_unique_names(padded_decode_input_pipelines)
 
     # TODO(pax-dev): Support auto-sharding for decoder step.
-    (decode_step_fns, decode_input_partition_specs,
-     decode_inputs_shape_dtypes, _) = (
-         trainer_lib.get_spmd_model_step_fns_from_inputs(
-             padded_decode_input_ps,
-             decode_input_ps,
-             jax_task,
-             RunningMode.DECODE,
-             init_key,
-             inputs_shape_dtype,
-             train_state_partition_spec=(
-                 train_state_metadata.partitioned_specs.to_eval_state())))
+    (
+        decode_step_fns,
+        decode_input_partition_specs,
+        decode_inputs_shape_dtypes,
+    ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
+        padded_decode_input_ps,
+        decode_input_ps,
+        partitioner,
+        RunningMode.DECODE,
+        train_state_metadata.partitioned_specs.to_eval_state(),
+    )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
         jax_task, task_p, padded_decode_input_pipelines, padded_decode_input_ps,
