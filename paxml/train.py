@@ -881,7 +881,7 @@ def train_and_evaluate_spmd_model(
       train_state_partition_spec=(
           train_state_metadata.partitioned_specs.to_eval_state()
       ),
-      # TODO(hthu): This should be from a evaluator?
+      # Use train_unpadded_global_batch_size since this is eval on train input.
       unpadded_global_batch_size=train_unpadded_global_batch_size,
   )
 
