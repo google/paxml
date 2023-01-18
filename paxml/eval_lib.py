@@ -421,11 +421,12 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       prng_key: PRNGKey,
       input_shape_dtypes: Optional[NestedShapeDtypeLike],
   ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
-    # Note: `discard_opt_states` is not supported when restoring pmap
-    # checkpoints. We must restore the entire checkpoint and then trim the
-    # unrelevant states.
+    # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
+    # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        input_shape_dtypes, is_eval=True, discard_opt_states=False
+        input_shape_dtypes,
+        is_eval=True,
+        discard_opt_states=py_utils.pmap_use_tensorstore() and not self.use_ema,
     )
 
     # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
@@ -441,6 +442,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           is_eval=not self._partitioner.always_use_train_for_model_init,
           checkpoint_type=self.checkpoint_type,
       )
+
     replicated_model_states = trainer_lib.replicate_model_state(model_states)
     logging.info('replicated_model_states: %s',
                  jax.tree_map(lambda x: x.shape, replicated_model_states))
