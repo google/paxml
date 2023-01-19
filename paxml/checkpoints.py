@@ -17,7 +17,7 @@
 
 import os
 import re
-from typing import Any, Optional, Sequence, Tuple, cast
+from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
 from absl import logging
 from etils import epath
@@ -31,17 +31,23 @@ import optax
 import orbax.checkpoint
 from paxml import base_task
 from paxml import checkpoint_pb2
+from paxml import checkpoint_version
 from paxml import train_states
 from praxis import py_utils
 from praxis import pytypes
 
+
 CHECKPOINT_PREFIX = 'checkpoint_'
+STATE_ITEM_NAME = 'state'
+METADATA_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METADATA_ITEM_NAME
 TMP_PREFIX = 'tmp_'
 CHECKPOINT_PATTERN_RE = re.compile(rf'{CHECKPOINT_PREFIX}[\d]+$')
 TMP_CHECKPOINT_PATTERN_RE = re.compile(
     rf'{TMP_PREFIX}[\d]+.{CHECKPOINT_PREFIX}[\d]+$')
 # Large value to disable flax-specific checkpoint management.
 _MAX_CHECKPOINT_FLAX = 1000000
+get_version_key = checkpoint_version.get_version_key
+get_version = checkpoint_version.get_version
 
 # TODO(b/260768187): Replace with Python enum.
 CheckpointType = checkpoint_pb2.CheckpointType
@@ -60,6 +66,48 @@ def _is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   return bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
 
 
+def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
+  if version is None:
+    version = get_version()
+  return {get_version_key(): version}
+
+
+def metadata_exists(directory: epath.Path) -> bool:
+  path = directory / METADATA_ITEM_NAME
+  return path.is_dir() and path.exists()
+
+
+def save_metadata(directory: epath.Path, metadata: Mapping[str, Any]):
+  checkpointer = Checkpointer(orbax.checkpoint.JsonCheckpointHandler())
+  path = directory / METADATA_ITEM_NAME
+  checkpointer.save(path, metadata)
+
+
+def restore_metadata(directory: epath.Path) -> Mapping[str, Any]:
+  checkpointer = Checkpointer(orbax.checkpoint.JsonCheckpointHandler())
+  path = directory / METADATA_ITEM_NAME
+  return checkpointer.restore(path)
+
+
+def get_version_and_save_dir(
+    checkpoint_step_dir: epath.Path,
+) -> Tuple[float, epath.Path]:
+  return get_version(), checkpoint_step_dir / STATE_ITEM_NAME
+
+
+def get_version_and_restore_dir(
+    checkpoint_step_dir: epath.Path,
+) -> Tuple[float, epath.Path]:
+  version = 0.
+  if metadata_exists(checkpoint_step_dir):
+    version = restore_metadata(checkpoint_step_dir)[get_version_key()]
+  if version > 0:
+    restore_dir = checkpoint_step_dir / STATE_ITEM_NAME
+  else:
+    restore_dir = checkpoint_step_dir
+  return version, restore_dir
+
+
 def checkpoint_name(
     step: int,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
@@ -70,7 +118,7 @@ def checkpoint_name(
     return f'{CHECKPOINT_PREFIX}{step:08d}'
 
 
-def _make_checkpoint_step_dir(
+def make_checkpoint_step_dir(
     checkpoint_dir: epath.Path,
     step: int,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
@@ -135,21 +183,27 @@ def save_checkpoint(
   checkpoint_dir = epath.Path(checkpoint_dir)
   step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
 
-  checkpoint_step_dir = _make_checkpoint_step_dir(
+  checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
+  version, checkpoint_save_dir = get_version_and_save_dir(checkpoint_step_dir)
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     if async_checkpointer is not None:
-      async_checkpointer.save(checkpoint_step_dir, train_state)
+      async_checkpointer.save(checkpoint_save_dir, train_state, version=version)
     else:
       checkpointer = orbax.checkpoint.Checkpointer(
           PaxCheckpointHandler())
-      checkpointer.save(checkpoint_step_dir, train_state)
+      checkpointer.save(checkpoint_save_dir, train_state, version=version)
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
-    checkpointer.save(checkpoint_step_dir, train_state, force=overwrite)
+    checkpointer.save(
+        checkpoint_save_dir, train_state, force=overwrite, version=version
+    )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
+
+  # Save metadata.
+  save_metadata(checkpoint_step_dir, make_metadata())
 
 
 def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
@@ -243,22 +297,28 @@ def restore_checkpoint(
     if step is None:
       logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
       return None
-  checkpoint_step_dir = _make_checkpoint_step_dir(
+  checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
-
+  version, checkpoint_restore_dir = get_version_and_restore_dir(
+      checkpoint_step_dir
+  )
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
-        checkpoint_step_dir,
+        checkpoint_restore_dir,
         item=state_global_shapes,
         specs=state_specs,
-        mesh=global_mesh)
+        mesh=global_mesh,
+        version=version,
+    )
     return restored_train_state
   elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
-    return checkpointer.restore(checkpoint_step_dir, item=state_global_shapes)
+    return checkpointer.restore(
+        checkpoint_restore_dir, item=state_global_shapes, version=version
+    )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
@@ -400,11 +460,16 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
 
-  async def async_save(self,
-                       directory: epath.Path,
-                       item: PyTreeDef,
-                       save_args: Optional[PyTreeDef] = None) -> Any:
+  async def async_save(
+      self,
+      directory: epath.Path,
+      item: PyTreeDef,
+      save_args: Optional[PyTreeDef] = None,
+      version: Optional[float] = None,
+  ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
+    if version is None:
+      raise ValueError('Expected version for saving.')
     flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
         item)
     # At that point, the flattened entries do not contain any reference to
@@ -413,12 +478,17 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     return await super().async_save(
         directory, flattened_train_state, save_args=save_args)
 
-  def restore(self,
-              directory: epath.Path,
-              item: Optional[PyTreeDef] = None,
-              specs: Optional[PyTreeDef] = None,
-              mesh: Optional[maps.Mesh] = None) -> PyTreeDef:
+  def restore(
+      self,
+      directory: epath.Path,
+      item: Optional[PyTreeDef] = None,
+      specs: Optional[PyTreeDef] = None,
+      mesh: Optional[maps.Mesh] = None,
+      version: Optional[float] = None,
+  ) -> PyTreeDef:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
+    if version is None:
+      raise ValueError('Expected version for restoration.')
     flattened_train_state, flattened_nested_names, flattened_state_specs = (
         _tensorstore_prepare(item, specs))
     # At that point, the flattened entries do not contain any reference to
@@ -464,7 +534,10 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       directory: epath.Path,
       item: PyTreeDef,
       save_args: Optional[PyTreeDef] = None,
+      version: Optional[float] = None,
   ) -> Any:
+    if version is None:
+      raise ValueError('Expected version for saving.')
     # Extract/flatten data structure to store to disk. Flax requires a flattened
     # data structure to be passed to the checkpointer.
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
@@ -491,7 +564,10 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       restore_args: Optional[PyTreeDef] = None,
       transforms: Optional[PyTreeDef] = None,
       transforms_default_to_original: bool = True,
+      version: Optional[float] = None,
   ) -> PyTreeDef:
+    if version is None:
+      raise ValueError('Expected version for restoration.')
     # Input the same data structure as in save_checkpoint().
     flattened_state, pytree_state = jax.tree_util.tree_flatten(item)
     str_pytree_state = str(pytree_state)

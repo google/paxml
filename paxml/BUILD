@@ -137,6 +137,7 @@ pytype_strict_library(
     deps = [
         ":base_task",
         ":checkpoint_py_pb2",
+        ":checkpoint_version",
         ":train_states",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
@@ -148,6 +149,11 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
     ],
+)
+
+pytype_strict_library(
+    name = "checkpoint_version",
+    srcs = ["checkpoint_version.py"],
 )
 
 pytype_strict_library(
@@ -480,7 +486,6 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
-        # Implicit fiddle dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
@@ -573,8 +578,8 @@ py_strict_test(
 )
 
 py_strict_test(
-    name = "orbax_checkpoint_managers_test",
-    srcs = ["orbax_checkpoint_managers_test.py"],
+    name = "checkpoint_managers_test",
+    srcs = ["checkpoint_managers_test.py"],
     deps = [
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
@@ -585,6 +590,7 @@ py_strict_test(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit orbax.checkpoint dependency.
+        "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -675,7 +681,6 @@ py_strict_test(
     srcs = ["summary_utils_test.py"],
     deps = [
         ":summary_utils",
-        # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.

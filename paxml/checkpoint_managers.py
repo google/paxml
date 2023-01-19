@@ -16,10 +16,8 @@
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
 import dataclasses
-import datetime
-import os
 import typing
-from typing import Any, Optional, List, Union, Mapping
+from typing import Any, Optional, Union, Mapping, Sequence
 
 from etils import epath
 import jax
@@ -35,8 +33,46 @@ from paxml import preemption  # mapped to internal
 CheckpointType = checkpoint_pb2.CheckpointType
 
 CHECKPOINT_PREFIX = 'checkpoint_'
-DEFAULT_ITEM_NAME = orbax.checkpoint.checkpoint_manager.DEFAULT_ITEM_NAME
-METRIC_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METRIC_ITEM_NAME
+STATE_ITEM_NAME = checkpoints.STATE_ITEM_NAME
+METADATA_ITEM_NAME = checkpoints.METADATA_ITEM_NAME
+
+_SUPPORTED_ITEMS = frozenset({STATE_ITEM_NAME, METADATA_ITEM_NAME})
+
+
+def _get_checkpoint_version(
+    step: int, checkpoint_type: CheckpointType, directory: epath.Path
+) -> float:
+  """Gets checkpoint version from saved metadata."""
+  checkpoint_step_dir = checkpoints.make_checkpoint_step_dir(
+      directory, step, checkpoint_type=checkpoint_type
+  )
+  version = 0.
+  # Necessary because some checkpoints do not conform to Orbax directory
+  # structure. Could rely exclusively on actual version if all checkpoints
+  # conformed.
+  if checkpoints.metadata_exists(checkpoint_step_dir):
+    version = checkpoints.restore_metadata(checkpoint_step_dir)[
+        checkpoints.get_version_key()
+    ]
+  return version
+
+
+def _update_args_with_version(item_kwargs, version):
+  kwargs = {STATE_ITEM_NAME: {checkpoints.get_version_key(): version}}
+  if item_kwargs is not None:
+    kwargs[STATE_ITEM_NAME].update(item_kwargs)
+  return kwargs
+
+
+def _create_items_dict_with_metadata(item, version):
+  items = {
+      STATE_ITEM_NAME: item,
+  }
+  if version > 0:
+    items.update(
+        {METADATA_ITEM_NAME: checkpoints.make_metadata(version=version)}
+    )
+  return items
 
 
 @dataclasses.dataclass
@@ -54,7 +90,7 @@ class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
   todelete_subdir: Optional[str] = None
 
 
-class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
+class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
   """Provides Pax-specific logic for orbax.checkpoint.CheckpointManager.
 
   Pax only supports a single checkpointable item (TrainState) and checkpoints
@@ -70,21 +106,43 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
 
   def __init__(
       self,
+      directory: epath.PathLike,
       *args,
       checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
-      **kwargs):
+      **kwargs,
+  ):
     if checkpoint_type == CheckpointType.CHECKPOINT_UNSPECIFIED:
       raise ValueError('Must specify checkpoint type.')
     self._checkpoint_type = checkpoint_type
-    super().__init__(*args, **kwargs)
+
+    self._version = checkpoints.get_version()
+    # Check for existing checkpoints and retrieve version information. The
+    # specific version may impact the checkpoint format, so it must be known in
+    # advance of any operations.
+    self._directory = epath.Path(directory)
+    if self._directory.exists():
+      steps = self.all_steps(read=True)
+      if steps:
+        versions = [
+            _get_checkpoint_version(s, self._checkpoint_type, self._directory)
+            for s in steps
+        ]
+        if not all(v == versions[0] for v in versions):
+          raise ValueError('Expected all checkpoints to have the same version.')
+        self._version = versions[0]
+
+    super().__init__(directory, *args, **kwargs)
     # Set to 1 if not provided or set to 0.
     self._options.save_interval_steps = self._options.save_interval_steps or 1
 
-  def _checkpoint_name(self, step: Union[int, str]) -> str:
-    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      return f'{CHECKPOINT_PREFIX}{step}'
-    else:
-      return checkpoints.checkpoint_name(step)
+  @property
+  def version(self) -> float:
+    return self._version
+
+  def _checkpoint_name(self, step: int) -> str:
+    return checkpoints.checkpoint_name(
+        step, checkpoint_type=self._checkpoint_type
+    )
 
   def should_save(self, step: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
@@ -103,80 +161,22 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
         last_checkpoint_step < step and
         step % self._options.save_interval_steps == 0)
 
-  # TODO(b/262389151) Rely on superclass logic when possible.
-  def _create_checkpoints(
-      self,
-  ) -> List[orbax.checkpoint.checkpoint_manager.CheckpointInfo]:
-    """Create a list of CheckpointInfo for existing checkpoints.
-
-    If none are present, returns empty list.
-
-    This method is copied from the superclass, except for the logic reading
-    existing checkpoint steps.
-
-    Returns:
-      a list of CheckpointInfo, sorted by increasing step.
-    """
-    checkpoint_dirnames = tf.io.gfile.listdir(self.directory)
-    dirnames = [
-        x for x in checkpoint_dirnames if checkpoints.is_checkpoint_asset(x)
-    ]
-    steps = sorted([
-        int(os.path.basename(x).replace(checkpoints.CHECKPOINT_PREFIX, ''))
-        for x in dirnames
-    ])
-    if not steps:
-      return []
-
-    tz = datetime.timezone.utc
-    times = [
-        datetime.datetime.fromtimestamp(
-            (self.directory / self._checkpoint_name(step)).stat().mtime, tz=tz)
-        for step in steps
-    ]
-
-    def get_metrics(step):
-      if self._track_best:
-        restored = self._restore_impl(step, {METRIC_ITEM_NAME: None}, {})
-        if METRIC_ITEM_NAME in restored:
-          return restored[METRIC_ITEM_NAME]
-      return None
-
-    metrics = [get_metrics(step) for step in steps]
-
-    return [
-        orbax.checkpoint.checkpoint_manager.CheckpointInfo(
-            step=s, time=t, metrics=m)
-        for s, t, m in zip(steps, times, metrics)
-    ]
-
   def _get_save_directory(self,
                           step: int,
                           directory: epath.Path,
                           key_name: Optional[str] = None) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
-    if key_name is None or key_name == DEFAULT_ITEM_NAME:
-      return checkpoints._make_checkpoint_step_dir(  # pylint: disable=protected-access
-          directory, step, checkpoint_type=self._checkpoint_type
-      )
-    else:
-      raise ValueError(
-          f'Unrecognized item {key_name} is not currently supported.')
+    step_dir = checkpoints.make_checkpoint_step_dir(
+        directory, step, checkpoint_type=self._checkpoint_type
+    )
+    if self._version < 1 or key_name is None:
+      return step_dir
+    return step_dir / key_name
 
   def _cleanup_tmp_directories(self):
     if py_utils.is_mock_tpu_backend():
       return
-
-    tmp_dirs = [
-        f
-        for f in self.directory.glob(CHECKPOINT_PREFIX + '*')
-        if not orbax.checkpoint.utils.is_checkpoint_item_finalized(f)
-    ]
-    if jax.process_index() == 0:
-      for tmp_dir in tmp_dirs:
-        assert tmp_dir.is_dir()
-        tmp_dir.rmtree()
-    py_utils.sync_global_devices('cleanup_tmp_dirs')
+    super()._cleanup_tmp_directories()
 
   def _delete_directory(self, step: int):
     if jax.process_index() != 0:
@@ -200,3 +200,74 @@ class OrbaxCheckpointManager(orbax.checkpoint.CheckpointManager):
     if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
       raise ValueError('`structure` not supported for Flax format checkpoints.')
     return super().structure()
+
+
+class OrbaxCheckpointManager:
+  """Wrapper class for overridden _CheckpointManagerImpl."""
+
+  def __init__(
+      self,
+      directory: epath.Path,
+      checkpointer: orbax.checkpoint.AbstractCheckpointer,
+      options: Optional[CheckpointManagerOptions] = None,
+      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+  ):
+    checkpointers = {
+        checkpoints.STATE_ITEM_NAME: checkpointer,
+        METADATA_ITEM_NAME: orbax.checkpoint.Checkpointer(
+            orbax.checkpoint.JsonCheckpointHandler()
+        ),
+    }
+    self._manager = _CheckpointManagerImpl(
+        directory,
+        checkpointers,
+        options=options,
+        checkpoint_type=checkpoint_type,
+    )
+
+  @property
+  def version(self) -> float:
+    return self._manager.version
+
+  @property
+  def directory(self) -> epath.Path:
+    return self._manager.directory
+
+  def all_steps(self) -> Sequence[int]:
+    return self._manager.all_steps()
+
+  def latest_step(self) -> Optional[int]:
+    return self._manager.latest_step()
+
+  def check_for_errors(self):
+    self._manager.check_for_errors()
+
+  def wait_until_finished(self):
+    self._manager.wait_until_finished()
+
+  def should_save(self, step: int) -> bool:
+    return self._manager.should_save(step)
+
+  def save(
+      self,
+      step: int,
+      train_state: Any,
+      force: Optional[bool] = False,
+  ) -> bool:
+    save_kwargs = _update_args_with_version(None, self.version)
+    items = _create_items_dict_with_metadata(train_state, self.version)
+    return self._manager.save(step, items, save_kwargs=save_kwargs, force=force)
+
+  def restore(
+      self,
+      step: int,
+      train_state: Any,
+      restore_kwargs: Optional[Any] = None,
+  ) -> Union[Any, Mapping[str, Any]]:
+    """See superclass documentation."""
+    # Propagate version to CheckpointHandler.
+    restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
+    items = _create_items_dict_with_metadata(train_state, self.version)
+    return self._manager.restore(
+        step, items=items, restore_kwargs=restore_kwargs
+    )[STATE_ITEM_NAME]

@@ -74,6 +74,7 @@ _INIT_TIME = time.time()
 _READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
 _WRITE_CHECKPOINT_EVENT: str = '/jax/checkpoint/write/durations_sec'
 
+
 def _checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
   """Returns the checkpoint directory from the root `job_log_dir`."""
   return job_log_dir / 'checkpoints'
@@ -194,7 +195,8 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           'global_mesh': global_mesh
       }
     return self.checkpoint_manager.restore(
-        step_i, items=train_state_global_shapes, restore_kwargs=restore_args)
+        step_i, train_state_global_shapes, restore_kwargs=restore_args
+    )
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
     logging.info('Saving a ckpt at final step: %d', step_i)
@@ -297,7 +299,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
           train_state = None
         else:
           train_state = self.checkpoint_manager.restore(
-              step, items=train_state_global_shapes)
+              step, train_state_global_shapes
+          )
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
     # Randomly initialized variables if no files in checkpoint dir.
@@ -401,7 +404,8 @@ def _create_checkpointer(
       checkpoint_dir,
       checkpointer,
       options=options,
-      checkpoint_type=checkpoint_type)
+      checkpoint_type=checkpoint_type,
+  )
 
   if task_p.model.ici_mesh_shape is not None:
     checkpointer = _OrbaxPjitTrainingCheckpointer(
