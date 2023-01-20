@@ -210,9 +210,12 @@ def compile_for_auto_sharding(step_fn: Any,
 EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
 
 
-def write_post_init_model_hparams_file(model: base_model.BaseModel,
-                                       var_weight_hparams: NestedWeightHParams,
-                                       job_log_dir: epath.Path) -> None:
+def write_post_init_model_hparams_file(
+    model: base_model.BaseModel,
+    var_weight_hparams: NestedWeightHParams,
+    job_log_dir: epath.Path,
+    do_eval: bool = False,
+) -> None:
   """Writes a post-init params file into the root `job_log_dir`.
 
   This file is the source of truth of how model is constructed. It contains two
@@ -224,19 +227,24 @@ def write_post_init_model_hparams_file(model: base_model.BaseModel,
     model: A BaseModel
     var_weight_hparams: A pytree of WeightHParams
     job_log_dir: The root dir for the training job.
+    do_eval: whether this is in eval mode.
   """
   if jax.process_index() == 0:
     params_fpath = job_log_dir / 'post_init_model_params.txt'
     logging.info('post_init_model_params: %s', params_fpath)
     job_log_dir.mkdir(parents=True, exist_ok=True)
+    context_p = base_layer.JaxContext.HParams(do_eval=do_eval)
     with params_fpath.open('w') as params_file:
       prng_key = jax.random.PRNGKey(seed=123)
 
       def gen_post_init_hparams(prng_key):
-        return model.apply({},
-                           rngs={base_layer.PARAMS: prng_key},
-                           method=model.post_init_hparams,
-                           mutable=True)[1]
+        with base_layer.JaxContext.new_context(hparams=context_p):
+          return model.apply(
+              {},
+              rngs={base_layer.PARAMS: prng_key},
+              method=model.post_init_hparams,
+              mutable=True,
+          )[1]
 
       variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
       assert base_layer.HYPER_PARAMS in variables_abstract

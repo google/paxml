@@ -1266,6 +1266,7 @@ def decode_pmap_model(
         jax_task.model,
         train_state_metadata.var_weight_hparams,
         job_log_dir / 'decoder_out',
+        do_eval=True,
     )
 
   prng_key, decode_key = jax.random.split(prng_key)
@@ -1693,8 +1694,11 @@ def decode_spmd_model(
       job_log_dir,
   ).get_partition_run_one_step_fn(eval_key, use_gda)
   trainer_lib.write_post_init_model_hparams_file(
-      jax_task.model, train_state_metadata.var_weight_hparams,
-      job_log_dir / 'decoder_out')
+      jax_task.model,
+      train_state_metadata.var_weight_hparams,
+      job_log_dir / 'decoder_out',
+      do_eval=True,
+  )
 
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
