@@ -59,11 +59,22 @@ COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
+  """Determines whether path is a checkpoint. May or may not be finalized."""
   return bool(CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
 
 
-def _is_tmp_checkpoint_asset(x: epath.Path) -> bool:
-  return bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
+def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
+  if not is_checkpoint_asset(x):
+    return False
+  # Would only match v0.0 checkpoints, without state/metadata subdirs.
+  if bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x))):
+    return True
+  # v0.0 checkpoint, if it did not return False at the previous condition, it
+  # must be finalized.
+  if not (x / STATE_ITEM_NAME).exists():
+    return False
+  # v>1.0 checkpoint, can use Orbax functions.
+  return not orbax.checkpoint.utils.is_checkpoint_finalized(x)
 
 
 def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
@@ -128,7 +139,7 @@ def make_checkpoint_step_dir(
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   checkpoint_dir = epath.Path(checkpoint_dir)
-  if _is_tmp_checkpoint_asset(checkpoint_dir):
+  if is_tmp_checkpoint_asset(checkpoint_dir):
     return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX):])
   return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX):])
 
@@ -218,10 +229,10 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
     return None
-  # Note: is_checkpoint_asset() already filters out flax temporary checkpoints
-  # that would be ending with `tmp`.
   checkpoint_assets = [
-      v for v in checkpoint_dir.iterdir() if is_checkpoint_asset(v)
+      v
+      for v in checkpoint_dir.iterdir()
+      if is_checkpoint_asset(v) and not is_tmp_checkpoint_asset(v)
   ]
   if not checkpoint_assets:
     return None
