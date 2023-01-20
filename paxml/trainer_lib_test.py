@@ -151,7 +151,7 @@ class PjitPartitionerTest(TrainLibTestBase):
         trainer_lib.train_step_single_learner if use_auto_shard else None
     )
     train_state_partition_spec = partitioner.get_train_state_metadata(
-        self._inputs_shape_dtype, metadata.partitioned_specs, is_eval=False
+        self._inputs_shape_dtype, is_eval=False
     ).partitioned_specs
 
     if use_auto_shard:

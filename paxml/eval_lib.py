@@ -325,7 +325,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
             decode_input_ps if is_decode else eval_input_ps,
             self._partitioner,
             RunningMode.DECODE if is_decode else RunningMode.EVAL,
-            partitioned_specs.to_eval_state(),
         )
     )
     if self.use_ema:
@@ -880,8 +879,7 @@ class _SpmdEvalRunner:
          init_key, train_input_specs, eval_input_ps=eval_input_ps))
 
     runner = _SpmdEvalRunner(
-        eval_input_ps, jax_task, partitioner,
-        partitioned_specs, job_log_dir)
+        eval_input_ps, jax_task, partitioner, job_log_dir)
     eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
         runner.run_one_step(partitioned_train_state, eval_summary_writers,
                             eval_key, create_gda_for_inputs, use_gda))
@@ -892,7 +890,6 @@ class _SpmdEvalRunner:
       eval_input_ps: Sequence[base_input.BaseInput.HParams],
       jax_task: tasks_lib.SingleTask,
       partitioner: trainer_lib.Partitioner,
-      partitioned_specs: train_states.TrainState,
       job_log_dir: epath.Path,
       partitioned_eval_step_fns: Optional[Sequence[Callable[..., Any]]] = None,
       inputs_partition_specs: Optional[Sequence[NestedPartitionSpec]] = None,
@@ -935,7 +932,6 @@ class _SpmdEvalRunner:
           self._unpadded_eval_input_ps,
           self._partitioner,
           RunningMode.EVAL,
-          partitioned_specs.to_eval_state(),
       )
 
   @classmethod
@@ -1054,7 +1050,6 @@ def evaluate_spmd_model(
       eval_input_p,
       jax_task,
       partitioner,
-      train_state_metadata.partitioned_specs,
       job_log_dir,
       step_fns,
       inputs_partition_specs,
@@ -1695,7 +1690,6 @@ def decode_spmd_model(
       eval_input_p,
       jax_task,
       partitioner,
-      train_state_metadata.partitioned_specs,
       job_log_dir,
   ).get_partition_run_one_step_fn(eval_key, use_gda)
   trainer_lib.write_post_init_model_hparams_file(

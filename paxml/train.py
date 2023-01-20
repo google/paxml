@@ -908,7 +908,6 @@ def train_and_evaluate_spmd_model(
         eval_input_p,
         partitioner,
         RunningMode.EVAL,
-        train_state_metadata.partitioned_specs.to_eval_state(),
     )
 
   def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
@@ -994,7 +993,6 @@ def train_and_evaluate_spmd_model(
         decode_input_ps,
         partitioner,
         RunningMode.DECODE,
-        train_state_metadata.partitioned_specs.to_eval_state(),
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
