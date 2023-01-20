@@ -70,6 +70,7 @@ def pax_targets(
         prefix_name = "",
         name = "",
         add_main_gpu_target = True,
+        add_main_mpm_target = True,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
         smoke_test_args = None,
@@ -81,6 +82,9 @@ def pax_targets(
 
     ":main", a Python binary that can be passed to the xm launcher to run
         the experiments.
+    ":main_mpm", an MPM target, which contains main.par, that can be used
+        in the xm launcher with --binary_type=mpm_target. Only available if
+        `add_main_mpm_target` is True.
     ":all_experiments_smoke_test", a Python test that runs a sanity check
         on all registered experiments.
     ":dump_hparams", a Python util binary that writes experiment hparams to
@@ -96,6 +100,7 @@ def pax_targets(
           main target is ":test_main".
       name: unused.
       add_main_gpu_target: Build with jax GPU dependency.
+      add_main_mpm_target: Add a ':main_mpm' target.
       smoke_test_args: The list of command line arguments that can be passed to the
        :all_experiments_smoke_test target.
       smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
@@ -133,6 +138,20 @@ def pax_targets(
         exp_sources = exp_sources,
         # Implicit py_binary flag
     )
+    if add_main_mpm_target and hasattr(native, "genmpm"):
+        main_name = "main_mpm"
+        main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
+        main_dep = "main"
+        main_dep = main_dep if not prefix_name else "%s_%s" % (prefix_name, main_dep)
+        native.genmpm(
+            name = main_name,
+            # Make package temporal since most pax users cannot build under
+            # learning/multipod/pax. Otherwise we could set the package_name to
+            # package_name = "%s/%s" % (native.package_name().removesuffix('/params'), main_dep),
+            temporal = 1,
+            srcs = [":%s.par" % main_dep],
+        )
+
     if add_main_gpu_target:
         main_name = "main_gpu"
         main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
