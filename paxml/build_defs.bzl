@@ -145,7 +145,9 @@ def pax_targets(
                 # Implicit gpu dependency.
             ] + extra_deps,
             exp_sources = exp_sources,
-            # Implicit py_binary flag
+            # # Implicit py_binary flag
+            # PAR reticulation OOMs for gpu_main.
+            exec_properties = {"mem": "24g"},
         )
 
     test_name = "all_experiments_smoke_test"
