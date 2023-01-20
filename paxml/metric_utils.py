@@ -41,13 +41,16 @@ WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 
 NestedMap = py_utils.NestedMap
-SummaryValueTypes = Union[clu_values.Scalar, clu_values.Image, clu_values.Text]
+SummaryValueTypes = Union[
+    clu_values.Scalar, clu_values.Image, clu_values.Text, clu_values.Summary]
 
 
 _VALUES_TO_SUMMARY_TYPE = {
     clu_values.Scalar: summary_utils.SummaryType.SCALAR,
     clu_values.Text: summary_utils.SummaryType.TEXT,
     clu_values.Image: summary_utils.SummaryType.IMAGE,
+    # Videos (GIFs) are written to tensorboard as clu.values.summary.
+    clu_values.Summary: summary_utils.SummaryType.VIDEO,
 }
 
 
@@ -119,8 +122,17 @@ def write_clu_metric_summaries(
   for metric_name, metric_value in metric_values.items():
     logging.info('Summarizing metric %s', metric_name)
     summary_type = _get_summary_type(metric_value)
-    summary_utils.write_summary_tensor(
-        step_i, metric_name, metric_value.value, summary_type)
+    # Pass both value and metadata to write_summary_tensor for video summary.
+    if isinstance(metric_value, clu_values.Summary):
+      summary_utils.write_summary_tensor(
+          step_i,
+          metric_name,
+          metric_value.value,
+          summary_type,
+          metric_value.metadata)
+    else:
+      summary_utils.write_summary_tensor(
+          step_i, metric_name, metric_value.value, summary_type)
 
 
 def write_seqio_metric_summaries(seqio_metrics: Sequence[Mapping[str, Union[

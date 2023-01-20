@@ -214,6 +214,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   scalar_summaries = {}
   image_summaries = {}
   audio_summaries = {}
+  video_summaries = {}
   for k, v in summary_tensors.items():
     summary_type = base_layer.get_summary_type_from_key(k)
     if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
@@ -222,6 +223,8 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
       image_summaries[k] = v
     elif base_layer.get_summary_base_type(summary_type) == SummaryType.AUDIO:
       audio_summaries[k] = v
+    elif base_layer.get_summary_base_type(summary_type) == SummaryType.VIDEO:
+      video_summaries[k] = v
 
   # Compute the mean of scalars.
   scalar_summaries = jax.lax.pmean(
@@ -241,9 +244,17 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   audio_summaries = jax.tree_map(
       lambda x: jnp.reshape(x, [-1] + list(x.shape[-2:]))[:max_entries],
       audio_summaries)
+  video_summaries = jax.tree_map(
+      lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
+      video_summaries)
 
   summary_tensors = summary_tensors.copy()
-  for summary_dict in (scalar_summaries, image_summaries, audio_summaries):
+  for summary_dict in (
+      scalar_summaries,
+      image_summaries,
+      audio_summaries,
+      video_summaries,
+  ):
     for k, v in summary_dict.items():
       summary_tensors[k] = v
   return summary_tensors
@@ -285,9 +296,13 @@ def flatten_summary_dict(summary_dict: Dict[str, JTensor],
   return outputs
 
 
-def write_summary_tensor(step_i: int, key: str,
-                         tensor: Union[float, JTensor, str, Sequence[JTensor]],
-                         summary_type: SummaryType) -> bool:
+def write_summary_tensor(
+    step_i: int,
+    key: str,
+    tensor: Union[float, JTensor, str, Sequence[JTensor]],
+    summary_type: SummaryType,
+    metadata: Optional[Any] = None,
+) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
     if summary_type in {
@@ -341,6 +356,12 @@ def write_summary_tensor(step_i: int, key: str,
         for i in range(min(tensor.shape[0], remaining_max_texts)):
           tf_summary.text(f'{key}/{i}', str(tensor[i:i + 1]), step_i)
         remaining_max_texts -= tensor.shape[0]
+  elif base_layer.get_summary_base_type(summary_type) == SummaryType.VIDEO:
+    # Metadata must exist for saving video summary.
+    assert metadata is not None
+    # Ensure that only one video summary is passed at a time.
+    assert len(tensors) == 1
+    tf_summary.write(tag=key, tensor=tensors[0], metadata=metadata, step=step_i)
   else:
     assert False, 'Unsupported summary type: ' + str(summary_type)
 

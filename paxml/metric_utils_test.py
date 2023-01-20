@@ -58,6 +58,22 @@ def _mock_image(batch_size=None) -> clu_values.Image:
   return clu_values.Image(np.ones(base_shape))
 
 
+def _mock_video(batch_size=None) -> clu_values.Summary:
+  class Metadata(object):
+    message: str = 'dummy metadata'
+
+  base_shape = [5, 12, 12, 3]
+  video = np.array([
+      str(base_shape[1]),
+      str(base_shape[2]),
+      np.ones(base_shape).astype(np.uint8).tobytes()])
+  video_summary = [clu_values.Summary(value=video, metadata=Metadata())]
+  if batch_size is not None:
+    return video_summary * batch_size
+  else:
+    return video_summary
+
+
 class MetricUtilsTest(absltest.TestCase):
 
   def _test_dir(self):
@@ -89,7 +105,9 @@ class MetricUtilsTest(absltest.TestCase):
             clu_values.Scalar(5),
             clu_values.Text('hi'),
             _mock_image(batch_size=None),
-            _mock_image(batch_size=2)
+            _mock_image(batch_size=2),
+            _mock_video(batch_size=None),
+            _mock_video(batch_size=2),
         ]
     metrics = {'test': ScalarListMetric()}
 
@@ -98,6 +116,9 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/test_1'].value, 'hi')
     self.assertEqual(metric_values['test/test_2'].value.shape, (12, 12, 3))
     self.assertEqual(metric_values['test/test_3'].value.shape, (2, 12, 12, 3))
+    self.assertLen(metric_values['test/test_4'], 1)
+    self.assertEqual(metric_values['test/test_4'][0].value.shape, (3,))
+    self.assertLen(metric_values['test/test_5'], 2)
 
   def test_tuple_compute_metric_values(self):
     @flax.struct.dataclass
@@ -121,7 +142,9 @@ class MetricUtilsTest(absltest.TestCase):
             'scalar_1': clu_values.Scalar(2),
             'text_0': clu_values.Text('test3'),
             'image_0': _mock_image(None),
-            'image_1': _mock_image(5)
+            'image_1': _mock_image(5),
+            'video_0': _mock_video(None),
+            'video_1': _mock_video(2),
         }
 
     metrics = {'test': ScalarDictMetric()}
@@ -132,6 +155,9 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/text_0'].value, 'test3')
     self.assertEqual(metric_values['test/image_0'].value.shape, (12, 12, 3))
     self.assertEqual(metric_values['test/image_1'].value.shape, (5, 12, 12, 3))
+    self.assertEqual(metric_values['test/video_0_0'].value.shape, (3,))
+    self.assertEqual(metric_values['test/video_1_0'].value.shape, (3,))
+    self.assertEqual(metric_values['test/video_1_1'].value.shape, (3,))
 
   def test_mixed_dict_compute_metric_values(self):
     @flax.struct.dataclass
@@ -173,6 +199,8 @@ class MetricUtilsTest(absltest.TestCase):
             'list_1': [clu_values.Scalar(1), clu_values.Text('test')],
             'tuple_0': (_mock_image(None), _mock_image(5)),
             'image_0': _mock_image(5),
+            'video_0': _mock_video(None),
+            'video_1': _mock_video(2),
         }
 
     metrics = {'test': MixedDictMetric()}
