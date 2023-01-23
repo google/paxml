@@ -33,7 +33,7 @@ import orbax.checkpoint
 from paxml import checkpoint_managers
 from paxml import checkpoint_pb2
 from paxml import checkpoints
-from praxis import train_states
+from paxml import train_states
 import tensorflow.compat.v2 as tf
 
 

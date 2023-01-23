@@ -584,13 +584,13 @@ py_strict_test(
         ":checkpoint_managers",
         ":checkpoint_py_pb2",
         ":checkpoints",
+        ":train_states",
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit orbax.checkpoint dependency.
-        "//praxis:train_states",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
