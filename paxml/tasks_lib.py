@@ -243,9 +243,12 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
 
 
 def _make_gda_train_state(
-    rules: CheckpointLoadingRules, ckpt_train_state: TrainState,
-    train_state_pspecs: TrainState, matched_pspecs: Dict[str, Any],
-    load_ema_state: bool) -> Tuple[TrainState, TrainState]:
+    rules: CheckpointLoadingRules,
+    ckpt_train_state: TrainState,
+    train_state_pspecs: TrainState,
+    matched_pspecs: Dict[str, Any],
+    load_ema_states: bool,
+) -> Tuple[TrainState, TrainState]:
   """Makes changes to checkpoint train states for GDA ckpts."""
   # For GDA checkpoint type, skip loading step / opt states from the
   # checkpoint if rules are set to False. FLAX checkpoint type doesn't support
@@ -254,8 +257,11 @@ def _make_gda_train_state(
     ckpt_train_state = ckpt_train_state.replace(step={})
     if train_state_pspecs is not None:
       train_state_pspecs = train_state_pspecs.replace(step={})
-  if (not rules.load_opt_states and not rules.partial_load_opt_states and
-      not load_ema_state):
+  if (
+      not rules.load_opt_states
+      and not rules.partial_load_opt_states
+      and not load_ema_states
+  ):
     ckpt_train_state = ckpt_train_state.replace(opt_states={})
     if train_state_pspecs is not None:
       train_state_pspecs = train_state_pspecs.replace(opt_states={})
@@ -277,7 +283,7 @@ def _make_gda_train_state(
   ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
   if train_state_pspecs is not None:
     train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
-  if load_ema_state:
+  if load_ema_states:
     new_states = []
     new_states_pspecs = []
     # TODO(pax-dev): This doesn't work with prefix dims.
@@ -493,7 +499,7 @@ class CheckpointLoadingRules(NamedTuple):
     load_step: whether to load the step from this checkpoint.
     load_opt_states: whether to load opt_states (in its entirety) from this
       checkpoint.
-    load_ema_state: whether to load EMA state.
+    load_ema_states: whether to load EMA state.
     partial_load_opt_states: whether to enable experimental partial opt_states
       loading from this checkpoint.
     input_specs_provider_p: A `BaseInputSpecsProvider.HParams` used to provide
@@ -506,7 +512,7 @@ class CheckpointLoadingRules(NamedTuple):
   step: Optional[int] = None
   load_step: bool = False
   load_opt_states: bool = False
-  load_ema_state: bool = True
+  load_ema_states: bool = True
   partial_load_opt_states: bool = False
   input_specs_provider_p: Optional[
       base_input.BaseInputSpecsProvider.HParams] = None
@@ -798,8 +804,8 @@ class SingleTask(base_task.BaseTask):
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
-      eval_use_ema_state: If True, use ema states to run eval during train, note
-        that in this case ema MUST be enabled in the learner.
+      eval_use_ema_states: If True, use ema states to run eval during train,
+        note that in this case ema MUST be enabled in the learner.
       inputs_split_mapping: The PartitionSpec for inputs such as inputs, labels,
         targets, paddings, num words etc. This is only relevant for SPMD sharded
         models. By default it is None, which means all the inputs are
@@ -815,7 +821,7 @@ class SingleTask(base_task.BaseTask):
         this value is not a positive int. Set to 0 to disable decode steps.
       decode_start_after_n_steps: Starts decoder after N steps, only used in
         continuous decoding.
-      decode_use_ema_state: If True, use ema states to run decode during train,
+      decode_use_ema_states: If True, use ema states to run decode during train,
         note that in this case ema MUST be enabled in the learner.
       profiler_num_steps: The number of steps to be captured by the profiler
         based on the step time estimate.
@@ -846,14 +852,14 @@ class SingleTask(base_task.BaseTask):
     variable_norm_summary: bool = True
     eval_interval_steps: int = 100
     eval_skip_train: bool = False
-    eval_use_ema_state: bool = False
+    eval_use_ema_states: bool = False
     inputs_split_mapping: Optional[PartitionSpec] = None
     init_from_checkpoint_rules: Dict[
         str, CheckpointLoadingRules] = dataclasses.field(default_factory=dict)
     decode_interval_steps: Optional[int] = None
     decode_start_after_n_steps: int = 0
     # TODO(zhishuai): verify this for a pjit model.
-    decode_use_ema_state: bool = False
+    decode_use_ema_states: bool = False
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.
     profiler_capture_step: Optional[int] = None
@@ -1241,10 +1247,10 @@ class SingleTask(base_task.BaseTask):
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(
         var_weight_hparams)
 
-    load_ema_state = (
+    load_ema_states = (
         hasattr(rules.task_p, 'train')
         and rules.task_p.train.learner.optimizer.ema_decay > 0.0
-    ) and rules.load_ema_state
+    ) and rules.load_ema_states
 
     loading_rules = [
         (re.compile(pattern), ref) for pattern, ref in rules.load_rules
@@ -1267,8 +1273,12 @@ class SingleTask(base_task.BaseTask):
 
     if uses_gda:
       ckpt_train_state, train_state_pspecs = _make_gda_train_state(
-          rules, ckpt_train_state, train_state_pspecs, matched_pspecs,
-          load_ema_state)
+          rules,
+          ckpt_train_state,
+          train_state_pspecs,
+          matched_pspecs,
+          load_ema_states,
+      )
 
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.hparams.ici_mesh_shape is None):
@@ -1296,7 +1306,7 @@ class SingleTask(base_task.BaseTask):
     loaded_vars = dict(NestedMap(loaded_train_state.mdl_vars).FlattenItems())
 
     # Load EMA state if specified
-    if load_ema_state:
+    if load_ema_states:
       # TODO(pax-dev): This doesn't work with prefix dims.
       for v in loaded_train_state.opt_states[0]:
         if 'ema' in v:
