@@ -512,6 +512,224 @@ class CheckpointLoadingRules(NamedTuple):
       base_input.BaseInputSpecsProvider.HParams] = None
 
 
+def create_state_partition_specs(
+    var_weight_hparams: NestedJTensor,
+    mesh_shape: Sequence[int],
+    mesh_axis_names: List[str],
+    discard_opt_states: bool,
+    learners: Optional[Sequence[learners_lib.Learner]],
+):
+  """Creates partition specs for all variables used in training.
+
+  Args:
+    var_weight_hparams: a nested map of variable params for all the forward
+      variables.
+    mesh_shape: shape of the logical mesh.
+    mesh_axis_names: axis names of each mesh axis.
+    discard_opt_states: when true, optimizer slot variables are skipped.
+    learners: learners of the optimizer. Cannot be None if discard_opt_states
+      is false.
+
+  Returns:
+    A TrainState that contains PartitionSpecs.
+  """
+
+  step_partition_spec = PartitionSpec()
+  var_partition_specs = base_layer.var_partition_specs(
+      var_weight_hparams,
+      mesh_shape=mesh_shape,
+      device_axis_names=mesh_axis_names)
+  if discard_opt_states:
+    opt_var_partition_specs = {}
+  else:
+    grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
+    opt_var_weight_hparams = []
+    for grad_tx in grad_txs:
+      assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
+      opt_var_weight_hparams.append(
+          grad_tx.init_partition_spec(var_weight_hparams))
+    opt_var_partition_specs = base_layer.var_partition_specs(
+        opt_var_weight_hparams,
+        mesh_shape=mesh_shape,
+        device_axis_names=mesh_axis_names)
+
+    # Note that due to the double nesting of sharded chain we need to un-mask
+    # the outer MaskedState() if present. If this is only a single optimizer
+    # the tree_map() will go through with a no-op.
+    def _is_instance_masked_state(x):
+      return isinstance(x, optax.MaskedState)
+
+    def _maybe_unmask_outer_masked_state(x):
+      if _is_instance_masked_state(x):
+        return x.inner_state
+      return x
+
+    opt_var_partition_specs = jax.tree_map(
+        _maybe_unmask_outer_masked_state,
+        opt_var_partition_specs,
+        is_leaf=_is_instance_masked_state)
+  return TrainState(
+      step=step_partition_spec,
+      mdl_vars=var_partition_specs,
+      opt_states=opt_var_partition_specs)
+
+
+def _create_opt_states(
+    mdl_vars: NestedJTensor,
+    var_weight_hparams: NestedJTensor,
+    learners: Sequence[learners_lib.Learner],
+) -> List[NestedJTensor]:
+  """Creates opt_states by applying gradient transformations.
+
+  Args:
+    mdl_vars: A nested structure of model vars to in TrainState.
+    var_weight_hparams: WeightHParams for each of the variable in mdl_vars.
+      var_weight_hparams must be of the same structure as mdl_vars. Each model
+      weight variable is associated with some WeightHParams which contains all
+      the meta information about the weight variable.
+    learners: learners of the optimizer.
+
+  Returns:
+    A list of NestedJTensor to update `opt_states` in TrainState.
+  """
+  grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
+  asserts.assert_same_structure(mdl_vars, var_weight_hparams)
+  return [x.init(mdl_vars) for x in grad_txs]
+
+
+def create_state(
+    mdl_vars: NestedJTensor,
+    var_weight_hparams: NestedJTensor,
+    discard_opt_states: bool,
+    learners: Optional[Sequence[learners_lib.Learner]],
+) -> TrainState:
+  """Creates train states that holds all the forward/backward variables.
+
+  Args:
+    mdl_vars: A nested structure of model vars to create TrainState for.
+      'mdl_vars' can be a sub-set of self.vars.
+    var_weight_hparams: WeightHParams for each of the variable in mdl_vars.
+      var_weight_hparams must be of the same structure as mdl_vars. Each model
+      weight variable is associated with some WeightHParams which contains all
+      the meta information about the weight variable.
+    discard_opt_states: bool, When true, optimizer slot variables are skipped.
+    learners: learners of the optimizer. Cannot be None if discard_opt_states is
+      false.
+
+  Returns:
+    a TrainState.
+  """
+  # Make a private copy of mdl_vars and var_weight_hparams structures that are
+  # not shared with the caller.
+  mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
+  var_weight_hparams = jax.tree_util.tree_map(lambda x: x, var_weight_hparams)
+  if discard_opt_states:
+    opt_states = {}
+  else:
+    opt_states = _create_opt_states(mdl_vars, var_weight_hparams, learners)
+
+  return TrainState(
+      # The global step for the model.
+      step=jnp.array(0, dtype=jnp.uint32),
+      mdl_vars=mdl_vars,
+      opt_states=opt_states,
+  )
+
+
+def create_state_unpadded_shapes(
+    var_weight_hparams: NestedJTensor,
+    discard_opt_states: bool,
+    learners: Optional[Sequence[learners_lib.Learner]],
+) -> TrainState:
+  """Creates shapes for all variables used in training without padding...
+
+  due to uneven sharding.
+
+  Args:
+    var_weight_hparams: a nested map of variable params for all the forward
+      variables.
+    discard_opt_states: bool, When true, optimizer slot variables are skipped.
+    learners: learners of the optimizer. Cannot be None if discard_opt_states is
+      false.
+
+  Returns:
+    A TrainState contains jax.ShapeDtypeStruct for all the forward and
+      backward variables.
+  """
+
+  def _get_shape(var_param):
+    shape = tuple(var_param.repeat_prefix or ()) + tuple(var_param.shape)
+    return jax.ShapeDtypeStruct(shape, var_param.dtype)
+
+  var_shapes = jax.tree_map(_get_shape, var_weight_hparams)
+
+  def _create_train_state_from_shape(mdl_vars):
+    return create_state(
+        mdl_vars, var_weight_hparams, discard_opt_states, learners
+    )
+
+  return jax.eval_shape(_create_train_state_from_shape, var_shapes)
+
+
+def create_state_padded_shapes(
+    var_weight_hparams: NestedJTensor,
+    mesh_shape: Sequence[int],
+    mesh_axis_names: List[str],
+    discard_opt_states: bool,
+    learners: Optional[Sequence[learners_lib.Learner]],
+) -> TrainState:
+  """Creates shapes for all variables used in training with padding...
+
+  due to uneven sharding.
+
+  Args:
+    var_weight_hparams: a nested map of variable params for all the forward
+      variables.
+    mesh_shape: shape of the logical mesh.
+    mesh_axis_names: axis names of each mesh axis.
+    discard_opt_states: bool, When true, optimizer slot variables are skipped.
+    learners: learners of the optimizer. Cannot be None if discard_opt_states is
+      false.
+
+  Returns:
+    A TrainState contains jax.ShapeDtypeStruct for all the forward and
+      backward variables.
+  """
+  unpadded_shapes = create_state_unpadded_shapes(
+      var_weight_hparams, discard_opt_states, learners
+  )
+
+  if mesh_shape is None:
+    return unpadded_shapes
+
+  model_state_partition_specs = create_state_partition_specs(
+      var_weight_hparams,
+      mesh_shape,
+      mesh_axis_names,
+      discard_opt_states,
+      learners,
+  )
+  asserts.assert_same_structure(model_state_partition_specs, unpadded_shapes)
+
+  def _maybe_pad(shape_dtype, pspec):
+    if py_utils.is_optax_masked_node(shape_dtype):
+      return shape_dtype
+    unpadded_shape = shape_dtype.shape
+    paddings = py_utils.get_uneven_sharding_paddings(
+        pspec, unpadded_shape, mesh_shape, mesh_axis_names
+    )
+    padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
+    return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
+
+  padded_shapes = jax.tree_map(
+      _maybe_pad,
+      unpadded_shapes,
+      model_state_partition_specs,
+      is_leaf=py_utils.is_optax_masked_node,
+  )
+  return padded_shapes
+
+
 class SingleTask(base_task.BaseTask):
   """A JAX task."""
 
@@ -817,9 +1035,7 @@ class SingleTask(base_task.BaseTask):
     Returns:
       A list of NestedJTensor to update `opt_states` in TrainState.
     """
-    grad_txs = [x.get_grad_tx(var_weight_hparams) for x in self.learners]
-    asserts.assert_same_structure(mdl_vars, var_weight_hparams)
-    return [x.init(mdl_vars) for x in grad_txs]
+    return _create_opt_states(mdl_vars, var_weight_hparams, self.learners)
 
   def create_train_state(self,
                          mdl_vars: NestedJTensor,
@@ -839,20 +1055,9 @@ class SingleTask(base_task.BaseTask):
     Returns:
       a TrainState.
     """
-    # Make a private copy of mdl_vars and var_weight_hparams structures that are
-    # not shared with the caller.
-    mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
-    var_weight_hparams = jax.tree_util.tree_map(lambda x: x, var_weight_hparams)
-    if discard_opt_states:
-      opt_states = {}
-    else:
-      opt_states = self.create_opt_states(mdl_vars, var_weight_hparams)
-
-    return TrainState(
-        # The global step for the model.
-        step=jnp.array(0, dtype=jnp.uint32),
-        mdl_vars=mdl_vars,
-        opt_states=opt_states)
+    return create_state(
+        mdl_vars, var_weight_hparams, discard_opt_states, self.learners
+    )
 
   def create_train_state_padded_shapes(self,
                                        var_weight_hparams,
@@ -870,33 +1075,15 @@ class SingleTask(base_task.BaseTask):
       A TrainState contains jax.ShapeDtypeStruct for all the forward and
         backward variables.
     """
-    unpadded_shapes = self.create_train_state_unpadded_shapes(
-        var_weight_hparams, discard_opt_states)
     mesh_shape = self.hparams.model.mesh_shape
     mesh_axis_names = self.hparams.model.mesh_axis_names
-    if mesh_shape is None:
-      return unpadded_shapes
-
-    model_state_partition_specs = self.create_train_state_partition_specs(
-        var_weight_hparams, discard_opt_states)
-    asserts.assert_same_structure(model_state_partition_specs, unpadded_shapes)
-
-    def _maybe_pad(shape_dtype, pspec):
-      if py_utils.is_optax_masked_node(shape_dtype):
-        return shape_dtype
-      unpadded_shape = shape_dtype.shape
-      paddings = py_utils.get_uneven_sharding_paddings(pspec, unpadded_shape,
-                                                       mesh_shape,
-                                                       mesh_axis_names)
-      padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
-      return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
-
-    padded_shapes = jax.tree_map(
-        _maybe_pad,
-        unpadded_shapes,
-        model_state_partition_specs,
-        is_leaf=py_utils.is_optax_masked_node)
-    return padded_shapes
+    return create_state_padded_shapes(
+        var_weight_hparams,
+        mesh_shape,
+        mesh_axis_names,
+        discard_opt_states,
+        self.learners,
+    )
 
   def create_train_state_unpadded_shapes(self,
                                          var_weight_hparams,
@@ -916,17 +1103,9 @@ class SingleTask(base_task.BaseTask):
         backward variables.
     """
 
-    def _get_shape(var_param):
-      shape = tuple(var_param.repeat_prefix or ()) + tuple(var_param.shape)
-      return jax.ShapeDtypeStruct(shape, var_param.dtype)
-
-    var_shapes = jax.tree_map(_get_shape, var_weight_hparams)
-
-    def _create_train_state_from_shape(mdl_vars):
-      return self.create_train_state(mdl_vars, var_weight_hparams,
-                                     discard_opt_states)
-
-    return jax.eval_shape(_create_train_state_from_shape, var_shapes)
+    return create_state_unpadded_shapes(
+        var_weight_hparams, discard_opt_states, self.learners
+    )
 
   def create_train_state_partition_specs(self,
                                          var_weight_hparams,
@@ -946,44 +1125,14 @@ class SingleTask(base_task.BaseTask):
     mesh_shape = p.model.mesh_shape
     if mesh_shape is None:
       return None
-    step_partition_spec = PartitionSpec()
-    var_partition_specs = base_layer.var_partition_specs(
+    mesh_axis_names = p.model.mesh_axis_names
+    return create_state_partition_specs(
         var_weight_hparams,
-        mesh_shape=mesh_shape,
-        device_axis_names=p.model.mesh_axis_names)
-    if discard_opt_states:
-      opt_var_partition_specs = {}
-    else:
-      grad_txs = [x.get_grad_tx(var_weight_hparams) for x in self.learners]
-      opt_var_weight_hparams = []
-      for grad_tx in grad_txs:
-        assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
-        opt_var_weight_hparams.append(
-            grad_tx.init_partition_spec(var_weight_hparams))
-      opt_var_partition_specs = base_layer.var_partition_specs(
-          opt_var_weight_hparams,
-          mesh_shape=mesh_shape,
-          device_axis_names=p.model.mesh_axis_names)
-
-      # Note that due to the double nesting of sharded chain we need to un-mask
-      # the outer MaskedState() if present. If this is only a single optimizer
-      # the tree_map() will go through with a no-op.
-      def _is_instance_masked_state(x):
-        return isinstance(x, optax.MaskedState)
-
-      def _maybe_unmask_outer_masked_state(x):
-        if _is_instance_masked_state(x):
-          return x.inner_state
-        return x
-
-      opt_var_partition_specs = jax.tree_map(
-          _maybe_unmask_outer_masked_state,
-          opt_var_partition_specs,
-          is_leaf=_is_instance_masked_state)
-    return TrainState(
-        step=step_partition_spec,
-        mdl_vars=var_partition_specs,
-        opt_states=opt_var_partition_specs)
+        mesh_shape,
+        mesh_axis_names,
+        discard_opt_states,
+        self.learners,
+    )
 
   def maybe_adjust_train_state(self, step: int, mdl_vars: Dict[
       str, JTensor], var_weight_hparams: Nested[base_layer.WeightHParams],
