@@ -63,18 +63,26 @@ def is_checkpoint_asset(x: epath.Path) -> bool:
   return bool(CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
 
 
+# TODO(cpgaffney) Rely on Orbax utils when possible. The complexity here is due
+# to the necessity of dealing with v0 checkpoints.
 def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
+  """Determines whether a checkpoint is temporary."""
   if not is_checkpoint_asset(x):
     return False
   # Would only match v0.0 checkpoints, without state/metadata subdirs.
+  # This case should trigger very rarely.
   if bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x))):
     return True
-  # v0.0 checkpoint, if it did not return False at the previous condition, it
-  # must be finalized.
-  if not (x / STATE_ITEM_NAME).exists():
+  # Very old format Flax checkpoint.
+  if x.is_file():
     return False
-  # v>1.0 checkpoint, can use Orbax functions.
-  return not orbax.checkpoint.utils.is_checkpoint_finalized(x)
+  # Return True if any of the sub-directories have the Orbax tmp dir suffix in
+  # their name. If this is a v0.0 checkpoint, so of these sub-directories may
+  # actually be files. If it is a v0.0 checkpoint, however, the Orbax tmp dir
+  # suffix will not be present, so it is safe to return False.
+  return any(
+      [(orbax.checkpoint.utils.TMP_DIR_SUFFIX in p.name) for p in x.iterdir()]
+  )
 
 
 def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
