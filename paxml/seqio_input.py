@@ -623,9 +623,15 @@ class SeqIOInput(base_input.BaseInput):
       return b
 
     def _add_pad(b):
+      if not isinstance(b, py_utils.NestedMap):
+        b = py_utils.NestedMap.FromNestedDict(b)
       b.eval_sample_weights = 0.0
       if p.use_enumeration:
         b = _add_fake_enumeration(b)
+      if hasattr(b, 'weights'):
+        b.weights *= 0
+        if hasattr(b, 'paddings'):
+          b.paddings = 1 - b.weights
       return b
 
     ds = ds.map(_add_weight)
