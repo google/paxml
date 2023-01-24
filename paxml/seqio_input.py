@@ -345,30 +345,32 @@ class SeqIOInput(base_input.BaseInput):
         expected by the model, e.g. instead of "targets" we have "ids" or
         "labels" or "paddings". This also implements any necessary padding or
         packing on the data.
-      shuffle: Whether to shuffle the data. Note that None means this feature
-        is decided automatically: True for and only for non-deterministic
-        training data, otherwise False. Users can override this by setting this
+      shuffle: Whether to shuffle the data. Note that None means this feature is
+        decided automatically: True for and only for non-deterministic training
+        data, otherwise False. Users can override this by setting this
         explicitly.
       repeat: Whether to repeat the data. Note that None means this feature is
         decided automatically: True only for non-deterministic training data,
         otherwise False. Users can override this by setting this field
         explicitly.
-      use_cached: Whether to read from the cached directory, if supported by
-        the underlying SeqIO task/mixture. Users can set to False to test out
-        data changes before the cache is applied.
+      use_cached: Whether to read from the cached directory, if supported by the
+        underlying SeqIO task/mixture. Users can set to False to test out data
+        changes before the cache is applied.
       trim_output_features: If True, it trims output features to be less than
         the length given by `sequence_length`.
       eval_auto_pad: Only used when p.is_training=False. Automatically pad the
         data to multiples of global batch size, using the first example in the
         data. Padded entries will have batch_input.eval_sample_weight == 0.0.
+      drop_remainder: Whether to drop remaining examples from the last partial
+        batch.
       deterministic_input_start_index: Params to compute the starting example
         index. Used only if the data is a deterministic input, otherwise
         ignored.
       eval_metrics_targets_length: typically when used in eval, the data
         returned by get_next() would not contain any targets.
-        eval_metrics_targets_length overrides the task feature lengths
-        for targets when processing the targets as ground truths to compute
-        eval metrics. It has no effect on get_next(), but only affects
+        eval_metrics_targets_length overrides the task feature lengths for
+        targets when processing the targets as ground truths to compute eval
+        metrics. It has no effect on get_next(), but only affects
         compute_metrics(). If set to None, won't truncate.
       use_enumeration: whether to use enumeration in both batch generation
         (get_next()) and metrics computation. When this param is set to True,
@@ -392,6 +394,7 @@ class SeqIOInput(base_input.BaseInput):
     repeat: Optional[bool] = None
     use_cached: bool = False
     eval_auto_pad: bool = True
+    drop_remainder: bool = True
     # trim_output_features flag allow passing this arg to seqio.get_dataset
     # the default value is True so this change will not affect any current
     # behaviour. the main purpose is for prefixlm to not problematically
@@ -526,7 +529,10 @@ class SeqIOInput(base_input.BaseInput):
         shard_info=self._shard_info)
     ds = self._pad_to_batch_size(ds)
     ds = ds.batch(
-        p.batch_size, drop_remainder=True, num_parallel_calls=tf.data.AUTOTUNE)
+        p.batch_size,
+        drop_remainder=p.drop_remainder,
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
     return ds
 
   def get_next(self) -> NestedNpTensor:
