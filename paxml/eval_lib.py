@@ -308,12 +308,13 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         self._partitioner.always_use_train_for_model_init
         and not getattr(self._partitioner, '_enable_auto_sharding', False)
     ):
-      input_shape_dtypes = None
+      inputs_shape_dtype = None
     else:
-      input_shape_dtypes = _SpmdEvalRunner.get_input_shape_dtypes_for_init(
-          padded_decode_input_ps + padded_eval_input_ps)
+      inputs_shape_dtype = _SpmdEvalRunner.get_inputs_shape_dtype_for_init(
+          padded_decode_input_ps + padded_eval_input_ps
+      )
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        input_shape_dtypes, is_eval=True, discard_opt_states=not self.use_ema
+        inputs_shape_dtype, is_eval=True, discard_opt_states=not self.use_ema
     )
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
@@ -419,12 +420,12 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       prng_key: PRNGKey,
-      input_shape_dtypes: Optional[NestedShapeDtypeLike],
+      inputs_shape_dtype: Optional[NestedShapeDtypeLike],
   ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        input_shape_dtypes,
+        inputs_shape_dtype,
         is_eval=True,
         discard_opt_states=py_utils.pmap_use_tensorstore() and not self.use_ema,
     )
@@ -717,7 +718,7 @@ class _PmapEvalRunner:
   Example usage:
 
     (replicated_model_states, train_state_metadata,
-     prng_key) = checkpointer.get_model_states(prng_key, input_shape_dtypes)
+     prng_key) = checkpointer.get_model_states(prng_key, inputs_shape_dtype)
 
     runner = _PmapEvalRunner(eval_input_params, jax_task, prng_key)
     metrics_list, eval_scoring_metrics_list, num_eval_steps = (
@@ -840,11 +841,14 @@ def evaluate_pmap_model(
   task_p = jax_task.hparams
   # TODO(pax-dev): Investigate if we can use model input specs
   # instead of instantiating this input pipeline.
-  input_shape_dtypes = (None if task_p.train.always_use_train_for_model_init
-                        else instantiate(eval_input_p[0]).get_next_padded())
+  inputs_shape_dtype = (
+      None
+      if task_p.train.always_use_train_for_model_init
+      else instantiate(eval_input_p[0]).get_next_padded()
+  )
 
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key, input_shape_dtypes)
+      checkpointer.get_model_states(prng_key, inputs_shape_dtype)
   )
   eval_one_step_fn = _PmapEvalRunner(
       eval_input_p, jax_task, prng_key,
@@ -936,14 +940,14 @@ class _SpmdEvalRunner:
       )
 
   @classmethod
-  def get_input_shape_dtypes_for_init(
+  def get_inputs_shape_dtype_for_init(
       cls, inputs_p: Sequence[base_input.BaseInput.HParams]
   ) -> pytypes.NestedShapeDtypeStruct:
     """Returns ShapesDtype NestedMap used to initialize a model."""
     assert inputs_p
     # We use first input_p to get sample for initializing the model as bsz
     # differences don't make a difference for initialized vars.
-    return trainer_lib.get_input_shape_dtypes(inputs_p[0])[1]
+    return trainer_lib.get_inputs_shape_dtype(inputs_p[0])[1]
 
   def run_one_step(
       self, partitioned_train_state: train_states.TrainState,
@@ -1232,7 +1236,7 @@ def decode_pmap_model(
   task_p = jax_task.hparams
   prng_key, eval_key = jax.random.split(prng_key)
   if task_p.train.always_use_train_for_model_init:
-    input_shape_dtypes = None
+    inputs_shape_dtype = None
   else:
     # Either decoder or eval inputs is not empty.
     assert list(input_p) + list(eval_input_p)
@@ -1245,7 +1249,7 @@ def decode_pmap_model(
     sample_input_p = input_p[0] if input_p else eval_input_p[0]
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_shape_dtypes = instantiate(sample_input_p).get_next_padded()
+    inputs_shape_dtype = instantiate(sample_input_p).get_next_padded()
 
   if continuous_decode:
     # Waits until train.decode_start_after_n_steps is reached.
@@ -1253,7 +1257,7 @@ def decode_pmap_model(
                      jax_task.hparams.train.decode_start_after_n_steps)
 
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key, input_shape_dtypes)
+      checkpointer.get_model_states(prng_key, inputs_shape_dtype)
   )
 
   eval_one_step_fn = _PmapEvalRunner(
@@ -1669,12 +1673,18 @@ def decode_spmd_model(
   # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
   # same regardless of which eval_input or decoder_input we use to draw the
   # sample inputs, we need to revisit the design here.
-  (partitioned_train_state, train_state_metadata, decode_step_fns,
-   inputs_partition_specs, input_shape_dtypes) = checkpointer.get_model_states(
-       init_key,
-       is_decode=True,
-       decode_input_ps=input_p,
-       eval_input_ps=eval_input_p)
+  (
+      partitioned_train_state,
+      train_state_metadata,
+      decode_step_fns,
+      inputs_partition_specs,
+      inputs_shape_dtype,
+  ) = checkpointer.get_model_states(
+      init_key,
+      is_decode=True,
+      decode_input_ps=input_p,
+      eval_input_ps=eval_input_p,
+  )
   decode_once_fn = partition_decode_once_spmd_model(
       jax_task,
       task_p,
@@ -1685,7 +1695,7 @@ def decode_spmd_model(
       partitioner.global_mesh,
       decode_step_fns,
       use_gda,
-      input_shape_dtypes,
+      inputs_shape_dtype,
       inputs_partition_specs,
   )
   eval_one_step_fn = _SpmdEvalRunner(

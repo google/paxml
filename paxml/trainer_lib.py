@@ -1171,8 +1171,8 @@ def infer_partition_spec_based_on_rank_fn(
     return base_layer.to_partition_spec(mapping_dict[key], mesh_names)
 
 
-def get_input_shape_dtypes(
-    input_p: base_input.BaseInput.HParams
+def get_inputs_shape_dtype(
+    input_p: base_input.BaseInput.HParams,
 ) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
   """Returns the per-host and global shape/dtype information of the input."""
   sample_inputs = instantiate(input_p).get_next_padded()
@@ -2150,7 +2150,7 @@ def get_spmd_model_step_fns_from_inputs(
   for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    _, inputs_shape_dtype = get_input_shape_dtypes(input_p)
+    _, inputs_shape_dtype = get_inputs_shape_dtype(input_p)
     metadata = partitioner.get_train_state_metadata(
         inputs_shape_dtype,
         is_eval=is_eval,
