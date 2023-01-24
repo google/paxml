@@ -170,7 +170,8 @@ def _enumerate_dataset(
   return ds
 
 
-def _is_packing_on(fc: seqio.FeatureConverter) -> bool:
+def is_packing_on(fc: seqio.FeatureConverter) -> bool:
+  """Safely checks whether a given feature converter has packing turned on."""
   return hasattr(fc, '_pack') and fc.pack
 
 
@@ -1054,7 +1055,7 @@ class SeqIOInput(base_input.BaseInput):
     if not task.predict_metric_fns:
       logging.info('no predict_metric_fns defined on task: %s', task.name)
       return []
-    if _is_packing_on(p.feature_converter):
+    if is_packing_on(p.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
@@ -1133,7 +1134,7 @@ class SeqIOInput(base_input.BaseInput):
     if not task.score_metric_fns:
       logging.info('no score_metric_fns defined on task: %s', task.name)
       return []
-    if _is_packing_on(p.feature_converter):
+    if is_packing_on(p.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
