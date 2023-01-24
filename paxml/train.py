@@ -225,7 +225,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
             step,
             metadata.padded_global_shapes,
             global_mesh,
-            metadata.partitioned_specs,
+            metadata.partition_specs,
         )
       monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                             restore_period.elapsed)
@@ -242,7 +242,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
               # init_checkpoint_rules are in the same format as the checkpoint
               # solution used by the experiment.
               checkpoint_type=self.checkpoint_type,
-              state_specs=metadata.partitioned_specs,
+              state_specs=metadata.partition_specs,
           )
       )
 
@@ -883,7 +883,7 @@ def train_and_evaluate_spmd_model(
       init_key,
       inputs_shape_dtype,
       train_state_partition_spec=(
-          train_state_metadata.partitioned_specs.to_eval_state()
+          train_state_metadata.partition_specs.to_eval_state()
       ),
       # Use train_unpadded_global_batch_size since this is eval on train input.
       unpadded_global_batch_size=train_unpadded_global_batch_size,
@@ -1039,7 +1039,7 @@ def _create_task_and_states(
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     enable_auto_sharding: bool = False,
-):  # -> Tuple[]:
+):
   jax_task = instantiate(task_p)
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
@@ -1171,8 +1171,9 @@ def _train_and_evaluate_common(
       if summary_last_step is None:
         summary_last_step = step_i - 1
 
-      checkpointer.save_if_needed(step_i, partitioned_train_state,
-                                  train_state_metadata.partitioned_specs)
+      checkpointer.save_if_needed(
+          step_i, partitioned_train_state, train_state_metadata.partition_specs
+      )
 
       if step_i >= train_p.num_train_steps:
         logging.info(
@@ -1376,8 +1377,9 @@ def _train_and_evaluate_common(
           break
     gc.unfreeze()
     # Save checkpoint for the last step.
-    checkpointer.save_final(step_i, partitioned_train_state,
-                            train_state_metadata.partitioned_specs)
+    checkpointer.save_final(
+        step_i, partitioned_train_state, train_state_metadata.partition_specs
+    )
 
     train_summary_handler.close()
     eval_summary_handler.close()

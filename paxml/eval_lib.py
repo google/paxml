@@ -262,8 +262,9 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         self.restore_checkpoint_dir,
         global_mesh=self._partitioner.global_mesh,
         checkpoint_type=self.checkpoint_type,
-        state_specs=train_state_metadata.partitioned_specs,
-        step=step)
+        state_specs=train_state_metadata.partition_specs,
+        step=step,
+    )
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}')
     if partitioned_train_state and self.use_ema:
@@ -314,8 +315,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     train_state_metadata = self._partitioner.get_train_state_metadata(
         input_shape_dtypes, is_eval=True, discard_opt_states=not self.use_ema
     )
-    partitioned_specs = train_state_metadata.partitioned_specs
-    assert partitioned_specs is not None, 'must be in pjit mode'
+    partition_specs = train_state_metadata.partition_specs
+    assert partition_specs is not None, 'must be in pjit mode'
 
     # If auto sharding is enabled, we need to get the updated partition specs
     # before using it to restore checkpoints.
@@ -330,7 +331,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     if self.use_ema:
       # Make sure the opt_states exists before restoring
       # This is combined with the decoding test
-      if not partitioned_specs.opt_states:
+      if not partition_specs.opt_states:
         raise ValueError(
             "The partition spec doesn't include opt states but ema is enabled."
         )
@@ -351,7 +352,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
               # init_checkpoint_rules are in the same format as the checkpoint
               # solution used by the experiment.
               checkpoint_type=self.checkpoint_type,
-              state_specs=partitioned_specs,
+              state_specs=partition_specs,
               discard_opt_states=True,
           )
       )

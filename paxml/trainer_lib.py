@@ -133,7 +133,7 @@ class TrainStateMetadata:
   var_weight_hparams: NestedWeightHParams
   padded_global_shapes: Optional[TrainState] = None
   unpadded_global_shapes: Optional[TrainState] = None
-  partitioned_specs: Optional[TrainState] = None
+  partition_specs: Optional[TrainState] = None
 
 
 def create_train_state_metadata(jax_task: tasks_lib.SingleTask,
@@ -161,16 +161,18 @@ def create_train_state_metadata(jax_task: tasks_lib.SingleTask,
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states)
   if jax_task.model.hparams.mesh_shape is not None:
-    partitioned_specs = jax_task.create_train_state_partition_specs(
-        var_weight_hparams, discard_opt_states=discard_opt_states)
+    partition_specs = jax_task.create_train_state_partition_specs(
+        var_weight_hparams, discard_opt_states=discard_opt_states
+    )
   else:
-    partitioned_specs = None
+    partition_specs = None
   return TrainStateMetadata(
       input_shape_dtype=train_shape_dtype,
       var_weight_hparams=var_weight_hparams,
       padded_global_shapes=padded_global_shapes,
       unpadded_global_shapes=unpadded_global_shapes,
-      partitioned_specs=partitioned_specs)
+      partition_specs=partition_specs,
+  )
 
 
 def compile_for_auto_sharding(step_fn: Any,
@@ -1682,7 +1684,7 @@ class _PjitPartitioner(Partitioner):
     else:
       assert partition_specs.opt_states
     train_state_metadata = dataclasses.replace(
-        train_state_metadata, partitioned_specs=partition_specs
+        train_state_metadata, partition_specs=partition_specs
     )
     return train_state_metadata
 
@@ -1846,7 +1848,7 @@ class _PjitPartitioner(Partitioner):
     model_p = self._jax_task.hparams.model
     return py_utils.maybe_pad_uneven_sharding(
         unpadded_state,
-        metadata.partitioned_specs,
+        metadata.partition_specs,
         self._get_state_unpadded_shapes(metadata),
         model_p.mesh_shape,
         model_p.mesh_axis_names,
@@ -1860,7 +1862,7 @@ class _PjitPartitioner(Partitioner):
     return jax.tree_map(
         py_utils.maybe_slice_uneven_sharding,
         padded_state,
-        metadata.partitioned_specs,
+        metadata.partition_specs,
         self._get_state_unpadded_shapes(metadata),
         is_leaf=py_utils.is_optax_masked_node,
     )
@@ -1929,7 +1931,7 @@ class _PjitPartitioner(Partitioner):
   ):
     prng_key_partition_spec = PartitionSpec(None)
     fn_in_partition_specs = (
-        metadata.partitioned_specs,
+        metadata.partition_specs,
         prng_key_partition_spec,
         input_partition_spec,
     )
@@ -1957,7 +1959,7 @@ class _PjitPartitioner(Partitioner):
     )
     if not is_eval:
       fn_out_partition_specs = tuple(
-          [metadata.partitioned_specs] + list(fn_out_partition_specs[1:])
+          [metadata.partition_specs] + list(fn_out_partition_specs[1:])
       )
 
     asserts.assert_same_structure(fn_out_partition_specs, out_shapes)
@@ -2100,12 +2102,12 @@ def get_partitioned_spmd_model_step_fn(
   )
   if train_state_partition_spec and not enable_auto_sharding:
     metadata = dataclasses.replace(
-        metadata, partitioned_specs=train_state_partition_spec
+        metadata, partition_specs=train_state_partition_spec
     )
   partitioned_step_fn, input_partition_spec = partitioner.partition(
       step_fn, inputs_shape_dtype, is_eval, metadata, unpadded_global_batch_size
   )
-  return partitioned_step_fn, input_partition_spec, metadata.partitioned_specs
+  return partitioned_step_fn, input_partition_spec, metadata.partition_specs
 
 
 def get_spmd_model_step_fns_from_inputs(
@@ -2241,9 +2243,12 @@ class SingleTaskPjitTrainer:
               prng_key,
               inputs_shape_dtype=self.inputs_shape_dtype,
               train_state_partition_spec=(
-                  self._train_state_metadata.partitioned_specs),
+                  self._train_state_metadata.partition_specs
+              ),
               unpadded_global_batch_size=self._train_unpadded_global_batch_size,
-              enable_auto_sharding=self._enable_auto_sharding))
+              enable_auto_sharding=self._enable_auto_sharding,
+          )
+      )
     return self._step_fn, self._input_pspecs, self._train_state_partition_spec
 
   def train_step(self, state: TrainState, prng_key: jax.random.KeyArray,

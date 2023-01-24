@@ -152,15 +152,13 @@ class PjitPartitionerTest(TrainLibTestBase):
     )
     train_state_partition_spec = partitioner.get_train_state_metadata(
         self._inputs_shape_dtype, is_eval=False
-    ).partitioned_specs
+    ).partition_specs
 
     if use_auto_shard:
       self.assertIsNotNone(train_state_partition_spec)
-      self.assertNotEqual(
-          metadata.partitioned_specs, train_state_partition_spec
-      )
+      self.assertNotEqual(metadata.partition_specs, train_state_partition_spec)
     else:
-      self.assertEqual(metadata.partitioned_specs, train_state_partition_spec)
+      self.assertEqual(metadata.partition_specs, train_state_partition_spec)
 
   @parameterized.parameters(
       [RunningMode.TRAIN, RunningMode.EVAL, RunningMode.DECODE]
@@ -175,7 +173,7 @@ class PjitPartitionerTest(TrainLibTestBase):
     metadata_2 = partitioner.get_train_state_metadata(
         self._inputs_shape_dtype, is_eval=is_eval, discard_opt_states=is_eval
     )
-    self.assertEqual(metadata_1.partitioned_specs, metadata_2.partitioned_specs)
+    self.assertEqual(metadata_1.partition_specs, metadata_2.partition_specs)
 
     partitioned_step_fn_1, input_partition_specs_1 = partitioner.partition(
         step_fn, self._inputs_shape_dtype, is_eval, metadata_1
@@ -199,8 +197,9 @@ class SingleTaskPjitTrainerTest(TrainLibTestBase):
 
     self.assertIsNotNone(trainer.task)
     self.assertEqual(step_fn, trainer._step_fn)
-    self.assertEqual(train_state_spec,
-                     trainer.train_state_metadata.partitioned_specs)
+    self.assertEqual(
+        train_state_spec, trainer.train_state_metadata.partition_specs
+    )
 
 
 if __name__ == '__main__':
