@@ -1236,12 +1236,16 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
     ```
   """
 
-  def __init__(self,
-               pack: bool = False,
-               use_custom_packing_ops: bool = False,
-               weights_on_targets_only: Optional[bool] = None,
-               apply_length_check: bool = True,
-               bos_id: int = 0) -> None:
+  def __init__(
+      self,
+      pack: bool = False,
+      use_custom_packing_ops: bool = False,
+      weights_on_targets_only: Optional[bool] = None,
+      apply_length_check: bool = True,
+      bos_id: int = 0,
+      reverse_bos_padding: bool = False,
+      eos_id: int = 1,
+  ) -> None:
     """Args to construct a language model feature converter.
 
     Args:
@@ -1259,12 +1263,18 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
         less than the lengths given by `sequence_length` in the get_dataset
         function.
       bos_id: bos id for decoder inputs.
+      reverse_bos_padding: Whether to reverse the bos_id padding, and pad
+        to the end of labels with eos_id instead.
+      eos_id: eos id for decoder inputs, only in effect if reverse_bos_padding
+        true.
     """
     self._pack = pack
     self._use_custom_packing_ops = use_custom_packing_ops
     self._weights_on_targets_only = weights_on_targets_only
     self._apply_length_check = apply_length_check
     self._bos_id = bos_id
+    self._reverse_bos_padding = reverse_bos_padding
+    self._eos_id = eos_id
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
@@ -1273,15 +1283,36 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
         bos_id=bos_id)
 
   def __str__(self) -> str:
-    return (f'{self.__class__.__name__}(pack={self._pack}, '
-            f'use_custom_packing_ops={self._use_custom_packing_ops}, '
-            f'weights_on_targets_only={self._weights_on_targets_only}, '
-            f'apply_length_check={self._apply_length_check}, '
-            f'bos_id={self._bos_id})')
+    return (
+        f'{self.__class__.__name__}(pack={self._pack}, '
+        f'use_custom_packing_ops={self._use_custom_packing_ops}, '
+        f'weights_on_targets_only={self._weights_on_targets_only}, '
+        f'apply_length_check={self._apply_length_check}, '
+        f'bos_id={self._bos_id},'
+        f'reverse_bos_padding={self._reverse_bos_padding},'
+        f'eos_id={self._eos_id})'
+    )
 
   @property
   def weights_on_targets_only(self) -> bool:
     return self._weights_on_targets_only
+
+  def _shift_left_and_pad(self, tensor, pad_val):
+    # Expand dims here so that the below code can work with 1-d tensors.
+    v = tf.expand_dims(tensor, 0)
+    # Make sure we keep tensor as ragged to allow for uneven concat.
+    if isinstance(v, tf.Tensor):
+      v = tf.RaggedTensor.from_tensor(v)
+
+    # Append padding to the last item of every sequence.
+    pad_shape = tf.concat([v.bounding_shape()[:-2], [1, 1]], axis=0)
+    pad_tensor = tf.broadcast_to(pad_val, pad_shape)
+    last_in_sequence = tf.concat([v[..., -1:, 1:], pad_tensor], axis=-1)
+    # Concat back the newly modified final sequence item.
+    v = tf.concat([v[..., :-1, :], last_in_sequence], axis=-2)
+    # Un-expand outer dimension.
+    v = v[0]
+    return v
 
   def _to_pax(self, b) -> NestedMap:
     """Change data format for a Pax LanguageModel."""
@@ -1319,6 +1350,13 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
 
     ret.ids = tf.math.abs(ret.ids)
     ret.labels = tf.math.abs(ret.labels)
+
+    if self._reverse_bos_padding:
+      ret.ids = ret.labels
+      ret.labels = self._shift_left_and_pad(ret.labels, self._eos_id)
+      ret.weights = self._shift_left_and_pad(ret.weights, 0.0)
+      ret.paddings = self._shift_left_and_pad(ret.paddings, 1.0)
+
     return ret
 
   def __call__(self, ds: tf.data.Dataset,
