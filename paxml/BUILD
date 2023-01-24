@@ -502,7 +502,12 @@ pytype_strict_library(
 pytype_strict_library(
     name = "train_states",
     srcs = ["train_states.py"],
-    deps = ["//praxis:train_states"],
+    deps = [
+        # Implicit flax.core dependency.
+        # Implicit jax dependency.
+        # Implicit optax dependency.
+        "//praxis:base_layer",
+    ],
 )
 
 pytype_strict_library(

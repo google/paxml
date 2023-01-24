@@ -19,6 +19,39 @@ TODO(b/259501483): This is is currently aliasing Praxis train_states.py's module
 symbol(s), until train_states.py gets fully migrated into Paxml.
 """
 
-from praxis import train_states
+from typing import List
 
-TrainState = train_states.TrainState
+from flax import struct as flax_struct
+import jax
+import optax
+from praxis import base_layer
+
+NestedJTensor = base_layer.NestedJTensor
+JTensorOrPartitionSpec = base_layer.JTensorOrPartitionSpec
+NestedJTensorOrPartitionSpec = base_layer.NestedJTensorOrPartitionSpec
+
+
+# A helper class for managing various train states. This struct may contain the
+# actual Jax tensors, or simply PartitionSpecs for the corresponding tensor.
+# If the latter, this struct is used for specifying the PartitionSpecs for
+# input/output to/from a pjit-ed function.
+class TrainState(flax_struct.PyTreeNode):
+  """Simple train state."""
+
+  step: JTensorOrPartitionSpec
+  mdl_vars: NestedJTensorOrPartitionSpec
+  opt_states: List[NestedJTensorOrPartitionSpec]
+
+  def new_state(
+      self, mdl_vars: NestedJTensor, opt_states: List[optax.OptState]
+  ) -> 'TrainState':
+    """Returns a new TrainState with updated mdl_vars and opt_states."""
+    mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
+    opt_states = jax.tree_util.tree_map(lambda x: x, opt_states)
+    return TrainState(
+        step=self.step + 1, mdl_vars=mdl_vars, opt_states=opt_states
+    )
+
+  def to_eval_state(self):
+    """Returns a new TrainState with opt_states removed, for eval purpose."""
+    return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states={})
