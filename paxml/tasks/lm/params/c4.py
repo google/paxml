@@ -33,6 +33,7 @@ from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
 from praxis import schedules
+from praxis.layers import transformers
 import seqio
 import t5.data
 from t5.data import preprocessors as t5_preprocessors
@@ -44,9 +45,9 @@ GPT_SPM_PATH = 'gs://mlperf-llm-public2/vocab/c4_en_301_5Mexp2_spm.model'
 GPT_EOS_ID = 1
 GPT_VOCABULARY = t5.data.SentencePieceVocabulary(GPT_SPM_PATH)
 C4_GPT_OUTPUT_FEATURES_LM = {
-    'targets': t5.data.Feature(vocabulary=GPT_VOCABULARY, add_eos=True)
+    'targets': t5.data.Feature(vocabulary=GPT_VOCABULARY, add_eos=False)
 }
-C4_TFDS_DATADIR = 'gs://mlperf-llm-public2'
+C4_TRAIN_DATADIR = 'gs://mlperf-llm-public2'
 C4_EVAL_DATADIR = 'gs://mlperf-llm-public2'
 
 
@@ -93,31 +94,34 @@ class TaskRegistry(t5.data.TaskRegistry):
 # C4 corpus for language model pretraining
 TaskRegistry.add_versioned_tfds_task(
     'c4_lm_v301_gpt',
-    versions=['3.0.1'],
-    pinned_version='3.0.1',
+    versions=['3.0.4'],
+    pinned_version='3.0.4',
     tfds_name='c4/en',
-    tfds_data_dir=C4_TFDS_DATADIR,
+    tfds_data_dir=C4_TRAIN_DATADIR,
     preprocessors=[
         functools.partial(
             t5_preprocessors.rekey,
             key_map={
                 'inputs': None,
                 'targets': 'text',
-            }),
+            },
+        ),
         seqio.preprocessors.tokenize,
-        t5_preprocessors.reduce_concat_tokens,
+        functools.partial(
+            t5_preprocessors.reduce_concat_tokens,
+            batch_size=4096,
+        ),
         t5_preprocessors.split_tokens_to_targets_length,
-        seqio.preprocessors.append_eos_after_trim,
     ],
     output_features=C4_GPT_OUTPUT_FEATURES_LM,
     metric_fns=[],
-    shuffle_buffer_size=100000,
+    shuffle_buffer_size=10000,
 )
 
 TaskRegistry.add_versioned_tfds_task(
     'c4_lm_v301_gpt_eval',
-    versions=['3.0.1'],
-    pinned_version='3.0.1',
+    versions=['3.0.4'],
+    pinned_version='3.0.4',
     tfds_name='c4/en',
     tfds_data_dir=C4_EVAL_DATADIR,
     preprocessors=[
@@ -126,15 +130,18 @@ TaskRegistry.add_versioned_tfds_task(
             key_map={
                 'inputs': None,
                 'targets': 'text',
-            }),
+            },
+        ),
         seqio.preprocessors.tokenize,
-        t5_preprocessors.reduce_concat_tokens,
+        functools.partial(
+            t5_preprocessors.reduce_concat_tokens,
+            batch_size=24567,
+        ),
         t5_preprocessors.split_tokens_to_targets_length,
-        seqio.preprocessors.append_eos_after_trim,
     ],
     output_features=C4_GPT_OUTPUT_FEATURES_LM,
     metric_fns=[],
-    shuffle_buffer_size=100000,
+    shuffle_buffer_size=None,
 )
 
 
@@ -161,26 +168,32 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         num_infeed_hosts = 1
     seed = None
     if is_training:
-      seed = jnp.int32(time.time())
+      seed = 9876
       # TODO(sgpyc): enable sync of seeds across hosts, currently the
       # following failed because of "sync_global_devices name mismatch"
       # seed = jnp.int32(multihost_utils.broadcast_one_to_all(seed))
-      logging.info('Train input seed: %d', seed)
+      logging.info('Train input seed: %s',
+                   'None' if seed is None else seed)
     p = seqio_input.SeqIOInput.HParams(
         name='C4Train' if is_training else 'C4Validation',
         mixture_name='c4_lm_v301_gpt' if is_training else 'c4_lm_v301_gpt_eval',
-        split_name='train' if is_training else 'validation_24567exp',
+        split_name='train2' if is_training else 'validation_24567exp',
         task_feature_lengths={'targets': self.MAX_SEQ_LEN},
-        use_cached=True,
+        use_cached=False,
         repeat=True if is_training else False,
         feature_converter=seqio_input.LanguageModelFeatures(
             pack=True if is_training else False,
-            use_custom_packing_ops=False),
+            use_custom_packing_ops=False,
+            bos_id=0,
+            reverse_bos_padding=True,
+            eos_id=GPT_EOS_ID),
         is_training=is_training,
         input_random_seed=(seed if is_training else 4321),
         batch_size=batch_size_per_process,
+        drop_remainder=True if is_training else False,
         num_infeed_hosts=num_infeed_hosts,
-        reset_for_eval=False if is_training else True)
+        reset_for_eval=False if is_training else True,
+    )
     return p
 
   def datasets(self) -> List[base_input.BaseInput.HParams]:
