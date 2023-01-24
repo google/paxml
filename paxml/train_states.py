@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""TrainState class for encapsulating model weights and optimizer states.
+"""TrainState class for encapsulating model weights and optimizer states."""
 
-TODO(b/259501483): This is is currently aliasing Praxis train_states.py's module
-symbol(s), until train_states.py gets fully migrated into Paxml.
-"""
+from __future__ import annotations
 
 from typing import List
 
@@ -44,7 +42,7 @@ class TrainState(flax_struct.PyTreeNode):
 
   def new_state(
       self, mdl_vars: NestedJTensor, opt_states: List[optax.OptState]
-  ) -> 'TrainState':
+  ) -> TrainState:
     """Returns a new TrainState with updated mdl_vars and opt_states."""
     mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
     opt_states = jax.tree_util.tree_map(lambda x: x, opt_states)
@@ -52,6 +50,6 @@ class TrainState(flax_struct.PyTreeNode):
         step=self.step + 1, mdl_vars=mdl_vars, opt_states=opt_states
     )
 
-  def to_eval_state(self):
+  def to_eval_state(self) -> TrainState:
     """Returns a new TrainState with opt_states removed, for eval purpose."""
     return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states={})
