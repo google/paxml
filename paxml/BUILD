@@ -245,7 +245,17 @@ pytype_strict_library(
 pytype_strict_library(
     name = "learners",
     srcs = ["learners.py"],
-    deps = ["//praxis:learners"],
+    deps = [
+        # Implicit jax dependency.
+        # Implicit optax dependency.
+        "//praxis:asserts",
+        "//praxis:base_hyperparams",
+        "//praxis:base_layer",
+        "//praxis:optimizer_prefix_vectorization",
+        "//praxis:optimizers",
+        "//praxis:py_utils",
+        "//praxis:sgf",
+    ],
 )
 
 pytype_binary(
@@ -628,6 +638,28 @@ pytype_strict_test(
         # Implicit etils dependency.
         # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+py_strict_test(
+    name = "learners_test",
+    srcs = ["learners_test.py"],
+    deps = [
+        ":learners",
+        # Implicit absl.logging dependency.
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        # Implicit optax dependency.
+        "//praxis:asserts",
+        "//praxis:base_hyperparams",
+        "//praxis:base_layer",
+        "//praxis:optimizer_prefix_vectorization",
+        "//praxis:optimizers",
+        "//praxis:py_utils",
+        "//praxis:schedules",
+        "//praxis:test_utils",
     ],
 )
 
