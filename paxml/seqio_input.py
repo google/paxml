@@ -363,6 +363,9 @@ class SeqIOInput(base_input.BaseInput):
         data. Padded entries will have batch_input.eval_sample_weight == 0.0.
       drop_remainder: Whether to drop remaining examples from the last partial
         batch.
+      num_batches_to_skip: If not None, skip given number of batches in the
+        dataset, to avoid reusing data after restaring the training process.
+        Only affects training.
       deterministic_input_start_index: Params to compute the starting example
         index. Used only if the data is a deterministic input, otherwise
         ignored.
@@ -395,6 +398,7 @@ class SeqIOInput(base_input.BaseInput):
     use_cached: bool = False
     eval_auto_pad: bool = True
     drop_remainder: bool = True
+    num_batches_to_skip: Optional[int] = None
     # trim_output_features flag allow passing this arg to seqio.get_dataset
     # the default value is True so this change will not affect any current
     # behaviour. the main purpose is for prefixlm to not problematically
@@ -533,6 +537,14 @@ class SeqIOInput(base_input.BaseInput):
         drop_remainder=p.drop_remainder,
         num_parallel_calls=tf.data.AUTOTUNE,
     )
+    if p.num_batches_to_skip:
+      if p.is_training:
+        ds = ds.skip(p.num_batches_to_skip)
+      else:
+        logging.warning(
+            "num_batches_to_skip set tp '%d' but has no effect because "
+            "is_training is false", p.num_batches_to_skip)
+
     return ds
 
   def get_next(self) -> NestedNpTensor:
