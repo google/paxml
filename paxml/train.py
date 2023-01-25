@@ -530,8 +530,14 @@ def train_and_evaluate(
     raise ValueError(
         f'Expecting exactly one training split. Got `{len(train_input_p)}`.')
   train_input_p = train_input_p[0]
-  logging.info('train_input_p=%s', train_input_p.to_text())
-  logging.info('task_p=%s', task_p.to_text())
+
+  logging.info('train_input_p:')
+  for line in train_input_p.to_text().splitlines():
+    logging.info('  %s', line)
+  logging.info('task_p:')
+  for line in task_p.to_text().splitlines():
+    logging.info('  %s', line)
+
   eval_input_p = []
   if (eval_on_test and task_p.train.eval_interval_steps is not None and
       task_p.train.eval_interval_steps > 0):
