@@ -204,6 +204,51 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
     ]
 
 
+def set_adam_and_learning_rate_schedule(
+    cls, task_p: tasks_lib.SingleTask.HParams
+) -> tasks_lib.SingleTask.HParams:
+  """Sets the Adam optimizer and the learning rate schedule."""
+  lp = task_p.train.learner
+  lp.loss_name = 'total_loss'
+  lp.optimizer = optimizers.Adam.HParams(
+      beta1=cls.ADAM_BETA1 if cls.ADAM_BETA1 else 0.9,
+      beta2=cls.ADAM_BETA2 if cls.ADAM_BETA2 else 0.999,
+      weight_decay=cls.WEIGHT_DECAY if cls.WEIGHT_DECAY else 0.0,
+      epsilon=cls.ADAM_EPSILON if cls.ADAM_EPSILON else 1e-6,
+      epsilon_root=cls.ADAM_EPSILON_ROOT if cls.ADAM_EPSILON_ROOT else 0.0,
+      clip_gradient_norm_to_value=cls.CLIP_GRADIENT_NORM_TO_VALUE
+      if cls.CLIP_GRADIENT_NORM_TO_VALUE
+      else 5.0,
+      clip_threshold=cls.ADAM_CLIP_THRESHOLD
+      if cls.ADAM_CLIP_THRESHOLD
+      else 1.0,
+  )
+  lp.optimizer.learning_rate = cls.LEARNING_RATE
+
+  if cls.LR_SCHEDULE == 'linear_rampup_exponential_decay':
+    lp.optimizer.lr_schedule = schedules.LinearRampupExponentialDecay.HParams(
+        warmup_steps=cls.LR_LRED_WARMUP,
+        decay_start=cls.LR_LRED_DECAY_START,
+        decay_end=cls.LR_LRED_DECAY_END,
+        min_ratio=cls.LR_LRED_MIN_RATIO,
+        max=cls.LR_LRED_MAX,
+    )
+  elif cls.LR_SCHEDULE == 'linear_rampup_cosine_decay':
+    lp.optimizer.lr_schedule = schedules.LinearRampupCosineDecay.HParams(
+        warmup_steps=cls.LR_COS_WARMUP,
+        decay_start=cls.LR_COS_DECAY_START,
+        decay_end=cls.LR_COS_DECAY_END,
+        min_ratio=cls.LR_COS_MIN_RATIO,
+        max=cls.LR_COS_MAX,
+    )
+  else:
+    raise NotImplementedError(
+        f'Learning rate schedule {cls.LR_SCHEDULE} is not supported.'
+    )
+
+  return task_p
+
+
 class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   """Base SPMD Transformer LM configuration using Adam.
 
@@ -246,44 +291,73 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
 
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    if stacked_p.cls == transformers.PipelinedTransformer:
+      stacked_p = stacked_p.pipeline_stage
     if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl.block  # pytype: disable=attribute-error
-    else:
-      stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error
-    transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
+      stacked_p = stacked_p.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
     transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
 
-    lp = task_p.train.learner
-    lp.loss_name = 'total_loss'
-    lp.optimizer = optimizers.Adam.HParams(
-        beta1=self.ADAM_BETA1,
-        beta2=self.ADAM_BETA2,
-        weight_decay=self.WEIGHT_DECAY,
-        epsilon=self.ADAM_EPSILON,
-        epsilon_root=self.ADAM_EPSILON_ROOT,
-        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
-        clip_threshold=self.ADAM_CLIP_THRESHOLD)
-    lp.optimizer.learning_rate = self.LEARNING_RATE
+    task_p = set_adam_and_learning_rate_schedule(cls=self, task_p=task_p)
 
-    if self.LR_SCHEDULE == 'linear_rampup_exponential_decay':
-      lp.optimizer.lr_schedule = (
-          schedules.LinearRampupExponentialDecay.HParams(
-              warmup_steps=self.LR_LRED_WARMUP,
-              decay_start=self.LR_LRED_DECAY_START,
-              decay_end=self.LR_LRED_DECAY_END,
-              min_ratio=self.LR_LRED_MIN_RATIO,
-              max=self.LR_LRED_MAX))
-    elif self.LR_SCHEDULE == 'linear_rampup_cosine_decay':
-      lp.optimizer.lr_schedule = (
-          schedules.LinearRampupCosineDecay.HParams(
-              warmup_steps=self.LR_COS_WARMUP,
-              decay_start=self.LR_COS_DECAY_START,
-              decay_end=self.LR_COS_DECAY_END,
-              min_ratio=self.LR_COS_MIN_RATIO,
-              max=self.LR_COS_MAX))
-    else:
-      raise NotImplementedError(f'Learning rate schedule {self.LR_SCHEDULE} is '
-                                'not supported.')
+    return task_p
+
+
+class TransformerLmSpmdPipelineAdam(
+    model_params.TransformerLmSpmdPipelineAdafactor
+):
+  """Base pipelined SPMD Transformer LM configuration using Adam.
+
+  Only things different from TransformerLmSpmdPipelineAdafactor are listed.
+  """
+
+  # architecture related
+  NUM_LAYERS = 32
+  NUM_HEADS = 16
+  MODEL_DIMS = 1024
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  FPROP_DTYPE = jnp.float32
+  PACKED_INPUT = True
+  USE_BIAS = False
+
+  # optimizer related
+  LEARNING_RATE = 1e-3
+  ADAM_BETA1 = 0.9
+  ADAM_BETA2 = 0.99
+  ADAM_CLIP_THRESHOLD = 1.0
+  ADAM_EPSILON = 1e-6
+  ADAM_EPSILON_ROOT = 0.0
+
+  # Learning rate schedule
+  LR_SCHEDULE = 'linear_rampup_exponential_decay'
+  LR_LRED_WARMUP = 4000
+  LR_LRED_DECAY_START = 4001
+  LR_LRED_DECAY_END = 300000
+  LR_LRED_MIN_RATIO = 0.1
+  LR_LRED_MAX = 1.0
+
+  LR_COS_MIN_RATIO = 0.1
+  LR_COS_MAX = 1.0
+  LR_COS_WARMUP = 4000
+  LR_COS_DECAY_START = 4001
+  LR_COS_DECAY_END = 300000
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    model_p = task_p.model
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
+
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    if stacked_p.cls == transformers.PipelinedTransformer:
+      stacked_p = stacked_p.pipeline_stage
+    if self.USE_REPEATED_LAYER:
+      stacked_p = stacked_p.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
+    transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
+
+    task_p = set_adam_and_learning_rate_schedule(cls=self, task_p=task_p)
 
     return task_p
 
