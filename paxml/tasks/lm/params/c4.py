@@ -16,7 +16,6 @@
 """Language Model configurations on the T5/C4 dataset."""
 
 import functools
-import time
 from typing import List, Optional
 
 from absl import logging
@@ -41,7 +40,9 @@ from t5.data import preprocessors as t5_preprocessors
 
 WeightInit = base_layer.WeightInit
 
-GPT_SPM_PATH = 'gs://mlperf-llm-public2/vocab/c4_en_301_5Mexp2_spm.model'
+GPT_SPM_PATH = (
+    'gs://mlperf-llm-public2/vocab/c4_en_301_5Mexp2_spm.model'
+)
 GPT_EOS_ID = 1
 GPT_VOCABULARY = t5.data.SentencePieceVocabulary(GPT_SPM_PATH)
 C4_GPT_OUTPUT_FEATURES_LM = {
@@ -262,6 +263,7 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   FPROP_DTYPE = jnp.float32
   PACKED_INPUT = True
   USE_BIAS = False
+  EMBEDDING_LOOKUP_STYLE = 'matmul'
 
   # optimizer related
   LEARNING_RATE = 1e-3
@@ -320,6 +322,7 @@ class TransformerLmSpmdPipelineAdam(
   FPROP_DTYPE = jnp.float32
   PACKED_INPUT = True
   USE_BIAS = False
+  EMBEDDING_LOOKUP_STYLE = 'matmul'
 
   # optimizer related
   LEARNING_RATE = 1e-3
@@ -379,6 +382,63 @@ class LmCloudSpmdAdam(TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   ICI_MESH_SHAPE = [1, 4, 2]
 
 
+def configure_gpt3_task(
+    cls,
+    task_p: tasks_lib.SingleTask.HParams,
+) -> tasks_lib.SingleTask.HParams:
+  """Returns task with gpt3 related configs."""
+  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+
+  model_p.decoder_tpl.eos_id = (
+      GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
+  )
+  model_p.decoder_tpl.seqlen = cls.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+
+  model_p.params_init = WeightInit.Gaussian(0.006)
+
+  softmax_init = WeightInit.Gaussian(0.006)
+  model_p.lm_tpl.softmax_tpl.params_init = softmax_init
+  model_p.lm_tpl.softmax_tpl.feed_forward_tpl.has_bias = False
+  model_p.lm_tpl.softmax_tpl.soft_cap_logits = None
+
+  if cls.SEPARATE_EMBEDDING:
+    model_p.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = False
+    model_p.lm_tpl.separate_embedding_tpl.lookup_style = (
+        cls.EMBEDDING_LOOKUP_STYLE
+    )
+  else:
+    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = False
+    model_p.lm_tpl.softmax_tpl.lookup_style = cls.EMBEDDING_LOOKUP_STYLE
+  if cls.TRAINABLE_POSITION_EMB:
+    model_p.lm_tpl.position_emb_tpl.lookup_style = cls.EMBEDDING_LOOKUP_STYLE
+
+  stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+  if stacked_p.cls == transformers.PipelinedTransformer:
+    stacked_p = stacked_p.pipeline_stage
+  if issubclass(stacked_p.cls, transformers.StackedTransformerRepeated):
+    stacked_p = stacked_p.block
+  transformer_layer_p = stacked_p.transformer_layer_params_tpl
+
+  transformer_layer_p.ln_tpl.epsilon = cls.LAYERNORM_EPSILON
+  transformer_layer_p.tr_fflayer_tpl.ln_tpl.epsilon = cls.LAYERNORM_EPSILON
+  model_p.lm_tpl.final_ln_tpl.epsilon = cls.LAYERNORM_EPSILON
+  transformer_layer_p.tr_atten_tpl.internal_enable_per_dim_scale = False
+  transformer_layer_p.tr_atten_tpl.use_bias = True
+
+  transformer_layer_p.tr_fflayer_tpl.activation_tpl.approximate = True
+
+  for atten_p in (
+      transformer_layer_p.tr_atten_tpl,
+      transformer_layer_p.cross_atten_tpl,
+  ):
+    if atten_p is None:
+      continue
+    atten_wp = atten_p.weight_split_dims_mapping
+    atten_wp.proj = ['data', 'mdl', None]
+
+  return task_p
+
+
 @experiment_registry.register
 class C4SpmdAdam(TransformerLmSpmdAdam,
                  C4UnsupervisedDataset):
@@ -412,10 +472,12 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
     return task_p
 
 
-@experiment_registry.register
-class C4SpmdGpt3Adam(C4SpmdAdam):
-  r"""GPT-3 config for a decoder only transformer."""
+class C4SpmdGpt3AdamOrgHP(C4SpmdAdam):
+  r"""GPT-3 config with original HPs.
 
+  From the paper & after convergence matching with
+  NVIDIA's Megatron-LM framework.
+  """
   MAX_SEQ_LEN = 2048
 
   NUM_LAYERS = 96
@@ -427,59 +489,6 @@ class C4SpmdGpt3Adam(C4SpmdAdam):
   DIMS_PER_HEAD = None
   # Known as NUM_EMBEDDINGS in t5x
   VOCAB_SIZE = 50257
-
-  # Autodiff remat.
-  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
-  CHECKPOINT_EVERY_N_STEPS = 200
-  CHECKPOINT_MAX_TO_KEEP = 2
-
-  # 768 replicas with 1.5k global batch size
-  PERCORE_BATCH_SIZE = 2
-  ICI_MESH_SHAPE = [1, 64, 12]
-
-
-@experiment_registry.register
-class C4SpmdGpt3L16Adam(C4SpmdGpt3Adam):
-  r"""a few layers of GPT-3 config for a decoder only transformer."""
-  NUM_LAYERS = 16
-  USE_REPEATED_LAYER = True
-  # pad vocab to TPU-friendly size
-  VOCAB_SIZE = 50304
-
-  # 128 replicas with 128 global batch size using fp32
-  PERCORE_BATCH_SIZE = 1
-  ICI_MESH_SHAPE = [1, 32, 4]
-
-
-@experiment_registry.register
-class C4SpmdGpt3AdamHP(C4SpmdGpt3Adam):
-  r"""GPT-3 config for a decoder only transformer."""
-  NUM_LAYERS = 96
-  USE_REPEATED_LAYER = True
-  # pad vocab to TPU-friendly size
-  VOCAB_SIZE = 50304
-
-  # 1536 replicas with 1536 global batch size
-  PERCORE_BATCH_SIZE = 1
-  ICI_MESH_SHAPE = [1, 192, 8]
-  FPROP_DTYPE = jnp.bfloat16
-
-  # HPs
-  ACTIVATION_CLS = layers.GELU
-  USE_GATED_ACTIVATION = False
-  LR_SCHEDULE = 'linear_rampup_exponential_decay'
-  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
-
-  CHECKPOINT_MAX_TO_KEEP = 10
-
-
-class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
-  r"""GPT-3 config with original HPs.
-
-  From the paper & after convergence matching with
-  NVIDIA's Megatron-LM framework.
-  """
-  NUM_LAYERS = 96
   USE_REPEATED_LAYER = True
 
   # HPs
@@ -499,12 +508,16 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
   CLIP_GRADIENT_NORM_TO_VALUE = 1.0
   LAYERNORM_EPSILON = 1e-5
 
+  # In units of steps for BS1.5k
   LR_SCHEDULE = 'linear_rampup_cosine_decay'
   LR_COS_WARMUP = 265
-  LR_COS_DECAY_START = 266
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
   LR_COS_DECAY_END = 108600
   LR_COS_MAX = 1.0
   LR_COS_MIN_RATIO = 0.1
+
+  # Autodiff remat.
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
 
   # Checkpoint
   EVAL_INTERVAL_STEPS = 100
@@ -515,128 +528,255 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdGpt3Adam):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
-
-    task_p.model.params_init = WeightInit.Gaussian(0.006)
-
-    softmax_init = WeightInit.Gaussian(0.006)
-    task_p.model.lm_tpl.softmax_tpl.params_init = softmax_init
-    task_p.model.lm_tpl.softmax_tpl.feed_forward_tpl.has_bias = False
-
-    if self.SEPARATE_EMBEDDING:
-      task_p.model.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = False
-      task_p.model.lm_tpl.separate_embedding_tpl.lookup_style = 'index'
-    else:
-      task_p.model.lm_tpl.softmax_tpl.scale_sqrt_depth = False
-      task_p.model.lm_tpl.softmax_tpl.lookup_style = 'index'
-    if self.TRAINABLE_POSITION_EMB:
-      task_p.model.lm_tpl.position_emb_tpl.lookup_style = 'index'
-
-    if self.USE_REPEATED_LAYER:
-      stacked_transformer_tpl = task_p.model.lm_tpl.stacked_transformer_tpl.block
-    else:
-      stacked_transformer_tpl = task_p.model.lm_tpl.stacked_transformer_tpl
-    transformer_layer_p = stacked_transformer_tpl.transformer_layer_params_tpl
-
-    transformer_layer_p.ln_tpl.epsilon = self.LAYERNORM_EPSILON
-    transformer_layer_p.tr_fflayer_tpl.ln_tpl.epsilon = self.LAYERNORM_EPSILON
-    task_p.model.lm_tpl.final_ln_tpl.epsilon = self.LAYERNORM_EPSILON
-    transformer_layer_p.tr_atten_tpl.internal_enable_per_dim_scale = False
-    transformer_layer_p.tr_atten_tpl.use_bias = True
-
-    transformer_layer_p.tr_fflayer_tpl.activation_tpl.approximate = True
-
+    task_p = configure_gpt3_task(self, task_p)
     return task_p
 
 
 @experiment_registry.register
-class C4SpmdGpt3AdamOrgHP1536Replicas(C4SpmdGpt3AdamOrgHP):
+class C4SpmdGpt3AdamOrgHPBS1p5k1536Replicas(C4SpmdGpt3AdamOrgHP):
   r"""GPT-3 config in fp32 for 1536 replicas with 1536 global batch size."""
+  # Padded to TPU friendly size
+  VOCAB_SIZE = 51200
+
   PERCORE_BATCH_SIZE = 1
   ICI_MESH_SHAPE = [1, 64, 24]
   FPROP_DTYPE = jnp.float32
   CHECKPOINT_MAX_TO_KEEP = 100
   EVAL_INTERVAL_STEPS = 25
+  SUMMARY_INTERVAL_STEPS = 1
 
 
 @experiment_registry.register
-class C4SpmdGpt3AdamOrgHP512Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""GPT-3 config in bf16 for 512 replicas with 1536 global batch size."""
-  PERCORE_BATCH_SIZE = 3
-  ICI_MESH_SHAPE = [1, 64, 8]
-  FPROP_DTYPE = jnp.bfloat16
+class C4SpmdPipelineAdam(TransformerLmSpmdPipelineAdam, C4UnsupervisedDataset):
+  r"""Base config for a decoder only transformer with pipeline."""
+
+  NUM_LAYERS = 24
+  NUM_HEADS = 32
+  MODEL_DIMS = 2048
+  # Known as MLP_DIM in t5x
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  # Defaults to MODEL_DIMS // NUM_HEADS.
+  DIMS_PER_HEAD = None
+  # Known as NUM_EMBEDDINGS in t5x
+  VOCAB_SIZE = 32128
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
+
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_FOR_MLPERF_200B
+  CHECKPOINT_EVERY_N_STEPS = 1000
+
+  # Sub-class has to specify a mesh.
+  MICROBATCH_SIZE = 2
+  ICI_MESH_SHAPE = [2, 1, 2, 2]
+  NUM_STAGES = 2
+  EMB_W_DATA_DIMS = ('replica', 'data')
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.decoder_tpl.eos_id = (
+        GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
+    )
+    model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+
+    return task_p
+
+
+class C4SpmdPipelineGpt3AdamOrgHP(C4SpmdPipelineAdam):
+  r"""GPT-3 config with original HPs.
+
+  From the paper & after convergence matching with
+  NVIDIA's Megatron-LM framework.
+  """
+  MAX_SEQ_LEN = 2048
+
+  NUM_LAYERS = 96
+  NUM_HEADS = 96
+  MODEL_DIMS = 12288
+  # Known as MLP_DIM in t5x
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  # Defaults to MODEL_DIMS // NUM_HEADS.
+  DIMS_PER_HEAD = None
+  # Known as NUM_EMBEDDINGS in t5x
+  VOCAB_SIZE = 50257
+  USE_REPEATED_LAYER = False
+
+  # HPs
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
+  SEPARATE_EMBEDDING = False
+  TRAINABLE_POSITION_EMB = True
+  TRAINABLE_PE_MAX_SEQ_LEN = 16384
+  ATTEN_LOGIT_CAP = -1.0  # Disable logits cap in atten
+
+  LEARNING_RATE = 6e-5
+  WEIGHT_DECAY = 0.1
+  ADAM_BETA1 = 0.9
+  ADAM_BETA2 = 0.95
+  ADAM_EPSILON = 1e-8
+  ADAM_CLIP_THRESHOLD = -1.0  # Disable Adam clip_threshold
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  LAYERNORM_EPSILON = 1e-5
+
+  # In units of steps for BS1.5k
+  LR_SCHEDULE = 'linear_rampup_cosine_decay'
+  LR_COS_WARMUP = 265
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 108600
+  LR_COS_MAX = 1.0
+  LR_COS_MIN_RATIO = 0.1
+
+  # Autodiff remat.
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+  # Checkpoint
+  EVAL_INTERVAL_STEPS = 100
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_EVERY_N_STEPS = 100
+  CHECKPOINT_MAX_TO_KEEP = 10
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    task_p = configure_gpt3_task(self, task_p)
+    return task_p
 
 
 @experiment_registry.register
-class C4SpmdGpt3AdamOrgHP768Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""GPT-3 config in bf16 for 768 replicas with 1536 global batch size."""
+class C4SpmdPipelineGpt3AdamOrgHPBS1p5k768Replicas(C4SpmdPipelineGpt3AdamOrgHP):
+  r"""GPT-3 config in fp32 for 768 replicas with 1536 global batch size."""
+  # Padded to TPU friendly size
+  VOCAB_SIZE = 51200
+
   PERCORE_BATCH_SIZE = 2
-  ICI_MESH_SHAPE = [1, 64, 12]
-  FPROP_DTYPE = jnp.bfloat16
+  NUM_STAGES = 8
+  ICI_MESH_SHAPE = [8, 1, 8, 12]
+  MICROBATCH_SIAZE = 8
+  FPROP_DTYPE = jnp.float32
   CHECKPOINT_MAX_TO_KEEP = 100
   EVAL_INTERVAL_STEPS = 25
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 50
+  STREAM_IO = False
 
 
 @experiment_registry.register
-class C4SpmdGpt3AdamOrgHP512Replicas2(C4SpmdGpt3AdamOrgHP):
-  r"""GPT-3 config in bf16 for 512 replicas with 1536 global batch size."""
-  PERCORE_BATCH_SIZE = 3
-  ICI_MESH_SHAPE = [1, 32, 16]
-  FPROP_DTYPE = jnp.bfloat16
-
-
-@experiment_registry.register
-class C4SpmdGpt3AdamOrgHPBS4k2048Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""GPT-3 config in bf16 for 1024 replicas with 4k global batch size."""
+class C4SpmdPipelineGpt3AdamMLPerfHPBS1p5k768Replicas(
+    C4SpmdPipelineGpt3AdamOrgHP
+):
+  r"""GPT-3 config in fp32 for 768 replicas with 1536 global batch size."""
+  VOCAB_SIZE = 51200
   PERCORE_BATCH_SIZE = 2
-  ICI_MESH_SHAPE = [1, 128, 16]
-  FPROP_DTYPE = jnp.bfloat16
+  NUM_STAGES = 8
+  ICI_MESH_SHAPE = [8, 1, 8, 12]
+  # NUM_MICROBATCHS = 192
+  MICROBATCH_SIZE = 8
+  FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 16
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 32
+
+  LEARNING_RATE = 2e-5
+  STREAM_IO = False
 
 
 @experiment_registry.register
-class C4SpmdGpt3L16AdamOrgHP(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config in bf16 for 64 replicas with 192 global batch size."""
-
-  NUM_LAYERS = 16
-  FPROP_DTYPE = jnp.bfloat16
-  PERCORE_BATCH_SIZE = 3
-  ICI_MESH_SHAPE = [1, 16, 4]
-
-
-@experiment_registry.register
-class C4SpmdGpt3L16AdamOrgHP128Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config in bf16 for 128 replicas with 256 global batch size."""
-  NUM_LAYERS = 16
-  FPROP_DTYPE = jnp.bfloat16
-  PERCORE_BATCH_SIZE = 2
-  ICI_MESH_SHAPE = [1, 8, 16]
-
-
-@experiment_registry.register
-class C4SpmdGpt3L16AdamOrgHP96Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config in bf16 for 96 replicas with 192 global batch size."""
-
-  NUM_LAYERS = 16
-  FPROP_DTYPE = jnp.bfloat16
-  PERCORE_BATCH_SIZE = 2
-  ICI_MESH_SHAPE = [1, 6, 16]
-
-
-@experiment_registry.register
-class C4SpmdGpt3L16AdamOrgHP64Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config in bf16 for 64 replicas with 256 global batch size."""
-  NUM_LAYERS = 16
-  FPROP_DTYPE = jnp.bfloat16
+class C4SpmdPipelineGpt3AdamMLPerfHPBS2k512Replicas(
+    C4SpmdPipelineGpt3AdamOrgHP
+):
+  r"""GPT-3 config in fp32 for 512 replicas with 2k global batch size."""
+  VOCAB_SIZE = 51200
   PERCORE_BATCH_SIZE = 4
-  ICI_MESH_SHAPE = [1, 4, 16]
+  NUM_STAGES = 8
+  ICI_MESH_SHAPE = [8, 1, 8, 8]
+  # NUM_MICROBATCHS = 256
+  MICROBATCH_SIZE = 8
+  # FPROP_DTYPE = jnp.bfloat16
+  FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 12
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 24
+
+  LEARNING_RATE = 2e-5
+  STREAM_IO = True
+  LR_COS_WARMUP = 199
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 81450
 
 
 @experiment_registry.register
-class C4SpmdGpt3L16AdamOrgHP32Replicas(C4SpmdGpt3AdamOrgHP):
-  r"""Small GPT-3 config in bf16 for 32 replicas with 128 global batch size."""
-  NUM_LAYERS = 16
-  FPROP_DTYPE = jnp.bfloat16
+class C4SpmdPipelineGpt3AdamMLPerfHPBS3k768Replicas(
+    C4SpmdPipelineGpt3AdamOrgHP
+):
+  r"""GPT-3 config in fp32 for 768 replicas with 3072 global batch size."""
+  VOCAB_SIZE = 51200
+  PERCORE_BATCH_SIZE = 4
+  NUM_STAGES = 4
+  ICI_MESH_SHAPE = [4, 1, 16, 12]
+  # NUM_MICROBATCHS = 192
+  MICROBATCH_SIZE = 16
+  FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 8
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 16
+
+  LEARNING_RATE = 2e-5
+  STREAM_IO = True
+  LR_COS_WARMUP = 133
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 54300
+
+
+@experiment_registry.register
+class C4SpmdPipelineGpt3AdamMLPerfHPBS4k1024Replicas(
+    C4SpmdPipelineGpt3AdamOrgHP
+):
+  r"""GPT-3 config in fp32 for 1024 replicas with 4096 global batch size."""
+  VOCAB_SIZE = 51200
+  PERCORE_BATCH_SIZE = 4
+  NUM_STAGES = 8
+  ICI_MESH_SHAPE = [8, 1, 8, 16]
+  # NUM_MICROBATCHS = 512
+  MICROBATCH_SIZE = 8
+  FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 36
+  EVAL_INTERVAL_STEPS = 6
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 12
+
+  LEARNING_RATE = 3e-5
+  STREAM_IO = True
+  LR_COS_WARMUP = 99
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 40725
+
+
+@experiment_registry.register
+class C4SpmdPipelineGpt3AdamMLPerfHPBS8k1024Replicas(
+    C4SpmdPipelineGpt3AdamOrgHP
+):
+  r"""GPT-3 config in fp32 for 1024 replicas with 8192 global batch size."""
+  VOCAB_SIZE = 51200
   PERCORE_BATCH_SIZE = 8
-  ICI_MESH_SHAPE = [1, 2, 16]
+  NUM_STAGES = 4
+  ICI_MESH_SHAPE = [4, 1, 16, 16]
+  # NUM_MICROBATCHS = 512
+  MICROBATCH_SIZE = 16
+  FPROP_DTYPE = jnp.float32
+  CHECKPOINT_MAX_TO_KEEP = 36
+  EVAL_INTERVAL_STEPS = 3
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 6
+
+  LEARNING_RATE = 3e-5
+  STREAM_IO = True
+  LR_COS_WARMUP = 50
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 20363
 
 
 @experiment_registry.register
@@ -694,11 +834,13 @@ class C4Spmd16BAdam32Replicas(C4SpmdAdam):
     task_p.train.learner.repeat_prefix_sep = '_'
     return task_p
 
+
 @experiment_registry.register
 class C4Spmd32BAdam64Replicas(C4SpmdAdam):
   r"""GPT-3 config with 32B params.
 
-  Model Parameters: Global batch size = 1 * 16 * 4 * 8 = 512."""
+  Model Parameters: Global batch size = 1 * 16 * 4 * 8 = 512.
+  """
   NUM_LAYERS = 40
   MODEL_DIMS = 8192
   HIDDEN_DIMS = MODEL_DIMS * 4
@@ -719,3 +861,39 @@ class C4Spmd32BAdam64Replicas(C4SpmdAdam):
     task_p = super().task()
     task_p.train.learner.repeat_prefix_sep = '_'
     return task_p
+
+
+@experiment_registry.register
+class C4SpmdGpt3L16AdamOrgHP(C4SpmdGpt3AdamOrgHP):
+  r"""Small GPT-3 config in bf16 for 64 replicas with 192 global batch size."""
+  NUM_LAYERS = 16
+  FPROP_DTYPE = jnp.bfloat16
+  PERCORE_BATCH_SIZE = 3
+  EVAL_INTERVAL_STEPS = 25000
+  ICI_MESH_SHAPE = [1, 16, 4]
+
+
+@experiment_registry.register
+class C4SpmdPipelineGpt3SmallAdam64Replicas(C4SpmdPipelineGpt3AdamOrgHP):
+  """Small GPT-3 config in bf16 for 64 replicas with 512 global batch size.
+
+  This was called GPT-3 XL in the GPT-3 paper, with 1.3B parameters.
+  """
+  NUM_STAGES = 4
+  NUM_LAYERS = 24
+  NUM_HEADS = 24
+  MODEL_DIMS = 3072
+  # Known as MLP_DIM in t5x
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  DIMS_PER_HEAD = 128
+
+  PER_CORE_BATCH_SIZE = 8
+  MICROBATCH_SIZE = 16
+  FPROP_DTYPE = jnp.bfloat16
+  LEARNING_RATE = 2.0e-4
+  ICI_MESH_SHAPE = [4, 1, 4, 4]
+
+  CHECKPOINT_MAX_TO_KEEP = 1000
+  EVAL_INTERVAL_STEPS = 100
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_EVERY_N_STEPS = 200
