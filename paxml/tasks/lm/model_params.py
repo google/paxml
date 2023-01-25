@@ -663,6 +663,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
 
   # Default these flags to False as we already have a loop over stages.
   USE_REPEATED_LAYER = False
+  SEPARATE_EMBEDDING = False
   TRAINABLE_POSITION_EMB = False
   TRAINABLE_PE_MAX_SEQ_LEN = 16 * 1024
   RELATIVE_BIAS = False
@@ -742,10 +743,19 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
     model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
 
+    if self.SEPARATE_EMBEDDING:
+      model_p.lm_tpl.separate_embedding_tpl = pax_fiddle.Config(
+          layers.Embedding
+      )
+      model_p.lm_tpl.softmax_tpl = pax_fiddle.Config(layers.FullSoftmax)
+
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
-    model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
+    if self.SEPARATE_EMBEDDING:
+      model_p.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = True
+    else:
+      model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = self.SOFTMAX_CAP_LOGITS
 
     if self.TRAINABLE_POSITION_EMB:
@@ -821,8 +831,9 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
         clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE)
 
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
-    task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
+    task_p.train.summary_interval_steps = self.SUMMARY_INTERVAL_STEPS
     task_p.train.save_max_to_keep = self.CHECKPOINT_MAX_TO_KEEP
+    task_p.train.eval_interval_steps = self.EVAL_INTERVAL_STEPS
     task_p.train.profiler_num_steps = self.PROFILER_NUM_STEPS
     task_p.train.profiler_min_duration_sec = self.PROFILER_MIN_DURATION_SEC
     task_p.train.profiler_capture_step = self.PROFILER_CAPTURE_STEP
@@ -862,25 +873,37 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
 
     # Run softmax/embedding in data parallelism across all cores.
     softmax_p = model_p.lm_tpl.softmax_tpl
-    softmax_p.activation_split_dims_mapping.emb_out_split_dims_mapping = [
-        batch_dims, None, mdl_axis
+    if self.SEPARATE_EMBEDDING:
+      embedding_p = model_p.lm_tpl.separate_embedding_tpl
+    else:
+      embedding_p = model_p.lm_tpl.softmax_tpl
+    embedding_p.activation_split_dims_mapping.emb_out_split_dims_mapping = [
+        batch_dims,
+        None,
+        mdl_axis,
     ]
-    softmax_p.activation_split_dims_mapping.out = [batch_dims, None, mdl_axis]
+    embedding_p.activation_split_dims_mapping.out = [batch_dims, None, mdl_axis]
     if (
         fdl.get_callable(softmax_p)
         == embedding_softmax.GShardSharedEmbeddingSoftmax
     ):
       # Softmax weight is of shape [vocab_size, input_dim].
       softmax_p.weight_split_dims_mapping.wt = [mdl_axis, self.EMB_W_DATA_DIMS]
-    elif (
-        fdl.get_callable(softmax_p) == embedding_softmax.SharedEmbeddingSoftmax
-    ):
+    elif fdl.get_callable(softmax_p) in {
+        embedding_softmax.SharedEmbeddingSoftmax,
+        embedding_softmax.FullSoftmax,
+    }:
       # Softmax weight is of shape [input_dim, vocab_size].
       softmax_p.weight_split_dims_mapping.wt = [self.EMB_W_DATA_DIMS, mdl_axis]
     else:
       raise NotImplementedError(
           f'softmax class {fdl.get_callable(softmax_p)} not supported'
       )
+    if self.SEPARATE_EMBEDDING:
+      embedding_p.weight_split_dims_mapping.wt = [
+          self.EMB_W_DATA_DIMS,
+          mdl_axis,
+      ]
 
     pipeline_layer_p = model_p.lm_tpl.stacked_transformer_tpl
     pipeline_layer_p.weight_split_dims_mapping.stages = [stage_axis]
