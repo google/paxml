@@ -435,13 +435,14 @@ class SeqIOInput(base_input.BaseInput):
 
     super().__init__(hparams)
     self._validate_hparams()
-    self._num_eval_examples = self._get_eval_num_examples()
     self._dataset = self._get_dataset()
     self._iter = self._dataset.as_numpy_iterator()
 
     # Populated by first call to `self._get_targets_with_enum_key`. Subsequent
     # calls to it short circuit by returning the cached values.
     self._cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = None
+
+    self.is_targets_init = False
 
   def _validate_deterministic(self):
     if self.hparams.deterministic_input:
@@ -475,9 +476,14 @@ class SeqIOInput(base_input.BaseInput):
     self._mixture_or_task = p.mixture_or_task or seqio.get_mixture_or_task(
         p.mixture_name)
     shard_info = seqio.ShardInfo(
-        index=p.infeed_host_index, num_shards=p.num_infeed_hosts)
-    logging.info('ShardInfo: shard_id: %d, num_shards: %d, ', shard_info.index,
-                 shard_info.num_shards)
+        index=p.infeed_host_index, num_shards=p.num_infeed_hosts
+    )
+    logging.info(
+        'ShardInfo for %s: shard_id: %d, num_shards: %d, ',
+        self._mixture_or_task.name,
+        shard_info.index,
+        shard_info.num_shards,
+    )
     self._shard_info = shard_info
     self._validate_deterministic()
 
@@ -515,10 +521,11 @@ class SeqIOInput(base_input.BaseInput):
   def mixture_or_task(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task
 
-  def _get_eval_num_examples(self) -> int:
-    """
-    Returns the number of eval examples corresponding to the eval_loop_num_batches.
-    If not specified or if reset_for_eval=True, eval will run on full dataset.
+  def _get_num_eval_examples(self) -> int:
+    """Returns the number of eval examples.
+
+    Corresponds to`eval_loop_num_batches` when reset_for_eval=True;
+    otherwise eval runs on full dataset.
     """
     p = self.hparams
     if (
@@ -527,7 +534,7 @@ class SeqIOInput(base_input.BaseInput):
         and p.eval_loop_num_batches
         and not p.reset_for_eval
     ):
-      return p.batch_size * p.eval_loop_num_batches
+      return p.eval_loop_num_batches * p.batch_size * p.num_infeed_hosts
     return -1
 
   def _get_dataset(self) -> tf.data.Dataset:
@@ -555,6 +562,87 @@ class SeqIOInput(base_input.BaseInput):
             "is_training is false", p.num_batches_to_skip)
 
     return ds
+
+  def _gen_targets_dataset(self):
+    p = self.hparams
+    self._len_full_ds = 0
+    inputs_length = p.task_feature_lengths['inputs']
+    # if set, p.eval_metrics_targets_length
+    # overrides p.task_feature_lengths['targets']
+    targets_length = (
+        p.eval_metrics_targets_length
+        if p.eval_metrics_targets_length
+        else p.task_feature_lengths['targets']
+    )
+    sharded_datasets = []
+    sharded_datasets_converted = []
+
+    for host_idx in range(p.num_infeed_hosts):
+      shard_info = seqio.ShardInfo(
+          index=host_idx, num_shards=p.num_infeed_hosts
+      )
+      ds_shard = self.mixture_or_task.get_dataset(
+          sequence_length={'inputs': inputs_length,
+                           'targets': targets_length},
+          split=p.split_name,
+          shuffle=False,
+          num_epochs=1,
+          shard_info=shard_info,
+          seed=p.input_random_seed,
+          use_cached=p.use_cached,
+          trim_output_features=p.trim_output_features
+      )
+      if p.use_enumeration:
+        ds_shard = _enumerate_dataset(
+            ds_shard, p.is_training, shard_info
+        )
+      else:
+        sharded_datasets_converted.append(
+            p.feature_converter(ds_shard, p.task_feature_lengths))
+      self._len_full_ds += _get_num_examples(ds_shard)
+      sharded_datasets.append(ds_shard)
+
+    # interleave sharded dataset so it can be read sequentially on
+    # single host
+    choice_dataset = tf.data.Dataset.range(p.num_infeed_hosts).repeat(
+        np.ceil(self._len_full_ds / p.num_infeed_hosts)
+    )
+    self.targets_ds = tf.data.experimental.choose_from_datasets(
+        sharded_datasets, choice_dataset
+    )
+    if not p.use_enumeration:
+      self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
+          sharded_datasets_converted, choice_dataset
+      )
+
+  def _gen_filtered_artifacts(self) -> None:
+    """Create filtered targets artifacts."""
+    (
+        self.targets_ds,
+        self.targets_ds_ori,
+        self.ds_non_ragged_tensor_keys,
+        self.ds_ragged_tensor_keys,
+    ) = self._filter_ragged_tensor(self.targets_ds)
+
+  def _gen_targets_iter(self) -> None:
+    """Generate targets iterator."""
+    p = self.hparams
+    self.targets_iter = self.targets_ds.as_numpy_iterator()
+    if not p.use_enumeration:
+      self.targets_iter_converted = (
+          self.targets_ds_converted.as_numpy_iterator()
+      )
+    # Create iterator for ori_targets_ds, which may have ragged tensors and thus
+    # can't safely be called with `as_numpy_iterator()`
+    # (see `_filter_ragged_tensor()`)
+    self.targets_iter_ori = iter(self.targets_ds_ori)
+
+  def _gen_targets_artifacts(self):
+    self._num_eval_examples = self._get_num_eval_examples()
+    self._gen_targets_dataset()
+    self._gen_filtered_artifacts()
+    self._gen_targets_iter()
+    self.is_targets_init = True
 
   def get_next(self) -> NestedNpTensor:
     return next(self._iter)
@@ -682,22 +770,22 @@ class SeqIOInput(base_input.BaseInput):
     # decoding when calling 'as_numpy_iterator()' below. We filter out
     # RaggedTensor here.
     ds_ragged_tensor_keys = []
-    ds_non_ragged_element_keys = []
+    ds_non_ragged_tensor_keys = []
     for ds_element_key, ds_element_value in targets_ds.element_spec.items():
       if isinstance(ds_element_value, tf.RaggedTensorSpec):
         ds_ragged_tensor_keys.append(ds_element_key)
       else:
-        ds_non_ragged_element_keys.append(ds_element_key)
+        ds_non_ragged_tensor_keys.append(ds_element_key)
     # keep the original target ds before filtering because if inputs is a
     # ragged tensor, we need both the inputs and targets_pretokenized.
     ori_targets_ds = targets_ds
     targets_ds = targets_ds.map(
-        lambda x: {i: x[i] for i in ds_non_ragged_element_keys}
+        lambda x: {i: x[i] for i in ds_non_ragged_tensor_keys}
     )
     return (
         targets_ds,
         ori_targets_ds,
-        ds_non_ragged_element_keys,
+        ds_non_ragged_tensor_keys,
         ds_ragged_tensor_keys,
     )
 
@@ -709,57 +797,53 @@ class SeqIOInput(base_input.BaseInput):
     # TODO(b/241386390): deprecate prefix-based matching for metrics computation
     p = self.hparams
     assert not p.use_enumeration
-
+    assert self.targets_ds
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # get a dict key-ed by detokenized inputs (tokenized inputs are truncated
     # to inputs_length).
     inputs_length = p.task_feature_lengths['inputs']
-    targets_length = p.eval_metrics_targets_length
     assert inputs_length is not None
-    assert targets_length is not None
-    targets_ds = self.mixture_or_task.get_dataset(
-        sequence_length={
-            'inputs': inputs_length,
-            'targets': targets_length,
-        },
-        split=p.split_name,
-        shuffle=False,
-        num_epochs=1,
-        seed=p.input_random_seed,
-        use_cached=p.use_cached,
-        trim_output_features=p.trim_output_features)
-
-    targets_ds = targets_ds.take(self._num_eval_examples)
-    targets_ds, ori_targets_ds, ds_non_ragged_element_keys, _ = (
-        self._filter_ragged_tensor(targets_ds)
-    )
 
     # Note that lists are used per prefix since there may be duplicates
     targets = collections.defaultdict(list)
     examples = collections.defaultdict(list)
-    if 'inputs' in ds_non_ragged_element_keys:
+    num_examples = 0
+    while (
+        self._num_eval_examples < 0
+        or num_examples < self._num_eval_examples
+    ):
+      num_examples += 1
+      try:
+        example = next(self.targets_iter)
+        if 'inputs' not in self.ds_non_ragged_tensor_keys:
+          example_orig = next(self.targets_iter_ori)
+      except (tf.errors.OutOfRangeError, StopIteration) as exc:
+        if self._num_eval_examples > 0:
+          raise Exception(
+              'Exhausted eval data with reset_for_eval=False after'
+              f' {num_examples-1} examples (batch_size={p.batch_size})'
+          ) from exc
+        logging.info('Exhausted eval data after %d steps', num_examples - 1)
+        self._gen_targets_iter()
+        break
+
       # Note that we intentionally do not use 'inputs_pretokenized' here because
       # it might be very different from the round-trip results below, which
       # wouldn't match with the keys we get from the model inference path.
-      for e in targets_ds.as_numpy_iterator():
-        key = self.ids_to_strings(e['inputs'][np.newaxis, :],
-                                  lengths=[inputs_length], key='src')[0]
-        t = _get_targets_str(e, self.mixture_or_task)
-        targets[key].append(self.mixture_or_task.postprocess_fn(
-            t, example=e, is_target=True))
-        examples[key].append(e)
-    else:
-      for e in list(iter(ori_targets_ds)):
+      if 'inputs' in self.ds_non_ragged_tensor_keys:
+        inputs = example['inputs'][np.newaxis, :]
+      else:
         # ragged tensor may have multiple elements of various lengths. We
         # linearize all inputs into one array.
-        assert 'inputs' in e, '"inputs" field is required but not found'
-        inputs = e['inputs'].flat_values.numpy()[np.newaxis, :]
-        key = self.ids_to_strings(inputs,
-                                  lengths=[inputs_length], key='src')[0]
-        t = _get_targets_str(e, self.mixture_or_task)
-        targets[key].append(self.mixture_or_task.postprocess_fn(
-            t, example=e, is_target=True))
-        examples[key].append(e)
+        assert (
+            'inputs' in example_orig
+        ), '"inputs" field is required but not found'
+        inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
+      key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
+      t = _get_targets_str(example, self.mixture_or_task)
+      targets[key].append(self.mixture_or_task.postprocess_fn(
+          t, example=example, is_target=True))
+      examples[key].append(example)
 
     # In case the prefix returned by the model are prefixes of the keys
     # re-constructed here. This can sometimes be needed due to truncation of
@@ -786,12 +870,19 @@ class SeqIOInput(base_input.BaseInput):
 
       # Mutate 'ans' dictionary which is written to disk afterwards
       ans['seqio_targets'] = targets[k]
-      ans['seqio_postprocessed_predictions'] = (
-          _convert_bytes_to_str(seqio_postprocessed_predictions))
-
-    eval_data_size = _get_num_examples(targets_ds)
-    logging.info('Data %s has %s examples for computing eval metrics.', p.name,
-                 eval_data_size)
+      ans['seqio_postprocessed_predictions'] = _convert_bytes_to_str(
+          seqio_postprocessed_predictions
+      )
+    eval_data_size = (
+        self._num_eval_examples
+        if self._num_eval_examples > 0
+        else self._len_full_ds
+    )
+    logging.info(
+        'Data %s has %s examples for computing eval metrics.',
+        p.name,
+        eval_data_size,
+    )
     if eval_data_size != len(predictions_list):
       raise ValueError(
           f'Data {p.name} expects {eval_data_size} examples for computing eval'
@@ -820,59 +911,50 @@ class SeqIOInput(base_input.BaseInput):
     return predictions_list, targets_list
 
   def _get_targets_with_enum_key(self) -> Mapping[str, NestedMap]:
+    assert self.targets_ds
     if self._cached_targets_with_enum_key is not None:
       return self._cached_targets_with_enum_key
-
     p = self.hparams
-    inputs_length = p.task_feature_lengths['inputs']
-    targets_length = p.eval_metrics_targets_length
-
     targets = {}
-    # simulate multi-host setup by iterating on multiple input generators
-    for host_idx in range(p.num_infeed_hosts):
-      shard_info = seqio.ShardInfo(
-          index=host_idx, num_shards=p.num_infeed_hosts)
-      targets_ds = self.mixture_or_task.get_dataset(
-          sequence_length={
-              'inputs': inputs_length,
-              'targets': targets_length,
-          },
-          split=p.split_name,
-          shuffle=False,
-          num_epochs=1,
-          shard_info=shard_info,
-          seed=p.input_random_seed,
-          use_cached=p.use_cached,
-          trim_output_features=p.trim_output_features)
-      targets_ds = targets_ds.take(self._num_eval_examples)
-      targets_ds = _enumerate_dataset(targets_ds, False, shard_info)
+    num_examples = 0
+    while (
+        self._num_eval_examples < 0
+        or num_examples < self._num_eval_examples
+    ):
+      num_examples += 1
+      try:
+        example = next(self.targets_iter)
+        if self.ds_ragged_tensor_keys:
+          example_orig = next(self.targets_ds_ori)
+      except (tf.errors.OutOfRangeError, StopIteration) as exc:
+        if self._num_eval_examples > 0:
+          raise Exception(
+              'Exhausted eval data with reset_for_eval=False after'
+              f' {num_examples-1} examples (batch_size={p.batch_size})'
+          ) from exc
+        logging.info(
+            'Exhausted target eval data after %d examples', num_examples - 1
+        )
+        self._gen_targets_iter()
+        break
 
-      targets_ds, ori_targets_ds, _, ds_ragged_tensor_keys = (
-          self._filter_ragged_tensor(targets_ds)
-      )
+      # remove enum related fields from example as seqio metric_fns API
+      # expects the output from the task dataset directly.
+      key = py_utils.get_enumeration_id(example, pop=True)
+      assert key is not None and key not in targets
+      targets[key] = example
 
-      for e in targets_ds.as_numpy_iterator():
-        # remove enum related fields from example as seqio metric_fns API
-        # expects the output from the task dataset directly.
-        key = py_utils.get_enumeration_id(e, pop=True)
-        assert key is not None and key not in targets
-        targets[key] = e
+      # we keep the ragged tensors and add them into the targets.
+      # ragged tensor may have multiple elements of various lengths. We
+      # linearize all inputs into one array.
+      for field in self.ds_ragged_tensor_keys:
+        field_value = example_orig[field]
+        linearized_field_value = field_value.flat_values.numpy()
+        linearized_field_value = linearized_field_value[np.newaxis, :]
+        targets[key][field] = linearized_field_value
 
-      if ds_ragged_tensor_keys:
-        # we keep the ragged tensors and add them into the targets.
-        # ragged tensor may have multiple elements of various lengths. We
-        # linearize all inputs into one array.
-        for e in list(iter(ori_targets_ds)):
-          key = py_utils.get_enumeration_id(e, pop=True)
-          non_ragged_values = targets[key]
-          for field, field_value in e.items():
-            if field not in non_ragged_values:
-              linearized_field_value = field_value.flat_values.numpy()
-              linearized_field_value = linearized_field_value[np.newaxis, :]
-              targets[key][field] = linearized_field_value
-
-    self._cached_targets_with_enum_key = targets  # populate cache
-
+    if p.reset_for_eval:
+      self._cached_targets_with_enum_key = targets  # populate cache
     return targets
 
   def _build_predict_metric_inputs_with_enum(
@@ -938,25 +1020,33 @@ class SeqIOInput(base_input.BaseInput):
       verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
     """Build 1-to-1 mapped scores and targets for metrics via label matching."""
     # TODO(b/241386390): deprecate label-based matching for metrics computation.
+    assert self.targets_ds
     p = self.hparams
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # produce a dict key-ed by tuple of `labels` token ids.
-    targets_ds = self.mixture_or_task.get_dataset(
-        sequence_length=p.task_feature_lengths,
-        split=p.split_name,
-        shuffle=False,
-        num_epochs=1,
-        seed=p.input_random_seed,
-        use_cached=p.use_cached,
-        trim_output_features=p.trim_output_features)
-    targets_ds = targets_ds.take(self._num_eval_examples)
-    converted_targets_ds = p.feature_converter(targets_ds,
-                                               p.task_feature_lengths)
     targets = collections.defaultdict(list)
-    for example, converted_example in zip(
-        targets_ds.as_numpy_iterator(),
-        converted_targets_ds.as_numpy_iterator()):
-      key = tuple(converted_example[_LM_LABEL_KEY])
+    num_examples = 0
+    while (
+        self._num_eval_examples < 0
+        or num_examples < self._num_eval_examples
+    ):
+      num_examples += 1
+      try:
+        example = next(self.targets_iter)
+        example_convert = next(self.targets_iter_converted)
+      except (tf.errors.OutOfRangeError, StopIteration) as exc:
+        if self._num_eval_examples > 0:
+          raise Exception(
+              'Exhausted eval data with reset_for_eval=False after'
+              f' {num_examples-1} examples (batch_size={p.batch_size})'
+          ) from exc
+        logging.info(
+            'Exhausted target eval data after %d examples', num_examples - 1
+        )
+        self._gen_targets_iter()
+        break
+
+      key = tuple(example_convert[_LM_LABEL_KEY])
       targets[key].append(example)
 
     # Construct (scoring output, seqio target) lists by joining on label tokens
@@ -988,10 +1078,16 @@ class SeqIOInput(base_input.BaseInput):
       ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(
           prefix_targets_list
       )
-
-    eval_data_size = _get_num_examples(targets_ds)
-    logging.info('Data %s has %s examples for computing eval metrics.', p.name,
-                 eval_data_size)
+    eval_data_size = (
+        self._num_eval_examples
+        if self._num_eval_examples > 0
+        else self._len_full_ds
+    )
+    logging.info(
+        'Data %s has %s examples for computing eval metrics.',
+        p.name,
+        eval_data_size,
+    )
     if eval_data_size != len(scores_list):
       raise ValueError(
           f'Data {p.name} expects {eval_data_size} examples for computing eval'
@@ -1102,6 +1198,10 @@ class SeqIOInput(base_input.BaseInput):
           _LM_DECODER_OUT_KEY)
       return []
 
+    # Create targets artifacts if they don't exist yet
+    if not self.is_targets_init:
+      self._gen_targets_artifacts()
+
     answers = dict(decoder_outputs)
     if p.use_enumeration:
       (predictions_list,
@@ -1180,6 +1280,10 @@ class SeqIOInput(base_input.BaseInput):
            'the key was not found in eval_outputs (b/244434890)'),
           _LM_SCORE_KEY)
       return []
+
+    # Create targets artifacts if they don't exist yet
+    if not self.is_targets_init:
+      self._gen_targets_artifacts()
 
     if p.use_enumeration:
       answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
