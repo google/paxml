@@ -170,6 +170,15 @@ def _enumerate_dataset(
   return ds
 
 
+def _get_num_examples(ds: tf.data.Dataset) -> int:
+  # Iterate one-by-one instead of len(list(...)) to reduce peak memory.
+  num_examples = 0
+  for _ in ds:
+    num_examples += 1
+
+  return num_examples
+
+
 def is_packing_on(fc: seqio.FeatureConverter) -> bool:
   """Safely checks whether a given feature converter has packing turned on."""
   return hasattr(fc, '_pack') and fc.pack
@@ -652,7 +661,7 @@ class SeqIOInput(base_input.BaseInput):
     # the underlying eval dataset stays unchanged across different iterations
     # of epochs.
     ds = ds.cache()
-    local_num = len(list(ds.as_numpy_iterator()))
+    local_num = _get_num_examples(ds)
     local_num_batches = (local_num + p.batch_size - 1) // p.batch_size
     # Find the max number of batches required across all Jax processes.
     num_batches_all = multihost_utils.process_allgather(
@@ -780,7 +789,7 @@ class SeqIOInput(base_input.BaseInput):
       ans['seqio_postprocessed_predictions'] = (
           _convert_bytes_to_str(seqio_postprocessed_predictions))
 
-    eval_data_size = len(list(targets_ds.as_numpy_iterator()))
+    eval_data_size = _get_num_examples(targets_ds)
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
                  eval_data_size)
     if eval_data_size != len(predictions_list):
@@ -980,7 +989,7 @@ class SeqIOInput(base_input.BaseInput):
           prefix_targets_list
       )
 
-    eval_data_size = len(list(targets_ds.as_numpy_iterator()))
+    eval_data_size = _get_num_examples(targets_ds)
     logging.info('Data %s has %s examples for computing eval metrics.', p.name,
                  eval_data_size)
     if eval_data_size != len(scores_list):
