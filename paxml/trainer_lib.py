@@ -86,6 +86,30 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 instantiate = base_hyperparams.instantiate
 
 
+def update_nestedmap(full_set, partial_set):
+  # Update full_set according to partial_set when name matches.
+
+  if type(full_set) is not dict:
+    return partial_set
+  ret = NestedMap() if type(full_set) is NestedMap else {}
+  for i in full_set.keys():
+    if i in partial_set.keys():
+      ret[i] = filter_nestedmap(full_set[i], partial_set[i])
+    else:
+      ret[i] = full_set[i]
+  return ret
+
+
+def filter_nestedmap(full_set, partial_set):
+  # Project full_set into partial set
+  if type(full_set) is not dict:
+    return full_set
+  ret = NestedMap() if type(full_set) is NestedMap else {}
+  for i in partial_set.keys():
+    ret[i] = filter_nestedmap(full_set[i], partial_set[i])
+  return ret
+
+
 class RunningMode(enum.Flag):
   """Running mode."""
   UNKNOWN = 0
@@ -1846,10 +1870,29 @@ class _PjitPartitioner(Partitioner):
     """Pad variables to avoid uneven sharding."""
     assert not self._enable_auto_sharding
     model_p = self._jax_task.hparams.model
+
+    # Here the metadata is derived from input_spec which includes all possible
+    # inputs. Thus metadata includes the full TrainState. The unpadded_state
+    # here could be derived from a eval/decode dataset (e.g.,
+    # get_spmd_model_step_fns_from_inputs) so it only includes a subset of
+    # TrainState. Here we project the metadata according to the actual state.
+
+    partition_specs = metadata.partition_specs.replace(
+        mdl_vars=filter_nestedmap(
+            metadata.partition_specs.mdl_vars, unpadded_state.mdl_vars
+        )
+    )
+    state_unpadded_shapes = self._get_state_unpadded_shapes(metadata)
+    state_unpadded_shapes = state_unpadded_shapes.replace(
+        mdl_vars=filter_nestedmap(
+            state_unpadded_shapes.mdl_vars, unpadded_state.mdl_vars
+        )
+    )
+
     return py_utils.maybe_pad_uneven_sharding(
         unpadded_state,
-        metadata.partition_specs,
-        self._get_state_unpadded_shapes(metadata),
+        partition_specs,
+        state_unpadded_shapes,
         model_p.mesh_shape,
         model_p.mesh_axis_names,
     )
@@ -1859,11 +1902,26 @@ class _PjitPartitioner(Partitioner):
   ):
     """Remove paddings from variables."""
     assert not self._enable_auto_sharding
+
+    # Similar to _pad_states above we need to project the metadata to match the
+    # actual padded_state
+
+    partition_specs = metadata.partition_specs.replace(
+        mdl_vars=filter_nestedmap(
+            metadata.partition_specs.mdl_vars, padded_state.mdl_vars
+        )
+    )
+    state_unpadded_shapes = self._get_state_unpadded_shapes(metadata)
+    state_unpadded_shapes = state_unpadded_shapes.replace(
+        mdl_vars=filter_nestedmap(
+            state_unpadded_shapes.mdl_vars, padded_state.mdl_vars
+        )
+    )
     return jax.tree_map(
         py_utils.maybe_slice_uneven_sharding,
         padded_state,
-        metadata.partition_specs,
-        self._get_state_unpadded_shapes(metadata),
+        partition_specs,
+        state_unpadded_shapes,
         is_leaf=py_utils.is_optax_masked_node,
     )
 
@@ -2107,7 +2165,20 @@ def get_partitioned_spmd_model_step_fn(
   partitioned_step_fn, input_partition_spec = partitioner.partition(
       step_fn, inputs_shape_dtype, is_eval, metadata, unpadded_global_batch_size
   )
-  return partitioned_step_fn, input_partition_spec, metadata.partition_specs
+  if train_state_partition_spec is None:
+    updated_train_state_partition_spec = metadata.partition_specs
+  else:
+    # Update the train_state_partition_spec because the metadata is derived from
+    # inputs_shape_dtype which may come from a eval/decode dataset. So metadata
+    # could only include a subset of all model variables.
+    updated_train_state_partition_spec = update_nestedmap(
+        train_state_partition_spec, metadata.partition_specs
+    )
+  return (
+      partitioned_step_fn,
+      input_partition_spec,
+      updated_train_state_partition_spec,
+  )
 
 
 def get_spmd_model_step_fns_from_inputs(
