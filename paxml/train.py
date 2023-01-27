@@ -883,6 +883,7 @@ def train_and_evaluate_spmd_model(
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
 
+  # TODO(laigd): Avoid creating a new partitioner here.
   p_eval_on_train_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
       jax_task,
       RunningMode.EVAL,
@@ -1064,9 +1065,7 @@ def _create_task_and_states(
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
-  train_state_metadata = partitioner.get_train_state_metadata(
-      partitioner.train_inputs_shape_dtype
-  )
+  train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():

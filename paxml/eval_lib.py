@@ -303,18 +303,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         for input_p in (decode_input_ps or [])
     ]
 
-    # TODO(laigd): maybe add enable_auto_sharding as an attr to Partitioner.
-    if (
-        self._partitioner.always_use_train_for_model_init
-        and not getattr(self._partitioner, '_enable_auto_sharding', False)
-    ):
-      inputs_shape_dtype = None
-    else:
-      inputs_shape_dtype = _SpmdEvalRunner.get_inputs_shape_dtype_for_init(
-          padded_decode_input_ps + padded_eval_input_ps
-      )
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        inputs_shape_dtype, is_eval=True, discard_opt_states=not self.use_ema
+        is_eval=True, discard_opt_states=not self.use_ema
     )
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
@@ -420,12 +410,10 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       prng_key: PRNGKey,
-      inputs_shape_dtype: Optional[NestedShapeDtypeLike],
   ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        inputs_shape_dtype,
         is_eval=True,
         discard_opt_states=py_utils.pmap_use_tensorstore() and not self.use_ema,
     )
@@ -440,7 +428,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           init_key,
           train_state_metadata.input_shape_dtype,
           discard_opt_states=not self.use_ema,
-          is_eval=not self._partitioner.always_use_train_for_model_init,
+          is_eval=not self._jax_task.hparams.train.always_use_train_for_model_init,
           checkpoint_type=self.checkpoint_type,
       )
 
@@ -664,6 +652,15 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
   """
+  eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
+  if not eval_input_p:
+    logging.info('No eval datasets defined. Returning early.')
+    return
+  for inp in eval_input_p:
+    if inp.num_infeed_hosts == 0:
+      inp.num_infeed_hosts = jax.process_count()
+    inp.infeed_host_index = jax.process_index()
+
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
   jax_task = instantiate(task_p)
@@ -676,6 +673,13 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       train_input_specs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
   )
+  if not task_p.train.always_use_train_for_model_init:
+    assert train_input_specs is None
+    # TODO(pax-dev): Investigate if we can use model input specs
+    # instead of instantiating this input pipeline.
+    input_p = partitioner.preprocess_input_params(eval_input_p[0])
+    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+
   checkpointer = _create_checkpointer(
       jax_task,
       job_log_dir,
@@ -685,15 +689,6 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       restore_checkpoint_step=restore_checkpoint_step,
       partitioner=partitioner,
   )
-
-  eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
-  if not eval_input_p:
-    logging.info('No eval datasets defined. Returning early.')
-    return
-  for inp in eval_input_p:
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
 
   if task_p.model.mesh_shape is not None:
     eval_method = evaluate_spmd_model
@@ -838,17 +833,8 @@ def evaluate_pmap_model(
   if not eval_input_p:
     return
 
-  task_p = jax_task.hparams
-  # TODO(pax-dev): Investigate if we can use model input specs
-  # instead of instantiating this input pipeline.
-  inputs_shape_dtype = (
-      None
-      if task_p.train.always_use_train_for_model_init
-      else instantiate(eval_input_p[0]).get_next_padded()
-  )
-
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key, inputs_shape_dtype)
+      checkpointer.get_model_states(prng_key)
   )
   eval_one_step_fn = _PmapEvalRunner(
       eval_input_p, jax_task, prng_key,
@@ -859,7 +845,7 @@ def evaluate_pmap_model(
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
       checkpointer,
-      task_p,
+      jax_task.hparams,
       job_log_dir,
       input_p,
       eval_input_p,
@@ -1126,6 +1112,10 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   if not decoder_inputs and not eval_inputs:
     logging.info('No input datasets defined.')
     return
+  for inp in decoder_inputs + eval_inputs:
+    if inp.num_infeed_hosts == 0:
+      inp.num_infeed_hosts = jax.process_count()
+    inp.infeed_host_index = jax.process_index()
 
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -1139,6 +1129,22 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       train_input_specs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
   )
+  if not task_p.train.always_use_train_for_model_init:
+    assert train_input_specs is None
+    # We assume that either eval_input or decoder_input can be used to retrieve
+    # all the model variable shapes, which is needed for restoring checkpoints.
+    #
+    # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
+    # same regardless of which eval_input or decoder_input we use to draw the
+    # sample inputs, we need to revisit the design here.
+
+    # TODO(pax-dev): Investigate if we can use model input specs
+    # instead of instantiating this input pipeline.
+    input_p = partitioner.preprocess_input_params(
+        (decoder_inputs + eval_inputs)[0]
+    )
+    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+
   checkpointer = _create_checkpointer(
       jax_task,
       job_log_dir,
@@ -1155,11 +1161,6 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   else:
     logging.info('running decode_once restored from %s',
                  checkpointer.restore_checkpoint_dir)
-
-  for inp in (decoder_inputs + eval_inputs):
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
 
   if task_p.model.mesh_shape is not None:
     decode_method = decode_spmd_model
@@ -1235,21 +1236,8 @@ def decode_pmap_model(
   del partitioner  # TODO(laigd): use this to partition the step function.
   task_p = jax_task.hparams
   prng_key, eval_key = jax.random.split(prng_key)
-  if task_p.train.always_use_train_for_model_init:
-    inputs_shape_dtype = None
-  else:
-    # Either decoder or eval inputs is not empty.
-    assert list(input_p) + list(eval_input_p)
-    # _PmapEvalRunner requires drawing a sample input for restoring checkpoints.
-    # We assume that either eval_input or decoder_input can be used to retrieve
-    # all the model variable shapes.
-    # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-    # same regardless of which eval_input or decoder_input we use to draw the
-    # sample inputs, we need to revisit the design here.
-    sample_input_p = input_p[0] if input_p else eval_input_p[0]
-    # TODO(pax-dev): Investigate if we can use model input specs
-    # instead of instantiating this input pipeline.
-    inputs_shape_dtype = instantiate(sample_input_p).get_next_padded()
+  # Either decoder or eval inputs is not empty.
+  assert list(input_p) + list(eval_input_p)
 
   if continuous_decode:
     # Waits until train.decode_start_after_n_steps is reached.
@@ -1257,7 +1245,7 @@ def decode_pmap_model(
                      jax_task.hparams.train.decode_start_after_n_steps)
 
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key, inputs_shape_dtype)
+      checkpointer.get_model_states(prng_key)
   )
 
   eval_one_step_fn = _PmapEvalRunner(
@@ -1665,14 +1653,7 @@ def decode_spmd_model(
     _wait_until_step(checkpointer,
                      jax_task.hparams.train.decode_start_after_n_steps)
 
-  # _SpmdEvalRunner requires drawing a sample input for restoring checkpoints.
-  # We assume that either eval_input or decoder_input can be used to retrieve
-  # all the model variable shapes.
-
   prng_key, init_key = jax.random.split(prng_key, 2)
-  # TODO(zhangqiaorjc): If we can no longer assume variable shapes will be the
-  # same regardless of which eval_input or decoder_input we use to draw the
-  # sample inputs, we need to revisit the design here.
   (
       partitioned_train_state,
       train_state_metadata,
@@ -2243,6 +2224,13 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   partitioner = trainer_lib.create_partitioner(
       task, prng_key, train_input_specs
   )
+  if not task_p.train.always_use_train_for_model_init:
+    assert train_input_specs is None
+    # TODO(pax-dev): Investigate if we can use model input specs
+    # instead of instantiating this input pipeline.
+    input_p = partitioner.preprocess_input_params(inputs_p[0])
+    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+
   checkpointer = _create_checkpointer(
       task,
       job_log_dir,
@@ -2280,14 +2268,8 @@ def infer_and_write_pmap(
 
   if not inputs_p:
     return
-  # TODO(pax-dev): Investigate if we can use model input specs
-  # instead of instantiating this input pipeline or re-using one of the
-  # input pipelines below.
-  inputs_sample = (None if task_p.train.always_use_train_for_model_init else
-                   instantiate(inputs_p[0]).get_next_padded())
-
   replicated_model_states, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key, inputs_sample)
+      checkpointer.get_model_states(prng_key)
   )
 
   @functools.partial(jax.pmap, axis_name=PMAP_PARALLEL_AXIS_NAME, out_axes=None)

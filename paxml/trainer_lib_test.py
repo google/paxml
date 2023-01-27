@@ -151,7 +151,7 @@ class PjitPartitionerTest(TrainLibTestBase):
         trainer_lib.train_step_single_learner if use_auto_shard else None
     )
     train_state_partition_spec = partitioner.get_train_state_metadata(
-        self._inputs_shape_dtype, is_eval=False
+        is_eval=False
     ).partition_specs
 
     if use_auto_shard:
@@ -168,10 +168,10 @@ class PjitPartitionerTest(TrainLibTestBase):
     step_fn, is_eval = trainer_lib.get_step_fn(mode)
     partitioner = self._create_partitioner(step_fn)
     metadata_1 = partitioner.get_train_state_metadata(
-        self._inputs_shape_dtype, is_eval=is_eval, discard_opt_states=is_eval
+        is_eval=is_eval, discard_opt_states=is_eval
     )
     metadata_2 = partitioner.get_train_state_metadata(
-        self._inputs_shape_dtype, is_eval=is_eval, discard_opt_states=is_eval
+        is_eval=is_eval, discard_opt_states=is_eval
     )
     self.assertEqual(metadata_1.partition_specs, metadata_2.partition_specs)
 

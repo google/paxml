@@ -1326,10 +1326,6 @@ class Partitioner(metaclass=abc.ABCMeta):
     self._job_log_dir = job_log_dir
 
   @property
-  def always_use_train_for_model_init(self):
-    return self._jax_task.hparams.train.always_use_train_for_model_init
-
-  @property
   def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
     """Shape/dtype attributes of the training inputs to model.init."""
     return self._train_inputs_shape_dtype
@@ -1342,7 +1338,8 @@ class Partitioner(metaclass=abc.ABCMeta):
 
     Args:
       train_input_pipeline: The training input pipeline that provides a
-        .peek_padded() method to get sample input batches.
+        peek_padded() or get_next_padded() method to get sample input batches.
+        TODO(laigd): consider using a protocol instead.
     """
 
   @property
@@ -1381,16 +1378,12 @@ class Partitioner(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def get_train_state_metadata(
       self,
-      inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
     Args:
-      inputs_shape_dtype: Shape/dtype attributes of the model input, used for
-        train state initialization. Useful only when not
-        self.always_use_train_for_model_init.
       is_eval: Whether this metadata is used for evaluation.
       discard_opt_states: Whether to discard the part corresponding to the
         optimizer states or not.
@@ -1401,24 +1394,22 @@ class Partitioner(metaclass=abc.ABCMeta):
 
   def _get_train_state_metadata_default(
       self,
-      inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
-    if self.always_use_train_for_model_init:
-      if not self._train_inputs_shape_dtype:
-        raise ValueError(
-            'No training input specs available, while enabling '
-            '`task_p.train.always_use_train_for_model_init` requires it.'
-        )
+    if not self._train_inputs_shape_dtype:
+      raise ValueError(
+          'Training input spec is not set. It can be set either when creating '
+          'the partitioner, or by calling set_train_inputs_shape_dtype().'
+      )
     return create_train_state_metadata(
         self._jax_task,
-        self._train_inputs_shape_dtype
-        if self.always_use_train_for_model_init
-        else inputs_shape_dtype,
+        self._train_inputs_shape_dtype,
         discard_opt_states=discard_opt_states,
-        do_eval=False if self.always_use_train_for_model_init else is_eval,
+        do_eval=False
+        if self._jax_task.hparams.train.always_use_train_for_model_init
+        else is_eval,
     )
 
   @abc.abstractmethod
@@ -1456,7 +1447,12 @@ class _PmapPartitioner(Partitioner):
     assert (
         not self._train_inputs_shape_dtype
     ), 'train_inputs_shape_dtype has been set before.'
-    sample_inputs = train_input_pipeline.peek_padded()
+    input_fn = (
+        train_input_pipeline.peek_padded
+        if hasattr(train_input_pipeline, 'peek_padded')
+        else train_input_pipeline.get_next_padded
+    )
+    sample_inputs = input_fn()
     self._train_inputs_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
@@ -1476,14 +1472,11 @@ class _PmapPartitioner(Partitioner):
 
   def get_train_state_metadata(
       self,
-      inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning."""
-    return self._get_train_state_metadata_default(
-        inputs_shape_dtype, is_eval, discard_opt_states
-    )
+    return self._get_train_state_metadata_default(is_eval, discard_opt_states)
 
   def partition(
       self,
@@ -1563,8 +1556,8 @@ class _PjitPartitioner(Partitioner):
       jax_task: The task which is an instance of tasks.SingleTask.
       init_key: PRNGKey for initializing the model variables.
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
-        model.init, for use in getting params of model variables. This is used
-        only when self.always_use_train_for_model_init is True.
+        model.init, for use in getting params of model variables. This is needed
+        when always_use_train_for_model_init is True.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
       job_log_dir: Directory for the job logs.
@@ -1592,7 +1585,12 @@ class _PjitPartitioner(Partitioner):
     assert (
         not self._train_inputs_shape_dtype
     ), 'train_inputs_shape_dtype has been set before.'
-    sample_inputs = train_input_pipeline.peek_padded()
+    input_fn = (
+        train_input_pipeline.peek_padded
+        if hasattr(train_input_pipeline, 'peek_padded')
+        else train_input_pipeline.get_next_padded
+    )
+    sample_inputs = input_fn()
     self._train_inputs_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
@@ -1647,18 +1645,12 @@ class _PjitPartitioner(Partitioner):
 
   def get_train_state_metadata(
       self,
-      inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
     Args:
-      inputs_shape_dtype: Shape/dtype attributes of the model input, used for
-        train state initialization. Required only when not
-        self.always_use_train_for_model_init or auto-sharding is enabled. When
-        auto-sharding is enabled, this must also match the input spec of
-        AutoShardingInfo.step_fn.
       is_eval: Whether this metadata is used for evaluation. When auto-sharding
         is enabled, this also indicates whether AutoShardingInfo.step_fn is used
         for evaluation.
@@ -1666,18 +1658,18 @@ class _PjitPartitioner(Partitioner):
         optimizer states or not.
     """
     train_state_metadata = self._get_train_state_metadata_default(
-        inputs_shape_dtype, is_eval, discard_opt_states
+        is_eval, discard_opt_states
     )
     if not self._enable_auto_sharding:
       return train_state_metadata
 
-    assert inputs_shape_dtype
+    assert self._train_inputs_shape_dtype
     # Currently we run auto-sharding only once to get the train state
     # partition spec, and reuse it for all subsequent get_train_state_metadata()
     # and partition() calls.
     if not self._auto_sharding_result:
       input_partition_spec = get_input_partition_specs(
-          self._mesh_names, inputs_shape_dtype
+          self._mesh_names, self._train_inputs_shape_dtype
       )
       wrapped_step_fn = self._get_step_fn(
           self._auto_sharding_info.step_fn,
@@ -1690,7 +1682,7 @@ class _PjitPartitioner(Partitioner):
             self._partition_auto_shard(
                 wrapped_step_fn,
                 is_eval,
-                inputs_shape_dtype,
+                self._train_inputs_shape_dtype,
                 input_partition_spec,
                 train_state_metadata,
             )
@@ -1699,7 +1691,7 @@ class _PjitPartitioner(Partitioner):
           partitioned_step_fn,
           train_state_pspec,
           input_pspec,
-          jax.tree_util.tree_map(lambda x: x, inputs_shape_dtype),
+          jax.tree_util.tree_map(lambda x: x, self._train_inputs_shape_dtype),
       )
 
     partition_specs = self._auto_sharding_result.train_state_partition_spec
@@ -2154,7 +2146,6 @@ def get_partitioned_spmd_model_step_fn(
 
   step_fn, is_eval = get_step_fn(mode)
   metadata = partitioner.get_train_state_metadata(
-      inputs_shape_dtype,
       is_eval=is_eval,
       discard_opt_states=is_eval,
   )
@@ -2223,7 +2214,6 @@ def get_spmd_model_step_fns_from_inputs(
     # instead of instantiating this input pipeline.
     _, inputs_shape_dtype = get_inputs_shape_dtype(input_p)
     metadata = partitioner.get_train_state_metadata(
-        inputs_shape_dtype,
         is_eval=is_eval,
         discard_opt_states=is_eval,
     )
