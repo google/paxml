@@ -59,7 +59,13 @@ def _get_experiment(experiment_name: str) -> BaseExperimentT:
   """Retrieves a experiment config from the global registry."""
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is None:
-    raise ValueError(f'Could not find experiment `{experiment_name}`.')
+    all_experiments = list(experiment_registry.get_all().keys())
+    all_names = '\n'.join(all_experiments)
+    msg = (
+        f'Could not find experiment {experiment_name}. Available experiments '
+        f'are:\n{all_names}.'
+    )
+    raise ValueError(msg)
   return experiment_class
 
 
