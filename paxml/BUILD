@@ -246,6 +246,7 @@ pytype_strict_library(
     name = "learners",
     srcs = ["learners.py"],
     deps = [
+        ":sgf",
         # Implicit jax dependency.
         # Implicit optax dependency.
         "//praxis:asserts",
@@ -254,7 +255,6 @@ pytype_strict_library(
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:optimizers",
         "//praxis:py_utils",
-        "//praxis:sgf",
     ],
 )
 
@@ -387,10 +387,12 @@ pytype_strict_library(
     name = "sgf",
     srcs = ["sgf.py"],
     deps = [
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit optax dependency.
+        "//praxis:base_hyperparams",
         "//praxis:py_utils",
         "//praxis:pytypes",
-        "//praxis:sgf",
     ],
 )
 

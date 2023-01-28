@@ -24,13 +24,13 @@ from typing import Optional, Sequence, Tuple, Union
 import jax
 from jax import numpy as jnp
 import optax
+from paxml import sgf
 from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import optimizer_prefix_vectorization as opt_vec
 from praxis import optimizers
 from praxis import py_utils
-from praxis import sgf
 
 JTensor = jnp.ndarray
 NestedMap = py_utils.NestedMap
