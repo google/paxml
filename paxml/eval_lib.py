@@ -1128,6 +1128,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       prng_key,
       train_input_specs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
+      job_log_dir=job_log_dir,
   )
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
