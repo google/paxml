@@ -672,6 +672,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       prng_key,
       train_input_specs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
+      job_log_dir=job_log_dir,
   )
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
@@ -2223,7 +2224,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   prng_key = jax.random.PRNGKey(task_p.infer.random_seed)
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
   partitioner = trainer_lib.create_partitioner(
-      task, prng_key, train_input_specs
+      task, prng_key, train_input_specs, job_log_dir=job_log_dir
   )
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
