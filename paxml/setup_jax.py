@@ -26,7 +26,7 @@ import tensorflow.compat.v2 as tf
 def setup_jax(globally_use_hardware_rng: bool,
               jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
               jax_enable_checks: bool,
-              jax_array: bool = False,
+              jax_array: bool = True,
               jax_traceback_filtering_option: str = 'auto',
               should_initialize_jax_distributed: bool = False) -> None:
   """Setups JAX and logs information about this job."""
