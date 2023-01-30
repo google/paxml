@@ -1300,7 +1300,36 @@ def _write_input_specs(
 
 
 class Partitioner(metaclass=abc.ABCMeta):
-  """Interface for partitioning computations."""
+  """Interface for partitioning computations.
+
+  Example usage:
+
+  ```
+  # Create the partitioner.
+  partitioner = create_partitioner(
+      jax_task, init_key, train_inputs_shape_dtype, job_log_dir=job_log_dir)
+
+  # [Optional] Set the training input shape/dtype information. Needed only if
+  # train_inputs_shape_dtype is not set when creating the partitioner above.
+  train_input_p = ...  # The config for training input pipeline.
+  train_input_p = partitioner.preprocess_input_params(train_input_p)
+  train_input_pipeline = instantiate(train_input_p)
+  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
+
+  # Restore the train state.
+  metadata = partitioner.get_train_state_metadata()
+  train_state = restore(metadata, ...)
+
+  # Partition the step function and run it.
+  partitioned_step_fn = partitioner.partition(
+      step_fn, inputs_shape_dtype, is_eval, metadata,
+      unpadded_global_batch_size)
+  prng_key = ...  # Create the PRNG key.
+  prng_key = partitioner.preprocess_prng_key(prng_key)
+  inputs = train_input_pipeline.get_next_padded()
+  partitioned_step_fn(train_state, prng_key, inputs)
+  ```
+  """
 
   def __init__(
       self,
@@ -1364,7 +1393,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     """
 
   @abc.abstractmethod
-  def preprocess_prng_key(self, prng_key: PRNGKey):
+  def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function.
 
     Args:
@@ -1464,7 +1493,7 @@ class _PmapPartitioner(Partitioner):
     """Preprocess input hparam(s) if necessary."""
     return input_ps
 
-  def preprocess_prng_key(self, prng_key: PRNGKey):
+  def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""
     # TODO(laigd): follow train_and_evaluate_pmap() and split the key into
     # jax.local_device_count() pieces.
@@ -1624,7 +1653,7 @@ class _PjitPartitioner(Partitioner):
         input_ps,
     )
 
-  def preprocess_prng_key(self, prng_key: PRNGKey):
+  def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""
     if not self._broadcast_key_fn:
       # The prng keys are already created on device with jax.random.split. We
