@@ -1909,8 +1909,7 @@ class _PjitPartitioner(Partitioner):
             state_unpadded_shapes.mdl_vars, padded_state.mdl_vars
         )
     )
-    return jax.tree_map(
-        py_utils.maybe_slice_uneven_sharding,
+    return py_utils.maybe_slice_uneven_sharding(
         padded_state,
         partition_specs,
         state_unpadded_shapes,
