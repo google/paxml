@@ -393,6 +393,10 @@ class SeqIOInput(base_input.BaseInput):
         `process_decode_out` the key in the sequence of tuples should be the
         enumerated index. At metrics computation time, we'll join the enumerated
         index.
+      annotate_padding_fields: whether to manually update the `.weights` and
+        `.padding` fields for examples. It is preferable that users use
+        `.eval_sample_weights` field that gets set to `=0` for padded eval
+        examples.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -421,6 +425,7 @@ class SeqIOInput(base_input.BaseInput):
         sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
     use_enumeration: bool = False
+    annotate_padding_fields: bool = False
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -725,7 +730,7 @@ class SeqIOInput(base_input.BaseInput):
       b.eval_sample_weights = 0.0
       if p.use_enumeration:
         b = _add_fake_enumeration(b)
-      if hasattr(b, 'weights'):
+      if p.annotate_padding_fields and hasattr(b, 'weights'):
         b.weights *= 0
         if hasattr(b, 'paddings'):
           b.paddings = 1 - b.weights
