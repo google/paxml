@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for base_metrics."""
+"""Tests for Paxml base_metrics."""
 
 from absl.testing import absltest
 import jax
