@@ -235,7 +235,9 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
     elif isinstance(loaded_var, global_device_array.GlobalDeviceArray):
       loaded_var = py_utils.copy_gda(loaded_var)
     else:
-      loaded_var = jnp.copy(loaded_var)
+      # Allow the copy of cross-host Jax arrays.
+      with jax.spmd_mode('allow_all'):
+        loaded_var = jnp.copy(loaded_var)
     if isinstance(model_vars, NestedMap):
       model_vars.Set(var_name, loaded_var)
     else:
