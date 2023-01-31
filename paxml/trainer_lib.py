@@ -1359,6 +1359,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     # always_use_train_for_model_init is enabled by default.
     self._init_is_eval = init_is_eval
     self._job_log_dir = job_log_dir
+    self._train_state_metadata = None
 
   @property
   def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
@@ -1425,10 +1426,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       The TrainStateMetadata.
     """
 
-  def _get_train_state_metadata_default(
-      self,
-      discard_opt_states: bool = False,
-  ) -> TrainStateMetadata:
+  def _get_train_state_metadata_default(self) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
     if not self._train_inputs_shape_dtype:
       raise ValueError(
@@ -1438,10 +1436,34 @@ class Partitioner(metaclass=abc.ABCMeta):
     return create_train_state_metadata(
         self._jax_task,
         self._train_inputs_shape_dtype,
-        discard_opt_states=discard_opt_states,
+        discard_opt_states=False,
         do_eval=False
         if self._jax_task.hparams.train.always_use_train_for_model_init
         else self._init_is_eval,
+    )
+
+  def _maybe_discard_opt_states(
+      self, metadata: TrainStateMetadata, discard_opt_states: bool
+  ) -> TrainStateMetadata:
+    if not discard_opt_states:
+      # Make sure all the metadata has opt_states.
+      for state in [
+          metadata.padded_global_shapes,
+          metadata.unpadded_global_shapes,
+          metadata.partition_specs,
+      ]:
+        if state:
+          assert state.opt_states
+      return metadata
+
+    # Discard the opt_states.
+    to_eval_state = lambda state: state.to_eval_state() if state else None
+    return TrainStateMetadata(
+        input_shape_dtype=metadata.input_shape_dtype,
+        var_weight_hparams=metadata.var_weight_hparams,
+        padded_global_shapes=to_eval_state(metadata.padded_global_shapes),
+        unpadded_global_shapes=to_eval_state(metadata.unpadded_global_shapes),
+        partition_specs=to_eval_state(metadata.partition_specs),
     )
 
   @abc.abstractmethod
@@ -1507,7 +1529,11 @@ class _PmapPartitioner(Partitioner):
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning."""
-    return self._get_train_state_metadata_default(discard_opt_states)
+    if not self._train_state_metadata:
+      self._train_state_metadata = self._get_train_state_metadata_default()
+    return self._maybe_discard_opt_states(
+        self._train_state_metadata, discard_opt_states
+    )
 
   def partition(
       self,
@@ -1527,7 +1553,7 @@ class _PmapPartitioner(Partitioner):
           prng_key,
           inputs,
           fprop_dtype=self._jax_task.hparams.model.fprop_dtype,
-          var_weight_hparams=metadata.var_weight_hparams,
+          var_weight_hparams=self._train_state_metadata.var_weight_hparams,
       )
 
     return (
@@ -1692,16 +1718,28 @@ class _PjitPartitioner(Partitioner):
       discard_opt_states: Whether to discard the part corresponding to the
         optimizer states or not.
     """
-    train_state_metadata = self._get_train_state_metadata_default(
-        discard_opt_states
-    )
+    if self._train_state_metadata:
+      return self._maybe_discard_opt_states(
+          self._train_state_metadata, discard_opt_states
+      )
+
+    train_state_metadata = self._get_train_state_metadata_default()
     if not self._enable_auto_sharding:
-      return train_state_metadata
+      self._train_state_metadata = train_state_metadata
+      return self._maybe_discard_opt_states(
+          self._train_state_metadata, discard_opt_states
+      )
 
     assert self._train_inputs_shape_dtype
     # Currently we run auto-sharding only once to get the train state
     # partition spec, and reuse it for all subsequent get_train_state_metadata()
     # and partition() calls.
+    # Since the structure of the partition spec needs to match the actual train
+    # state passed to the auto-sharded step function, we need to discard the
+    # opt_states if AutoShardingInfo.is_eval==True.
+    train_state_metadata = self._maybe_discard_opt_states(
+        train_state_metadata, self._auto_sharding_info.is_eval
+    )
     if not self._auto_sharding_result:
       input_partition_spec = get_input_partition_specs(
           self._mesh_names, self._train_inputs_shape_dtype
@@ -1730,14 +1768,12 @@ class _PjitPartitioner(Partitioner):
       )
 
     partition_specs = self._auto_sharding_result.train_state_partition_spec
-    if discard_opt_states:
-      partition_specs = partition_specs.to_eval_state()
-    else:
-      assert partition_specs.opt_states
-    train_state_metadata = dataclasses.replace(
+    self._train_state_metadata = dataclasses.replace(
         train_state_metadata, partition_specs=partition_specs
     )
-    return train_state_metadata
+    return self._maybe_discard_opt_states(
+        self._train_state_metadata, discard_opt_states
+    )
 
   def partition(
       self,
