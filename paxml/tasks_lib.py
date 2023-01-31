@@ -256,9 +256,9 @@ def _make_gda_train_state(
   # checkpoint if rules are set to False. FLAX checkpoint type doesn't support
   # loading and assigning partial saved vars.
   if not rules.load_step:
-    ckpt_train_state = ckpt_train_state.replace(step={})
+    ckpt_train_state = ckpt_train_state.replace(step=None)
     if train_state_pspecs is not None:
-      train_state_pspecs = train_state_pspecs.replace(step={})
+      train_state_pspecs = train_state_pspecs.replace(step=None)
   if (
       not rules.load_opt_states
       and not rules.partial_load_opt_states

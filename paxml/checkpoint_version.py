@@ -17,6 +17,9 @@
 
 #
 # Past versions:
+# 1.1
+# - For Tensorstore checkpoints, parameter directory naming follows that used by
+# Orbax.
 #
 # 1.0
 # - Checkpoints folders are organized into per-step directories, where each has
@@ -30,7 +33,7 @@
 # other words, the msgpack file may be 'checkpoint_1' instead of
 # 'checkpoint_1/checkpoint', where 'checkpoint' is the msgpack file.
 
-_VERSION: float = 1.0
+_VERSION: float = 1.1
 _VERSION_KEY: str = 'version'
 
 
