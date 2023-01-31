@@ -288,8 +288,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
           _get_spec, train_state_global_shapes
       )
       restore_args = {
-          'state_specs': fully_replicated_state_specs,
-          'global_mesh': global_mesh,
+          'specs': fully_replicated_state_specs,
+          'mesh': global_mesh,
       }
     return self.checkpoint_manager.restore(
         step_i, train_state_global_shapes, restore_kwargs=restore_args
