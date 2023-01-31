@@ -478,14 +478,14 @@ class SeqIOInput(base_input.BaseInput):
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
 
-    self._mixture_or_task = p.mixture_or_task or seqio.get_mixture_or_task(
+    self._mixture_or_task_inst = p.mixture_or_task or seqio.get_mixture_or_task(
         p.mixture_name)
     shard_info = seqio.ShardInfo(
         index=p.infeed_host_index, num_shards=p.num_infeed_hosts
     )
     logging.info(
         'ShardInfo for %s: shard_id: %d, num_shards: %d, ',
-        self._mixture_or_task.name,
+        self._mixture_or_task_inst.name,
         shard_info.index,
         shard_info.num_shards,
     )
@@ -524,7 +524,7 @@ class SeqIOInput(base_input.BaseInput):
 
   @property
   def mixture_or_task(self) -> Union[seqio.Task, seqio.Mixture]:
-    return self._mixture_or_task
+    return self._mixture_or_task_inst
 
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
