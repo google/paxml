@@ -1336,6 +1336,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      init_is_eval: bool = False,
       job_log_dir: Optional[epath.Path] = None,
   ):
     """Constructor.
@@ -1347,11 +1348,16 @@ class Partitioner(metaclass=abc.ABCMeta):
         model.init, for use in getting params of model variables. Can also be
         set using self.set_train_inputs_shape_dtype() if not provided during
         construction.
+      init_is_eval: Whether it should set is_eval=True when running
+        abstract_init_with_metadata.
       job_log_dir: Directory for the job logs.
     """
     self._jax_task = jax_task
     self._init_key = init_key
     self._train_inputs_shape_dtype = train_inputs_shape_dtype
+    # TODO(laigd): remove this option (it should always be False) once
+    # always_use_train_for_model_init is enabled by default.
+    self._init_is_eval = init_is_eval
     self._job_log_dir = job_log_dir
 
   @property
@@ -1407,13 +1413,11 @@ class Partitioner(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def get_train_state_metadata(
       self,
-      is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
     Args:
-      is_eval: Whether this metadata is used for evaluation.
       discard_opt_states: Whether to discard the part corresponding to the
         optimizer states or not.
 
@@ -1423,7 +1427,6 @@ class Partitioner(metaclass=abc.ABCMeta):
 
   def _get_train_state_metadata_default(
       self,
-      is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
@@ -1438,7 +1441,7 @@ class Partitioner(metaclass=abc.ABCMeta):
         discard_opt_states=discard_opt_states,
         do_eval=False
         if self._jax_task.hparams.train.always_use_train_for_model_init
-        else is_eval,
+        else self._init_is_eval,
     )
 
   @abc.abstractmethod
@@ -1501,11 +1504,10 @@ class _PmapPartitioner(Partitioner):
 
   def get_train_state_metadata(
       self,
-      is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning."""
-    return self._get_train_state_metadata_default(is_eval, discard_opt_states)
+    return self._get_train_state_metadata_default(discard_opt_states)
 
   def partition(
       self,
@@ -1551,6 +1553,9 @@ class _PjitPartitioner(Partitioner):
     # the train state partition spec.
     step_fn: Callable[..., Any]
 
+    # Whether step_fn is used for evaluation.
+    is_eval: bool
+
     # Whether to replicate the output when auto sharding is enabled.
     # TODO(pax-dev): support custom output partition spec.
     replicate_output: bool
@@ -1576,6 +1581,7 @@ class _PjitPartitioner(Partitioner):
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      init_is_eval: bool = False,
       auto_sharding_info: Optional[AutoShardingInfo] = None,
       job_log_dir: Optional[epath.Path] = None,
   ):
@@ -1587,6 +1593,8 @@ class _PjitPartitioner(Partitioner):
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. This is needed
         when always_use_train_for_model_init is True.
+      init_is_eval: Whether it should set is_eval=True when running
+        abstract_init_with_metadata.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
       job_log_dir: Directory for the job logs.
@@ -1602,7 +1610,9 @@ class _PjitPartitioner(Partitioner):
     self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
 
     # Initialize the remaining parts.
-    super().__init__(jax_task, init_key, train_inputs_shape_dtype, job_log_dir)
+    super().__init__(
+        jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
+    )
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
     self._enable_auto_sharding = auto_sharding_info is not None
@@ -1674,20 +1684,16 @@ class _PjitPartitioner(Partitioner):
 
   def get_train_state_metadata(
       self,
-      is_eval: bool = False,
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
     Args:
-      is_eval: Whether this metadata is used for evaluation. When auto-sharding
-        is enabled, this also indicates whether AutoShardingInfo.step_fn is used
-        for evaluation.
       discard_opt_states: Whether to discard the part corresponding to the
         optimizer states or not.
     """
     train_state_metadata = self._get_train_state_metadata_default(
-        is_eval, discard_opt_states
+        discard_opt_states
     )
     if not self._enable_auto_sharding:
       return train_state_metadata
@@ -1702,7 +1708,7 @@ class _PjitPartitioner(Partitioner):
       )
       wrapped_step_fn = self._get_step_fn(
           self._auto_sharding_info.step_fn,
-          is_eval,
+          self._auto_sharding_info.is_eval,
           train_state_metadata,
           input_partition_spec=input_partition_spec,
       )
@@ -1710,7 +1716,7 @@ class _PjitPartitioner(Partitioner):
         partitioned_step_fn, input_pspec, train_state_pspec = (
             self._partition_auto_shard(
                 wrapped_step_fn,
-                is_eval,
+                self._auto_sharding_info.is_eval,
                 self._train_inputs_shape_dtype,
                 input_partition_spec,
                 train_state_metadata,
@@ -2083,6 +2089,7 @@ def create_partitioner(
     jax_task: tasks_lib.SingleTask,
     init_key: PRNGKey,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+    init_is_eval: bool = False,
     auto_sharding_mode: Optional[RunningMode] = None,
     job_log_dir: Optional[epath.Path] = None,
 ) -> Partitioner:
@@ -2093,6 +2100,8 @@ def create_partitioner(
     init_key: PRNGKey for initializing the model variables.
     train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
       model.init, for use in getting params of model variables.
+    init_is_eval: Whether it should set is_eval=True when running
+      abstract_init_with_metadata.
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
       function to use for auto-sharding (when pjit is used). If None, it means
       to disable auto-sharding.
@@ -2103,20 +2112,25 @@ def create_partitioner(
   """
   if jax_task.hparams.model.ici_mesh_shape is None:
     partitioner = _PmapPartitioner(
-        jax_task, init_key, train_inputs_shape_dtype, job_log_dir,
+        jax_task,
+        init_key,
+        train_inputs_shape_dtype,
+        init_is_eval,
+        job_log_dir,
     )
   else:
     auto_sharding_info = None
     if auto_sharding_mode:
-      step_fn, _ = get_step_fn(auto_sharding_mode)
+      step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
       auto_sharding_info = _PjitPartitioner.AutoShardingInfo(
-          step_fn, replicate_output
+          step_fn, step_fn_is_eval, replicate_output
       )
     partitioner = _PjitPartitioner(
         jax_task,
         init_key,
         train_inputs_shape_dtype,
+        init_is_eval,
         auto_sharding_info,
         job_log_dir,
     )
@@ -2165,16 +2179,15 @@ def get_partitioned_spmd_model_step_fn(
   if not train_inputs_shape_dtype and (mode.has_train or mode.has_eval):
     train_inputs_shape_dtype = inputs_shape_dtype
 
+  step_fn, is_eval = get_step_fn(mode)
   partitioner = create_partitioner(
       jax_task,
       init_key,
       train_inputs_shape_dtype,
+      init_is_eval=is_eval,
       auto_sharding_mode=mode if enable_auto_sharding else None,
   )
-
-  step_fn, is_eval = get_step_fn(mode)
   metadata = partitioner.get_train_state_metadata(
-      is_eval=is_eval,
       discard_opt_states=is_eval,
   )
   if train_state_partition_spec and not enable_auto_sharding:
@@ -2242,7 +2255,6 @@ def get_spmd_model_step_fns_from_inputs(
     # instead of instantiating this input pipeline.
     _, inputs_shape_dtype = get_inputs_shape_dtype(input_p)
     metadata = partitioner.get_train_state_metadata(
-        is_eval=is_eval,
         discard_opt_states=is_eval,
     )
     partitioned_step_fn, inputs_partition_spec = partitioner.partition(

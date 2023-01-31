@@ -304,7 +304,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     ]
 
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        is_eval=True, discard_opt_states=not self.use_ema
+        discard_opt_states=not self.use_ema
     )
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
@@ -414,7 +414,6 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        is_eval=True,
         discard_opt_states=py_utils.pmap_use_tensorstore() and not self.use_ema,
     )
 
@@ -671,6 +670,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       jax_task,
       prng_key,
       train_input_specs,
+      init_is_eval=True,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -1128,6 +1128,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       jax_task,
       prng_key,
       train_input_specs,
+      init_is_eval=True,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )

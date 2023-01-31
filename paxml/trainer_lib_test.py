@@ -128,16 +128,21 @@ class PjitPartitionerTest(TrainLibTestBase):
         train_sample_inputs,
     )
 
-  def _create_partitioner(self, auto_sharding_step_fn=None):
+  def _create_partitioner(
+      self, auto_sharding_step_fn=None, auto_sharding_is_eval=False
+  ):
     auto_sharding_info = None
     if auto_sharding_step_fn:
       auto_sharding_info = trainer_lib._PjitPartitioner.AutoShardingInfo(
-          auto_sharding_step_fn, False
+          auto_sharding_step_fn,
+          is_eval=auto_sharding_is_eval,
+          replicate_output=False,
       )
     return trainer_lib._PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
         train_inputs_shape_dtype=self._inputs_shape_dtype,
+        init_is_eval=False,
         auto_sharding_info=auto_sharding_info,
     )
 
@@ -151,7 +156,6 @@ class PjitPartitionerTest(TrainLibTestBase):
         trainer_lib.train_step_single_learner if use_auto_shard else None
     )
     train_state_partition_spec = partitioner.get_train_state_metadata(
-        is_eval=False
     ).partition_specs
 
     if use_auto_shard:
@@ -166,12 +170,12 @@ class PjitPartitionerTest(TrainLibTestBase):
   def test_cache_sharding_result(self, mode):
     prng_key = jax.random.PRNGKey(0)
     step_fn, is_eval = trainer_lib.get_step_fn(mode)
-    partitioner = self._create_partitioner(step_fn)
+    partitioner = self._create_partitioner(step_fn, is_eval)
     metadata_1 = partitioner.get_train_state_metadata(
-        is_eval=is_eval, discard_opt_states=is_eval
+        discard_opt_states=is_eval
     )
     metadata_2 = partitioner.get_train_state_metadata(
-        is_eval=is_eval, discard_opt_states=is_eval
+        discard_opt_states=is_eval
     )
     self.assertEqual(metadata_1.partition_specs, metadata_2.partition_specs)
 
