@@ -393,7 +393,12 @@ if __name__ == '__main__':
     if int(task_id) == 0:
       dump_dir = os.getenv('XLA_DUMP_TO')
       if dump_dir:
-        os.environ['XLA_FLAGS'] = f'--xla_dump_to={dump_dir}'
+        existing_xla_flags = os.getenv('XLA_FLAGS')
+        to_append = f'--xla_dump_to={dump_dir}'
+        if existing_xla_flags:
+          os.environ['XLA_FLAGS'] = f'{existing_xla_flags} {to_append}'
+        else:
+          os.environ['XLA_FLAGS'] = to_append
 
   # Provide access to --jax_backend_target and --jax_xla_backend flags.
   jax.config.config_with_absl()

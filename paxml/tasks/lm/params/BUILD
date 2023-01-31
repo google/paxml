@@ -30,6 +30,7 @@ pytype_library(
         "bert.py",
         "c4.py",
         "lm_cloud.py",
+        "nvidia.py",
         "optimal_scaling.py",
     ],
     srcs_version = "PY3",
