@@ -140,7 +140,7 @@ class Learner(base_hyperparams.BaseParameterizable):
 
     p = self._hparams
     asserts.not_none(p.optimizer)
-    self._optimizer = instantiate(p.optimizer)
+    self._optimizer_inst = instantiate(p.optimizer)
     self._stochastic_gradient = (
         None
         if p.stochastic_gradient is None
@@ -151,7 +151,7 @@ class Learner(base_hyperparams.BaseParameterizable):
   @property
   def optimizer(self) -> optimizers.BaseOptimizer:
     """Returns the Optimizer object of this learner."""
-    return self._optimizer
+    return self._optimizer_inst
 
   @property
   def stochastic_gradient(self) -> Optional[sgf.BaseStochasticGradient]:
@@ -469,11 +469,11 @@ class MultiOptimizerLearner(Learner):
           f' of the {p.auxiliary_optimizers} and length of the '
           f'{p.auxiliary_names}.'
       )
-    self._optimizer = instantiate(p.optimizer)
+    self._optimizer_inst = instantiate(p.optimizer)
     self._auxiliary_optimizers = [
         instantiate(opt) for opt in p.auxiliary_optimizers
     ]
-    self._grad_tx_fn = self._optimizer.get_grad_transformation
+    self._grad_tx_fn = self._optimizer_inst.get_grad_transformation
     self._auxiliary_grad_tx_fn = [
         opt.get_grad_transformation for opt in self._auxiliary_optimizers
     ]
@@ -561,7 +561,7 @@ class MultiOptimizerLearner(Learner):
     )
 
     # Include ema in the beginning before masking
-    op = self._optimizer.hparams
+    op = self._optimizer_inst.hparams
     if op.ema_decay > 0.0:
       optimizer_chain.insert(
           0, optimizers.apply_ema_weights(decay=op.ema_decay)
