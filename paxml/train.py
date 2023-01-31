@@ -29,7 +29,6 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
 from absl import logging
 from etils import epath
 import jax
-import numpy as np
 from jax import monitoring
 from jax.experimental import maps
 from jax.experimental import pjit
@@ -273,27 +272,14 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
-  def _restore_with_args(self, step_i, train_state_global_shapes):
-    restore_args = None
-    if py_utils.pmap_use_tensorstore():
-
-      def _get_spec(shape):
-        if shape.shape:
-          return pjit.PartitionSpec(None)
-        else:
-          return pjit.PartitionSpec()
-
-      global_mesh = maps.Mesh(np.array(jax.devices()), axis_names=('x',))
-      fully_replicated_state_specs = jax.tree_map(
-          _get_spec, train_state_global_shapes
-      )
-      restore_args = {
-          'specs': fully_replicated_state_specs,
-          'mesh': global_mesh,
-      }
-    return self.checkpoint_manager.restore(
-        step_i, train_state_global_shapes, restore_kwargs=restore_args
-    )
+  def _restore_from_tensorstore(self, train_state_global_shapes):
+    _make_checkpoint_dir(self.job_log_dir)
+    logging.info('Pmap restore from TensorStore checkpoint...')
+    # Restored from GDA checkpoint dir.
+    return tasks_lib.restore_pmap_from_tensorstore(
+        train_state_global_shapes,
+        self.checkpoint_dir,
+        checkpoint_type=self._checkpoint_type)
 
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
   def get_model_states(
@@ -305,11 +291,16 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   ) -> Tuple[TrainState, int]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
-      step = self.checkpoint_manager.latest_step()
-      if step is None:
-        train_state = None
+      if py_utils.pmap_use_tensorstore():
+        train_state = self._restore_from_tensorstore(train_state_global_shapes)
       else:
-        train_state = self._restore_with_args(step, train_state_global_shapes)
+        step = self.checkpoint_manager.latest_step()
+        if step is None:
+          train_state = None
+        else:
+          train_state = self.checkpoint_manager.restore(
+              step, train_state_global_shapes
+          )
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
     # Randomly initialized variables if no files in checkpoint dir.
