@@ -146,7 +146,7 @@ def neural_architecture_search(
 
     reward = MultiObjective.HParams(
         metrics=metrics,
-        aggregator=aggregator_cls.HParams(
+        aggregator_tpl=aggregator_cls.HParams(
             cost_objective=cost_objective, exponent=exponent),
         reward_for_nan=reward_for_nan)
   else:
@@ -292,8 +292,8 @@ class MultiObjective(BaseReward):
 
     Attributes:
       metrics: The keys of metric whose value will be used as reward.
-      aggregator: Multi-objective aggregator for coupling multiple values into a
-        single float value.
+      aggregator_tpl: Multi-objective aggregator for coupling multiple values
+        into a single float value.
       goal: Defines how the metric should be optimized. Acceptable values are
         'maximize' or 'minimize'.
       reward_for_nan: An optional float used as the reward when metric value is
@@ -301,7 +301,7 @@ class MultiObjective(BaseReward):
         skipped by the search algorithm.
     """
     metrics: Optional[Sequence[Metric]] = None
-    aggregator: Optional[MultiObjectiveAggregator.HParams] = None
+    aggregator_tpl: Optional[MultiObjectiveAggregator.HParams] = None
     goal: str = 'maximize'
     reward_for_nan: Optional[float] = None
 
@@ -310,13 +310,13 @@ class MultiObjective(BaseReward):
       if not self.metrics:
         raise ValueError('Param `metrics` must be provided.')
 
-      if len(self.metrics) > 1 and self.aggregator is None:
+      if len(self.metrics) > 1 and self.aggregator_tpl is None:
         raise ValueError('Param `aggregator` must be provided.')
 
   def __init__(self, hparams: HParams):
     super().__init__(hparams)
-    if self._hparams.aggregator is not None:
-      self._aggregator = self._hparams.aggregator.Instantiate()
+    if self._hparams.aggregator_tpl is not None:
+      self._aggregator = self._hparams.aggregator_tpl.Instantiate()
 
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     del global_step
@@ -380,7 +380,7 @@ def weighted_sum_reward(
   return MultiObjective.HParams(
       metrics=metrics,
       goal=goal,
-      aggregator=WeightedSumAggregator.HParams(weights=weights),
+      aggregator_tpl=WeightedSumAggregator.HParams(weights=weights),
       reward_for_nan=reward_for_nan)
 
 

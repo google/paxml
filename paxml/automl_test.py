@@ -307,7 +307,7 @@ class SearchHParamsTest(absltest.TestCase):
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
     ])
-    self.assertEqual(p.search_reward.aggregator.cost_objective, 150)
+    self.assertEqual(p.search_reward.aggregator_tpl.cost_objective, 150)
     self.assertEqual(p.max_num_trials, 6000)
 
   def test_neural_architecture_search_multi_objective_aggregators(self):
@@ -317,21 +317,21 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           reward_type='tunas').search_reward
-    self.assertIsInstance(p.aggregator, automl.TunasAbsolute.HParams)
+    self.assertIsInstance(p.aggregator_tpl, automl.TunasAbsolute.HParams)
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
     ],
                                           150,
                                           reward_type='mnas_hard').search_reward
-    self.assertIsInstance(p.aggregator, automl.MnasHard.HParams)
+    self.assertIsInstance(p.aggregator_tpl, automl.MnasHard.HParams)
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
     ],
                                           150,
                                           reward_type='mnas_soft').search_reward
-    self.assertIsInstance(p.aggregator, automl.MnasSoft.HParams)
+    self.assertIsInstance(p.aggregator_tpl, automl.MnasSoft.HParams)
     with self.assertRaisesRegex(ValueError, 'Unsupported reward type'):
       automl.neural_architecture_search([
           automl.Metric.eval('accuracy'),
@@ -433,7 +433,7 @@ class RewardsTest(absltest.TestCase):
             automl.Metric.decode('f1'),
             automl.Metric.train_steps_per_second()
         ],
-        aggregator=automl.MnasHard.HParams(cost_objective=150),
+        aggregator_tpl=automl.MnasHard.HParams(cost_objective=150),
         goal='minimize',
         reward_for_nan=-1.0))
     self.assertIsInstance(reward_fn, automl.MultiObjective)
