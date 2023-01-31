@@ -2254,11 +2254,7 @@ def get_spmd_model_step_fns_from_inputs(
     unpadded_input_ps: Sequence[base_input.BaseInput.HParams],
     partitioner: Partitioner,
     mode: RunningMode,
-) -> Tuple[
-    Sequence[Callable[..., Any]],
-    Sequence[NestedPartitionSpec],
-    Sequence[NestedShapeDtypeStruct],
-]:
+) -> Tuple[Sequence[Callable[..., Any]], Sequence[NestedPartitionSpec]]:
   """Helper for calling `get_partitioned_spmd_model_step_fn` with input_ps.
 
   Note: This method instantiates all the input pipelines passed in `input_ps` to
@@ -2273,7 +2269,7 @@ def get_spmd_model_step_fns_from_inputs(
       use.
 
   Returns:
-    (partitioned_step_fns, input_partition_specs, inputs_shape_dtypes):
+    (partitioned_step_fns, input_partition_specs):
     The partitioned step functions, partition specs for the inputs,
     and shape/dtype information for the inputs.
   """
@@ -2285,7 +2281,6 @@ def get_spmd_model_step_fns_from_inputs(
   step_fn, is_eval = get_step_fn(mode)
   partitioned_step_fns = []
   input_partition_specs = []
-  inputs_shape_dtypes = []
   for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
@@ -2303,11 +2298,10 @@ def get_spmd_model_step_fns_from_inputs(
         ),
     )
 
-    inputs_shape_dtypes.append(inputs_shape_dtype)
     partitioned_step_fns.append(partitioned_step_fn)
     input_partition_specs.append(inputs_partition_spec)
 
-  return partitioned_step_fns, input_partition_specs, inputs_shape_dtypes
+  return partitioned_step_fns, input_partition_specs
 
 
 def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:

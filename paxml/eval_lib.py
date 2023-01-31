@@ -289,7 +289,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
       trainer_lib.TrainStateMetadata,
       Sequence[Callable[..., Any]],
       Sequence[NestedPartitionSpec],
-      Sequence[NestedShapeDtypeLike],
   ]:
     """Gets a partitioned model states and the step function."""
     global_mesh = self._partitioner.global_mesh
@@ -311,7 +310,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
     # If auto sharding is enabled, we need to get the updated partition specs
     # before using it to restore checkpoints.
-    step_fns, inputs_partition_specs, inputs_shape_dtypes = (
+    step_fns, inputs_partition_specs = (
         trainer_lib.get_spmd_model_step_fns_from_inputs(
             padded_decode_input_ps if is_decode else padded_eval_input_ps,
             decode_input_ps if is_decode else eval_input_ps,
@@ -348,8 +347,12 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
           )
       )
 
-    return (partitioned_train_state, train_state_metadata, step_fns,
-            inputs_partition_specs, inputs_shape_dtypes)
+    return (
+        partitioned_train_state,
+        train_state_metadata,
+        step_fns,
+        inputs_partition_specs,
+    )
 
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
@@ -487,7 +490,6 @@ def run_eval_loop_over_test_splits(
     model_inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
     eval_inputs_pspecs: Optional[Sequence[NestedPartitionSpec]] = None,
-    eval_inputs_shapes: Optional[Sequence[NestedShapeDtypeLike]] = None,
     global_mesh: Optional[maps.Mesh] = None,
     reshard_inputs: Optional[bool] = False,
     create_gda_for_inputs: bool = False,
@@ -505,7 +507,6 @@ def run_eval_loop_over_test_splits(
     model_inputs: List of BaseInput instances.
     job_log_dir: Job's log directory in which scoring outputs will be written.
     eval_inputs_pspecs: Sequence of PartitionSpec for eval inputs.
-    eval_inputs_shapes: Sequence of global shape of eval inputs.
     global_mesh: Device mesh used by pjit.
     reshard_inputs: Whether to reshard inputs.
     create_gda_for_inputs: Whether to create GDAs for model inputs.
@@ -557,8 +558,8 @@ def run_eval_loop_over_test_splits(
           (create_gda_for_inputs or
            model_inputs[split].hparams.experimental_remote_input)):
         eval_inputs = model_inputs[split].reshard_for_spmd(
-            eval_inputs, eval_inputs_shapes[split], global_mesh,
-            eval_inputs_pspecs[split])
+            eval_inputs, global_mesh, eval_inputs_pspecs[split]
+        )
       elif reshard_inputs:
         eval_inputs = model_inputs[split].reshard_for_pmap(eval_inputs)
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
@@ -885,7 +886,6 @@ class _SpmdEvalRunner:
       job_log_dir: epath.Path,
       partitioned_eval_step_fns: Optional[Sequence[Callable[..., Any]]] = None,
       inputs_partition_specs: Optional[Sequence[NestedPartitionSpec]] = None,
-      inputs_shape_dtypes: Optional[Sequence[NestedShapeDtypeLike]] = None,
   ):
     self._unpadded_eval_input_ps = eval_input_ps
     self._padded_eval_input_ps = [
@@ -910,15 +910,12 @@ class _SpmdEvalRunner:
 
     if partitioned_eval_step_fns:
       assert inputs_partition_specs is not None
-      assert inputs_shape_dtypes is not None
       self._eval_steps = partitioned_eval_step_fns
       self._inputs_partition_specs = inputs_partition_specs
-      self._inputs_shape_dtypes = inputs_shape_dtypes
     else:
       (
           self._eval_steps,
           self._inputs_partition_specs,
-          self._inputs_shape_dtypes,
       ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
           self._padded_eval_input_ps,
           self._unpadded_eval_input_ps,
@@ -967,7 +964,6 @@ class _SpmdEvalRunner:
           self._eval_input_pipelines,
           self._job_log_dir,
           self._inputs_partition_specs,
-          self._inputs_shape_dtypes,
           self._partitioner.global_mesh,
           reshard_inputs=False,
           create_gda_for_inputs=use_gda,
@@ -1027,11 +1023,14 @@ def evaluate_spmd_model(
   _, eval_key = jax.random.split(prng_key)
   logging.info('eval prng_key: %s', eval_key)
 
-  (partitioned_train_state, train_state_metadata, step_fns,
-   inputs_partition_specs, inputs_shape_dtypes) = checkpointer.get_model_states(
-       init_key,
-       is_decode=False,
-       eval_input_ps=eval_input_p)
+  (
+      partitioned_train_state,
+      train_state_metadata,
+      step_fns,
+      inputs_partition_specs,
+  ) = checkpointer.get_model_states(
+      init_key, is_decode=False, eval_input_ps=eval_input_p
+  )
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
@@ -1045,7 +1044,6 @@ def evaluate_spmd_model(
       job_log_dir,
       step_fns,
       inputs_partition_specs,
-      inputs_shape_dtypes,
   ).get_partition_run_one_step_fn(eval_key, use_gda)
 
   decode_once_fn = None
@@ -1662,7 +1660,6 @@ def decode_spmd_model(
       train_state_metadata,
       decode_step_fns,
       inputs_partition_specs,
-      inputs_shape_dtype,
   ) = checkpointer.get_model_states(
       init_key,
       is_decode=True,
@@ -1679,7 +1676,6 @@ def decode_spmd_model(
       partitioner.global_mesh,
       decode_step_fns,
       use_gda,
-      inputs_shape_dtype,
       inputs_partition_specs,
   )
   eval_one_step_fn = _SpmdEvalRunner(
@@ -1723,7 +1719,6 @@ def partition_decode_once_spmd_model(
         Callable[[NestedJTensor, JTensor, NestedJTensor],
                  Tuple[Tuple[NestedMap, NestedMap], NestedMap]]],
     use_gda: bool,
-    inputs_shape_dtypes: Sequence[pytypes.NestedShapeDtypeStruct],
     inputs_partition_specs: Sequence[NestedPartitionSpec]) -> Callable[
         [train_states.TrainState, List[SummaryWriter]],
         tuning_lib.DecodeMetrics]:
@@ -1731,12 +1726,25 @@ def partition_decode_once_spmd_model(
 
   def decode_once_fn(partitioned_train_state, summary_writers):
     with py_utils.timeit() as decode_period:
-      (decode_metrics_list, processed_decode_metrics_list,
-       decode_seqio_metrics_list, num_decode_steps) = decode_once_spmd_model(
-           jax_task, task_p, inputs, input_p, job_log_dir,
-           partitioned_train_state, summary_writers, prng_key, global_mesh,
-           decode_step_fns, use_gda, inputs_shape_dtypes,
-           inputs_partition_specs)
+      (
+          decode_metrics_list,
+          processed_decode_metrics_list,
+          decode_seqio_metrics_list,
+          num_decode_steps,
+      ) = decode_once_spmd_model(
+          jax_task,
+          task_p,
+          inputs,
+          input_p,
+          job_log_dir,
+          partitioned_train_state,
+          summary_writers,
+          prng_key,
+          global_mesh,
+          decode_step_fns,
+          use_gda,
+          inputs_partition_specs,
+      )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
         input_p=input_p,
@@ -1790,7 +1798,6 @@ def decode_once_spmd_model(
         Callable[[NestedJTensor, JTensor, NestedJTensor],
                  Tuple[Tuple[NestedMap, NestedMap], NestedMap]]],
     use_gda: bool,
-    inputs_shapes: Sequence[pytypes.NestedShapeDtypeStruct],
     inputs_partition_specs: Sequence[NestedPartitionSpec],
 ) -> Tuple[List[Optional[Dict[str, float]]],  # decode metrics.
            List[Optional[Dict[str, float]]],  # processed decode metrics.
@@ -1810,7 +1817,6 @@ def decode_once_spmd_model(
     global_mesh: the global mesh.
     decode_step_fns: sequence of pjit'ed decode functions.
     use_gda: bool, whether GDA is used.
-    inputs_shapes: nested map of shapes of inputs.
     inputs_partition_specs: Partition specs for inputs.
 
   Returns:
@@ -1894,9 +1900,9 @@ def decode_once_spmd_model(
                                       inputs_partition_specs_common)
       else:
         if use_gda or inputs[split].hparams.experimental_remote_input:
-          batch = inputs[split].reshard_for_spmd(batch, inputs_shapes[split],
-                                                 global_mesh,
-                                                 inputs_partition_specs[split])
+          batch = inputs[split].reshard_for_spmd(
+              batch, global_mesh, inputs_partition_specs[split]
+          )
       (weighted_scalars, out,
        updated_metrics), updated_vars = spmd_decode_step_fns[split](batch)
 

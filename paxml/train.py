@@ -624,9 +624,8 @@ class _PeekableInput:
   def reshard_for_pmap(self, arrays):
     return self._inp.reshard_for_pmap(arrays)
 
-  def reshard_for_spmd(self, arrays, global_shapes, global_mesh, pspecs):
-    return self._inp.reshard_for_spmd(arrays, global_shapes, global_mesh,
-                                      pspecs)
+  def reshard_for_spmd(self, arrays, global_mesh, pspecs):
+    return self._inp.reshard_for_spmd(arrays, global_mesh, pspecs)
 
 
 def _maybe_update_latest_model_step(
@@ -804,10 +803,13 @@ def train_and_evaluate_pmap(
         -1 if p.reset_for_eval else p.eval_loop_num_batches
         for p in eval_input_p
     ]
-    eval_test_inputs_shape_dtype = None
     eval_test_inputs_pspecs = None
-    return (eval_input_pipelines, eval_num_steps, eval_test_inputs_shape_dtype,
-            eval_test_inputs_pspecs, eval_input_p)
+    return (
+        eval_input_pipelines,
+        eval_num_steps,
+        eval_test_inputs_pspecs,
+        eval_input_p,
+    )
 
   def partition_decode_once_fns(prng_key, decode_input_p):
     decode_input_pipelines = [
@@ -927,7 +929,7 @@ def train_and_evaluate_spmd_model(
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
         for input_p in eval_input_p
     ]
-    p_eval_steps, _, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
+    p_eval_steps, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
         padded_eval_input_p,
         eval_input_p,
         partitioner,
@@ -940,7 +942,6 @@ def train_and_evaluate_spmd_model(
       if step_counter <= _N_STEPS_WARMUP_LOGGING:
         start = time.time()
       model_inputs = input_pipeline.reshard_for_spmd(model_inputs,
-                                                     inputs_shape_dtype,
                                                      global_mesh, inputs_pspecs)
       if step_counter <= _N_STEPS_WARMUP_LOGGING:
         logging.info('GDA train batch input creation time %s',
@@ -951,7 +952,8 @@ def train_and_evaluate_spmd_model(
     if (create_gda_for_inputs or
         train_input_pipeline.hparams.experimental_remote_input):
       eval_inputs = train_input_pipeline.reshard_for_spmd(
-          eval_inputs, inputs_shape_dtype, global_mesh, inputs_pspecs)
+          eval_inputs, global_mesh, inputs_pspecs
+      )
     return eval_inputs
 
   def partition_eval_input_fns(padded_eval_input_ps):
@@ -962,14 +964,12 @@ def train_and_evaluate_spmd_model(
 
     eval_num_steps = []
     eval_test_inputs_pspecs = []
-    eval_test_inputs_shape_dtypes = []
     for p in padded_eval_input_ps:
       # Do not mutate eval_input_pipelines itself. Instantiate a new one
       # to get sample input.
       sample_eval_model_inputs = instantiate(p).get_next_padded()
       inputs_shape_dtype = jax.tree_util.tree_map(
           py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
-      eval_test_inputs_shape_dtypes.append(inputs_shape_dtype)
       eval_test_inputs_pspecs.append(
           trainer_lib.get_input_partition_specs(
               task_p.model.mesh_axis_names, inputs_shape_dtype
@@ -984,8 +984,12 @@ def train_and_evaluate_spmd_model(
       # sequence, or a pre-determined num_batches has reached.
       eval_num_steps.append(-1 if p.reset_for_eval else p.eval_loop_num_batches)
 
-    return (eval_input_pipelines, eval_num_steps, eval_test_inputs_shape_dtypes,
-            eval_test_inputs_pspecs, padded_eval_input_ps)
+    return (
+        eval_input_pipelines,
+        eval_num_steps,
+        eval_test_inputs_pspecs,
+        padded_eval_input_ps,
+    )
 
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
@@ -1011,7 +1015,6 @@ def train_and_evaluate_spmd_model(
     (
         decode_step_fns,
         decode_input_partition_specs,
-        decode_inputs_shape_dtypes,
     ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
         padded_decode_input_ps,
         decode_input_ps,
@@ -1020,10 +1023,17 @@ def train_and_evaluate_spmd_model(
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
-        jax_task, task_p, padded_decode_input_pipelines, padded_decode_input_ps,
-        job_log_dir, decode_key, global_mesh, decode_step_fns,
-        create_gda_for_inputs, decode_inputs_shape_dtypes,
-        decode_input_partition_specs)
+        jax_task,
+        task_p,
+        padded_decode_input_pipelines,
+        padded_decode_input_ps,
+        job_log_dir,
+        decode_key,
+        global_mesh,
+        decode_step_fns,
+        create_gda_for_inputs,
+        decode_input_partition_specs,
+    )
 
     return decode_once_fn, prng_key, decode_input_ps
 
@@ -1129,9 +1139,12 @@ def _train_and_evaluate_common(
   """Training loop code common to both pmap and spmd."""
 
   if eval_input_p:
-    (eval_input_pipelines, eval_num_steps, eval_test_inputs_shape_dtypes,
-     eval_test_inputs_pspecs, eval_input_p) = partition_eval_input_fns(
-         eval_input_p)
+    (
+        eval_input_pipelines,
+        eval_num_steps,
+        eval_test_inputs_pspecs,
+        eval_input_p,
+    ) = partition_eval_input_fns(eval_input_p)
 
   if decode_input_p:
     decode_once_fn, prng_key, decode_input_p = partition_decode_once_fns(
@@ -1317,7 +1330,6 @@ def _train_and_evaluate_common(
                     eval_input_pipelines,
                     job_log_dir,
                     eval_test_inputs_pspecs,
-                    eval_test_inputs_shape_dtypes,
                     global_mesh,
                     reshard_inputs=reshard_inputs,
                     create_gda_for_inputs=create_gda_for_inputs))
