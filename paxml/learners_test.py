@@ -446,8 +446,9 @@ class LearnersTest(test_utils.TestCase):
     partition_spec_single = grad_tx_single.init_partition_spec(old_vars)
     # Assert that the length of partition spec is the same as the total
     # auxiliary optimizers plus 1 (for the primary optimizer).
-    self.assertLen(partition_spec,
-                   len(learner_instance._auxiliary_optimizers) + 1)
+    self.assertLen(
+        partition_spec, len(learner_instance._auxiliary_optimizer_insts) + 1
+    )
     # Optimizers are chained as l1 - l2 - optimizer update - weight_decay.
     for k in partition_spec_single[0][2]._fields:
       for p in partition_spec:

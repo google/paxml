@@ -141,7 +141,7 @@ class Learner(base_hyperparams.BaseParameterizable):
     p = self._hparams
     asserts.not_none(p.optimizer)
     self._optimizer_inst = instantiate(p.optimizer)
-    self._stochastic_gradient = (
+    self._stochastic_gradient_inst = (
         None
         if p.stochastic_gradient is None
         else instantiate(p.stochastic_gradient)
@@ -156,7 +156,7 @@ class Learner(base_hyperparams.BaseParameterizable):
   @property
   def stochastic_gradient(self) -> Optional[sgf.BaseStochasticGradient]:
     """Returns the stochastic gradient function object of this learner."""
-    return self._stochastic_gradient
+    return self._stochastic_gradient_inst
 
   def plot_learning_rate(self, step: int) -> None:
     learning_rate = self.optimizer.get_learning_rate(step)
@@ -470,12 +470,12 @@ class MultiOptimizerLearner(Learner):
           f'{p.auxiliary_names}.'
       )
     self._optimizer_inst = instantiate(p.optimizer)
-    self._auxiliary_optimizers = [
+    self._auxiliary_optimizer_insts = [
         instantiate(opt) for opt in p.auxiliary_optimizers
     ]
     self._grad_tx_fn = self._optimizer_inst.get_grad_transformation
     self._auxiliary_grad_tx_fn = [
-        opt.get_grad_transformation for opt in self._auxiliary_optimizers
+        opt.get_grad_transformation for opt in self._auxiliary_optimizer_insts
     ]
 
   def plot_learning_rate(self, step: int) -> None:
@@ -485,7 +485,9 @@ class MultiOptimizerLearner(Learner):
         'learning/lr_main', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
 
-    for name, optimizer in zip(p.auxiliary_names, self._auxiliary_optimizers):
+    for name, optimizer in zip(
+        p.auxiliary_names, self._auxiliary_optimizer_insts
+    ):
       learning_rate = optimizer.get_learning_rate(step)
       base_layer.add_global_summary(
           f'learning/lr_{name}', learning_rate, SummaryType.AGGREGATE_SCALAR
