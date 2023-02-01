@@ -147,18 +147,18 @@ class PjitPartitionerTest(TrainLibTestBase):
     )
 
   @parameterized.parameters([True, False])
-  def test_output_spec(self, use_auto_shard):
+  def test_output_spec(self, use_auto_sharding):
     prng_key = jax.random.PRNGKey(0)
     metadata = trainer_lib.create_train_state_metadata(
         self.task, self._inputs_shape_dtype
     )
     partitioner = self._create_partitioner(
-        trainer_lib.train_step_single_learner if use_auto_shard else None
+        trainer_lib.train_step_single_learner if use_auto_sharding else None
     )
     train_state_partition_spec = partitioner.get_train_state_metadata(
     ).partition_specs
 
-    if use_auto_shard:
+    if use_auto_sharding:
       self.assertIsNotNone(train_state_partition_spec)
       self.assertNotEqual(metadata.partition_specs, train_state_partition_spec)
     else:
@@ -167,10 +167,12 @@ class PjitPartitionerTest(TrainLibTestBase):
   @parameterized.parameters(
       [RunningMode.TRAIN, RunningMode.EVAL, RunningMode.DECODE]
   )
-  def test_cache_sharding_result(self, mode):
+  def test_cache_auto_sharding_result(self, mode):
     prng_key = jax.random.PRNGKey(0)
     step_fn, is_eval = trainer_lib.get_step_fn(mode)
     partitioner = self._create_partitioner(step_fn, is_eval)
+    # TODO(laigd): split the get_train_state_metadata logic to separate test
+    # cases.
     metadata_1 = partitioner.get_train_state_metadata(
         discard_opt_states=is_eval
     )
@@ -180,10 +182,10 @@ class PjitPartitionerTest(TrainLibTestBase):
     self.assertEqual(metadata_1.partition_specs, metadata_2.partition_specs)
 
     partitioned_step_fn_1, input_partition_specs_1 = partitioner.partition(
-        step_fn, self._inputs_shape_dtype, is_eval, metadata_1
+        step_fn, self._inputs_shape_dtype, is_eval
     )
     partitioned_step_fn_2, input_partition_specs_2 = partitioner.partition(
-        step_fn, self._inputs_shape_dtype, is_eval, metadata_2
+        step_fn, self._inputs_shape_dtype, is_eval
     )
     self.assertIs(partitioned_step_fn_1, partitioned_step_fn_2)
     self.assertIs(input_partition_specs_1, input_partition_specs_2)

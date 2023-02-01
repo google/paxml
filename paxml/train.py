@@ -766,7 +766,6 @@ def train_and_evaluate_pmap(
       train_step_fn,
       inputs_shape_dtype,  # TODO(laigd): this is not needed by pmap.
       is_eval,
-      train_state_metadata,
   )
 
   fprop_dtype = task_p.model.fprop_dtype
@@ -894,7 +893,6 @@ def train_and_evaluate_spmd_model(
       train_step_fn,
       inputs_shape_dtype,
       is_eval,
-      train_state_metadata,
       train_unpadded_global_batch_size,
   )
 
@@ -902,15 +900,12 @@ def train_and_evaluate_spmd_model(
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
 
-  # TODO(laigd): Avoid creating a new partitioner here.
-  p_eval_on_train_step, _, _ = trainer_lib.get_partitioned_spmd_model_step_fn(
-      jax_task,
-      RunningMode.EVAL,
-      init_key,
+  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+  assert is_eval
+  p_eval_on_train_step, eval_inp_pspec = partitioner.partition(
+      eval_step_fn,
       inputs_shape_dtype,
-      train_state_partition_spec=(
-          train_state_metadata.partition_specs.to_eval_state()
-      ),
+      is_eval,
       # Use train_unpadded_global_batch_size since this is eval on train input.
       unpadded_global_batch_size=train_unpadded_global_batch_size,
   )
@@ -952,7 +947,7 @@ def train_and_evaluate_spmd_model(
     if (create_gda_for_inputs or
         train_input_pipeline.hparams.experimental_remote_input):
       eval_inputs = train_input_pipeline.reshard_for_spmd(
-          eval_inputs, global_mesh, inputs_pspecs
+          eval_inputs, global_mesh, eval_inp_pspec
       )
     return eval_inputs
 
