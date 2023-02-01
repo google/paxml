@@ -780,6 +780,28 @@ class C4SpmdPipelineGpt3AdamMLPerfHPBS8k1024Replicas(
 
 
 @experiment_registry.register
+class C4Spmd1BAdam4Replicas(C4SpmdAdam):
+  r"""GPT-3 config with 1B params.
+
+  Model Parameters:  Global batch size = 1 * 4 * 1 * 32 = 128
+  """
+  NUM_LAYERS = 13
+  MODEL_DIMS = 2560
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 20
+  DIMS_PER_HEAD = 128
+  PERCORE_BATCH_SIZE = 32
+  MAX_SEQ_LEN = 1024
+  VOCAB_SIZE = 32000
+  FPROP_DTYPE = jnp.bfloat16
+  USE_REPEATED_LAYER = True
+
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+  ICI_MESH_SHAPE = [1, 4, 1]
+
+
+@experiment_registry.register
 class C4Spmd2BAdam4Replicas(C4SpmdAdam):
   r"""GPT-3 config with 2B params.
 
