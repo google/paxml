@@ -68,7 +68,6 @@ TrainState = train_states.TrainState
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
-_N_STEPS_WARMUP_LOGGING = 5
 
 _INIT_TIME = time.time()
 _READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
@@ -765,8 +764,7 @@ def train_and_evaluate_pmap(
   create_gda_for_inputs = False
   is_vars_replicated = True
 
-  def prepare_model_inputs(train_input_pipeline, model_inputs, step_counter):
-    del step_counter  # Unused in pmap flow
+  def prepare_model_inputs(train_input_pipeline, model_inputs):
     return train_input_pipeline.reshard_for_pmap(model_inputs)
 
   def prepare_eval_inputs(train_input_pipeline, eval_inputs):
@@ -914,16 +912,11 @@ def train_and_evaluate_spmd_model(
         RunningMode.EVAL,
     )
 
-  def prepare_model_inputs(input_pipeline, model_inputs, step_counter):
+  def prepare_model_inputs(input_pipeline, model_inputs):
     if (create_gda_for_inputs or
         input_pipeline.hparams.experimental_remote_input):
-      if step_counter <= _N_STEPS_WARMUP_LOGGING:
-        start = time.time()
       model_inputs = input_pipeline.reshard_for_spmd(model_inputs,
                                                      global_mesh, inputs_pspecs)
-      if step_counter <= _N_STEPS_WARMUP_LOGGING:
-        logging.info('GDA train batch input creation time %s',
-                     time.time() - start)
     return model_inputs
 
   def prepare_eval_inputs(train_input_pipeline, eval_inputs):
@@ -1195,12 +1188,9 @@ def _train_and_evaluate_common(
         break
 
       # Get new model inputs
-      if step_i - initial_step <= _N_STEPS_WARMUP_LOGGING:
-        logging.info('step=`%d`: Retrieving model inputs.', step_i)
       logging.debug('  Retrieving inputs.')
       model_inputs = train_input_pipeline.get_next_padded()
-      model_inputs = prepare_model_inputs(train_input_pipeline, model_inputs,
-                                          step_i - initial_step)
+      model_inputs = prepare_model_inputs(train_input_pipeline, model_inputs)
       logging.debug('  Retrieved inputs.')
 
       do_profile = train_p.profiler_capture_step is not None
