@@ -163,11 +163,6 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   def checkpoint_type(self) -> CheckpointType:
     raise NotImplementedError
 
-  @property
-  @abc.abstractmethod
-  def version(self) -> float:
-    raise NotImplementedError
-
 
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
@@ -262,10 +257,6 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   @property
   def checkpoint_type(self) -> CheckpointType:
     return self._checkpoint_type
-
-  @property
-  def version(self) -> float:
-    return self.checkpoint_manager.version
 
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
@@ -376,10 +367,6 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   @property
   def checkpoint_type(self) -> CheckpointType:
     return self._checkpoint_type
-
-  @property
-  def version(self) -> float:
-    return self.checkpoint_manager.version
 
 
 def _create_checkpointer(
@@ -580,10 +567,6 @@ def train_and_evaluate(
   if not enable_checkpoint_saving:
     logging.info(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
-
-  if checkpointer.version >= 1.1:
-    task_p.train.learner.repeat_prefix_sep = '_'
-  # Otherwise retain default '#'.
 
   if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,

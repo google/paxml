@@ -190,14 +190,6 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
-    if checkpoint_type != CheckpointType.CHECKPOINT_FLAX:
-      state_dir = checkpoint_manager._manager._get_save_directory(
-          0, checkpoint_manager.directory, key_name='state'
-      )
-      # Check correct naming param names.
-      self.assertEmpty(list(state_dir.glob('opt_states_0*')))
-      self.assertNotEmpty(list(state_dir.glob('opt_states.0*')))
-
   @parameterized.parameters((None, CheckpointType.CHECKPOINT_GDA),
                             (None, CheckpointType.CHECKPOINT_FLAX),
                             (2, CheckpointType.CHECKPOINT_GDA),
@@ -455,21 +447,36 @@ class CheckpointManagerTest(parameterized.TestCase):
       (CheckpointType.CHECKPOINT_GDA,), (CheckpointType.CHECKPOINT_FLAX,)
   )
   def test_restore_legacy_format(self, checkpoint_type):
-    with mock.patch.object(
-        checkpoints, 'get_version', autospec=True, return_value=0.0
-    ):
-      checkpoint_manager = self.create_checkpoint_manager(
-          checkpoint_managers.CheckpointManagerOptions(),
-          checkpoint_type=checkpoint_type,
-      )
-      self.save(checkpoint_manager, 0, self.train_state)
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+    )
+    self.save(checkpoint_manager, 0, self.train_state)
 
     step_dir = checkpoint_manager._manager._get_save_directory(
         0, checkpoint_manager.directory
     )
     self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
-    self.assertFalse((step_dir / 'state').exists())
-    self.assertFalse((step_dir / 'metadata').exists())
+    self.assertTrue((step_dir / 'state').exists())
+    self.assertTrue((step_dir / 'metadata').exists())
+
+    # Transform directory to what we would expect in a version 0 checkpoint with
+    # no per-item subdirectories.
+    (step_dir / 'metadata').rmtree()
+    for d in (step_dir / 'state').iterdir():  # parameter directories
+      if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+        assert d.is_dir(), d
+        (step_dir / d.name).mkdir()
+        for f in d.iterdir():
+          assert f.is_file(), f
+          f.copy(step_dir / d.name / f.name)
+      else:
+        f = d
+        assert f.is_file(), f
+        assert f.name == 'checkpoint'
+        f.copy(step_dir / f.name)
+    (step_dir / 'state').rmtree()
+    checkpoint_manager._manager._version = 0.0
 
     expected = self.train_state
     if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
@@ -497,43 +504,6 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertFalse((step_dir / 'state').exists())
     self.assertFalse((step_dir / 'metadata').exists())
 
-  @parameterized.parameters(
-      (CheckpointType.CHECKPOINT_GDA,), (CheckpointType.CHECKPOINT_FLAX,)
-  )
-  def test_restore_legacy_names(self, checkpoint_type):
-    with mock.patch.object(
-        checkpoints, 'get_version', autospec=True, return_value=0.0
-    ):
-      checkpoint_manager = self.create_checkpoint_manager(
-          checkpoint_managers.CheckpointManagerOptions(),
-          checkpoint_type=checkpoint_type,
-      )
-      self.save(checkpoint_manager, 0, self.train_state)
-
-    expected = self.train_state
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
-      expected = jax.tree_util.tree_map(
-          lambda x: np.asarray(x.addressable_data(0)),
-          expected,
-      )
-    train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
-    restored = self.restore(
-        checkpoint_manager,
-        0,
-        train_state_global_shapes,
-        self.state_specs,
-        checkpoint_type,
-        global_mesh=self.global_mesh,
-    )
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
-
-    if checkpoint_type != CheckpointType.CHECKPOINT_FLAX:
-      state_dir = checkpoint_manager._manager._get_save_directory(
-          0, checkpoint_manager.directory, key_name='state'
-      )
-      # Check correct naming param names.
-      self.assertNotEmpty(list(state_dir.glob('opt_states_0*')))
-      self.assertEmpty(list(state_dir.glob('opt_states.0*')))
 
 if __name__ == '__main__':
   absltest.main()

@@ -21,7 +21,6 @@ from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
 from absl import logging
 from etils import epath
-from flax import traverse_util
 import flax.serialization
 import jax
 from jax.experimental import maps
@@ -369,22 +368,7 @@ def _extract_nested_prefix_names(
           key_separator=key_separator,
           left_separator=left_separator,
           right_separator=right_separator,
-          is_leaf=py_utils.is_optax_masked_node,
-      ),
-  )
-
-
-def _filter_masked_nodes(
-    train_state: train_states.TrainState,
-) -> Mapping[Any, Any]:
-  state_dict = flax.serialization.to_state_dict(train_state)
-  flattened_state_dict_filtered = traverse_util.flatten_dict(
-      state_dict, keep_empty_nodes=False
-  )
-  state_dict_filtered = traverse_util.unflatten_dict(
-      flattened_state_dict_filtered
-  )
-  return state_dict_filtered
+          is_leaf=py_utils.is_optax_masked_node))
 
 
 def _masked_node_to_none(mask: Any, value: Any) -> Any:
@@ -396,19 +380,14 @@ def _masked_node_to_none(mask: Any, value: Any) -> Any:
 
 def _tensorstore_prepare(
     train_state: train_states.TrainState,
-    nested_names: Optional[train_states.TrainState] = None,
-    state_specs: Optional[train_states.TrainState] = None,
-) -> Tuple[
-    Sequence[JTensorOrPartitionSpec],
-    Sequence[str],
-    Optional[Sequence[JTensorOrPartitionSpec]],
-]:
+    state_specs: Optional[train_states.TrainState] = None
+) -> Tuple[Sequence[JTensorOrPartitionSpec], Sequence[str],
+           Optional[Sequence[JTensorOrPartitionSpec]]]:
   """Prepares data prior to saving/restoring it from/to TensorStore.
 
   Args:
     train_state: A partitioned train_state that is a Pytree of
       GlobalDeviceArray.
-    nested_names: [optional] Names to be applied to the parameters.
     state_specs: [optional] The partition specs corresponding to this TrainState
       instance, when it is used for checkpoint restoring.
 
@@ -438,22 +417,11 @@ def _tensorstore_prepare(
   else:
     flattened_state_specs = None
 
-  if nested_names is not None:
-    # If names are already known, we must ensure they are filtered
-    # according to the MaskedNode instances in train_state.
-    nested_names_none = jax.tree_map(
-        _masked_node_to_none,
-        train_state,
-        nested_names,
-        is_leaf=py_utils.is_optax_masked_node,
-    )
-  else:
-    # _extract_nested_prefix_names() also replaces MaskedNode instances by None
-    # values ...
-    nested_names_none = _extract_nested_prefix_names(train_state)
-
+  # _extract_nested_prefix_names() also replaces MaskedNode instances by None
+  # values ...
+  nested_names = _extract_nested_prefix_names(train_state)
   # ... that are filtered out when calling jax.tree_util.tree_flatten() here.
-  flattened_nested_names, _ = jax.tree_util.tree_flatten(nested_names_none)
+  flattened_nested_names, _ = jax.tree_util.tree_flatten(nested_names)
   return flattened_train_state, flattened_nested_names, flattened_state_specs
 
 
@@ -493,32 +461,23 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   Allows setting parameter names manually, which would normally be extracted
   from the train state itself. This is somewhat hacky, and we will aim to remove
   it eventually (see below).
+
+  TODO(cpgaffney) Rework _extract_nested_prefix_names to allow extracting names
+  from a state dict.
   """
 
-  # Parameter names used for v<1.1 checkpoints. These are computed outside the
-  # standard Orbax API and are manually set with a call to
-  # _set_legacy_param_names before access. The corresponding _get_param_names
-  # is called in Orbax internal code. In v>=1.1 checkpoints, as in vanilla
-  # Orbax, the parameter names are computed based on the PyTree alone.
-  _legacy_param_names: PyTreeDef = None
+  _param_names: PyTreeDef = None
 
-  def _set_legacy_param_names(self, param_names: PyTreeDef):
-    self._legacy_param_names = param_names
+  def _set_param_names(self, param_names: PyTreeDef):
+    self._param_names = param_names
 
   def _get_param_names(self, item: PyTreeDef) -> PyTreeDef:
-    if self._legacy_param_names is None:
-      return super()._get_param_names(item)
-    return self._legacy_param_names
+    return self._param_names
 
   async def _write_aggregate_file(self, directory: epath.Path, item: PyTreeDef,
                                   param_infos: PyTreeDef, save_args: PyTreeDef):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
-
-  async def _maybe_deserialize(self, info, value, args):
-    if args is None:
-      return value
-    return await super()._maybe_deserialize(info, value, args)
 
   async def async_save(
       self,
@@ -530,18 +489,13 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Filters optax.MaskedNode before calling superclass async_save."""
     if version is None:
       raise ValueError('Expected version for saving.')
-    if version < 1.1:
-      flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
-          item
-      )
-      # At that point, the flattened entries do not contain any reference to
-      # MaskedNode's.
-      self._set_legacy_param_names(flattened_nested_names)
-      train_state = flattened_train_state
-    else:
-      # Remove MaskedNode entries.
-      train_state = _filter_masked_nodes(item)
-    return await super().async_save(directory, train_state, save_args=save_args)
+    flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
+        item)
+    # At that point, the flattened entries do not contain any reference to
+    # MaskedNode's.
+    self._set_param_names(flattened_nested_names)
+    return await super().async_save(
+        directory, flattened_train_state, save_args=save_args)
 
   def restore(
       self,
@@ -554,76 +508,38 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
       raise ValueError('Expected version for restoration.')
-
-    train_state, state_specs = item, specs
-    if version < 1.1:  # Legacy names used in checkpoint.
-      train_state_filtered, nested_names, state_specs_filtered = (
-          _tensorstore_prepare(item, state_specs=specs)
-      )  # Flattened
-      # At that point, the flattened entries do not contain any reference to
-      # MaskedNode's.
-      self._set_legacy_param_names(nested_names)
-    else:  # Standardized Orbax names used in checkpoint.
-      state_specs_masked = jax.tree_map(
-          _masked_node_to_none,
-          train_state,
-          state_specs,
-          is_leaf=py_utils.is_optax_masked_node,
-      )
-      train_state_filtered = _filter_masked_nodes(train_state)
-      state_specs_filtered = _filter_masked_nodes(state_specs_masked)
+    flattened_train_state, flattened_nested_names, flattened_state_specs = (
+        _tensorstore_prepare(item, specs))
+    # At that point, the flattened entries do not contain any reference to
+    # MaskedNode's.
+    self._set_param_names(flattened_nested_names)
 
     def create_restore_args(pspec, shape_struct):
-      # MaskedNode after serialization.
-      if isinstance(shape_struct, dict) and not shape_struct:
-        return {}
       restore_type = jax.Array if jax.config.jax_array else GlobalDeviceArray
       return orbax.checkpoint.ArrayRestoreArgs(
           restore_type=restore_type,
           mesh=mesh,
           mesh_axes=pspec,
           global_shape=shape_struct.shape,
-          dtype=shape_struct.dtype,
-      )
+          dtype=shape_struct.dtype)
 
-    restore_args = jax.tree_map(
-        create_restore_args, state_specs_filtered, train_state_filtered
-    )
-    restored_train_state_filtered = super().restore(
-        directory, item=train_state_filtered, restore_args=restore_args
-    )
+    restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
+                                flattened_train_state)
 
-    if version < 1.1:
-      # We add back the MaskedNode entries into the pytree.
-      restored_train_state = _tensorstore_reconstruct(
-          item, restored_train_state_filtered
-      )
-    else:
-      # Use transforms to add back the nodes previously filtered out of
-      # `train_state_dict`. Then, it can be deserialized
-      # back into a TrainState object.
-      train_state_dict = flax.serialization.to_state_dict(train_state)
-      restored_train_state = (
-          orbax.checkpoint.transform_utils.apply_transformations(
-              original_tree=restored_train_state_filtered,
-              transformations={},
-              new_tree=train_state_dict,
-          )
-      )
-      restored_train_state = flax.serialization.from_state_dict(
-          train_state, restored_train_state
-      )
+    # Consequently, we restore the checkpoint that does not contain any
+    # reference to MaskedNode's.
+    restored_train_state = super().restore(
+        directory, item=flattened_train_state, restore_args=restore_args)
+
+    # We add back the MaskedNode entries into the pytree.
+    restored_train_state = _tensorstore_reconstruct(item, restored_train_state)
 
     return restored_train_state
 
   def structure(self, directory: epath.Path) -> PyTreeDef:
-    if self._legacy_param_names is None:
-      return orbax.checkpoint.utils.pytree_structure(directory)
-    else:
-      return jax.tree_util.tree_map(
-          orbax.checkpoint.utils.leaf_placeholder,
-          flax.serialization.to_state_dict(self._legacy_param_names),
-      )
+    return jax.tree_util.tree_map(
+        orbax.checkpoint.utils.leaf_placeholder,
+        flax.serialization.to_state_dict(self._param_names))
 
 
 class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
