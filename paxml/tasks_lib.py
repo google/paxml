@@ -977,7 +977,7 @@ class SingleTask(base_task.BaseTask):
     self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
 
     assert p.model is not None
-    self._model: base_model.BaseModel = instantiate(p.model)
+    self._model_inst: base_model.BaseModel = instantiate(p.model)
 
     # instantiate the metrics aggregation helper
     if p.metrics:
@@ -991,17 +991,18 @@ class SingleTask(base_task.BaseTask):
       if any([learner.loss_name is not None for learner in self._learners]):
         raise ValueError('If a `loss_aggregator` is specified, all '
                          '`loss_names` on the learner are expected to be None.')
-      self._loss_aggregator = instantiate(p.loss_aggregator)
+      self._loss_aggregator_inst = instantiate(p.loss_aggregator)
     else:
       if self._learners[0].loss_name is None:
         raise ValueError('`loss_name` on the learner is None. Must be set.')
       loss_p = base_metrics.LossAggregator.HParams(
           loss_key=self._learners[0].loss_name)
-      self._loss_aggregator = instantiate(loss_p)
+      self._loss_aggregator_inst = instantiate(loss_p)
 
     if p.infer_writer:
       self._inference_runner = p.infer_writer.inference_runner.Instantiate(
-          model=self._model)
+          model=self._model_inst
+      )
 
   @property
   def learners(self) -> Sequence[learners_lib.Learner]:
@@ -1009,7 +1010,7 @@ class SingleTask(base_task.BaseTask):
 
   @property
   def model(self) -> base_model.BaseModel:
-    return self._model
+    return self._model_inst
 
   @property
   def metrics_aggregator(self) -> base_metrics.MeanMetrics:
@@ -1017,7 +1018,7 @@ class SingleTask(base_task.BaseTask):
 
   @property
   def loss_aggregator(self) -> base_metrics.LossAggregator:
-    return self._loss_aggregator
+    return self._loss_aggregator_inst
 
   @property
   def has_ema_decay(self):
