@@ -187,13 +187,15 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
             use_custom_packing_ops=False,
             bos_id=0,
             reverse_bos_padding=True,
-            eos_id=GPT_EOS_ID),
+            eos_id=GPT_EOS_ID,
+        ),
         is_training=is_training,
         input_random_seed=(seed if is_training else 4321),
         batch_size=batch_size_per_process,
         drop_remainder=True if is_training else False,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
+        annotate_padding_fields=True,
     )
     return p
 
