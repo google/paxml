@@ -17,7 +17,7 @@
 
 import dataclasses
 import typing
-from typing import Any, Optional, Union, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence, Union
 
 from etils import epath
 import jax
