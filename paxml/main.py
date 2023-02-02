@@ -92,9 +92,6 @@ flags.DEFINE_bool(
     'Enables fully asynchronous checkpointing via GDA and TensorStore. This '
     'means that the training can continue ahead when checkpointing is '
     'happening.')
-flags.DEFINE_bool(
-    'jax_array_in_pax', True,
-    'Use jax.Array globally in PAX which replaces DA, SDA and GDA.')
 flags.DEFINE_string(
     'jax_traceback_filtering_option', 'auto',
     'Controls how JAX filters internal frames out of tracebacks: '
@@ -367,7 +364,6 @@ def main(argv: Sequence[str]) -> None:
 
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
-                      FLAGS.jax_array_in_pax,
                       FLAGS.jax_traceback_filtering_option,
                       FLAGS.jax_fully_async_checkpoint)
 
