@@ -21,7 +21,6 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
-from jax.experimental import maps
 import numpy as np
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -96,7 +95,7 @@ class TrainLibTestBase(parameterized.TestCase):
     super().setUpClass()
     # Construct a 1d mesh with 2 devices on x.
     devices = np.array(jax.local_devices()[:2]).reshape((2,))
-    cls.mesh = maps.Mesh(devices, 'x')
+    cls.mesh = jax.sharding.Mesh(devices, 'x')
 
     # Set up input data
     train_input_p = TestInput.HParams(batch_size=2)

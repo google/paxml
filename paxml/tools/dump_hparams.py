@@ -35,7 +35,6 @@ from absl import app
 from absl import flags
 from absl import logging
 import jax
-from jax.experimental import maps
 import numpy as np
 from paxml import base_experiment
 from paxml import experiment_registry
@@ -177,7 +176,9 @@ def main(argv) -> None:
           task_p.model.dcn_mesh_shape,
           contiguous_submeshes=task_p.model.contiguous_submeshes,
       )
-      context_manager = maps.Mesh(device_mesh, task_p.model.mesh_axis_names)
+      context_manager = jax.sharding.Mesh(
+          device_mesh, task_p.model.mesh_axis_names
+      )
     else:
       context_manager = contextlib.nullcontext()
 

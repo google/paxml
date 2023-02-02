@@ -28,7 +28,6 @@ from etils import epath
 from flax.core import frozen_dict
 import jax
 from jax import numpy as jnp
-from jax.experimental import maps
 from jax.experimental import pjit
 from jax.interpreters import pxla
 from paxml import base_metrics
@@ -46,7 +45,7 @@ from praxis import pytypes
 
 from paxml import checkpoints  # mapped to internal
 
-PartitionSpec = pjit.PartitionSpec
+PartitionSpec = jax.sharding.PartitionSpec
 
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
@@ -292,7 +291,7 @@ def write_post_init_model_hparams_file(
 
 def adjust_input_params_for_small_batch(
     inp_p: base_input.BaseInput.HParams,
-    global_mesh: maps.Mesh) -> base_input.BaseInput.HParams:
+    global_mesh: jax.sharding.Mesh) -> base_input.BaseInput.HParams:
   """Creates a copy of inp_p adjusted when per-device batch < 1."""
   # Remote input adjusts the params for small batch itself.
   if inp_p.experimental_remote_input:
@@ -1036,7 +1035,7 @@ def initialize_partitioned_model_states(
     prng_key: PRNGKey,
     global_input_shapes: NestedShapeDtypeLike,
     discard_opt_states: bool = False,
-    global_mesh: Optional[maps.Mesh] = None,
+    global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_GDA,
     state_specs: Optional[TrainState] = None,
     do_init_checkpoint_rules: bool = True) -> Tuple[TrainState, TrainState]:
@@ -1126,7 +1125,8 @@ def initialize_partitioned_model_states(
 
 
 def shard_on_batch_dim_partition_spec(
-    mesh_names: Sequence[str], x: jax.ShapeDtypeStruct) -> pjit.PartitionSpec:
+    mesh_names: Sequence[str], x: jax.ShapeDtypeStruct
+) -> jax.sharding.PartitionSpec:
   """Fully shards x on the batch dimension."""
   x_dim = len(x.shape)
   assert x_dim >= 1
@@ -1173,7 +1173,7 @@ def infer_partition_spec_based_on_rank_fn(
     mapping_dict: Dict[str, base_layer.SplitDimsMapping],
     mesh_names: Sequence[str],
     x: JTensor,
-) -> Optional[pjit.PartitionSpec]:
+) -> Optional[jax.sharding.PartitionSpec]:
   """Infers PartitionSpec of input from the rank of corresponding JTensors.
 
   Args:
@@ -1378,7 +1378,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     """
 
   @property
-  def global_mesh(self) -> Optional[maps.Mesh]:
+  def global_mesh(self) -> Optional[jax.sharding.Mesh]:
     """The global mesh."""
     return None
 
@@ -1628,7 +1628,7 @@ class _PjitPartitioner(Partitioner):
         contiguous_submeshes=model_p.contiguous_submeshes,
     )
     logging.info('device_mesh: %s', device_mesh)
-    self._global_mesh = maps.Mesh(device_mesh, model_p.mesh_axis_names)
+    self._global_mesh = jax.sharding.Mesh(device_mesh, model_p.mesh_axis_names)
 
     # Initialize the remaining parts.
     super().__init__(
@@ -1672,7 +1672,7 @@ class _PjitPartitioner(Partitioner):
       logging.info('Auto sharding is enabled in PAX.')
 
   @property
-  def global_mesh(self) -> Optional[maps.Mesh]:
+  def global_mesh(self) -> Optional[jax.sharding.Mesh]:
     return self._global_mesh
 
   def preprocess_input_params(
@@ -2289,7 +2289,7 @@ def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:
     names.add(name)
 
 
-def bind_mesh(pjitted_fn, global_mesh: maps.Mesh):
+def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
   """Wraps a pjitted_fn with a mesh context."""
 
   def call(*args):
@@ -2310,7 +2310,7 @@ class SingleTaskPjitTrainer:
   def __init__(self,
                task: tasks_lib.SingleTask,
                train_input: base_input.BaseInput,
-               mesh: maps.Mesh,
+               mesh: jax.sharding.Mesh,
                enable_auto_sharding: bool = False):
     self._task = task
     self._train_input = train_input

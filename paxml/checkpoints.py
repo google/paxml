@@ -23,7 +23,6 @@ from absl import logging
 from etils import epath
 import flax.serialization
 import jax
-from jax.experimental import maps
 from jax.experimental import multihost_utils
 from jax.experimental.global_device_array import GlobalDeviceArray
 import numpy as np
@@ -283,7 +282,7 @@ def retrieve_latest_checkpoint_step(
 def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
-    global_mesh: Optional[maps.Mesh] = None,
+    global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
     state_specs: Optional[train_states.TrainState] = None,
     step: Optional[int] = None) -> Optional[train_states.TrainState]:
@@ -502,7 +501,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       directory: epath.Path,
       item: Optional[PyTreeDef] = None,
       specs: Optional[PyTreeDef] = None,
-      mesh: Optional[maps.Mesh] = None,
+      mesh: Optional[jax.sharding.Mesh] = None,
       version: Optional[float] = None,
   ) -> PyTreeDef:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""

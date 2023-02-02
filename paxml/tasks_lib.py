@@ -33,8 +33,6 @@ import flax
 import jax
 from jax import numpy as jnp
 from jax.experimental import global_device_array
-from jax.experimental import maps
-from jax.experimental import pjit
 import numpy as np
 import optax
 from paxml import base_inference_runner
@@ -61,7 +59,7 @@ Nested = pytypes.Nested
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor
 JTensor = base_layer.JTensor
-PartitionSpec = pjit.PartitionSpec
+PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
 
 PRNGKey = pytypes.PRNGKey
@@ -393,15 +391,17 @@ def restore_pmap_from_tensorstore(
     ShardedDeviceArray`.
   """
   if global_mesh is None:
-    restore_global_mesh = maps.Mesh(np.array(jax.devices()), axis_names=('x',))
+    restore_global_mesh = jax.sharding.Mesh(
+        np.array(jax.devices()), axis_names=('x',)
+    )
   else:
     restore_global_mesh = global_mesh
 
   def _get_spec(shape):
     if shape.shape:
-      return pjit.PartitionSpec(None)
+      return jax.sharding.PartitionSpec(None)
     else:
-      return pjit.PartitionSpec()
+      return jax.sharding.PartitionSpec()
 
   fully_replicated_state_specs = jax.tree_map(_get_spec, global_shapes)
   with restore_global_mesh:
@@ -1218,7 +1218,7 @@ class SingleTask(base_task.BaseTask):
       ckpt_path: str,
       rules: CheckpointLoadingRules,
       load_status: List[Any],
-      global_mesh: Optional[maps.Mesh] = None,
+      global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
       target_partition_specs: Optional[TrainState] = None):
     """Applies one CheckpointLoadingRules to train_state."""
@@ -1362,7 +1362,7 @@ class SingleTask(base_task.BaseTask):
       self,
       train_state: TrainState,
       train_state_partition_specs: Optional[TrainState] = None,
-      global_mesh: Optional[maps.Mesh] = None,
+      global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
   ) -> Tuple[TrainState, bool]:
     """Applies p.train.init_from_checkpoint_rules to update train_state.

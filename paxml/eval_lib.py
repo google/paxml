@@ -30,7 +30,6 @@ from absl import logging
 from clu import platform
 from etils import epath
 import jax
-from jax.experimental import maps
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
@@ -490,7 +489,7 @@ def run_eval_loop_over_test_splits(
     model_inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
     eval_inputs_pspecs: Optional[Sequence[NestedPartitionSpec]] = None,
-    global_mesh: Optional[maps.Mesh] = None,
+    global_mesh: Optional[jax.sharding.Mesh] = None,
     reshard_inputs: Optional[bool] = False,
     create_gda_for_inputs: bool = False,
 ) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics.
@@ -1714,7 +1713,7 @@ def partition_decode_once_spmd_model(
     input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     prng_key: JTensor,
-    global_mesh: maps.Mesh,
+    global_mesh: jax.sharding.Mesh,
     decode_step_fns: Sequence[
         Callable[[NestedJTensor, JTensor, NestedJTensor],
                  Tuple[Tuple[NestedMap, NestedMap], NestedMap]]],
@@ -1793,7 +1792,7 @@ def decode_once_spmd_model(
     train_state: train_states.TrainState,
     summary_writers: List[SummaryWriter],
     prng_key: JTensor,
-    global_mesh: maps.Mesh,
+    global_mesh: jax.sharding.Mesh,
     decode_step_fns: Sequence[
         Callable[[NestedJTensor, JTensor, NestedJTensor],
                  Tuple[Tuple[NestedMap, NestedMap], NestedMap]]],

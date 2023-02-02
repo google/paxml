@@ -30,7 +30,6 @@ from absl import logging
 from etils import epath
 import jax
 from jax import monitoring
-from jax.experimental import maps
 from jax.experimental import pjit
 from paxml import base_experiment
 from paxml import checkpoint_managers
@@ -140,7 +139,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   def get_model_states(
       self,
       jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[maps.Mesh],
+      global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
   ) -> Tuple[TrainState, int]:
@@ -211,7 +210,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def get_model_states(
       self,
       jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[maps.Mesh],
+      global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
   ) -> Tuple[TrainState, int]:
@@ -284,7 +283,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   def get_model_states(
       self,
       jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[maps.Mesh],
+      global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
   ) -> Tuple[TrainState, int]:

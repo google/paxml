@@ -26,8 +26,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 import jax
 from jax.experimental import multihost_utils
-from jax.experimental import pjit
-from jax.experimental.maps import Mesh
+from jax.sharding import Mesh
 import numpy as np
 import orbax.checkpoint
 from paxml import checkpoint_managers
@@ -67,7 +66,7 @@ def _actual_checkpoint_filenames(directory: str) -> List[str]:
 def create_train_state(step: int = 0):
   mdl_vars = orbax.checkpoint.test_utils.setup_pytree()
   global_mesh = Mesh(np.asarray(jax.devices()), ('x',))
-  axes = pjit.PartitionSpec(
+  axes = jax.sharding.PartitionSpec(
       None,
   )
   mdl_vars = jax.tree_util.tree_map(
@@ -137,7 +136,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         step=orbax.checkpoint.test_utils.create_sharded_array(
             step,
             self.global_mesh,
-            pjit.PartitionSpec(
+            jax.sharding.PartitionSpec(
                 None,
             ),
         )
