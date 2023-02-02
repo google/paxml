@@ -582,6 +582,7 @@ class SeqIOInput(base_input.BaseInput):
     sharded_datasets = []
     sharded_datasets_converted = []
 
+    largest_shard = 0
     for host_idx in range(p.num_infeed_hosts):
       shard_info = seqio.ShardInfo(
           index=host_idx, num_shards=p.num_infeed_hosts
@@ -604,13 +605,19 @@ class SeqIOInput(base_input.BaseInput):
       else:
         sharded_datasets_converted.append(
             p.feature_converter(ds_shard, p.task_feature_lengths))
-      self._len_full_ds += _get_num_examples(ds_shard)
+      shard_num_examples = _get_num_examples(ds_shard)
+      if shard_num_examples > largest_shard:
+        largest_shard = shard_num_examples
+      logging.info('Targets shard %d/%d has %d examples',
+                   host_idx, p.num_infeed_hosts, shard_num_examples)
+      self._len_full_ds += shard_num_examples
       sharded_datasets.append(ds_shard)
 
-    # interleave sharded dataset so it can be read sequentially on
-    # single host
+    # Interleave sharded dataset so it can be read sequentially on
+    # single host. The shards may be uneven so we need to repeat based on the
+    # largest shard to avoid missing any data.
     choice_dataset = tf.data.Dataset.range(p.num_infeed_hosts).repeat(
-        np.ceil(self._len_full_ds / p.num_infeed_hosts)
+        largest_shard
     )
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
