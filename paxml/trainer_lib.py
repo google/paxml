@@ -1559,7 +1559,8 @@ class _PmapPartitioner(Partitioner):
             donate_argnums=() if is_eval else (0,),
             axis_name=base_layer.PMAP_PARALLEL_AXIS_NAME,
         ),
-        None,  # Input partition spec.
+        # Input partition spec.
+        None,  # type: ignore
     )
 
 
