@@ -1,3 +1,13 @@
+# Version: 0.2.2
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 0.2.2
+*   Build Date: 20230201
+*   Paxml commit: cab3ed811174682733e2c836363510162fbfb1da
+*   Praxis version: 0.2.2
+*   Praxis commit: 9e1d13d888ac18a567e249ddb41e6b1bd1fe505a
 # Version: 0.2.1
 ## Bug fix
 * fix the HBM OOM error when loading the checkpoint using orbax

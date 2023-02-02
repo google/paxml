@@ -1,8 +1,8 @@
 # Paxml (aka Pax)
 
 Pax is a framework to configure and run machine learning experiments on top of Jax.
-
-## Setting up a Cloud TPU VM
+## Quickstart
+### Setting up a Cloud TPU VM
 
 We refer to
 [this page](https://cloud.google.com/tpu/docs/users-guide-tpu-vm#managing_tpus)
@@ -11,27 +11,47 @@ following command is sufficient to create a Cloud TPU VM with 8 cores from a
 corp machine.
 
 ```bash
-$ TPU_NAME=pax-8
-$ gcloud alpha compute tpus tpu-vm create ${TPU_NAME} --zone us-central2-b --accelerator-type v4-8 --version v2-alpha-tpuv4 --project ${PROJECT}
+export ZONE=us-central2-b
+export VERSION=tpu-vm-v4-base
+export PROJECT=<your-project>
+export ACCELERATOR=v4-8
+export TPU_NAME=paxml
+
+#create a TPU VM
+gcloud compute tpus tpu-vm create $TPU_NAME --zone=$ZONE --version=$VERSION --project=$PROJECT --accelerator-type=$ACCELERATOR
 ```
 
 The corresponding VM instance can then be accessed via ssh.
 
 ```bash
-gcloud alpha compute tpus tpu-vm ssh ${TPU_NAME} --zone us-central2-b --project ${PROJECT}
+gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE
 ```
 
-## Installing Pax
+### Installing Pax
 
 After ssh-ing the VM, paxml can be installed using
 [pip](https://pypi.org/project/pip/).
 
 ```bash
 $ python3 -m pip install -U pip
-$ python3 -m pip install protobuf==3.15 paxml jax[tpu] \
+$ python3 -m pip install paxml jax[tpu] \
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
 For the exact version of dependencies used to build/test each release, go to the corresponding release branch rX.Y.Z and check out `paxml/pip_package/requirements.txt`
+
+### Run a test model
+```bash
+# example model using pjit (SPMD)
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.lm_cloud.LmCloudSpmd2BLimitSteps \
+--job_log_dir=gs://<your-bucket>
+
+# example model using pmap
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamLimitSteps \
+--job_log_dir=gs://<your-bucket> \
+--pmap_use_tensorstore=True
+```
 
 # Data inputs
 
