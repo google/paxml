@@ -114,8 +114,10 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 
 @experiment_registry.register
 class NVIDIA175BProxy(NVIDIA5B):
+  """175B config that works with 4x16 A100-40G."""
+
   DCN_MESH_SHAPE = [2, 2, 1, 1]
-  ICI_MESH_SHAPE = [1, 1, 1, 8]
+  ICI_MESH_SHAPE = [1, 1, 1, 16]
   NUM_STAGES = 2
   MICROBATCH_SIZE = 2
   PERCORE_BATCH_SIZE = 1
