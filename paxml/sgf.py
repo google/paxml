@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import abc
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 from flax import struct
 import jax
@@ -136,69 +136,136 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
   class HParams(BaseStochasticGradient.HParams):
     """Returns the PrivateGradient params."""
-
-    l2_norm_clip: float = None
+    # Standard DP-SGD hyperparameters.
+    l2_norm_clip: Optional[float] = None
     noise_multiplier: float = 0.0
 
-  def _clip_and_noise(
-      self, grads: NestedMap, prng_key: PRNGKey = None, loss_weight: float = 1.0
-  ) -> Tuple[NestedMap, float]:
-    p = self.hparams
+    # Number of examples to process at one time. If set to `None`,
+    # this will be set to batch size as determined by the 0th element of
+    # the shape of the input.
+    #
+    # This may be useful if a large batch size is desired (for example, for
+    # better privacy-utility tradeoffs), but we cannot fit all of the
+    # per-example gradients in memory. When set, the code computes
+    # `inner_batch_size` per-example gradients at a time, accumulating
+    # the total clipped gradient as it goes. Note that the setting of
+    # `inner_batch_size` has no effect on the value of the final gradients--
+    # it affects only the feasibility and speed of the computation.
+    inner_batch_size: Optional[int] = None
 
+  def _clip_and_mean_gradients(
+      self, grads: NestedMap, l2_norm_clip: float = 1.0
+  ) -> Tuple[NestedMap, float, int]:
     grads_flat, grads_treedef = jax.tree_flatten(grads)
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
-        grads=grads_flat, l2_norm_clip=loss_weight * p.l2_norm_clip
-    )
+        grads=grads_flat, l2_norm_clip=l2_norm_clip)
     sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
-    # Average gradients across all examples
+
+    # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
     clipped_grads_mean = jax.tree_map(lambda x: x / batch_size, sum_grads)
     frac_clipped = num_clipped / batch_size
 
-    if p.noise_multiplier == 0.0:
-      final_grads = clipped_grads_mean
-    else:
-      noise_stddev = (
-          p.noise_multiplier * loss_weight * p.l2_norm_clip / batch_size
-      )
-      prng_keys = jax.random.split(
-          prng_key, len(jax.tree_leaves(clipped_grads_mean))
-      )
-      prng_tree = jax.tree_unflatten(
-          jax.tree_structure(clipped_grads_mean), prng_keys
-      )
-      final_grads = jax.tree_map(
-          lambda x, prng: x
-          + noise_stddev * jax.random.normal(prng, shape=x.shape),
-          clipped_grads_mean,
-          prng_tree,
-      )
+    return clipped_grads_mean, frac_clipped, batch_size
 
-    return final_grads, frac_clipped
+  def _add_noise(
+      self,
+      grads: NestedMap,
+      noise_stddev: float,
+      prng_key: PRNGKey = None) -> NestedMap:
+    prng_keys = jax.random.split(prng_key, len(jax.tree_leaves(grads)))
+    prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
+    final_grads = jax.tree_map(
+        lambda x, prng: x + noise_stddev * jax.random.normal(
+            prng, shape=x.shape), grads, prng_tree)
+    return final_grads
+
+  def _prepare_inputs(self, inputs):
+    """Reshape inputs to prepare for vmap to find per-example gradients."""
+    return jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=1), inputs)
 
   def process_aux_info(self, aux_info):
     aux_info = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), aux_info)
     return aux_info
 
-  def grad_fn(
-      self,
-      loss_fn: Callable[..., Any],
-      mdl_vars: Any,
-      inputs: NestedMap,
-      prng_key: PRNGKey,
-  ) -> Tuple[Any, Any]:
+  def grad_fn(self, loss_fn: Callable[..., Any], mdl_vars: Any,
+              inputs: NestedMap, prng_key: PRNGKey) -> Tuple[Any, Any]:
+    p = self.hparams
+
+    inputs = self._prepare_inputs(inputs)
+
+    # Get batch size.
+    inputs_flat, _ = jax.tree_flatten(inputs)
+    batch_size = inputs_flat[0].shape[0]
+
+    if self.hparams.inner_batch_size is None:
+      inner_batch_size = batch_size
+    else:
+      inner_batch_size = self.hparams.inner_batch_size
+    if batch_size % inner_batch_size != 0:
+      raise ValueError('`batch_size` must be divisible by `inner_batch_size`.')
+    num_iters = batch_size // inner_batch_size
+    inner_prng_keys = jax.random.split(prng_key, num_iters)
+
     grad_fn = jax.vmap(
         jax.value_and_grad(loss_fn, has_aux=True, allow_int=True),
         in_axes=(None, 0, None),
         out_axes=0,
     )
-    inputs = jax.tree_map(
-        jax.tree_util.Partial(jnp.expand_dims, axis=1), inputs
-    )
-    (values, aux), grads = grad_fn(mdl_vars, inputs, prng_key)
 
-    aux = self.process_aux_info(aux)
-    grads, _ = self._clip_and_noise(grads, prng_key, aux.loss_weight)
+    def reshape_batch(x):
+      return jnp.reshape(x, [-1, inner_batch_size, *x.shape[1:]])
+
+    # Reshape input so that inner batches are stacked on axis 0.
+    inputs = jax.tree_map(reshape_batch, inputs)
+
+    def _process_inner_batch(index: int) -> Any:
+      """Computes mean clipped gradient for inner batch specified by index."""
+      new_inputs = jax.tree_map(lambda x: x[index], inputs)
+
+      # Compute loss and gradients.
+      (values, aux), grads = grad_fn(
+          mdl_vars, new_inputs, inner_prng_keys[index]
+      )
+
+      # Clip and aggregate gradients.
+      grads, _, _ = self._clip_and_mean_gradients(
+          grads, aux.loss_weight * p.l2_norm_clip
+      )
+      # Aggregate values and aux.
+      values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
+      aux = self.process_aux_info(aux)
+      return (values, aux, grads)
+
+    def _loop_process_inner_batch(index: int, val: Any) -> Any:
+      """Wrapper for _process_inner_batch suitable for fori_loop."""
+      cur_values, cur_aux, cur_grads = val
+      values, aux, grads = _process_inner_batch(index)
+
+      new_values = jax.tree_map(jnp.add, cur_values, values)
+      new_aux = jax.tree_map(jnp.add, cur_aux, aux)
+      new_grads = jax.tree_map(jnp.add, cur_grads, grads)
+      return (new_values, new_aux, new_grads)
+
+    # Loop over inner batches, summing the results together.
+    # We have to do one iteration first to get the correct shape of the return
+    # values.
+    values, aux, grads = jax.lax.fori_loop(
+        1, num_iters, _loop_process_inner_batch, _process_inner_batch(0)
+    )
+
+    # Normalize results by number of inner batches.
+    values, aux, grads = jax.tree_map(
+        jax.tree_util.Partial(jnp.multiply, 1.0 / num_iters),
+        (values, aux, grads),
+    )
+
+    # Add noise to normalized gradients.
+    grads = self._add_noise(
+        grads,
+        p.noise_multiplier * aux.loss_weight * p.l2_norm_clip / batch_size,
+        prng_key,
+    )
     return (values, aux), grads
 
 
@@ -214,18 +281,8 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
     """Returns the PrivateGradient params."""
     microbatch_size: int = 1
 
-  def grad_fn(self, loss_fn: Callable[..., Any], mdl_vars: Any,
-              inputs: NestedMap, prng_key: PRNGKey) -> Tuple[Any, Any]:
-    grad_fn = jax.vmap(
-        jax.value_and_grad(loss_fn, has_aux=True, allow_int=True),
-        in_axes=(None, 0, None),
-        out_axes=0)
-    inputs = jax.tree_map(self._prepare_for_microbatching, inputs)
-    (values, aux), grads = grad_fn(mdl_vars, inputs, prng_key)
-
-    aux = self.process_aux_info(aux)
-    grads, _ = self._clip_and_noise(grads, prng_key, aux.loss_weight)
-    return (values, aux), grads
+  def _prepare_inputs(self, inputs):
+    return jax.tree_map(self._prepare_for_microbatching, inputs)
 
   def _prepare_for_microbatching(self, tensor: JTensor) -> JTensor:
     """Reshapes tensor for vmap with microbatch size support.
