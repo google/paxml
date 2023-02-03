@@ -1,12 +1,15 @@
-# Version: 0.2.2
+# Version: 0.3.0
 ## Major Features and Improvements
-## Breaking changes
-## Deprecations
+* Partitioning API refactoring
+* Orbax checkpointing integration
+* Improve AutoML and hyperparameter search support
+* Improve support for differential privacy
+* Support for bool, int32, etc. as non-trainable parameters
 ## Note
-*   Version: 0.2.2
+*   Version: 0.3.0
 *   Build Date: 20230201
 *   Paxml commit: cab3ed811174682733e2c836363510162fbfb1da
-*   Praxis version: 0.2.2
+*   Praxis version: 0.3.0
 *   Praxis commit: 9e1d13d888ac18a567e249ddb41e6b1bd1fe505a
 # Version: 0.2.1
 ## Bug fix
