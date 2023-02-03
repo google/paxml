@@ -114,7 +114,7 @@ executing==1.2.0
     # via stack-data
 fastjsonschema==2.16.2
     # via nbformat
-fiddle @ git+https://github.com/google/fiddle
+fiddle==0.2.5
     # via -r praxis-requirements.in
 filelock==3.9.0
     # via
@@ -589,7 +589,7 @@ sentencepiece==0.1.97
     #   lingvo
     #   seqio
     #   t5
-seqio @ git+https://github.com/google/seqio
+seqio==0.0.14
     # via
     #   -r paxml-requirements.in
     #   t5
