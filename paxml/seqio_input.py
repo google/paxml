@@ -404,7 +404,7 @@ class SeqIOInput(base_input.BaseInput):
     split_name: Optional[str] = None
     deterministic_input: bool = False
     task_feature_lengths: Optional[Mapping[str, int]] = None
-    feature_converter: seqio.FeatureConverter = None
+    feature_converter: Optional[seqio.FeatureConverter] = None
     # Optional params.
     shuffle: Optional[bool] = None
     repeat: Optional[bool] = None
