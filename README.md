@@ -52,6 +52,58 @@ python3 .local/lib/python3.8/site-packages/paxml/main.py \
 --job_log_dir=gs://<your-bucket> \
 --pmap_use_tensorstore=True
 ```
+## Example Convergence Runs
+Here are some sample convergence runs on [c4 dataset](https://www.tensorflow.org/datasets/catalog/c4).
+
+### 1B model on c4 dataset
+
+You can run a `1B` params model on c4 dataset on TPU `v4-8`using the config `C4Spmd1BAdam4Replicas`from [c4.py](paxml/tasks/lm/params/c4.py) as follows:  
+
+```bash
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.c4.C4Spmd1BAdam4Replicas \
+--job_log_dir=gs://<your-bucket> 
+```
+You can observe loss curve and `log perplexity` graph as follows:
+
+<img src=paxml/docs/images/1B-loss.png width="400" height="300">
+<img src=paxml/docs/images/1B-pplx.png width="400" height="300">
+
+### 16B model on c4 dataset
+
+You can run a `16B` params model on c4 dataset on TPU `v4-64`using the config `C4Spmd16BAdam32Replicas`from [c4.py](paxml/tasks/lm/params/c4.py) as follows:
+
+```bash
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.c4.C4Spmd16BAdam32Replicas \
+--job_log_dir=gs://<your-bucket> 
+```
+You can observe loss curve and `log perplexity` graph as follows:
+
+<img src=paxml/docs/images/16B-loss.png width="400" height="300">
+<img src=paxml/docs/images/16B-pplx.png width="400" height="300">
+
+### GPT3-XL model on c4 dataset
+
+You can run the GPT3-XL model on c4 dataset on TPU `v4-128`using the config `C4SpmdPipelineGpt3SmallAdam64Replicas`from [c4.py](paxml/tasks/lm/params/c4.py) as follows:
+
+```bash
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.c4.C4SpmdPipelineGpt3SmallAdam64Replicas \
+--job_log_dir=gs://<your-bucket> 
+```
+You can observe loss curve and `log perplexity` graph as follows:
+
+<img src=paxml/docs/images/GPT3-XL-loss.png width="400" height="300">
+<img src=paxml/docs/images/GPT3-XL-pplx.png width="400" height="300">
+
+## Benchmark on Cloud TPU v4
+The [PaLM](https://arxiv.org/abs/2204.02311) paper introduced an efficiency metric called Model FLOPs Utilization (MFU). This is measured as the ratio of the observed throughput (in, for example, tokens per second for a language model) to the theoretical maximum throughput of a system harnessing 100% of peak FLOPs. It differs from other ways of measuring compute utilization because it doesn’t include FLOPs spent on activation rematerialization during the backward pass, meaning that efficiency as measured by MFU translates directly into end-to-end training speed.
+
+To evaluate the MFU of a key class of workloads on TPU v4 Pods with Pax, we carried out an in-depth benchmark campaign on a series of decoder-only Transformer language model (GPT) configurations that range in size from billions to trillions of parameters on the [c4 dataset](https://www.tensorflow.org/datasets/catalog/c4). The following graph shows the training efficiency using the "weak scaling" pattern where we grew the model size in
+proportion to the number of chips used.
+
+<img src=paxml/docs/images/Weak_scaling_of_large_language_model_training_on_TPU_v4.png width="500" height="300">
 
 # Data inputs
 
