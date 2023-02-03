@@ -977,7 +977,7 @@ def train_and_evaluate_spmd_model(
         for input_p in decode_input_ps
     ]
     padded_decode_input_pipelines = [
-        instantiate(input_p) for input_p in decode_input_ps
+        instantiate(input_p) for input_p in padded_decode_input_ps
     ]
     trainer_lib.check_unique_names(padded_decode_input_pipelines)
 
