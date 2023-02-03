@@ -1760,29 +1760,6 @@ def _is_shape_dtype_struct(x):
   return isinstance(x, jax.ShapeDtypeStruct)
 
 
-def _extract_common_specs(x, y, is_leaf=_is_shape_dtype_struct):
-  """Extracts common specs given two pytrees."""
-  if is_leaf(x):
-    return y
-  elif isinstance(x, dict):
-    if not isinstance(y, dict):
-      raise ValueError(f'Tree mismatch (`x={x}` vs. `y={y}`.')
-    out = {}
-    for k in x:
-      if k in y:
-        out[k] = _extract_common_specs(x[k], y[k], is_leaf)
-    return type(x)(out)
-  elif isinstance(x, (list, tuple)):
-    if not isinstance(y, (list, tuple)) or len(x) != len(y):
-      raise ValueError(f'Tree mismatch (`x={x}` vs. `y={y}`.')
-    out = []
-    for a, b in zip(x, y):
-      out.append(_extract_common_specs(a, b, is_leaf))
-    return type(x)(out)
-  else:
-    raise ValueError(f'Unsupported type `{type(x)}` in tree `{x}`.')
-
-
 def decode_once_spmd_model(
     jax_task: tasks_lib.SingleTask,
     task_p: tasks_lib.SingleTask.HParams,
@@ -1889,19 +1866,10 @@ def decode_once_spmd_model(
       except (tf.errors.OutOfRangeError, StopIteration):
         inputs[split].reset()
         break
-      if jax_task.hparams.train.always_use_train_for_model_init:
-        if use_gda:
-          inputs_shape = jax.tree_util.tree_map(
-              py_utils.get_global_input_shape_dtype, batch)
-          inputs_partition_specs_common = _extract_common_specs(
-              inputs_shape, inputs_partition_specs[split])
-          batch = py_utils.create_gda(batch, inputs_shape, global_mesh,
-                                      inputs_partition_specs_common)
-      else:
-        if use_gda or inputs[split].hparams.experimental_remote_input:
-          batch = inputs[split].reshard_for_spmd(
-              batch, global_mesh, inputs_partition_specs[split]
-          )
+      if use_gda or inputs[split].hparams.experimental_remote_input:
+        batch = inputs[split].reshard_for_spmd(
+            batch, global_mesh, inputs_partition_specs[split]
+        )
       (weighted_scalars, out,
        updated_metrics), updated_vars = spmd_decode_step_fns[split](batch)
 
