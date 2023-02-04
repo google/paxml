@@ -651,6 +651,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
   """
+  jax.monitoring.record_event('/jax/pax/evaluate/beacon')
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
   if not eval_input_p:
     logging.info('No eval datasets defined. Returning early.')
