@@ -395,6 +395,8 @@ if __name__ == '__main__':
           os.environ['XLA_FLAGS'] = f'{existing_xla_flags} {to_append}'
         else:
           os.environ['XLA_FLAGS'] = to_append
+  # Log XLA_FLAGS for easy debugging.
+  logging.info("os.environ['XLA_FLAGS']=%s", os.environ['XLA_FLAGS'])
 
   # Provide access to --jax_backend_target and --jax_xla_backend flags.
   jax.config.config_with_absl()
