@@ -140,6 +140,7 @@ class PjitPartitionerTest(TrainLibTestBase):
     return trainer_lib._PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
+        reshard_inputs=True,
         train_inputs_shape_dtype=self._inputs_shape_dtype,
         init_is_eval=False,
         auto_sharding_info=auto_sharding_info,

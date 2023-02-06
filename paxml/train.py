@@ -572,8 +572,16 @@ def train_and_evaluate(
                                   decode_input_p, early_stopping_fn,
                                   enable_auto_sharding)
   else:
-    train_and_evaluate_pmap(task_p, train_input_p, job_log_dir, checkpointer,
-                            eval_input_p, decode_input_p, early_stopping_fn)
+    train_and_evaluate_pmap(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpointer,
+        checkpoint_type,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+    )
 
 
 class _PeekableInput:
@@ -689,9 +697,11 @@ def train_and_evaluate_pmap(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    checkpoint_type: CheckpointType,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None) -> None:
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+) -> None:
   """Runs the training and evaluation loop with PMAP.
 
   Args:
@@ -699,6 +709,7 @@ def train_and_evaluate_pmap(
     train_input_p: HParams for the train data input pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
+    checkpoint_type: The type of checkpoint to use.
     eval_input_p: list of hparams for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -723,7 +734,11 @@ def train_and_evaluate_pmap(
       train_input_pipeline,
       train_unpadded_global_batch_size,
   ) = _create_task_and_states(
-      task_p, train_input_p, job_log_dir, checkpointer,
+      task_p,
+      train_input_p,
+      job_log_dir,
+      checkpointer,
+      checkpoint_type,
   )
   assert not partitioner.global_mesh
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
@@ -758,16 +773,8 @@ def train_and_evaluate_pmap(
   p_eval_step = jax.pmap(eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
   p_eval_steps = [p_eval_step] * len(eval_input_p)
 
-  global_mesh = None
-  reshard_inputs = True
-  create_gda_for_inputs = False
   is_vars_replicated = True
-
-  def prepare_model_inputs(train_input_pipeline, model_inputs):
-    return train_input_pipeline.reshard_for_pmap(model_inputs)
-
-  def prepare_eval_inputs(train_input_pipeline, eval_inputs):
-    return train_input_pipeline.reshard_for_pmap(eval_inputs)
+  train_input_pspec = None
 
   def partition_eval_input_fns(eval_input_p):
     eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
@@ -799,19 +806,41 @@ def train_and_evaluate_pmap(
     decode_prng_seed = jax.random.split(decode_key, num=num_devices)
     logging.info('decode prng_seed: %s', decode_prng_seed)
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        jax_task, task_p, train_state_metadata.var_weight_hparams,
-        decode_input_pipelines, decode_input_p, decode_prng_seed, job_log_dir)
+        jax_task,
+        partitioner,
+        task_p,
+        train_state_metadata.var_weight_hparams,
+        decode_input_pipelines,
+        decode_input_p,
+        decode_prng_seed,
+        job_log_dir,
+    )
     return decode_once_fn, prng_key, decode_input_p
 
   _train_and_evaluate_common(
-      partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
-      total_num_params, early_stopping_fn, checkpointer,
-      partition_eval_input_fns, partition_decode_once_fns, job_log_dir,
-      eval_prng_seed, reshard_inputs, task_p.train, prepare_eval_inputs,
-      prepare_model_inputs, is_vars_replicated,
-      train_unpadded_global_batch_size, train_state_metadata,
-      train_input_pipeline, p_train_step, p_eval_steps, p_eval_step,
-      global_mesh, create_gda_for_inputs, train_prng_seed)
+      partitioner,
+      partitioned_train_state,
+      prng_key,
+      eval_input_p,
+      decode_input_p,
+      task_p,
+      total_num_params,
+      early_stopping_fn,
+      checkpointer,
+      partition_eval_input_fns,
+      partition_decode_once_fns,
+      job_log_dir,
+      eval_prng_seed,
+      is_vars_replicated,
+      train_unpadded_global_batch_size,
+      train_state_metadata,
+      train_input_pipeline,
+      train_input_pspec,
+      p_train_step,
+      p_eval_steps,
+      p_eval_step,
+      train_prng_seed,
+  )
 
 
 def train_and_evaluate_spmd_model(
@@ -853,7 +882,12 @@ def train_and_evaluate_spmd_model(
       train_input_pipeline,
       train_unpadded_global_batch_size,
   ) = _create_task_and_states(
-      task_p, train_input_p, job_log_dir, checkpointer, enable_auto_sharding
+      task_p,
+      train_input_p,
+      job_log_dir,
+      checkpointer,
+      checkpoint_type,
+      enable_auto_sharding,
   )
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
 
@@ -882,7 +916,7 @@ def train_and_evaluate_spmd_model(
 
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
   assert is_eval
-  p_eval_on_train_step, eval_inp_pspec = partitioner.partition(
+  p_eval_on_train_step, _ = partitioner.partition(
       eval_step_fn,
       inputs_shape_dtype,
       is_eval,
@@ -891,10 +925,6 @@ def train_and_evaluate_spmd_model(
   )
 
   global_mesh = partitioner.global_mesh
-  create_gda_for_inputs = (
-      py_utils.gda_or_jax_array() and
-      checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE)
-  reshard_inputs = False
   is_vars_replicated = False
 
   p_eval_steps = []
@@ -910,21 +940,6 @@ def train_and_evaluate_spmd_model(
         partitioner,
         RunningMode.EVAL,
     )
-
-  def prepare_model_inputs(input_pipeline, model_inputs):
-    if (create_gda_for_inputs or
-        input_pipeline.hparams.experimental_remote_input):
-      model_inputs = input_pipeline.reshard_for_spmd(model_inputs,
-                                                     global_mesh, inputs_pspecs)
-    return model_inputs
-
-  def prepare_eval_inputs(train_input_pipeline, eval_inputs):
-    if (create_gda_for_inputs or
-        train_input_pipeline.hparams.experimental_remote_input):
-      eval_inputs = train_input_pipeline.reshard_for_spmd(
-          eval_inputs, global_mesh, eval_inp_pspec
-      )
-    return eval_inputs
 
   def partition_eval_input_fns(padded_eval_input_ps):
     assert padded_eval_input_ps, 'padded_eval_input_ps must not be empty'
@@ -994,20 +1009,20 @@ def train_and_evaluate_spmd_model(
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
         jax_task,
+        partitioner,
         task_p,
         padded_decode_input_pipelines,
         padded_decode_input_ps,
         job_log_dir,
         decode_key,
-        global_mesh,
         decode_step_fns,
-        create_gda_for_inputs,
         decode_input_partition_specs,
     )
 
     return decode_once_fn, prng_key, decode_input_ps
 
   _train_and_evaluate_common(
+      partitioner,
       partitioned_train_state,
       prng_key,
       padded_eval_input_p,
@@ -1020,19 +1035,14 @@ def train_and_evaluate_spmd_model(
       partition_decode_once_fns,
       job_log_dir,
       eval_prng_seed,
-      reshard_inputs,
-      task_p.train,
-      prepare_eval_inputs,
-      prepare_model_inputs,
       is_vars_replicated,
       train_unpadded_global_batch_size,
       train_state_metadata,
       train_input_pipeline,
+      inputs_pspecs,
       p_train_step,
       p_eval_steps,
       p_eval_on_train_step,
-      global_mesh,
-      create_gda_for_inputs,
       train_prng_seed,
   )
 
@@ -1042,8 +1052,10 @@ def _create_task_and_states(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
 ):
+  reshard_inputs = checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE
   jax_task = instantiate(task_p)
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
@@ -1053,6 +1065,7 @@ def _create_task_and_states(
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       init_key,
+      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -1099,14 +1112,31 @@ def _create_task_and_states(
 
 
 def _train_and_evaluate_common(
-    partitioned_train_state, prng_key, eval_input_p, decode_input_p, task_p,
-    total_num_params, early_stopping_fn, checkpointer, partition_eval_input_fns,
-    partition_decode_once_fns, job_log_dir, eval_prng_seed, reshard_inputs,
-    train_p, prepare_eval_inputs, prepare_model_inputs, is_vars_replicated,
-    train_unpadded_global_batch_size, train_state_metadata,
-    train_input_pipeline, p_train_step, p_eval_steps, p_eval_on_train_step,
-    global_mesh, create_gda_for_inputs, train_prng_seed):
+    partitioner,
+    partitioned_train_state,
+    prng_key,
+    eval_input_p,
+    decode_input_p,
+    task_p,
+    total_num_params,
+    early_stopping_fn,
+    checkpointer,
+    partition_eval_input_fns,
+    partition_decode_once_fns,
+    job_log_dir,
+    eval_prng_seed,
+    is_vars_replicated,
+    train_unpadded_global_batch_size,
+    train_state_metadata,
+    train_input_pipeline,
+    train_input_pspec,
+    p_train_step,
+    p_eval_steps,
+    p_eval_on_train_step,
+    train_prng_seed,
+):
   """Training loop code common to both pmap and spmd."""
+  train_p = task_p.train
 
   if eval_input_p:
     (
@@ -1189,7 +1219,9 @@ def _train_and_evaluate_common(
       # Get new model inputs
       logging.debug('  Retrieving inputs.')
       model_inputs = train_input_pipeline.get_next_padded()
-      model_inputs = prepare_model_inputs(train_input_pipeline, model_inputs)
+      model_inputs = partitioner.preprocess_inputs(
+          train_input_pipeline, model_inputs, train_input_pspec
+      )
       logging.debug('  Retrieved inputs.')
 
       do_profile = train_p.profiler_capture_step is not None
@@ -1290,6 +1322,7 @@ def _train_and_evaluate_common(
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
+                    partitioner,
                     eval_num_steps,
                     eval_step_fns,
                     eval_test_summary_writers,
@@ -1297,9 +1330,8 @@ def _train_and_evaluate_common(
                     eval_input_pipelines,
                     job_log_dir,
                     eval_test_inputs_pspecs,
-                    global_mesh,
-                    reshard_inputs=reshard_inputs,
-                    create_gda_for_inputs=create_gda_for_inputs))
+                )
+            )
           eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
               input_p=eval_input_p,
@@ -1320,7 +1352,9 @@ def _train_and_evaluate_common(
           else:
             logging.debug('  Retrieved eval model_inputs.')
             logging.debug('  Performing eval_step() runs on training split.')
-            eval_inputs = prepare_eval_inputs(train_input_pipeline, eval_inputs)
+            eval_inputs = partitioner.preprocess_inputs(
+                train_input_pipeline, eval_inputs, train_input_pspec
+            )
 
             eval_on_train_step_fn = functools.partial(
                 p_eval_on_train_step,
