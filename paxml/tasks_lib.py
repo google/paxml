@@ -47,6 +47,7 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
 from praxis import optimizers
+from praxis import optimizer_prefix_vectorization
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
@@ -61,6 +62,7 @@ NestedJTensor = base_layer.NestedJTensor
 JTensor = base_layer.JTensor
 PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
+NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 PRNGKey = pytypes.PRNGKey
 PyTreeDef = pytypes.PyTreeDef
@@ -287,6 +289,11 @@ def _make_gda_train_state(
     new_states = []
     new_states_pspecs = []
     # TODO(pax-dev): This doesn't work with prefix dims.
+    if NO_PREFIX_KEY in ckpt_train_state.opt_states[0]:
+      raise NotImplementedError(
+          'b/264556712: loading ema states is not supported for vectorized'
+          ' models'
+      )
     for i, v in enumerate(ckpt_train_state.opt_states[0]):
       if 'ema' not in v:
         new_states.append(v)

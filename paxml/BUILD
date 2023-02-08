@@ -439,6 +439,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:optimizer_prefix_vectorization",
         "//praxis:optimizers",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
