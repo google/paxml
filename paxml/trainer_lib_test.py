@@ -194,18 +194,24 @@ class PjitPartitionerTest(TrainLibTestBase):
 class SingleTaskPjitTrainerTest(TrainLibTestBase):
 
   def test_trainer_partitioned_step(self):
-    trainer = trainer_lib.SingleTaskPjitTrainer(
-        self.task, self.train_input, mesh=self.mesh, enable_auto_sharding=False
+    inputs_shape_dtype = jax.tree_map(
+        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+        self.train_input.get_next(),
     )
-    prng_key = jax.random.PRNGKey(0)
-
-    step_fn, _, train_state_spec = trainer.compile_step(prng_key)
+    partitioner = trainer_lib._PjitPartitioner(
+        self.task,
+        jax.random.PRNGKey(0),
+        reshard_inputs=True,
+        train_inputs_shape_dtype=inputs_shape_dtype,
+        init_is_eval=False,
+    )
+    trainer = trainer_lib.SingleTaskPjitTrainer(
+        self.task, self.train_input, partitioner
+    )
+    step_fn, _ = trainer.partition_step()
 
     self.assertIsNotNone(trainer.task)
     self.assertEqual(step_fn, trainer._step_fn)
-    self.assertEqual(
-        train_state_spec, trainer.train_state_metadata.partition_specs
-    )
 
 
 if __name__ == '__main__':
