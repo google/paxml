@@ -2394,7 +2394,7 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
   return call
 
 
-class SingleTaskPjitTrainer:
+class SingleTaskPjitTrainProgram:
   """Trainer that assumes a single taks on a single dataset."""
 
   def __init__(

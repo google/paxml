@@ -191,9 +191,9 @@ class PjitPartitionerTest(TrainLibTestBase):
     self.assertIs(input_partition_specs_1, input_partition_specs_2)
 
 
-class SingleTaskPjitTrainerTest(TrainLibTestBase):
+class SingleTaskPjitTrainProgramTest(TrainLibTestBase):
 
-  def test_trainer_partitioned_step(self):
+  def test_train_program_partitioned_step(self):
     inputs_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
@@ -205,13 +205,13 @@ class SingleTaskPjitTrainerTest(TrainLibTestBase):
         train_inputs_shape_dtype=inputs_shape_dtype,
         init_is_eval=False,
     )
-    trainer = trainer_lib.SingleTaskPjitTrainer(
+    train_pg = trainer_lib.SingleTaskPjitTrainProgram(
         self.task, self.train_input, partitioner
     )
-    step_fn, _ = trainer.partition_step()
+    step_fn, _ = train_pg.partition_step()
 
-    self.assertIsNotNone(trainer.task)
-    self.assertEqual(step_fn, trainer._step_fn)
+    self.assertIsNotNone(train_pg.task)
+    self.assertEqual(step_fn, train_pg._step_fn)
 
 
 if __name__ == '__main__':
