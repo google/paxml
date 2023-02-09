@@ -307,7 +307,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     step_fns, inputs_partition_specs = (
         trainer_lib.get_spmd_model_step_fns_from_inputs(
             padded_decode_input_ps if is_decode else padded_eval_input_ps,
-            decode_input_ps if is_decode else eval_input_ps,
             self._partitioner,
             RunningMode.DECODE if is_decode else RunningMode.EVAL,
         )
@@ -886,12 +885,11 @@ class _SpmdEvalRunner:
       partitioned_eval_step_fns: Optional[Sequence[Callable[..., Any]]] = None,
       inputs_partition_specs: Optional[Sequence[NestedPartitionSpec]] = None,
   ):
-    self._unpadded_eval_input_ps = eval_input_ps
     self._padded_eval_input_ps = [
         trainer_lib.adjust_input_params_for_small_batch(
             input_p, partitioner.global_mesh
         )
-        for input_p in self._unpadded_eval_input_ps
+        for input_p in eval_input_ps
     ]
     if not self._padded_eval_input_ps:
       return
@@ -916,10 +914,7 @@ class _SpmdEvalRunner:
           self._eval_steps,
           self._inputs_partition_specs,
       ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
-          self._padded_eval_input_ps,
-          self._unpadded_eval_input_ps,
-          self._partitioner,
-          RunningMode.EVAL,
+          self._padded_eval_input_ps, self._partitioner, RunningMode.EVAL
       )
 
   @classmethod

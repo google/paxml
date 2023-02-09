@@ -2320,21 +2320,17 @@ def get_partitioned_spmd_model_step_fn(
 
 
 def get_spmd_model_step_fns_from_inputs(
-    input_ps: Sequence[base_input.BaseInput.HParams],
-    unpadded_input_ps: Sequence[base_input.BaseInput.HParams],
+    padded_input_ps: Sequence[base_input.BaseInput.HParams],
     partitioner: Partitioner,
     mode: RunningMode,
 ) -> Tuple[Sequence[Callable[..., Any]], Sequence[NestedPartitionSpec]]:
-  """Helper for calling `get_partitioned_spmd_model_step_fn` with input_ps.
+  """Partition step functions for each input in padded_input_ps.
 
-  Note: This method instantiates all the input pipelines passed in `input_ps` to
-    get a sample input.
+  Note: This method instantiates all the input pipelines passed in
+    `padded_input_ps` to get a sample input.
 
   Args:
-    input_ps: inputs hparams list. May be padded unliked `unpadded_input_ps`.
-    unpadded_input_ps: inputs hparams list. Importantly these are inputs
-      *before* being called by `adjust_input_params_for_small_batch`. Thus,
-      `py_utils.get_global_batch_size(p)` returns the unpadded batch size.
+    padded_input_ps: inputs hparams list, may be padded.
     mode: One of TRAIN, EVAL, and DECODE, that determines the step function to
       use.
 
@@ -2343,15 +2339,10 @@ def get_spmd_model_step_fns_from_inputs(
     The partitioned step functions, partition specs for the inputs,
     and shape/dtype information for the inputs.
   """
-  if len(input_ps) != len(unpadded_input_ps):
-    raise ValueError(
-        'Length of padded and unpadded inputs must match and be 1-to-1: '
-        f'{len(input_ps)} != {len(unpadded_input_ps)}.')
-
   step_fn, is_eval = get_step_fn(mode)
   partitioned_step_fns = []
   input_partition_specs = []
-  for input_p, unpadded_input_p in zip(input_ps, unpadded_input_ps):
+  for input_p in padded_input_ps:
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
     _, inputs_shape_dtype = get_inputs_shape_dtype(input_p)
@@ -2359,9 +2350,7 @@ def get_spmd_model_step_fns_from_inputs(
         step_fn,
         inputs_shape_dtype,
         is_eval,
-        unpadded_global_batch_size=(
-            unpadded_input_p.cls.get_global_batch_size(unpadded_input_p)
-        ),
+        unpadded_global_batch_size=input_p.cls.get_global_batch_size(input_p),
     )
 
     partitioned_step_fns.append(partitioned_step_fn)

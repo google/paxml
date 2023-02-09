@@ -935,10 +935,7 @@ def train_and_evaluate_spmd_model(
         for input_p in eval_input_p
     ]
     p_eval_steps, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
-        padded_eval_input_p,
-        eval_input_p,
-        partitioner,
-        RunningMode.EVAL,
+        padded_eval_input_p, partitioner, RunningMode.EVAL
     )
 
   def partition_eval_input_fns(padded_eval_input_ps):
@@ -999,10 +996,7 @@ def train_and_evaluate_spmd_model(
         decode_step_fns,
         decode_input_partition_specs,
     ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
-        padded_decode_input_ps,
-        decode_input_ps,
-        partitioner,
-        RunningMode.DECODE,
+        padded_decode_input_ps, partitioner, RunningMode.DECODE
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
