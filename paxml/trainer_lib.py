@@ -2261,65 +2261,6 @@ def create_partitioner(
   return partitioner
 
 
-# TODO(laigd): get rid of this method, it's used only in unit tests/colab.
-def get_partitioned_spmd_model_step_fn(
-    jax_task: tasks_lib.SingleTask,
-    mode: RunningMode,
-    init_key: PRNGKey,
-    inputs_shape_dtype: NestedShapeDtypeLike,
-    train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
-    train_state_partition_spec: Optional[TrainState] = None,
-    unpadded_global_batch_size: Optional[int] = None,
-    enable_auto_sharding: bool = False) -> Tuple[Any, NestedPartitionSpec,
-                                                 TrainState]:
-  """Return sharded train/eval/decode step function of the SPMD Model.
-
-  Args:
-    jax_task: The task which is an instance of tasks.SingleTask.
-    mode: One of TRAIN, EVAL, and DECODE, that determines the step function to
-      use.
-    init_key: PRNGKey for initializing the model variables.
-    inputs_shape_dtype: Shape/dtype attributes of the inputs to the step
-      function, for use in pjit sharding.
-    train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
-      model.init, for use in getting params of model variables. If not provided,
-      it assumes it's the same as inputs_shape_dtype.
-    train_state_partition_spec: A TrainState contains PartitionSpecs for all the
-      variables. Used when auto-sharding is disabled.
-    unpadded_global_batch_size: If not None, this is the unpadded size of global
-      batch, and the padding is on the right side of inputs_shape_dtype. Used
-      when auto-sharding is disabled.
-    enable_auto_sharding: Whether to enable xla auto-sharding.
-
-  Returns:
-    (partitioned_step_fn, input_partition_spec, train_state_partition_spec):
-    The partitioned step function and the partition spec for the inputs and
-    train state. If auto-sharding is enabled, train_state_partition_spec is
-    automatically generated, otherwise it's the same as the provided one.
-  """
-  del train_state_partition_spec  # TODO(laigd): remove this arg.
-  # TODO(laigd): check that train_inputs_shape_dtype is None if
-  # always_use_train_for_model_init is not set.
-  # Train/eval both use model.__call__ so train_inputs_shape_dtype and
-  # inputs_shape_dtype are the same.
-  if not train_inputs_shape_dtype and (mode.has_train or mode.has_eval):
-    train_inputs_shape_dtype = inputs_shape_dtype
-
-  step_fn, is_eval = get_step_fn(mode)
-  partitioner = create_partitioner(
-      jax_task,
-      init_key,
-      train_inputs_shape_dtype,
-      init_is_eval=is_eval,
-      auto_sharding_mode=mode if enable_auto_sharding else None,
-  )
-  partitioned_step_fn, input_partition_spec = partitioner.partition(
-      step_fn, inputs_shape_dtype, is_eval, unpadded_global_batch_size
-  )
-  metadata = partitioner.get_train_state_metadata(discard_opt_states=is_eval)
-  return partitioned_step_fn, input_partition_spec, metadata.partition_specs
-
-
 def get_spmd_model_step_fns_from_inputs(
     padded_input_ps: Sequence[base_input.BaseInput.HParams],
     partitioner: Partitioner,
