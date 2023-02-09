@@ -73,7 +73,6 @@ pytype_strict_library(
     name = "checkpoint_managers",
     srcs = ["checkpoint_managers.py"],
     deps = [
-        ":checkpoint_py_pb2",
         ":checkpoints",
         # Implicit etils dependency.
         # Implicit jax dependency.
@@ -136,7 +135,6 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_task",
-        ":checkpoint_py_pb2",
         ":checkpoint_version",
         ":train_states",
         # Implicit absl.logging dependency.
@@ -175,7 +173,6 @@ pytype_strict_library(
     deps = [
         ":base_experiment",
         ":base_metrics",
-        ":checkpoint_py_pb2",
         ":io_utils",
         ":metric_tracker_utils",
         ":metric_utils",
@@ -475,7 +472,6 @@ pytype_strict_library(
     deps = [
         ":base_experiment",
         ":checkpoint_managers",
-        ":checkpoint_py_pb2",
         ":eval_lib",
         ":experiment_utils",
         ":metric_utils",
@@ -623,7 +619,6 @@ py_strict_test(
     srcs = ["checkpoint_managers_test.py"],
     deps = [
         ":checkpoint_managers",
-        ":checkpoint_py_pb2",
         ":checkpoints",
         ":train_states",
         # Implicit absl.flags dependency.

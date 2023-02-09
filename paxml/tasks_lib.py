@@ -376,7 +376,8 @@ def restore_pmap_from_tensorstore(
     checkpoint_dir: epath.PathLike,
     step=None,
     global_mesh=None,
-    checkpoint_type=CheckpointType.CHECKPOINT_GDA):
+    checkpoint_type=CheckpointType.GDA,
+):
   """Restores pmap checkpoints from tensorstore.
 
   The model_states returned are of type `DeviceArray`, `GlobalDeviceArray` or
@@ -421,7 +422,7 @@ def restore_pmap_from_tensorstore(
         step=step)
   if global_mesh is not None:
     return fully_replicated_gda_model_states
-  if checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+  if checkpoint_type == CheckpointType.PERSISTENCE:
     if jax.config.jax_array:
       fully_replicated_array_model_states = jax.tree_map(
           py_utils.convert_fully_replicated_array_to_pmap_array,
@@ -1226,12 +1227,14 @@ class SingleTask(base_task.BaseTask):
       rules: CheckpointLoadingRules,
       load_status: List[Any],
       global_mesh: Optional[jax.sharding.Mesh] = None,
-      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
-      target_partition_specs: Optional[TrainState] = None):
+      checkpoint_type: CheckpointType = CheckpointType.FLAX,
+      target_partition_specs: Optional[TrainState] = None,
+  ):
     """Applies one CheckpointLoadingRules to train_state."""
     uses_gda = (
-        checkpoint_type == CheckpointType.CHECKPOINT_GDA or
-        checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE)
+        checkpoint_type == CheckpointType.GDA
+        or checkpoint_type == CheckpointType.PERSISTENCE
+    )
     if uses_gda:
       rules.task_p.model.ici_mesh_shape = self.model.hparams.ici_mesh_shape
       rules.task_p.model.dcn_mesh_shape = self.model.hparams.dcn_mesh_shape
@@ -1292,9 +1295,7 @@ class SingleTask(base_task.BaseTask):
 
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.hparams.ici_mesh_shape is None):
-      assert (checkpoint_type in {
-          CheckpointType.CHECKPOINT_GDA, CheckpointType.CHECKPOINT_PERSISTENCE
-      })
+      assert checkpoint_type in {CheckpointType.GDA, CheckpointType.PERSISTENCE}
       loaded_train_state = restore_pmap_from_tensorstore(
           ckpt_train_state,
           ckpt_path,
@@ -1370,7 +1371,7 @@ class SingleTask(base_task.BaseTask):
       train_state: TrainState,
       train_state_partition_specs: Optional[TrainState] = None,
       global_mesh: Optional[jax.sharding.Mesh] = None,
-      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
+      checkpoint_type: CheckpointType = CheckpointType.FLAX,
   ) -> Tuple[TrainState, bool]:
     """Applies p.train.init_from_checkpoint_rules to update train_state.
 

@@ -15,6 +15,7 @@
 
 """Checkpointing-related utilities to handle TrainState instances."""
 
+import enum
 import os
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple, cast
@@ -29,7 +30,6 @@ import numpy as np
 import optax
 import orbax.checkpoint
 from paxml import base_task
-from paxml import checkpoint_pb2
 from paxml import checkpoint_version
 from paxml import train_states
 from praxis import py_utils
@@ -48,13 +48,21 @@ _MAX_CHECKPOINT_FLAX = 1000000
 get_version_key = checkpoint_version.get_version_key
 get_version = checkpoint_version.get_version
 
-# TODO(b/260768187): Replace with Python enum.
-CheckpointType = checkpoint_pb2.CheckpointType
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 PyTreeDef = pytypes.PyTreeDef
 AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
 Checkpointer = orbax.checkpoint.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
+
+
+@enum.unique
+class CheckpointType(str, enum.Enum):
+  """The type of the checkpointing format."""
+
+  UNSPECIFIED = 'unspecified'
+  FLAX = 'flax'
+  GDA = 'gda'
+  PERSISTENCE = 'persistence'
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
@@ -125,9 +133,9 @@ def get_version_and_restore_dir(
 
 def checkpoint_name(
     step: int,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+    checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
 ) -> str:
-  if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  if checkpoint_type == CheckpointType.FLAX:
     return f'{CHECKPOINT_PREFIX}{step}'
   else:
     return f'{CHECKPOINT_PREFIX}{step:08d}'
@@ -136,7 +144,7 @@ def checkpoint_name(
 def make_checkpoint_step_dir(
     checkpoint_dir: epath.Path,
     step: int,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+    checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
 ) -> epath.Path:
   return checkpoint_dir / checkpoint_name(step, checkpoint_type=checkpoint_type)
 
@@ -157,21 +165,22 @@ def retrieve_checkpoint_type(
     if using_pjit:
       assert py_utils.gda_or_jax_array(), 'pjit requires GDA or jax.Array'
     if maybe_use_persistence_checkpointing:
-      return CheckpointType.CHECKPOINT_PERSISTENCE
+      return CheckpointType.PERSISTENCE
     else:
-      return CheckpointType.CHECKPOINT_GDA
+      return CheckpointType.GDA
   else:
-    # pmap uses CHECKPOINT_FLAX, Persistence-based or not.
-    return CheckpointType.CHECKPOINT_FLAX
+    # pmap uses FLAX, Persistence-based or not.
+    return CheckpointType.FLAX
 
 
 def save_checkpoint(
     train_state: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
     overwrite: bool = False,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
+    checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: Optional[train_states.TrainState] = None,
-    async_checkpointer: Optional[AsyncCheckpointer] = None) -> None:
+    async_checkpointer: Optional[AsyncCheckpointer] = None,
+) -> None:
   """Saves a checkpoint into the provided base directory.
 
   This is typically called on a replicated TrainState instance.
@@ -202,14 +211,14 @@ def save_checkpoint(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
   version, checkpoint_save_dir = get_version_and_save_dir(checkpoint_step_dir)
-  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+  if checkpoint_type == CheckpointType.GDA:
     if async_checkpointer is not None:
       async_checkpointer.save(checkpoint_save_dir, train_state, version=version)
     else:
       checkpointer = orbax.checkpoint.Checkpointer(
           PaxCheckpointHandler())
       checkpointer.save(checkpoint_save_dir, train_state, version=version)
-  elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
     checkpointer.save(
         checkpoint_save_dir, train_state, force=overwrite, version=version
@@ -280,9 +289,10 @@ def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
     global_mesh: Optional[jax.sharding.Mesh] = None,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_FLAX,
+    checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: Optional[train_states.TrainState] = None,
-    step: Optional[int] = None) -> Optional[train_states.TrainState]:
+    step: Optional[int] = None,
+) -> Optional[train_states.TrainState]:
   """Restores a checkpoint from the provided base directory.
 
   This is typically called on an unreplicated TrainState instance.
@@ -312,16 +322,13 @@ def restore_checkpoint(
     if step is None:
       logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
       return None
-  logging.info(checkpoint_dir)
   checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
-  logging.info(checkpoint_step_dir)
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
-  logging.info(checkpoint_restore_dir)
-  if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+  if checkpoint_type == CheckpointType.GDA:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
@@ -332,7 +339,7 @@ def restore_checkpoint(
         version=version,
     )
     return restored_train_state
-  elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
     return checkpointer.restore(
         checkpoint_restore_dir, item=state_global_shapes, version=version

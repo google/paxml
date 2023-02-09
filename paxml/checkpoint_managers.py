@@ -22,7 +22,6 @@ from typing import Any, Mapping, Optional, Sequence, Union
 from etils import epath
 import jax
 import orbax.checkpoint
-from paxml import checkpoint_pb2
 from paxml import checkpoints
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
@@ -30,7 +29,7 @@ import tensorflow.compat.v2 as tf
 from paxml import preemption  # mapped to internal
 
 
-CheckpointType = checkpoint_pb2.CheckpointType
+CheckpointType = checkpoints.CheckpointType
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 STATE_ITEM_NAME = checkpoints.STATE_ITEM_NAME
@@ -108,10 +107,10 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       self,
       directory: epath.PathLike,
       *args,
-      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+      checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       **kwargs,
   ):
-    if checkpoint_type == CheckpointType.CHECKPOINT_UNSPECIFIED:
+    if checkpoint_type == CheckpointType.UNSPECIFIED:
       raise ValueError('Must specify checkpoint type.')
     self._checkpoint_type = checkpoint_type
 
@@ -210,7 +209,7 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       super()._delete_directory(step)
 
   def structure(self) -> Union[Any, Mapping[str, Any]]:
-    if self._checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if self._checkpoint_type == CheckpointType.FLAX:
       raise ValueError('`structure` not supported for Flax format checkpoints.')
     return super().structure()
 
@@ -223,7 +222,7 @@ class OrbaxCheckpointManager:
       directory: epath.Path,
       checkpointer: orbax.checkpoint.AbstractCheckpointer,
       options: Optional[CheckpointManagerOptions] = None,
-      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED,
+      checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
   ):
     checkpointers = {
         checkpoints.STATE_ITEM_NAME: checkpointer,

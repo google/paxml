@@ -33,7 +33,6 @@ from jax import monitoring
 from jax.experimental import pjit
 from paxml import base_experiment
 from paxml import checkpoint_managers
-from paxml import checkpoint_pb2
 from paxml import eval_lib
 from paxml import experiment_utils
 from paxml import metric_utils
@@ -53,7 +52,7 @@ from paxml import checkpoints  # mapped to internal
 from paxml import profiling  # mapped to internal
 
 Checkpointer = checkpoints.Checkpointer
-CheckpointType = checkpoint_pb2.CheckpointType
+CheckpointType = checkpoints.CheckpointType
 instantiate = base_hyperparams.instantiate
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 FlaxCheckpointer = checkpoints.FlaxCheckpointer
@@ -174,7 +173,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
                enable_checkpoint_saving: bool = True):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if checkpoint_type == CheckpointType.FLAX:
       raise ValueError('FLAX checkpointing not supported for pjit models.')
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
@@ -192,9 +191,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def _restore_with_args(self, step_i, train_state_global_shapes, global_mesh,
                          train_state_pspecs):
     restore_args = {}
-    if self._checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+    if self._checkpoint_type == CheckpointType.GDA:
       restore_args = {'specs': train_state_pspecs, 'mesh': global_mesh}
-    elif self._checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+    elif self._checkpoint_type == CheckpointType.PERSISTENCE:
       restore_args = {
           'state_specs': train_state_pspecs,
           'global_mesh': global_mesh
@@ -398,13 +397,13 @@ def _create_checkpointer(
       keep_time_interval=keep_interval_timedelta,
       todelete_subdir=todelete_subdir)
   checkpointer = async_checkpointer
-  if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+  if checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
   if checkpointer is None:
-    if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+    if checkpoint_type == CheckpointType.GDA:
       checkpointer = Checkpointer(
           PaxCheckpointHandler())
-    elif checkpoint_type == CheckpointType.CHECKPOINT_PERSISTENCE:
+    elif checkpoint_type == CheckpointType.PERSISTENCE:
       raise ValueError('Checkpointer must already be initialized.')
     else:
       raise ValueError(f'Unsupported Orbax checkpoint type: {checkpoint_type}')
@@ -1057,7 +1056,7 @@ def _create_task_and_states(
     checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
 ):
-  reshard_inputs = checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE
+  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   jax_task = instantiate(task_p)
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)

@@ -35,7 +35,6 @@ import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
-from paxml import checkpoint_pb2
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
@@ -57,7 +56,7 @@ import tensorflow_datasets as tfds
 from paxml import checkpoints  # mapped to internal
 
 instantiate = base_hyperparams.instantiate
-CheckpointType = checkpoint_pb2.CheckpointType
+CheckpointType = checkpoints.CheckpointType
 EvaluationMode = io_utils.EvaluationMode
 JTensor = pytypes.JTensor
 Metrics = pytypes.Metrics
@@ -656,7 +655,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE
+  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
@@ -1115,7 +1114,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE
+  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
@@ -2206,7 +2205,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.CHECKPOINT_PERSISTENCE
+  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       task,
       prng_key,

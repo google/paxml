@@ -30,25 +30,24 @@ from jax.sharding import Mesh
 import numpy as np
 import orbax.checkpoint
 from paxml import checkpoint_managers
-from paxml import checkpoint_pb2
 from paxml import checkpoints
 from paxml import train_states
 import tensorflow.compat.v2 as tf
 
 
-CheckpointType = checkpoint_pb2.CheckpointType
+CheckpointType = checkpoints.CheckpointType
 FLAGS = flags.FLAGS
 CHECKPOINT_PREFIX = checkpoint_managers.CHECKPOINT_PREFIX
 TrainState = train_states.TrainState
 
 
 def _expected_checkpoint_filenames(
-    steps: List[int],
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_GDA):
+    steps: List[int], checkpoint_type: CheckpointType = CheckpointType.GDA
+):
   """Returns checkpoint basenames corresponding to all the `steps`."""
   results = []
   for step in steps:
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if checkpoint_type == CheckpointType.FLAX:
       name = f'{CHECKPOINT_PREFIX}{step}'
     else:
       name = f'{CHECKPOINT_PREFIX}{step:08d}'
@@ -101,11 +100,11 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.global_mesh, self.state_specs, self.train_state = create_train_state()
 
   def create_checkpointer(self, checkpoint_type: CheckpointType):
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if checkpoint_type == CheckpointType.FLAX:
       checkpointer = checkpoints.FlaxCheckpointer(
           checkpoints.FlaxCheckpointHandler()
       )
-    elif checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+    elif checkpoint_type == CheckpointType.GDA:
       checkpointer = orbax.checkpoint.Checkpointer(
           checkpoints.PaxCheckpointHandler()
       )
@@ -116,7 +115,7 @@ class CheckpointManagerTest(parameterized.TestCase):
   def create_checkpoint_manager(
       self,
       options: checkpoint_managers.CheckpointManagerOptions,
-      checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_GDA
+      checkpoint_type: CheckpointType = CheckpointType.GDA,
   ) -> checkpoint_managers.OrbaxCheckpointManager:
     checkpointer = self.create_checkpointer(checkpoint_type)
     return checkpoint_managers.OrbaxCheckpointManager(
@@ -154,17 +153,15 @@ class CheckpointManagerTest(parameterized.TestCase):
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
-    if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+    if checkpoint_type == CheckpointType.GDA:
       restore_kwargs = {'specs': state_specs, 'mesh': global_mesh}
-    elif checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    elif checkpoint_type == CheckpointType.FLAX:
       restore_kwargs = None
     return checkpoint_manager.restore(
         step, train_state, restore_kwargs=restore_kwargs
     )
 
-  @parameterized.parameters(
-      (CheckpointType.CHECKPOINT_GDA,), (CheckpointType.CHECKPOINT_FLAX,)
-  )
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_save_restore(self, checkpoint_type):
     checkpoint_manager = self.create_checkpoint_manager(
         checkpoint_managers.CheckpointManagerOptions(),
@@ -173,7 +170,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.save(checkpoint_manager, 0, self.train_state)
 
     expected = self.train_state
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if checkpoint_type == CheckpointType.FLAX:
       expected = jax.tree_util.tree_map(
           lambda x: np.asarray(x.addressable_data(0)),
           expected,
@@ -189,10 +186,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
-  @parameterized.parameters((None, CheckpointType.CHECKPOINT_GDA),
-                            (None, CheckpointType.CHECKPOINT_FLAX),
-                            (2, CheckpointType.CHECKPOINT_GDA),
-                            (2, CheckpointType.CHECKPOINT_FLAX))
+  @parameterized.parameters(
+      (None, CheckpointType.GDA),
+      (None, CheckpointType.FLAX),
+      (2, CheckpointType.GDA),
+      (2, CheckpointType.FLAX),
+  )
   def test_save_max_to_keep(self, max_to_keep, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
         save_interval_steps=1000, max_to_keep=max_to_keep)
@@ -213,8 +212,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         _actual_checkpoint_filenames(self.directory))
     self.assertSameElements(expected_steps, checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
-                            (CheckpointType.CHECKPOINT_FLAX,))
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_save_checkpoint_keep_interval_timedelta(self, checkpoint_type):
     tz = datetime.timezone.utc
     current_datetime = datetime.datetime.now(tz=tz)
@@ -248,8 +246,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         _actual_checkpoint_filenames(self.directory))
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
-                            (CheckpointType.CHECKPOINT_FLAX,))
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_save_restore_manager_case_1_default(self, checkpoint_type):
     tz = datetime.timezone.utc
     current_datetime = datetime.datetime.now(tz=tz)
@@ -309,8 +306,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         _actual_checkpoint_filenames(self.directory))
     self.assertSameElements(saved_steps_2, checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
-                            (CheckpointType.CHECKPOINT_FLAX,))
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_save_restore_manager_case_2_mutant(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
         save_interval_steps=100, max_to_keep=None)
@@ -400,8 +396,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     self.assertSameElements([0], checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
-                            (CheckpointType.CHECKPOINT_FLAX,))
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_todelete_subdir(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
         max_to_keep=2, todelete_subdir='archive')
@@ -420,8 +415,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertIn('archive', tf.io.gfile.listdir(self.directory))
     self.assertSameElements([2, 3], checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.CHECKPOINT_GDA,),
-                            (CheckpointType.CHECKPOINT_FLAX,))
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_reinitialize(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(max_to_keep=2)
     checkpoint_manager = self.create_checkpoint_manager(
@@ -437,9 +431,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.save(new_checkpoint_manager, 3, self.train_state)
     self.assertSameElements([2, 3], new_checkpoint_manager.all_steps())
 
-  @parameterized.parameters(
-      (CheckpointType.CHECKPOINT_GDA,), (CheckpointType.CHECKPOINT_FLAX,)
-  )
+  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_restore_legacy_format(self, checkpoint_type):
     checkpoint_manager = self.create_checkpoint_manager(
         checkpoint_managers.CheckpointManagerOptions(),
@@ -458,7 +450,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     # no per-item subdirectories.
     (step_dir / 'metadata').rmtree()
     for d in (step_dir / 'state').iterdir():  # parameter directories
-      if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
+      if checkpoint_type == CheckpointType.GDA:
         assert d.is_dir(), d
         (step_dir / d.name).mkdir()
         for f in d.iterdir():
@@ -473,7 +465,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_manager._manager._version = 0.0
 
     expected = self.train_state
-    if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
+    if checkpoint_type == CheckpointType.FLAX:
       expected = jax.tree_util.tree_map(
           lambda x: np.asarray(x.addressable_data(0)),
           expected,

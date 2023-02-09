@@ -355,7 +355,7 @@ def initialize_model_state(
     discard_opt_states: bool = False,
     do_init_checkpoint_rules: bool = True,
     is_eval: bool = False,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_UNSPECIFIED
+    checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
 ) -> TrainState:
   """Initializes the model states.
 
@@ -414,11 +414,11 @@ def initialize_model_state(
                                             discard_opt_states)
   # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
-    if checkpoint_type == CheckpointType.CHECKPOINT_UNSPECIFIED:
+    if checkpoint_type == CheckpointType.UNSPECIFIED:
       if py_utils.pmap_use_tensorstore():
-        checkpoint_type = CheckpointType.CHECKPOINT_GDA
+        checkpoint_type = CheckpointType.GDA
       else:
-        checkpoint_type = CheckpointType.CHECKPOINT_FLAX
+        checkpoint_type = CheckpointType.FLAX
     # Overwrite some parts if init_checkpoint_rules are set (warm-start)
     # Note that this assumes a pmap model with Flax checkpoint(s).
     train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
@@ -1036,9 +1036,10 @@ def initialize_partitioned_model_states(
     global_input_shapes: NestedShapeDtypeLike,
     discard_opt_states: bool = False,
     global_mesh: Optional[jax.sharding.Mesh] = None,
-    checkpoint_type: CheckpointType = CheckpointType.CHECKPOINT_GDA,
+    checkpoint_type: CheckpointType = CheckpointType.GDA,
     state_specs: Optional[TrainState] = None,
-    do_init_checkpoint_rules: bool = True) -> Tuple[TrainState, TrainState]:
+    do_init_checkpoint_rules: bool = True,
+) -> Tuple[TrainState, TrainState]:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first.
