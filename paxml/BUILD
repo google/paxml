@@ -487,6 +487,17 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "programs",
+    srcs = ["programs.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":train_states",
+        # Implicit jax dependency.
+        "//praxis:pytypes",
+    ],
+)
+
+pytype_strict_library(
     name = "trainer_lib",
     srcs = ["trainer_lib.py"],
     srcs_version = "PY3",
