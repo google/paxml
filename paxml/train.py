@@ -161,6 +161,10 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   def checkpoint_type(self) -> CheckpointType:
     raise NotImplementedError
 
+  def wait_until_finished(self):
+    """Waits for any incomplete save operations to complete."""
+    raise NotImplementedError
+
 
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
@@ -173,6 +177,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     if checkpoint_type == CheckpointType.CHECKPOINT_FLAX:
       raise ValueError('FLAX checkpointing not supported for pjit models.')
     self._enable_checkpoint_saving = enable_checkpoint_saving
+
+  def wait_until_finished(self):
+    self.checkpoint_manager.wait_until_finished()
 
   def _save_with_args(self, step_i, partitioned_train_state):
     if not self._enable_checkpoint_saving:
@@ -269,6 +276,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
+
+  def wait_until_finished(self):
+    self.checkpoint_manager.wait_until_finished()
 
   def _restore_from_tensorstore(self, train_state_global_shapes):
     _make_checkpoint_dir(self.job_log_dir)
@@ -1409,5 +1419,6 @@ def _train_and_evaluate_common(
         step_i, partitioned_train_state, train_state_metadata.partition_specs
     )
 
+    checkpointer.wait_until_finished()
     train_summary_handler.close()
     eval_summary_handler.close()

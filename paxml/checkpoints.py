@@ -58,30 +58,27 @@ COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
-  """Determines whether path is a checkpoint. May or may not be finalized."""
-  return bool(CHECKPOINT_PATTERN_RE.match(os.path.basename(x)))
+  """Determines whether path is a checkpoint."""
+  return bool(CHECKPOINT_PATTERN_RE.match(x.name))
 
 
-# TODO(cpgaffney) Rely on Orbax utils when possible. The complexity here is due
-# to the necessity of dealing with v0 checkpoints.
 def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   """Determines whether a checkpoint is temporary."""
-  if not is_checkpoint_asset(x):
-    return False
   # Would only match v0.0 checkpoints, without state/metadata subdirs.
   # This case should trigger very rarely.
-  if bool(TMP_CHECKPOINT_PATTERN_RE.match(os.path.basename(x))):
+  if bool(TMP_CHECKPOINT_PATTERN_RE.match(x.name)):
     return True
   # Very old format Flax checkpoint.
   if x.is_file():
     return False
-  # Return True if any of the sub-directories have the Orbax tmp dir suffix in
-  # their name. If this is a v0.0 checkpoint, so of these sub-directories may
-  # actually be files. If it is a v0.0 checkpoint, however, the Orbax tmp dir
-  # suffix will not be present, so it is safe to return False.
-  return any(
-      [(orbax.checkpoint.utils.TMP_DIR_SUFFIX in p.name) for p in x.iterdir()]
-  )
+
+  # TODO(b/267498552) Remove hasattr when possible.
+  if hasattr(orbax.checkpoint.utils, 'is_tmp_checkpoint'):
+    return orbax.checkpoint.utils.is_tmp_checkpoint(x)
+  else:
+    return any(
+        [(orbax.checkpoint.utils.TMP_DIR_SUFFIX in p.name) for p in x.iterdir()]
+    )
 
 
 def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
@@ -315,12 +312,15 @@ def restore_checkpoint(
     if step is None:
       logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
       return None
+  logging.info(checkpoint_dir)
   checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
+  logging.info(checkpoint_step_dir)
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
+  logging.info(checkpoint_restore_dir)
   if checkpoint_type == CheckpointType.CHECKPOINT_GDA:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())

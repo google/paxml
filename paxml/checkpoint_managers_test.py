@@ -384,19 +384,14 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpoint_manager = self.create_checkpoint_manager(options)
       self.save(checkpoint_manager, 0, self.train_state)
       # Step 0 not finalized.
-      tmp_checkpoint_pattern = (
-          checkpoint_managers.STATE_ITEM_NAME
-          + orbax.checkpoint.utils.TMP_DIR_SUFFIX
-          + '*'
+      self.assertLen(
+          orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory),
+          1,
       )
-      item_dir = checkpoint_manager._manager._get_save_directory(
-          0, checkpoint_manager.directory
-      )
-      self.assertNotEmpty(list(item_dir.glob(tmp_checkpoint_pattern)))
 
     checkpoint_manager = self.create_checkpoint_manager(options)
     self.assertEmpty(
-        list(checkpoint_manager.directory.glob(tmp_checkpoint_pattern))
+        orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory)
     )
     self.save(checkpoint_manager, 0, self.train_state)
     self.assertSameElements(

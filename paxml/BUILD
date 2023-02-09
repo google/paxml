@@ -151,6 +151,18 @@ pytype_strict_library(
     ],
 )
 
+py_strict_test(
+    name = "checkpoints_test",
+    srcs = ["checkpoints_test.py"],
+    deps = [
+        ":checkpoints",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit etils dependency.
+        # Implicit orbax.checkpoint dependency.
+    ],
+)
+
 pytype_strict_library(
     name = "checkpoint_version",
     srcs = ["checkpoint_version.py"],

@@ -161,17 +161,30 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
         last_checkpoint_step < step and
         step % self._options.save_interval_steps == 0)
 
-  def _get_save_directory(self,
-                          step: int,
-                          directory: epath.Path,
-                          key_name: Optional[str] = None) -> epath.Path:
+  def _get_save_directory(
+      self,
+      step: int,
+      directory: epath.Path,
+      key_name: Optional[str] = None,
+      tmp_directory: Optional[epath.Path] = None,
+  ) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
-    step_dir = checkpoints.make_checkpoint_step_dir(
-        directory, step, checkpoint_type=self._checkpoint_type
-    )
+    if tmp_directory is None:
+      step_dir = checkpoints.make_checkpoint_step_dir(
+          directory, step, checkpoint_type=self._checkpoint_type
+      )
+    else:
+      step_dir = tmp_directory
     if self._version < 1 or key_name is None:
       return step_dir
     return step_dir / key_name
+
+  def _create_tmp_directory(self, directory: epath.Path) -> epath.Path:
+    if self._version < 1:
+      # Construct the path without returning. This is because Checkpointer must
+      # be allowed to create the path. Only needed for legacy compatibility.
+      return orbax.checkpoint.utils.get_tmp_directory(directory)
+    return super()._create_tmp_directory(directory)
 
   def _cleanup_tmp_directories(self):
     if py_utils.is_mock_tpu_backend():
