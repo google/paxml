@@ -815,7 +815,7 @@ def train_and_evaluate_pmap(
         decode_prng_seed,
         job_log_dir,
     )
-    return decode_once_fn, prng_key, decode_input_p
+    return decode_once_fn, prng_key
 
   _train_and_evaluate_common(
       partitioner,
@@ -978,10 +978,8 @@ def train_and_evaluate_spmd_model(
 
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
-      decode_input_ps: Sequence[base_input.BaseInput.HParams]) -> Tuple[
-          Callable[..., tuning_lib.DecodeMetrics],
-          jax.random.KeyArray, Sequence[base_input.BaseInput.HParams],
-      ]:
+      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+  ) -> Tuple[Callable[..., tuning_lib.DecodeMetrics], jax.random.KeyArray]:
     assert decode_input_ps, 'decode_input_p must not be empty'
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_key: %s', decode_key)
@@ -1019,7 +1017,7 @@ def train_and_evaluate_spmd_model(
         decode_input_partition_specs,
     )
 
-    return decode_once_fn, prng_key, decode_input_ps
+    return decode_once_fn, prng_key
 
   _train_and_evaluate_common(
       partitioner,
@@ -1147,8 +1145,9 @@ def _train_and_evaluate_common(
     ) = partition_eval_input_fns(eval_input_p)
 
   if decode_input_p:
-    decode_once_fn, prng_key, decode_input_p = partition_decode_once_fns(
-        prng_key, decode_input_p)
+    decode_once_fn, prng_key = partition_decode_once_fns(
+        prng_key, decode_input_p
+    )
 
   logging.info('Training loop starting...')
 
