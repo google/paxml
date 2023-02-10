@@ -1370,6 +1370,7 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
       bos_id: int = 0,
       reverse_bos_padding: bool = False,
       eos_id: int = 1,
+      target_has_suffix: bool = False
   ) -> None:
     """Args to construct a language model feature converter.
 
@@ -1392,6 +1393,7 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
         to the end of labels with eos_id instead.
       eos_id: eos id for decoder inputs, only in effect if reverse_bos_padding
         true.
+      target_has_suffix: targets followed by a suffix.
     """
     self._pack = pack
     self._use_custom_packing_ops = use_custom_packing_ops
@@ -1400,6 +1402,7 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
     self._bos_id = bos_id
     self._reverse_bos_padding = reverse_bos_padding
     self._eos_id = eos_id
+    self._target_has_suffix = target_has_suffix
     super().__init__(
         loss_on_targets_only=True,
         pack=pack,
@@ -1421,6 +1424,10 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
   @property
   def weights_on_targets_only(self) -> bool:
     return self._weights_on_targets_only
+
+  @property
+  def target_has_suffix(self) -> bool:
+    return self._target_has_suffix
 
   def _shift_left_and_pad(self, tensor, pad_val):
     # Expand dims here so that the below code can work with 1-d tensors.
@@ -1472,6 +1479,9 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
       non_negative_positions = tf.cast(
           b.decoder_loss_weights > 0, dtype=tf.float32)
       ret.weights *= non_negative_positions
+
+    if self.target_has_suffix:
+      ret.weights *= tf.cast(b['target_suffix_weights'], dtype=tf.float32)
 
     ret.ids = tf.math.abs(ret.ids)
     ret.labels = tf.math.abs(ret.labels)

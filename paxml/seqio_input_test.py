@@ -38,19 +38,24 @@ INDEX_WITHIN_SHARD_KEY = seqio_input.INDEX_WITHIN_SHARD_KEY
 def _register_task(
     task_name: str,
     ds: tf.data.Dataset,
-    output_feature_names: Sequence[str] = ('inputs', 'targets')
+    output_feature_names: Sequence[str] = ('inputs', 'targets'),
+    add_eos: bool = True,
 ) -> None:
   """Register a dummy task."""
+  if add_eos:
+    preprocessors = [seqio.preprocessors.append_eos_after_trim]
+  else:
+    preprocessors = []
   seqio.TaskRegistry.add(
       task_name,
       source=seqio.FunctionDataSource(
           dataset_fn=lambda split, shuffle_files, seed=0: ds,
           splits=['train', 'validation']),
-      preprocessors=[
-          seqio.preprocessors.append_eos_after_trim,
-      ],
+      preprocessors=preprocessors,
       output_features={
-          feat: seqio.Feature(seqio.test_utils.sentencepiece_vocab())
+          feat: seqio.Feature(
+              seqio.test_utils.sentencepiece_vocab(),
+              add_eos=add_eos)
           for feat in output_feature_names
       },
       metric_fns=[])
@@ -871,6 +876,96 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         '.*must set LanguageModelFeatures.weights_on_targets_only=True'):
       _ = instantiate(p)
 
+  def test_ininputs_target_suffix_lm(self):
+    name = 'test_weights'
+    x = [{
+        'inputs': [2, 8, 9, 3],
+        'targets': [2, 4],
+        'suffixes': [3, 1],
+    }, {
+        'inputs': [3, 4, 6, 4],
+        'targets': [4, 8, 7],
+        'suffixes': []
+    }]
+    ds = seqio.test_utils.create_default_dataset(
+        x, feature_names=('inputs', 'targets', 'suffixes'))
+    _register_task(name, ds, add_eos=False)
+    expected_labels = np.array(
+        [[2, 8, 9, 3, 2, 4, 3, 1, 3, 4, 6, 4, 4, 8, 7, 0, 0]],
+        dtype=np.int32)
+    expected_ids = np.array(
+        [[0, 2, 8, 9, 3, 2, 4, 3, 0, 3, 4, 6, 4, 4, 8, 0, 0]],
+        dtype=np.int32)
+    expected_paddings = np.array(
+        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]],
+        dtype=np.float32)
+    expected_weights = np.array(
+        [[0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0]],
+        dtype=np.float32)
+    expected_inputs_indicator = np.array(
+        [[1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0]],
+        dtype=np.int32)
+
+    p = seqio_input.SeqIOInput.HParams()
+    p.mixture_name = name
+    p.split_name = 'validation'
+    p.task_feature_lengths = {'inputs': 10, 'targets': 4, 'suffixes': 3}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=True, weights_on_targets_only=True, target_has_suffix=True)
+    p.batch_size = 1
+    p.is_training = False
+    inp = instantiate(p)
+    batch = inp.get_next()
+    self.assertArraysEqual(batch.ids, expected_ids)
+    self.assertArraysEqual(batch.labels, expected_labels)
+    self.assertArraysEqual(batch.paddings, expected_paddings)
+    self.assertArraysEqual(batch.weights, expected_weights)
+    self.assertArraysEqual(batch.inputs_indicator, expected_inputs_indicator)
+
+    name = 'test_weights_2'
+    x = [{
+        'inputs': [2, 8, 9, 3],
+        'targets': [2, 4],
+        'suffixes': [3, 1],
+    }, {
+        'inputs': [3, 4, 6, 4],
+        'targets': [],
+        'suffixes': [4, 8, 7]
+    }]
+    ds = seqio.test_utils.create_default_dataset(
+        x, feature_names=('inputs', 'targets', 'suffixes'))
+    _register_task(name, ds, add_eos=False)
+    expected_labels = np.array(
+        [[2, 8, 9, 3, 2, 4, 3, 1, 3, 4, 6, 4, 4, 8, 7, 0, 0]],
+        dtype=np.int32)
+    expected_ids = np.array(
+        [[0, 2, 8, 9, 3, 2, 4, 3, 0, 3, 4, 6, 4, 4, 8, 0, 0]],
+        dtype=np.int32)
+    expected_paddings = np.array(
+        [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]],
+        dtype=np.float32)
+    expected_weights = np.array(
+        [[0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0]],
+        dtype=np.float32)
+    expected_inputs_indicator = np.array(
+        [[1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0]],
+        dtype=np.int32)
+
+    p = seqio_input.SeqIOInput.HParams()
+    p.mixture_name = name
+    p.split_name = 'validation'
+    p.task_feature_lengths = {'inputs': 10, 'targets': 4, 'suffixes': 3}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=True, weights_on_targets_only=True, target_has_suffix=True)
+    p.batch_size = 1
+    p.is_training = False
+    inp = instantiate(p)
+    batch = inp.get_next()
+    self.assertArraysEqual(batch.ids, expected_ids)
+    self.assertArraysEqual(batch.labels, expected_labels)
+    self.assertArraysEqual(batch.paddings, expected_paddings)
+    self.assertArraysEqual(batch.weights, expected_weights)
+    self.assertArraysEqual(batch.inputs_indicator, expected_inputs_indicator)
 
 if __name__ == '__main__':
   absltest.main()
