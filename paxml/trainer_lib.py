@@ -781,14 +781,21 @@ def train_step_single_learner(
   # _zero_gradient_for_non_learnable_vars needs to handle jax.dtypes.float0
   # specially.
 
-  if learner.stochastic_gradient is None:
+  if learner.stochastic_gradient_inst is None:
     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
   else:
-    grad_fn = functools.partial(learner.stochastic_gradient.grad_fn, _loss_fn)
+    grad_fn = functools.partial(
+        learner.stochastic_gradient_inst.grad_fn, _loss_fn
+    )
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
-  (mean_loss, weighted_scalars, fwd_updated_vars, fwd_summary_tensors,
-   per_example_out) = aux_info.aux_info
+  (
+      mean_loss,
+      weighted_scalars,
+      fwd_updated_vars,
+      fwd_summary_tensors,
+      per_example_out,
+  ) = aux_info.aux_info
 
   # weighted_loss is only needed for computing gradients, but otherwise, not
   # needed.

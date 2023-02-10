@@ -154,7 +154,7 @@ class Learner(base_hyperparams.BaseParameterizable):
     return self._optimizer_inst
 
   @property
-  def stochastic_gradient(self) -> Optional[sgf.BaseStochasticGradient]:
+  def stochastic_gradient_inst(self) -> Optional[sgf.BaseStochasticGradient]:
     """Returns the stochastic gradient function object of this learner."""
     return self._stochastic_gradient_inst
 
