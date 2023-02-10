@@ -814,16 +814,3 @@ py_strict_test(
         # Implicit pyglove dependency.
     ],
 )
-
-load("@com_google_protobuf//:protobuf.bzl", "py_proto_library")
-
-py_proto_library(
-    name = "checkpoint_py_pb2",
-    srcs = ["checkpoint.proto"],
-    default_runtime = "@com_google_protobuf//:protobuf_python",
-    protoc = "@com_google_protobuf//:protoc",
-    srcs_version = "PY3",
-    deps = [
-        "@com_google_protobuf//:protobuf_python",
-    ],
-)

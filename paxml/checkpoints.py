@@ -191,7 +191,7 @@ def save_checkpoint(
     overwrite: Whether to overwrite existing checkpoints files if a checkpoint
       at the current or a later step already exists.
     checkpoint_type: The checkpoint type (implementation) to save. Either
-      `CHECKPOINT_FLAX`, `CHECKPOINT_GDA` or `CHECKPOINT_PERSISTENCE`.
+      `FLAX`, `GDA` or `PERSISTENCE`.
     state_specs: Currently unused.
     async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
@@ -303,7 +303,7 @@ def restore_checkpoint(
     checkpoint_dir: The base directory from where to retrieve checkpoints.
     global_mesh: The global mesh representing devices across multiple processes.
     checkpoint_type: The checkpoint type (implementation) to restore. Either
-      `CHECKPOINT_FLAX`, `CHECKPOINT_GDA` or `CHECKPOINT_PERSISTENCE`.
+      `FLAX`, `GDA` or `PERSISTENCE`.
     state_specs: If using a GDA-based checkpoint, the partition specs
       corresponding to this TrainState instance to restore.
     step: Step number to load a checkpoint from or None to load the latest.
