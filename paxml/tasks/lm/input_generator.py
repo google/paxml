@@ -351,7 +351,7 @@ class TextInput(base_input.BaseInput):
 
   def __init__(self, hparams: TextInput.HParams) -> None:
     super().__init__(hparams)
-    self.tokenizer = hparams.tokenizer.Instantiate()
+    self.tokenizer_inst = hparams.tokenizer.Instantiate()
     self._actual_num_samples = None
     self._dataset = self._gen_dataset()
     self._iterator = iter(self._dataset)
@@ -386,15 +386,15 @@ class TextInput(base_input.BaseInput):
 
   def ids_to_strings(self, ids: pytypes.NpTensor,
                      lengths: pytypes.NpTensor) -> List[str]:
-    bytes_list = self.tokenizer.IdsToStrings(ids, lengths).numpy()
+    bytes_list = self.tokenizer_inst.IdsToStrings(ids, lengths).numpy()
     return [b.decode('utf-8') for b in bytes_list]
 
   def _to_nested_map(self, text) -> py_utils.NestedMap:
-    ids, labels, paddings = self.tokenizer.StringsToIds(
+    ids, labels, paddings = self.tokenizer_inst.StringsToIds(
         text, max_length=self.hparams.max_sequence_length)
     # Unfortunately some tokenizers don't return the correct paddings.
     # We recompute it by looking at when the labels sequence terminates.
-    indices = tf.where(tf.math.equal(labels, self.tokenizer.eos_id))
+    indices = tf.where(tf.math.equal(labels, self.tokenizer_inst.eos_id))
     lengths = tf.math.segment_min(indices[:, 1], indices[:, 0]) + 1
     new_paddings = tf.cast(
         1.0 - tf.sequence_mask(
