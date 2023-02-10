@@ -146,10 +146,10 @@ class Learner(base_hyperparams.BaseParameterizable):
         if p.stochastic_gradient is None
         else instantiate(p.stochastic_gradient)
     )
-    self._get_grad_tx = self.optimizer.get_grad_transformation
+    self._get_grad_tx = self.optimizer_inst.get_grad_transformation
 
   @property
-  def optimizer(self) -> optimizers.BaseOptimizer:
+  def optimizer_inst(self) -> optimizers.BaseOptimizer:
     """Returns the Optimizer object of this learner."""
     return self._optimizer_inst
 
@@ -159,7 +159,7 @@ class Learner(base_hyperparams.BaseParameterizable):
     return self._stochastic_gradient_inst
 
   def plot_learning_rate(self, step: int) -> None:
-    learning_rate = self.optimizer.get_learning_rate(step)
+    learning_rate = self.optimizer_inst.get_learning_rate(step)
     base_layer.add_global_summary(
         'lr', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
@@ -480,7 +480,7 @@ class MultiOptimizerLearner(Learner):
 
   def plot_learning_rate(self, step: int) -> None:
     p = self._hparams
-    learning_rate = self.optimizer.get_learning_rate(step)
+    learning_rate = self.optimizer_inst.get_learning_rate(step)
     base_layer.add_global_summary(
         'learning/lr_main', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
