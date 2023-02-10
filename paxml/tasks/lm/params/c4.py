@@ -805,6 +805,15 @@ class C4Spmd1BAdam4Replicas(C4SpmdAdam):
 
 
 @experiment_registry.register
+class C4Spmd1BAdam4ReplicasLimitSteps(C4Spmd1BAdam4Replicas):
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    task_p.train.num_train_steps = 15000
+    return task_p
+
+
+@experiment_registry.register
 class C4Spmd2BAdam4Replicas(C4SpmdAdam):
   r"""GPT-3 config with 2B params.
 
