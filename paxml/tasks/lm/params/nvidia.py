@@ -24,7 +24,11 @@ from paxml.tasks.lm.params import lm_cloud
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import schedules
+from praxis.layers import attentions
+from praxis.layers import gpu_fast_attention
+
 
 WeightInit = base_layer.WeightInit
 
@@ -32,6 +36,7 @@ WeightInit = base_layer.WeightInit
 @experiment_registry.register
 class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   """Pipelined Transformer using Adam optimizer."""
+  USE_FLASH_ATTENTION = True
 
   USE_REPEATED_LAYER = False
   DCN_MESH_SHAPE = [2, 1, 1, 1]
@@ -81,9 +86,23 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
+    task_p.train.save_interval_steps = 100000
 
     model_p = task_p.model
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
+
+    if self.USE_FLASH_ATTENTION:
+      layer_p = (
+          model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage.transformer_layer_params_tpl
+      )
+      # Use Triton flash attention.
+      assert layer_p.tr_atten_tpl.cls == attentions.DotProductAttention
+      fused_tr_atten_tpl = pax_fiddle.Config(
+          gpu_fast_attention.GpuTritonFusedDotProductAttention,
+      )
+      fused_tr_atten_tpl.copy_fields_from(layer_p.tr_atten_tpl)
+      layer_p.tr_atten_tpl = fused_tr_atten_tpl
+
     scale = self.SOFTMAX_INIT_STD
     if not scale:
       scale = 1.0 / math.sqrt(self.MODEL_DIMS)
@@ -134,10 +153,11 @@ class TestSmallConfig(NVIDIA5B):
   """Test config that works with 16 A100-40G."""
 
   DCN_MESH_SHAPE = [1, 1, 1, 1]
-  ICI_MESH_SHAPE = [16, 1, 1, 1]
-  NUM_STAGES = 16
-  MICROBATCH_SIZE = 1
-  PERCORE_BATCH_SIZE = 1
+  ICI_MESH_SHAPE = [2, 2, 1, 4]
+  NUM_STAGES = 2
+
+  MICROBATCH_SIZE = 2
+  PERCORE_BATCH_SIZE = 2
 
   NUM_LAYERS = 16
   NUM_HEADS = 32
