@@ -120,6 +120,7 @@ class TrainLibTestBase(parameterized.TestCase):
 class PjitPartitionerTest(TrainLibTestBase):
 
   def setUp(self):
+    super().setUp()
     train_sample_inputs = self.train_input.get_next()
     # Single-host test, per-host shape/dtype is global.
     self._inputs_shape_dtype = jax.tree_map(
@@ -132,19 +133,29 @@ class PjitPartitionerTest(TrainLibTestBase):
   ):
     auto_sharding_info = None
     if auto_sharding_step_fn:
-      auto_sharding_info = trainer_lib._PjitPartitioner.AutoShardingInfo(
-          auto_sharding_step_fn,
-          is_eval=auto_sharding_is_eval,
-          replicate_output=False,
+      auto_sharding_info = (
+          trainer_lib._AutoShardingPjitPartitioner.AutoShardingInfo(
+              auto_sharding_step_fn,
+              is_eval=auto_sharding_is_eval,
+              replicate_output=False,
+          )
       )
-    return trainer_lib._PjitPartitioner(
-        self.task,
-        jax.random.PRNGKey(0),
-        reshard_inputs=True,
-        train_inputs_shape_dtype=self._inputs_shape_dtype,
-        init_is_eval=False,
-        auto_sharding_info=auto_sharding_info,
-    )
+      return trainer_lib._AutoShardingPjitPartitioner(
+          self.task,
+          jax.random.PRNGKey(0),
+          reshard_inputs=True,
+          auto_sharding_info=auto_sharding_info,
+          train_inputs_shape_dtype=self._inputs_shape_dtype,
+          init_is_eval=False,
+      )
+    else:
+      return trainer_lib._PjitPartitioner(
+          self.task,
+          jax.random.PRNGKey(0),
+          reshard_inputs=True,
+          train_inputs_shape_dtype=self._inputs_shape_dtype,
+          init_is_eval=False,
+      )
 
   @parameterized.parameters([True, False])
   def test_output_spec(self, use_auto_sharding):
