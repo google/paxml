@@ -410,12 +410,15 @@ class RewardsTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metric` should not be None'):
-      _ = automl.SingleObjective.HParams()
+      _ = instantiate(automl.SingleObjective.HParams())
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `goal` should be either .*'):
-      _ = automl.SingleObjective.HParams(
-          metric=automl.Metric.eval('accuracy'), goal='abc')
+      _ = instantiate(
+          automl.SingleObjective.HParams(
+              metric=automl.Metric.eval('accuracy'), goal='abc'
+          )
+      )
 
     with self.assertRaisesRegex(KeyError,
                                 'Metric .* does not match with any metrics'):
@@ -458,14 +461,18 @@ class RewardsTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metrics` must be provided.'):
-      _ = automl.MultiObjective.HParams()
+      _ = instantiate(automl.MultiObjective.HParams())
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `aggregator` must be provided.'):
-      _ = automl.MultiObjective.HParams(metrics=[
-          automl.Metric.eval('accuracy'),
-          automl.Metric.train_steps_per_second()
-      ])
+      _ = instantiate(
+          automl.MultiObjective.HParams(
+              metrics=[
+                  automl.Metric.eval('accuracy'),
+                  automl.Metric.train_steps_per_second(),
+              ]
+          )
+      )
 
     with self.assertRaisesRegex(KeyError,
                                 'Metric .* does not match with any metrics'):
@@ -514,7 +521,7 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `cost_objective` must be provided.'):
-      _ = automl.TunasAbsolute.HParams()
+      _ = instantiate(automl.TunasAbsolute.HParams())
 
   def test_mnas_hard(self):
     aggregator = instantiate(automl.MnasHard.HParams(cost_objective=1))
