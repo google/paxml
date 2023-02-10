@@ -5,7 +5,7 @@ absl-py
 clu
 etils
 flax
-jax
+jax @ git+https://github.com/google/jax
 lingvo
 numpy
 orbax
