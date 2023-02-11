@@ -48,6 +48,7 @@ pytype_library(
         "//praxis:optimizers",
         "//praxis:schedules",
         "//praxis/layers",
+        "//praxis/layers:gpu_fast_attention",
         # Implicit seqio dependency.
         # Implicit t5.data dependency.
         # Implicit t5.data.preprocessors dependency.

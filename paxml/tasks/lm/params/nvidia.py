@@ -26,7 +26,6 @@ from praxis import layers
 from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
-from praxis.layers import attentions
 from praxis.layers import gpu_fast_attention
 
 
@@ -96,7 +95,7 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
           model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage.transformer_layer_params_tpl
       )
       # Use Triton flash attention.
-      assert layer_p.tr_atten_tpl.cls == attentions.DotProductAttention
+      assert layer_p.tr_atten_tpl.cls == layers.DotProductAttention
       fused_tr_atten_tpl = pax_fiddle.Config(
           gpu_fast_attention.GpuTritonFusedDotProductAttention,
       )
