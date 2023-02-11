@@ -219,7 +219,6 @@ def tune(trial_fn: TrialFn,
 
   trial_dirname_generator = TrialDirectoryNameGenerator(
       job_log_dir, search_space, combined_decision_point_names)
-
   published_study_link = False
   for example, feedback in pg.sample(
       search_space, search_algorithm, max_num_trials,
@@ -251,7 +250,9 @@ def tune(trial_fn: TrialFn,
             cross_step_metric_aggregator=cross_step_metric_aggregator,
             is_metric_reporting_role=is_metric_reporting_role,
             is_last_experiment=(i == len(sub_experiments) - 1),
-            tuning_step_start=i * automl.SUB_EXPERIMENT_STEP_OFFSET)
+            tuning_step_start=i * automl.SUB_EXPERIMENT_STEP_OFFSET,
+            treats_early_stopped_trials_as_done=(
+                search_hparams.treats_early_stopped_trials_as_done))
 
         # Mark trial as infeasible on NaN. PAX user can add more error
         # through `SearchHParams.errors_to_skip`.
@@ -352,7 +353,8 @@ class EarlyStoppingFn:
       cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
       is_metric_reporting_role: bool,
       is_last_experiment: bool,
-      tuning_step_start: int):
+      tuning_step_start: int,
+      treats_early_stopped_trials_as_done: bool):
     self._feedback = feedback
     self._sub_experiment_id = sub_experiment_id
     self._reward_fn = reward_fn
@@ -360,6 +362,8 @@ class EarlyStoppingFn:
     self._is_metric_reporting_role = is_metric_reporting_role
     self._is_last_experiment = is_last_experiment
     self._tuning_step_start = tuning_step_start
+    self._treats_early_stopped_trials_as_done = (
+        treats_early_stopped_trials_as_done)
     if reward_fn is None:
       self._needs_train = False
       self._needs_eval = False
@@ -431,7 +435,11 @@ class EarlyStoppingFn:
       # `feedback.skip` is preferably called just once, so we always call
       # it on the main host.
       if jax.process_index() == 0:
-        self._feedback.skip()
+        if (self._treats_early_stopped_trials_as_done
+            and self._feedback.get_trial().measurements):
+          self._feedback.done()
+        else:
+          self._feedback.skip()
       should_stop = True
     if should_stop:
       # NOTE(daiyip): at the end of each trial, we sync all hosts to make sure
@@ -485,11 +493,19 @@ class EarlyStoppingFn:
       # Calling the reward_fn triggers `EarlyStoppingError`, which indicates
       # user signaled early stopping.
       if e.skip:
-        self._feedback.skip(e.skip_reason or 'Unknown.')
-        logging.info(
-            'Trial %d is early stopped at step %s and will be skipped '
-            'by controller. Reason: %s.',
-            self._feedback.id, e.step, e.skip_reason)
+        if (self._treats_early_stopped_trials_as_done
+            and self._feedback.get_trial().measurements):
+          self._feedback.done()
+          logging.info(
+              'Trial %d is early stopped at step %s and will be treated as '
+              'done. Reason: %s.',
+              self._feedback.id, e.step, e.skip_reason)
+        else:
+          self._feedback.skip(e.skip_reason or 'Unknown.')
+          logging.info(
+              'Trial %d is early stopped at step %s and will be skipped '
+              'by controller. Reason: %s.',
+              self._feedback.id, e.step, e.skip_reason)
       else:
         reward = e.reward
         if reward is None:

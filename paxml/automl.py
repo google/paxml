@@ -107,7 +107,8 @@ def hyperparameter_tuning(
       early_stopping=early_stopping,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
-      cross_step_metric_aggregator=cross_step_metric_aggregator)
+      cross_step_metric_aggregator=cross_step_metric_aggregator,
+      treats_early_stopped_trials_as_done=True)
 
 
 def neural_architecture_search(
@@ -810,7 +811,8 @@ def parameter_sweep(
         del self
         return SearchHParams(
             search_algorithm=Sweeping.HParams(),
-            search_reward=search_reward)
+            search_reward=search_reward,
+            treats_early_stopped_trials_as_done=True)
 
     new_cls = _ParameterSweeping
     # Create a COMBINATION property and use it to set HP attributes' values.

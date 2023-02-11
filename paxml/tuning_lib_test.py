@@ -16,7 +16,7 @@
 """Tests for automl."""
 
 import math
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Dict, List, Optional, Tuple, Type, Union
 from absl.testing import absltest
 from clu import platform
 from etils import epath
@@ -33,15 +33,25 @@ class StopWithLowerMetric(automl.BaseReward):
 
   class HParams(automl.BaseReward.HParams):
     metric: Optional[automl.Metric] = None
-    threshold: float = 0.0
+    threshold: Union[float, List[Tuple[int, float]]] = 0.0
     skip: bool = False
     reward_replacement: Optional[float] = None
     metrics_replacement: Optional[Dict[str, float]] = None
 
+  def get_threshold(self, global_step: int) -> float:
+    p = self._hparams
+    if isinstance(p.threshold, float):
+      return p.threshold
+    for i, (step, value) in enumerate(p.threshold):
+      if step <= global_step and (
+          i == len(p.threshold) - 1 or p.threshold[i + 1][0] > global_step):
+        return value
+    return 0.0
+
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     p = self._hparams
     reward = p.metric.get_value(metrics_dict)
-    if reward < p.threshold:
+    if reward < self.get_threshold(global_step):
       if p.skip:
         raise automl.EarlyStoppingError(
             skip=p.skip,
@@ -202,6 +212,19 @@ class TuningWithPerTrialEarlyStopping(TuningExperiment):
         metric=automl.Metric.eval('reward'),
         threshold=1.0,
         skip=True)
+    return search_hparams
+
+
+class TuningWithTreatingEarlyStoppedTrailsAsDone(TuningExperiment):
+  """A faked tuning experiment for treating early stopped trials as done."""
+
+  def search(self):
+    search_hparams = super().search()
+    search_hparams.search_reward = StopWithLowerMetric.HParams(
+        metric=automl.Metric.eval('reward'),
+        threshold=[(10, 0.5), (20, 2.0)],
+        skip=True)
+    search_hparams.treats_early_stopped_trials_as_done = True
     return search_hparams
 
 
@@ -493,6 +516,24 @@ class TuneTest(absltest.TestCase):
     self.assertLen(result.trials, 5)
     self.assertEqual([t.status for t in result.trials], ['COMPLETED'] * 5)
     self.assertEqual([t.infeasible for t in result.trials], [True] * 5)
+
+  def test_tune_with_treating_early_stopped_trials_as_done(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    tuning_lib.tune(run_experiment,
+                    TuningWithTreatingEarlyStoppedTrailsAsDone(),
+                    platform.work_unit(),
+                    job_log_dir,
+                    study='local_treating_early_stopped_trials_as_done',
+                    max_num_trials=5)
+    result = pg.tuning.poll_result(
+        'local_treating_early_stopped_trials_as_done')
+    self.assertLen(result.trials, 5)
+    self.assertEqual([t.status for t in result.trials], ['COMPLETED'] * 5)
+    self.assertEqual([t.infeasible for t in result.trials],
+                     [True, True, False, False, False])
+    final_rewards = [t.final_measurement.reward if t.final_measurement else 0
+                     for t in result.trials]
+    self.assertEqual(final_rewards, [0.0, 0.0, 3.2, 0.64, 0.64])
 
   def test_tune_with_per_trial_early_stopping(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
