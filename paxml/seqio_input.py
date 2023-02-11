@@ -289,7 +289,7 @@ def process_outputs(
          if not isinstance(v, seqio.metrics.MetricValue) else v
       for k, v in merged_seqio_metrics.items()
   }
-  logger(task_name=inp.mixture_or_task.name, step=step,
+  logger(task_name=inp.mixture_or_task_inst.name, step=step,
          metrics=merged_seqio_metrics, dataset=None, inferences=None,
          targets=None)
 
@@ -454,11 +454,11 @@ class SeqIOInput(base_input.BaseInput):
       raise ValueError('deterministic_input is not supported')
 
   def _validate_eval_task(self):
-    assert isinstance(self.mixture_or_task, seqio.Task)
+    assert isinstance(self.mixture_or_task_inst, seqio.Task)
     p = self.hparams
     # weights_on_targets_only must be true if computing scoring metric fns and
     # using LanguageModelFeatures as feature converter.
-    if (self.mixture_or_task.score_metric_fns
+    if (self.mixture_or_task_inst.score_metric_fns
         and isinstance(p.feature_converter, LanguageModelFeatures)
         and not p.feature_converter.weights_on_targets_only):
       raise ValueError(
@@ -492,7 +492,7 @@ class SeqIOInput(base_input.BaseInput):
     self._shard_info = shard_info
     self._validate_deterministic()
 
-    if not p.is_training and isinstance(self.mixture_or_task, seqio.Task):
+    if not p.is_training and isinstance(self.mixture_or_task_inst, seqio.Task):
       self._validate_eval_task()
 
     if p.eval_loop_num_batches is None and p.repeat:
@@ -507,7 +507,7 @@ class SeqIOInput(base_input.BaseInput):
     return False
 
   @property
-  def shuffle(self) -> bool:
+  def should_shuffle(self) -> bool:
     """Indicates whether this SeqIOInput shuffles the data or not."""
     p = self.hparams
     if p.shuffle is None:
@@ -515,7 +515,7 @@ class SeqIOInput(base_input.BaseInput):
     return p.shuffle
 
   @property
-  def repeat(self) -> bool:
+  def should_repeat(self) -> bool:
     """Indicates whether this SeqIOInput repeats the data or not."""
     p = self.hparams
     if p.repeat is None:
@@ -523,7 +523,7 @@ class SeqIOInput(base_input.BaseInput):
     return p.repeat
 
   @property
-  def mixture_or_task(self) -> Union[seqio.Task, seqio.Mixture]:
+  def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task_inst
 
   def _get_num_eval_examples(self) -> int:
@@ -546,11 +546,11 @@ class SeqIOInput(base_input.BaseInput):
     p = self.hparams
     logging.info(
         "Initializing dataset for task '%s' with a per host batch size of %d "
-        'and a seed of %s', self.mixture_or_task.name, p.batch_size,
+        'and a seed of %s', self.mixture_or_task_inst.name, p.batch_size,
         p.input_random_seed)
     ds = self._get_backing_ds(
-        shuffle=self.shuffle,
-        num_epochs=-1 if self.repeat else 1,
+        shuffle=self.should_shuffle,
+        num_epochs=-1 if self.should_repeat else 1,
         shard_info=self._shard_info)
     ds = self._pad_to_batch_size(ds)
     ds = ds.batch(
@@ -587,7 +587,7 @@ class SeqIOInput(base_input.BaseInput):
       shard_info = seqio.ShardInfo(
           index=host_idx, num_shards=p.num_infeed_hosts
       )
-      ds_shard = self.mixture_or_task.get_dataset(
+      ds_shard = self.mixture_or_task_inst.get_dataset(
           sequence_length={'inputs': inputs_length,
                            'targets': targets_length},
           split=p.split_name,
@@ -666,7 +666,7 @@ class SeqIOInput(base_input.BaseInput):
       self, ids: pytypes.NpTensor,
       lengths: Union[pytypes.NpTensor, Sequence[pytypes.NpTensor]],
       key: Optional[str] = None) -> Sequence[str]:
-    features = self.mixture_or_task.output_features
+    features = self.mixture_or_task_inst.output_features
     if key is None:
       vocab = features['targets'].vocabulary
     elif key not in ['src', 'tgt']:
@@ -690,7 +690,7 @@ class SeqIOInput(base_input.BaseInput):
                       num_epochs: int,
                       shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
     p = self.hparams
-    ds = self.mixture_or_task.get_dataset(
+    ds = self.mixture_or_task_inst.get_dataset(
         sequence_length=p.task_feature_lengths,
         split=p.split_name,
         shuffle=shuffle,
@@ -748,7 +748,7 @@ class SeqIOInput(base_input.BaseInput):
     if (p.is_training or
         not p.reset_for_eval or
         not p.eval_auto_pad or
-        self.repeat):
+        self.should_repeat):
       return ds
 
     # p.reset_for_eval=True: We are running eval over exactly one epoch.
@@ -852,15 +852,15 @@ class SeqIOInput(base_input.BaseInput):
         ), '"inputs" field is required but not found'
         inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
       key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
-      t = _get_targets_str(example, self.mixture_or_task)
-      targets[key].append(self.mixture_or_task.postprocess_fn(
+      t = _get_targets_str(example, self.mixture_or_task_inst)
+      targets[key].append(self.mixture_or_task_inst.postprocess_fn(
           t, example=example, is_target=True))
       examples[key].append(example)
 
     # In case the prefix returned by the model are prefixes of the keys
     # re-constructed here. This can sometimes be needed due to truncation of
     # the original key during input processing.
-    _update_keys(answers, targets, self.mixture_or_task.name)
+    _update_keys(answers, targets, self.mixture_or_task_inst.name)
 
     # Construct (decode output, seqio target) lists by joining on seqio's
     # detok(tok(features['inputs'])[:task_feature_lengths['inputs']])).
@@ -875,7 +875,7 @@ class SeqIOInput(base_input.BaseInput):
       seqio_postprocessed_predictions = []
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
-        prediction = self.mixture_or_task.postprocess_fn(
+        prediction = self.mixture_or_task_inst.postprocess_fn(
             answer, example=e, is_target=False)
         predictions_list.append(prediction)
         seqio_postprocessed_predictions.append(prediction)
@@ -907,10 +907,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = examples[k][0]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task.postprocess_fn(
+      answer_processed = self.mixture_or_task_inst.postprocess_fn(
           answer, example=e, is_target=False)
-      target = _get_targets_str(e, self.mixture_or_task)
-      target_processed = self.mixture_or_task.postprocess_fn(
+      target = _get_targets_str(e, self.mixture_or_task_inst)
+      target_processed = self.mixture_or_task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
@@ -990,13 +990,13 @@ class SeqIOInput(base_input.BaseInput):
       answer = ans[_LM_DECODER_OUT_KEY]
 
       # postprocess model's decoder output
-      prediction = self.mixture_or_task.postprocess_fn(
+      prediction = self.mixture_or_task_inst.postprocess_fn(
           answer, example=targets[k], is_target=False)
       predictions_list.append(prediction)
 
       # postprocess target example for target decoder output str
-      t = _get_targets_str(targets[k], self.mixture_or_task)
-      seqio_target = self.mixture_or_task.postprocess_fn(
+      t = _get_targets_str(targets[k], self.mixture_or_task_inst)
+      seqio_target = self.mixture_or_task_inst.postprocess_fn(
           t, example=targets[k], is_target=True)
       targets_list.append(seqio_target)
 
@@ -1012,10 +1012,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = targets[k]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task.postprocess_fn(
+      answer_processed = self.mixture_or_task_inst.postprocess_fn(
           answer, example=e, is_target=False)
-      target = _get_targets_str(e, self.mixture_or_task)
-      target_processed = self.mixture_or_task.postprocess_fn(
+      target = _get_targets_str(e, self.mixture_or_task_inst)
+      target_processed = self.mixture_or_task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
@@ -1074,7 +1074,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       prefix_targets_list = []
       for e in targets[k]:
-        target_post = self.mixture_or_task.postprocess_fn(
+        target_post = self.mixture_or_task_inst.postprocess_fn(
             target, example=e, is_target=True)
         targets_list.append(target_post)
         prefix_targets_list.append(target_post)
@@ -1124,7 +1124,7 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
-      target_post = self.mixture_or_task.postprocess_fn(
+      target_post = self.mixture_or_task_inst.postprocess_fn(
           score, example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
@@ -1187,7 +1187,7 @@ class SeqIOInput(base_input.BaseInput):
     # specifically the prediction string has key='decoded_substr'.
     # Also assumes inputs and targets field names are 'inputs' and 'targets'.
     p = self.hparams
-    task = self.mixture_or_task
+    task = self.mixture_or_task_inst
     if not isinstance(task, seqio.Task):
       logging.warning('compute_metrics is only supported for seqio.Tasks, '
                       'got %s for %s.', type(task), p.name)
@@ -1270,7 +1270,7 @@ class SeqIOInput(base_input.BaseInput):
       metric name to a float.
     """
     p = self.hparams
-    task = self.mixture_or_task
+    task = self.mixture_or_task_inst
     if not isinstance(task, seqio.Task):
       logging.warning(
           'compute_metrics_eval() is only supported for seqio.Tasks, '

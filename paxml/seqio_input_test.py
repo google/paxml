@@ -575,7 +575,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.eval_metrics_targets_length = 3
     p.reset_for_eval = True
     inp = instantiate(p)
-    vocab = inp.mixture_or_task.output_features['inputs'].vocabulary
+    vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
     vocab.decode = mock.Mock(return_value='blahhh')
     m = inp.compute_metrics(decoder_outputs)
     self.assertLen(m, 1)
@@ -604,7 +604,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.use_enumeration = False
     p.eval_loop_num_batches = 2
     inp = instantiate(p)
-    vocab = inp.mixture_or_task.output_features['inputs'].vocabulary
+    vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
     vocab.decode = mock.Mock(return_value='blahhh')
     m = inp.compute_metrics(decoder_outputs)
     metric_output = m[0]['accuracy']
