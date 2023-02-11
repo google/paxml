@@ -1507,8 +1507,8 @@ class Partitioner(metaclass=abc.ABCMeta):
   #   train_state: The current TrainState.
   #   prng_key: The PRNGKey.
   #   inputs: Inputs drawn from the input pipeline.
-  #   unpadded_global_batch_size: The unpadded size of global batch, and the
-  #     padding is on the right side of each input.
+  #   fprop_dtype: Fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+  #   var_weight_hparams: A pytree of WeightHParams for the model variables.
   #
   # Returns:
   #   (new_train_state, ...) if is_eval==False, or just (...) otherwise, where

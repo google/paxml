@@ -742,21 +742,18 @@ class _PmapEvalRunner:
     if not self._eval_input_p:
       return
 
-    def eval_step(mdl_states, prng_key, inputs):
-      return trainer_lib.eval_step_single_learner(
-          self._jax_task,
-          mdl_states,
-          prng_key,
-          inputs,
-          fprop_dtype=self._jax_task.model.fprop_dtype)
-
     num_devices = jax.local_device_count()
     prng_key, eval_key = jax.random.split(prng_key)
     self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
     logging.info('eval prng_seed: %s', self._eval_prng_seed)
 
-    self._pmap_eval_step = jax.pmap(
-        eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
+    eval_step, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+    self._pmap_eval_step, _ = self._partitioner.partition(
+        # Note inputs_shape_dtype is not used by pmap.
+        eval_step,
+        self._partitioner.train_inputs_shape_dtype,
+        is_eval,
+    )
 
   def run_one_step(
       self,

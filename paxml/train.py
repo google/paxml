@@ -65,7 +65,6 @@ TrainState = train_states.TrainState
 
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
-PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 _INIT_TIME = time.time()
 _READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
@@ -768,18 +767,14 @@ def train_and_evaluate_pmap(
   train_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.TRAIN)
   assert not is_eval
   p_train_step, _ = partitioner.partition(
-      train_step_fn,
-      inputs_shape_dtype,  # TODO(laigd): this is not needed by pmap.
-      is_eval,
+      train_step_fn, inputs_shape_dtype, is_eval
   )
 
-  fprop_dtype = task_p.model.fprop_dtype
-
-  def eval_step(eval_states, prng_key, inputs):
-    return trainer_lib.eval_step_single_learner(
-        jax_task, eval_states, prng_key, inputs, fprop_dtype=fprop_dtype)
-
-  p_eval_step = jax.pmap(eval_step, axis_name=PMAP_PARALLEL_AXIS_NAME)
+  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+  assert is_eval
+  p_eval_step, _ = partitioner.partition(
+      eval_step_fn, inputs_shape_dtype, is_eval
+  )
   p_eval_steps = [p_eval_step] * len(eval_input_p)
 
   is_vars_replicated = True
