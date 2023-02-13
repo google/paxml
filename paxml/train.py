@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
+from statistics import mean
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -1147,6 +1148,8 @@ def _train_and_evaluate_common(
         prng_key, decode_input_p
     )
 
+  num_sub_batches = getattr(task_p.train.learner.optimizer, "num_sub_batches", 1)
+
   logging.info('Training loop starting...')
 
   with _SummaryContextManager(
@@ -1169,12 +1172,15 @@ def _train_and_evaluate_common(
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
         log_interval_steps=_train_log_interval_steps(train_p),
         is_async=bool(train_p.device_sync_interval_steps),
-        name='training')
+        name='training',
+        global_bs=train_unpadded_global_batch_size,
+        num_sub_batches=num_sub_batches)
     eval_summary_handler = summary_utils.SummaryHandler(
         eval_summary_writer,
         train_p.summary_interval_steps,
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
-        name='eval')
+        name='eval',
+        global_bs=train_unpadded_global_batch_size)
 
     summary_last_time = time.time()
     summary_last_step = None
@@ -1213,27 +1219,37 @@ def _train_and_evaluate_common(
             'num_train_step (`%d`).', step_i, train_p.num_train_steps)
         break
 
-      # Get new model inputs
-      logging.debug('  Retrieving inputs.')
-      model_inputs = train_input_pipeline.get_next_padded()
-      model_inputs = partitioner.preprocess_inputs(
-          train_input_pipeline, model_inputs, train_input_pspec
-      )
-      logging.debug('  Retrieved inputs.')
+      loss_tracker = []
+      for ga_step in range(num_sub_batches):
+        
+        # Get new model inputs
+        logging.debug('  Retrieving inputs.')
+        model_inputs = train_input_pipeline.get_next_padded()
+        model_inputs = partitioner.preprocess_inputs(
+            train_input_pipeline, model_inputs, train_input_pspec
+        )
+        logging.debug('  Retrieved inputs.')
 
-      do_profile = train_p.profiler_capture_step is not None
-      if (do_profile and
-          step_i - initial_step == train_p.profiler_capture_step):
-        profiler.capture_async()
+        do_profile = train_p.profiler_capture_step is not None
+        if (do_profile and
+            step_i - initial_step == train_p.profiler_capture_step):
+          profiler.capture_async()
 
-      logging.debug('  Performing train_step().')
-      with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-        with py_utils.timeit() as train_period:
-          (partitioned_train_state, loss, weighted_scalars, per_example_out,
-           summary_tensors) = p_train_step(partitioned_train_state,
-                                           train_prng_seed, model_inputs)
+        logging.debug('  Performing train_step().')
+        with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
+          with py_utils.timeit() as train_period:
+            (partitioned_train_state, loss, weighted_scalars, per_example_out,
+             summary_tensors) = p_train_step(partitioned_train_state,
+                                             train_prng_seed, model_inputs)
+        loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
+        loss_tracker.append(loss.item())
+
       logging.debug('  Completed train_step() in %f seconds.',
                     train_period.elapsed)
+
+      loss = mean(loss_tracker)
+      loss_tracker.clear()
+
       if step_i == initial_step:
         first_step_completion_time = time.time()
 
@@ -1257,7 +1273,7 @@ def _train_and_evaluate_common(
         # a gap between steps.
         new_step_i = int(
             py_utils.maybe_unreplicate_for_fully_replicated(
-                partitioned_train_state.step))
+                partitioned_train_state.step)/num_sub_batches)
         steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
                                                summary_last_step)
         logging.info('steps/sec: %f', steps_per_sec)

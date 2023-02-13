@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,17 +18,29 @@ r"""Utilities to set up JAX global configs."""
 from typing import Optional
 
 from absl import logging
+import dataclasses
 import jax
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
+@dataclasses.dataclass
+class JaxDistributedOptions:
+  coordinator_address: int
+  num_processes: int
+  process_id: int
 
 def setup_jax(globally_use_hardware_rng: bool,
               jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
               jax_enable_checks: bool,
               jax_traceback_filtering_option: str = 'auto',
-              should_initialize_jax_distributed: bool = False) -> None:
+              should_initialize_jax_distributed: bool = False,
+              should_log_compiles: bool = False, 
+              jax_distributed_options: Optional[JaxDistributedOptions] = None,) -> None:
   """Setups JAX and logs information about this job."""
+
+  if should_log_compiles:
+    jax.config.update('jax_log_compiles', True)
+
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
   # it unavailable to JAX.
   tf.config.experimental.set_visible_devices([], 'GPU')
@@ -54,7 +66,12 @@ def setup_jax(globally_use_hardware_rng: bool,
     logging.info('Using JAX XLA backend %s', jax_xla_backend)
 
   if should_initialize_jax_distributed:
-    jax.distributed.initialize()
+    if jax_distributed_options:
+      jax.distributed.initialize(jax_distributed_options.coordinator_address, 
+                                 jax_distributed_options.num_processes,
+                                 jax_distributed_options.process_id)
+    else:
+      jax.distributed.initialize()
 
   logging.info('JAX process: %d / %d', jax.process_index(), jax.process_count())
   logging.info('JAX devices: %r', jax.devices())

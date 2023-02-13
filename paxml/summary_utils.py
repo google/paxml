@@ -371,7 +371,9 @@ def write_summary_entry(summary_writer: SummaryWriter,
                         loss: JTensor,
                         weighted_scalars_list: WeightedScalarsList,
                         summary_tensors: NestedJTensor,
-                        steps_per_sec: Optional[float] = None) -> None:
+                        steps_per_sec: Optional[float] = None,
+                        global_bs: Optional[int] = None,
+                        num_sub_batches: Optional[int] = 1) -> None:
   """Writes a summary entry into the provided SummaryWriter."""
   work_unit = platform.work_unit()
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
@@ -391,6 +393,12 @@ def write_summary_entry(summary_writer: SummaryWriter,
       status_msg += f', steps/sec {steps_per_sec}'
       write_summary_tensor(step_i, 'Steps/sec', steps_per_sec,
                            SummaryType.AGGREGATE_SCALAR)
+        
+      if global_bs is not None:
+        seqs_per_sec = num_sub_batches*global_bs*steps_per_sec
+        status_msg += f', seqs/sec {seqs_per_sec}'
+        write_summary_tensor(step_i, 'Seqs/sec', seqs_per_sec,
+                             SummaryType.AGGREGATE_SCALAR)
     logging.info('Metrics values at step %d:', step_i)
     logging.info('  loss=%f', mean_loss)
     for key, value_lst in weighted_scalars_list.items():
@@ -465,7 +473,9 @@ class SummaryHandler:
                accumulate_interval_steps: Optional[int] = None,
                log_interval_steps: Optional[int] = None,
                is_async: bool = False,
-               name: str = '') -> None:
+               name: str = '',
+               global_bs: int = None,
+               num_sub_batches: int = 1) -> None:
     """Constructor.
 
     Args:
@@ -492,6 +502,8 @@ class SummaryHandler:
     self._weighted_scalars_list = collections.defaultdict(list)
     self._summary_tensors = collections.defaultdict(list)
     self._steps_per_sec = []
+    self.global_bs = global_bs
+    self.num_sub_batches = num_sub_batches
 
     if is_async:
       self._summary_pool = concurrent.futures.ThreadPoolExecutor(
@@ -663,4 +675,4 @@ class SummaryHandler:
 
     write_summary_entry(self._summary_writer, self._latest_step, losses,
                         self._weighted_scalars_list, self._summary_tensors,
-                        steps_per_sec)
+                        steps_per_sec, self.global_bs, self.num_sub_batches)
