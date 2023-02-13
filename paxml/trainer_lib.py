@@ -755,7 +755,7 @@ def train_step_single_learner(
       (weighted_loss, mean_loss, loss_weight, aggregated_scalars,
        aggregated_summaries,
        per_example_output) = _maybe_aggregate_metrics_summaries(
-           jax_task.loss_aggregator, weighted_scalars, summary_tensors,
+           jax_task.loss_aggregator_inst, weighted_scalars, summary_tensors,
            per_example_output)
       # metrics and summary_tensors no longer needed.
       del weighted_scalars
@@ -933,7 +933,7 @@ def eval_step_single_learner(
     per_example_out.update(enum_keys)
     (_, mean_loss, _, aggregated_scalars, aggregated_summaries,
      per_example_out) = _maybe_aggregate_metrics_summaries(
-         jax_task.loss_aggregator, weighted_scalars, summary_tensors,
+         jax_task.loss_aggregator_inst, weighted_scalars, summary_tensors,
          per_example_out)
 
     # weighted_scalars and summary_tensors no longer needed.

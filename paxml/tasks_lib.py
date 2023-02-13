@@ -1025,7 +1025,7 @@ class SingleTask(base_task.BaseTask):
     return self._metrics_aggregator
 
   @property
-  def loss_aggregator(self) -> base_metrics.LossAggregator:
+  def loss_aggregator_inst(self) -> base_metrics.LossAggregator:
     return self._loss_aggregator_inst
 
   @property
