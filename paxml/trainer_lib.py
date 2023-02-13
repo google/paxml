@@ -1654,7 +1654,6 @@ class _PjitPartitioner(Partitioner):
       self,
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
-      reshard_inputs: bool,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       init_is_eval: bool = False,
       job_log_dir: Optional[epath.Path] = None,
@@ -1664,8 +1663,6 @@ class _PjitPartitioner(Partitioner):
     Args:
       jax_task: The task which is an instance of tasks.SingleTask.
       init_key: PRNGKey for initializing the model variables.
-      reshard_inputs: Whether to reshard model inputs before running the
-        partitioned function. Only applicable for pjit.
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. This is needed
         when always_use_train_for_model_init is True.
@@ -1677,7 +1674,6 @@ class _PjitPartitioner(Partitioner):
     super().__init__(
         jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
     )
-    self._reshard_inputs = reshard_inputs
     self._mesh_names = model_p.mesh_axis_names
 
     # Create global mesh.
@@ -1746,11 +1742,9 @@ class _PjitPartitioner(Partitioner):
       partition_specs: Optional[NestedPartitionSpec],
   ) -> NestedJTensor:
     """Preprocess the input batch before using it."""
-    if self._reshard_inputs or input_pipeline.hparams.experimental_remote_input:
-      padded_inputs = input_pipeline.reshard_for_spmd(
-          padded_inputs, self.global_mesh, partition_specs
-      )
-    return padded_inputs
+    return input_pipeline.reshard_for_spmd(
+        padded_inputs, self.global_mesh, partition_specs
+    )
 
   def get_train_state_metadata(
       self,
@@ -2067,7 +2061,6 @@ class _AutoShardingPjitPartitioner(_PjitPartitioner):
       self,
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
-      reshard_inputs: bool,
       auto_sharding_info: AutoShardingInfo,
       train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
       init_is_eval: bool = False,
@@ -2078,8 +2071,6 @@ class _AutoShardingPjitPartitioner(_PjitPartitioner):
     Args:
       jax_task: The task which is an instance of tasks.SingleTask.
       init_key: PRNGKey for initializing the model variables.
-      reshard_inputs: Whether to reshard model inputs before running the
-        partitioned function. Only applicable for pjit.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
       train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
@@ -2090,12 +2081,7 @@ class _AutoShardingPjitPartitioner(_PjitPartitioner):
       job_log_dir: Directory for the job logs.
     """
     super().__init__(
-        jax_task,
-        init_key,
-        reshard_inputs,
-        train_inputs_shape_dtype,
-        init_is_eval,
-        job_log_dir,
+        jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
     )
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
@@ -2275,7 +2261,6 @@ def create_partitioner(
     init_key: PRNGKey,
     train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     init_is_eval: bool = False,
-    reshard_inputs: bool = False,
     auto_sharding_mode: Optional[RunningMode] = None,
     job_log_dir: Optional[epath.Path] = None,
 ) -> Partitioner:
@@ -2288,8 +2273,6 @@ def create_partitioner(
       model.init, for use in getting params of model variables.
     init_is_eval: Whether it should set is_eval=True when running
       abstract_init_with_metadata.
-    reshard_inputs: Whether to reshard model inputs before running the
-      partitioned function. Only applicable for pjit.
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
       function to use for auto-sharding (when pjit is used). If None, it means
       to disable auto-sharding.
@@ -2317,7 +2300,6 @@ def create_partitioner(
       partitioner = _AutoShardingPjitPartitioner(
           jax_task,
           init_key,
-          reshard_inputs,
           auto_sharding_info,
           train_inputs_shape_dtype,
           init_is_eval,
@@ -2327,7 +2309,6 @@ def create_partitioner(
       partitioner = _PjitPartitioner(
           jax_task,
           init_key,
-          reshard_inputs,
           train_inputs_shape_dtype,
           init_is_eval,
           job_log_dir,

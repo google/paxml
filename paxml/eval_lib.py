@@ -655,13 +655,11 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
       init_is_eval=True,
-      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -1111,13 +1109,11 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
       init_is_eval=True,
-      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -2202,12 +2198,10 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       task,
       prng_key,
       train_input_specs,
-      reshard_inputs=reshard_inputs,
       job_log_dir=job_log_dir,
   )
   if not task_p.train.always_use_train_for_model_init:
