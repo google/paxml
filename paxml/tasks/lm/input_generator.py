@@ -365,7 +365,7 @@ class TextInput(base_input.BaseInput):
     self._iterator = iter(self._dataset)
 
   @property
-  def num_samples(self):
+  def computed_num_samples(self):
     """Number of samples contained in the dataset."""
     p = self.hparams
     if self._actual_num_samples is not None:
@@ -381,7 +381,7 @@ class TextInput(base_input.BaseInput):
     """Smallest multiple of global batch size that covers the entire data."""
     p = self.hparams
     n = p.num_infeed_hosts * p.batch_size
-    num_global_batches = (self.num_samples + n - 1) // n
+    num_global_batches = (self.computed_num_samples + n - 1) // n
     return num_global_batches * n
 
   def ids_to_strings(self, ids: pytypes.NpTensor,
@@ -424,7 +424,7 @@ class TextInput(base_input.BaseInput):
     lines = tf.data.TextLineDataset(p.input_file)
     if p.bytes_repr:
       lines = self._remove_bytes_repr(lines)
-    num_repeat = self._num_to_truncate() // self.num_samples + 1
+    num_repeat = self._num_to_truncate() // self.computed_num_samples + 1
     lines = lines.repeat(num_repeat).take(self._num_to_truncate())
     lines = lines.shard(
         num_shards=p.num_infeed_hosts, index=p.infeed_host_index)
