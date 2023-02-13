@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -64,7 +64,8 @@ class LearnersTest(test_utils.TestCase):
         grad2=jnp.array([g2], dtype=jnp.float32))
 
     with base_layer.JaxContext.new_context():
-      transformed_grads, _ = learner_instance.scale_gradients(grads)
+      grad_norm, valid_step = learner_instance.get_grad_norm_valid_step(grads)
+      transformed_grads = learner_instance.scale_gradients(grads, grad_norm)
 
     global_norm = np.linalg.norm([g1a, g1b, g2])
     local_norm1 = np.linalg.norm([g1a, g1b])
