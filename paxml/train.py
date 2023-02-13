@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ from etils import epath
 import jax
 from jax import monitoring
 from jax.experimental import pjit
+import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import eval_lib
@@ -519,6 +520,9 @@ def train_and_evaluate(
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+
+  # in case the user passed in a string dtype, convert it to an actual dtype
+  task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
 
   input_p = experiment_config.datasets()
   # Note that we modify input params below with runtime information, therefore
