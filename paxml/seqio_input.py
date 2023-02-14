@@ -424,7 +424,7 @@ class SeqIOInput(base_input.BaseInput):
     deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
         sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
-    use_enumeration: bool = False
+    use_enumeration: bool = True
     annotate_padding_fields: bool = False
 
   def __init__(self, hparams: ParamsT) -> None:
@@ -1216,13 +1216,17 @@ class SeqIOInput(base_input.BaseInput):
 
     answers = dict(decoder_outputs)
     if p.use_enumeration:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_enum(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_enum(
+              answers, verbose_entries, plain_text_output
+          )
+      )
     else:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_prefix(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_prefix(
+              answers, verbose_entries, plain_text_output
+          )
+      )
 
     metrics = []
     for fn in task.predict_metric_fns:
@@ -1682,7 +1686,7 @@ def get_eval_hparams_for_seqio(
     split_name: Union[str, Callable[[str], str]] = 'validation',
     feature_converter: Optional[seqio.FeatureConverter] = None,
     num_infeed_hosts: int = 0,
-    use_enumeration: bool = False,
+    use_enumeration: bool = True,
     use_cached: bool = False,
     shuffle: bool = None,
     require_metric_fns: bool = True,

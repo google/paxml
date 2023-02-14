@@ -17,7 +17,6 @@
 
 from typing import Any, Callable, Mapping, Optional, Sequence
 from unittest import mock
-
 from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
@@ -564,7 +563,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     })
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    decoder_outputs = [('blahh', {'decoded_substr': 'whatever'})]
     p = seqio_input.SeqIOInput.HParams()
     p.mixture_name = task_name
     p.split_name = 'validation'
@@ -577,10 +575,18 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     inp = instantiate(p)
     vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
     vocab.decode = mock.Mock(return_value='blahhh')
+    enumerated_ds = seqio_input._enumerate_dataset(
+        ds, p.is_training, shard_info=None
+    )
+    enumerated_iter = enumerated_ds.as_numpy_iterator()
+    decoder_outputs = []
+    for _ in range(len(ds)):
+      ex = next(enumerated_iter)
+      enum_id = py_utils.get_enumeration_id(ex)
+      decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
     m = inp.compute_metrics(decoder_outputs)
     self.assertLen(m, 1)
-    self.assertEqual(m[0]['accuracy'], ['ex target', 'whatever'])
-    vocab.decode.assert_called_once_with([7, 8, 1])
+    self.assertEqual(m[0]['accuracy'], ['ex target', 'ex pred'])
 
   def test_compute_metrics_eval_num_batches(self):
     task_name = 'compute_metrics_eval_num_batches'
@@ -591,7 +597,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     }).repeat(6)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    decoder_outputs = [('blahh', {'decoded_substr': 'whatever'})]
     p = seqio_input.SeqIOInput.HParams()
     p.mixture_name = task_name
     p.split_name = 'validation'
@@ -601,16 +606,33 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.is_training = False
     p.eval_metrics_targets_length = 3
     p.reset_for_eval = False
-    p.use_enumeration = False
-    p.eval_loop_num_batches = 2
+    p.eval_loop_num_batches = 3
     inp = instantiate(p)
     vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
     vocab.decode = mock.Mock(return_value='blahhh')
+    enumerated_ds = seqio_input._enumerate_dataset(
+        ds, p.is_training, shard_info=None
+    )
+    enumerated_iter = enumerated_ds.as_numpy_iterator()
+    decoder_outputs = []
+    for _ in range(len(ds)):
+      ex = next(enumerated_iter)
+      enum_id = py_utils.get_enumeration_id(ex)
+      decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
     m = inp.compute_metrics(decoder_outputs)
     metric_output = m[0]['accuracy']
-    self.assertLen(metric_output, 4)
-    self.assertEqual(metric_output,
-                     ['ex target', 'ex target', 'whatever', 'whatever'])
+    self.assertLen(metric_output, 6)
+    self.assertEqual(
+        metric_output,
+        [
+            'ex target',
+            'ex target',
+            'ex target',
+            'ex pred',
+            'ex pred',
+            'ex pred',
+        ],
+    )
 
   def test_compute_metrics_eval(self):
     task_name = 'compute_metrics_eval'
@@ -634,23 +656,21 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.is_training = False
     p.reset_for_eval = True
     inp = instantiate(p)
-    labels = np.array([[7, 8, 1, 3, 9, 0], [15, 16, 17, 1, 29, 1]],
-                      dtype=np.int32)
     scores = np.array([1.0, 2.5], dtype=np.float32)
+    enumerated_ds = seqio_input._enumerate_dataset(
+        ds, p.is_training, shard_info=None
+    )
+    enumerated_iter = enumerated_ds.as_numpy_iterator()
     eval_output = []
-    for label, score in zip(labels, scores):
-      eval_output.append((None, py_utils.NestedMap(labels=label, scores=score)))
+    for i in range(len(x)):
+      ex = next(enumerated_iter)
+      enum_id = py_utils.get_enumeration_id(ex)
+      ex.update({'scores': scores[i]})
+      eval_output.append((enum_id, ex))
     m = inp.compute_metrics_eval(eval_output)
     self.assertLen(m, 1)
     self.assertEqual(m[0]['total_score'], 3.5)
 
-    # length is wrong: does not match feature converter.
-    labels2 = np.array([[7, 8, 1, 3, 9], [15, 16, 17, 1, 29]], dtype=np.int32)
-    eval_output = []
-    for label, score in zip(labels2, scores):
-      eval_output.append((None, py_utils.NestedMap(labels=label, scores=score)))
-    with self.assertRaisesRegex(ValueError, 'Example not found'):
-      inp.compute_metrics_eval(eval_output)
 
   def _setup_seqio_test_registry(self,
                                  num_examples=10,
