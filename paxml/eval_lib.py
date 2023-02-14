@@ -280,7 +280,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   ) -> Tuple[
       train_states.TrainState,
       trainer_lib.TrainStateMetadata,
-      Sequence[Callable[..., Any]],
+      Sequence[trainer_lib.Partitioner.PartitionedStepFn],
       Sequence[NestedPartitionSpec],
   ]:
     """Gets a partitioned model states and the step function."""
@@ -477,7 +477,7 @@ def _create_checkpointer(
 def run_eval_loop_over_test_splits(
     partitioner: trainer_lib.Partitioner,
     num_steps: List[int],
-    eval_steps: Sequence[Callable[[NestedJTensor], Any]],
+    eval_steps: Sequence[Callable[[NestedJTensor, Optional[int]], Any]],
     summary_writers: List[SummaryWriter],
     step: int,
     model_inputs: List[base_input.BaseInput],
@@ -547,8 +547,17 @@ def run_eval_loop_over_test_splits(
           eval_inputs_pspecs[split] if eval_inputs_pspecs else None,
       )
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
-      (eval_loss, eval_metrics, per_example_output,
-       eval_summary_tensors) = eval_steps[split](eval_inputs)
+      (
+          eval_loss,
+          eval_metrics,
+          per_example_output,
+          eval_summary_tensors,
+      ) = eval_steps[split](
+          eval_inputs,
+          model_inputs[split].get_global_batch_size(
+              model_inputs[split].hparams
+          ),
+      )
 
       logging.info('Finished eval step on input batch %d for %s',
                    step_num, model_inputs[split].hparams.name)
@@ -768,10 +777,14 @@ class _PmapEvalRunner:
         py_utils.maybe_unreplicate_for_fully_replicated(
             replicated_model_states.step))
 
-    def eval_step_fn(inputs):
+    def eval_step_fn(inputs, unpadded_global_batch_size):
       # TODO(pax): shall we eval all sub-models during eval?
-      return self._pmap_eval_step(replicated_model_states, self._eval_prng_seed,
-                                  inputs)
+      return self._pmap_eval_step(
+          replicated_model_states,
+          self._eval_prng_seed,
+          inputs,
+          unpadded_global_batch_size,
+      )
 
     # Run the eval loop.
     return run_eval_loop_over_test_splits(
@@ -1709,7 +1722,7 @@ def partition_decode_once_spmd_model(
     prng_key: JTensor,
     decode_step_fns: Sequence[
         Callable[
-            [NestedJTensor, JTensor, NestedJTensor],
+            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
             Tuple[Tuple[NestedMap, NestedMap], NestedMap],
         ]
     ],
@@ -1767,7 +1780,7 @@ def decode_once_spmd_model(
     prng_key: JTensor,
     decode_step_fns: Sequence[
         Callable[
-            [NestedJTensor, JTensor, NestedJTensor],
+            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
             Tuple[Tuple[NestedMap, NestedMap], NestedMap],
         ]
     ],
@@ -1866,8 +1879,11 @@ def decode_once_spmd_model(
       batch = partitioner.preprocess_inputs(
           inputs[split], batch, inputs_partition_specs[split]
       )
-      (weighted_scalars, out,
-       updated_metrics), updated_vars = spmd_decode_step_fns[split](batch)
+      (weighted_scalars, out, updated_metrics), updated_vars = (
+          spmd_decode_step_fns[split](
+              batch, inputs[split].get_global_batch_size(inputs[split].hparams)
+          )
+      )
 
       # Cross host synchronization happens at this point.
       py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')

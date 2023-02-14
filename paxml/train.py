@@ -603,6 +603,10 @@ class _PeekableInput:
   def hparams(self):
     return self._inp.hparams
 
+  @classmethod
+  def get_global_batch_size(cls, hparams: base_input.BaseInput.HParams) -> int:
+    return hparams.cls.get_global_batch_size(hparams)
+
   def get_next_padded(self):
     if self._peek is None:
       return self._inp.get_next_padded()
@@ -738,13 +742,7 @@ def train_and_evaluate_pmap(
       prng_key,
       init_key,
       train_input_pipeline,
-      train_unpadded_global_batch_size,
-  ) = _create_task_and_states(
-      task_p,
-      train_input_p,
-      job_log_dir,
-      checkpointer,
-  )
+  ) = _create_task_and_states(task_p, train_input_p, job_log_dir, checkpointer)
   assert not partitioner.global_mesh
   inputs_shape_dtype = partitioner.train_inputs_shape_dtype
 
@@ -833,7 +831,6 @@ def train_and_evaluate_pmap(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated,
-      train_unpadded_global_batch_size,
       train_state_metadata,
       train_input_pipeline,
       train_input_pspec,
@@ -879,7 +876,6 @@ def train_and_evaluate_spmd_model(
       prng_key,
       init_key,
       train_input_pipeline,
-      train_unpadded_global_batch_size,
   ) = _create_task_and_states(
       task_p,
       train_input_p,
@@ -902,10 +898,7 @@ def train_and_evaluate_spmd_model(
   train_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.TRAIN)
   assert not is_eval
   p_train_step, inputs_pspecs = partitioner.partition(
-      train_step_fn,
-      inputs_shape_dtype,
-      is_eval,
-      train_unpadded_global_batch_size,
+      train_step_fn, inputs_shape_dtype, is_eval
   )
 
   # TODO(pax): Support auto-sharding for eval step. In this case, we would
@@ -915,11 +908,7 @@ def train_and_evaluate_spmd_model(
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
   assert is_eval
   p_eval_on_train_step, _ = partitioner.partition(
-      eval_step_fn,
-      inputs_shape_dtype,
-      is_eval,
-      # Use train_unpadded_global_batch_size since this is eval on train input.
-      unpadded_global_batch_size=train_unpadded_global_batch_size,
+      eval_step_fn, inputs_shape_dtype, is_eval
   )
 
   global_mesh = partitioner.global_mesh
@@ -1026,7 +1015,6 @@ def train_and_evaluate_spmd_model(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated,
-      train_unpadded_global_batch_size,
       train_state_metadata,
       train_input_pipeline,
       inputs_pspecs,
@@ -1055,9 +1043,6 @@ def _create_task_and_states(
       init_key,
       auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
-  )
-  train_unpadded_global_batch_size = train_input_p.cls.get_global_batch_size(
-      train_input_p
   )
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = _PeekableInput(instantiate(train_input_p))
@@ -1094,7 +1079,6 @@ def _create_task_and_states(
       prng_key,
       init_key,
       train_input_pipeline,
-      train_unpadded_global_batch_size,
   )
 
 
@@ -1113,7 +1097,6 @@ def _train_and_evaluate_common(
     job_log_dir,
     eval_prng_seed,
     is_vars_replicated,
-    train_unpadded_global_batch_size,
     train_state_metadata,
     train_input_pipeline,
     train_input_pspec,
@@ -1139,6 +1122,9 @@ def _train_and_evaluate_common(
     )
 
   logging.info('Training loop starting...')
+  train_unpadded_global_batch_size = train_input_pipeline.get_global_batch_size(
+      train_input_pipeline.hparams
+  )
 
   with _SummaryContextManager(
       job_log_dir, eval_input_p, decode_input_p,
@@ -1220,9 +1206,18 @@ def _train_and_evaluate_common(
       logging.debug('  Performing train_step().')
       with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
         with py_utils.timeit() as train_period:
-          (partitioned_train_state, loss, weighted_scalars, per_example_out,
-           summary_tensors) = p_train_step(partitioned_train_state,
-                                           train_prng_seed, model_inputs)
+          (
+              partitioned_train_state,
+              loss,
+              weighted_scalars,
+              per_example_out,
+              summary_tensors,
+          ) = p_train_step(
+              partitioned_train_state,
+              train_prng_seed,
+              model_inputs,
+              train_unpadded_global_batch_size,
+          )
       logging.debug('  Completed train_step() in %f seconds.',
                     train_period.elapsed)
       if step_i == initial_step:
@@ -1344,12 +1339,12 @@ def _train_and_evaluate_common(
                 train_input_pipeline, eval_inputs, train_input_pspec
             )
 
-            eval_on_train_step_fn = functools.partial(
-                p_eval_on_train_step,
+            loss, weighted_scalars, _, summary_tensors = p_eval_on_train_step(
                 eval_partitioned_train_state,
-                eval_prng_seed)
-            loss, weighted_scalars, _, summary_tensors = eval_on_train_step_fn(
-                eval_inputs)
+                eval_prng_seed,
+                eval_inputs,
+                train_unpadded_global_batch_size,
+            )
             logging.debug('  Completed eval_step() runs on training split.')
             if eval_summary_handler.process(step_i, loss, weighted_scalars,
                                             summary_tensors):
