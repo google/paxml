@@ -280,7 +280,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   ) -> Tuple[
       train_states.TrainState,
       trainer_lib.TrainStateMetadata,
-      Sequence[Callable[..., Any]],
+      Sequence[trainer_lib.Partitioner.PartitionedStepFn],
       Sequence[NestedPartitionSpec],
   ]:
     """Gets a partitioned model states and the step function."""
@@ -477,7 +477,7 @@ def _create_checkpointer(
 def run_eval_loop_over_test_splits(
     partitioner: trainer_lib.Partitioner,
     num_steps: List[int],
-    eval_steps: Sequence[Callable[[NestedJTensor], Any]],
+    eval_steps: Sequence[Callable[[NestedJTensor, Optional[int]], Any]],
     summary_writers: List[SummaryWriter],
     step: int,
     model_inputs: List[base_input.BaseInput],
@@ -547,8 +547,17 @@ def run_eval_loop_over_test_splits(
           eval_inputs_pspecs[split] if eval_inputs_pspecs else None,
       )
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
-      (eval_loss, eval_metrics, per_example_output,
-       eval_summary_tensors) = eval_steps[split](eval_inputs)
+      (
+          eval_loss,
+          eval_metrics,
+          per_example_output,
+          eval_summary_tensors,
+      ) = eval_steps[split](
+          eval_inputs,
+          model_inputs[split].get_global_batch_size(
+              model_inputs[split].hparams
+          ),
+      )
 
       logging.info('Finished eval step on input batch %d for %s',
                    step_num, model_inputs[split].hparams.name)
@@ -655,13 +664,11 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
       init_is_eval=True,
-      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -770,10 +777,14 @@ class _PmapEvalRunner:
         py_utils.maybe_unreplicate_for_fully_replicated(
             replicated_model_states.step))
 
-    def eval_step_fn(inputs):
+    def eval_step_fn(inputs, unpadded_global_batch_size):
       # TODO(pax): shall we eval all sub-models during eval?
-      return self._pmap_eval_step(replicated_model_states, self._eval_prng_seed,
-                                  inputs)
+      return self._pmap_eval_step(
+          replicated_model_states,
+          self._eval_prng_seed,
+          inputs,
+          unpadded_global_batch_size,
+      )
 
     # Run the eval loop.
     return run_eval_loop_over_test_splits(
@@ -1111,13 +1122,11 @@ def decode(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
       init_is_eval=True,
-      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
@@ -1713,7 +1722,7 @@ def partition_decode_once_spmd_model(
     prng_key: JTensor,
     decode_step_fns: Sequence[
         Callable[
-            [NestedJTensor, JTensor, NestedJTensor],
+            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
             Tuple[Tuple[NestedMap, NestedMap], NestedMap],
         ]
     ],
@@ -1771,7 +1780,7 @@ def decode_once_spmd_model(
     prng_key: JTensor,
     decode_step_fns: Sequence[
         Callable[
-            [NestedJTensor, JTensor, NestedJTensor],
+            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
             Tuple[Tuple[NestedMap, NestedMap], NestedMap],
         ]
     ],
@@ -1870,8 +1879,11 @@ def decode_once_spmd_model(
       batch = partitioner.preprocess_inputs(
           inputs[split], batch, inputs_partition_specs[split]
       )
-      (weighted_scalars, out,
-       updated_metrics), updated_vars = spmd_decode_step_fns[split](batch)
+      (weighted_scalars, out, updated_metrics), updated_vars = (
+          spmd_decode_step_fns[split](
+              batch, inputs[split].get_global_batch_size(inputs[split].hparams)
+          )
+      )
 
       # Cross host synchronization happens at this point.
       py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')
@@ -2202,12 +2214,10 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = trainer_lib.create_partitioner(
       task,
       prng_key,
       train_input_specs,
-      reshard_inputs=reshard_inputs,
       job_log_dir=job_log_dir,
   )
   if not task_p.train.always_use_train_for_model_init:
@@ -2276,8 +2286,9 @@ def infer_and_write_pmap(
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in inputs_p
   ]
 
-  for input_p, input_gen, num_steps in zip(inputs_p, inputs, num_steps):
-    logging.info('Starting output generation on input "%s"', input_p.name)
+  for input_gen, num_steps in zip(inputs, num_steps):
+    name = input_gen.hparams.name
+    logging.info('Starting output generation on input "%s"', name)
 
     # Feed each (device, input) pair a unique seed
     prng_key, output_seed = jax.random.split(prng_key)
@@ -2287,7 +2298,7 @@ def infer_and_write_pmap(
       logging.info('total number of steps: %d', num_steps)
 
     # Only write from one process
-    dirname = job_log_dir / 'output' / input_p.name
+    dirname = job_log_dir / 'output' / name
     fq_filename = dirname / 'output'
     if jax.process_index() == 0:
       # Create output dirs if DNE
@@ -2302,7 +2313,7 @@ def infer_and_write_pmap(
       tfds.core.MetadataDict(
           restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
           restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,
-          input_name=input_p.name,
+          input_name=name,
           model_name=task_p.model.name,
       ).save_metadata(dirname)
 

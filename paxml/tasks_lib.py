@@ -749,6 +749,8 @@ def create_state_padded_shapes(
 class SingleTask(base_task.BaseTask):
   """A JAX task."""
 
+  model: base_model.BaseModel
+
   class InferWriterHParams(base_hyperparams.BaseHyperParams):
     """Parameters for generating and writing outputs from a model.
 
@@ -940,9 +942,7 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
     """
-    model: Optional[pax_fiddle.Config[base_model.BaseModel]] = sub_config_field(
-        None
-    )
+    model: Optional[base_model.BaseModel] = None
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
@@ -985,7 +985,13 @@ class SingleTask(base_task.BaseTask):
     self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
 
     assert p.model is not None
-    self._model_inst: base_model.BaseModel = instantiate(p.model)
+    if isinstance(p.model, pax_fiddle.Config):
+      self.model = instantiate(p.model)
+    elif isinstance(p.model, base_model.BaseModel):
+      self.model = p.model
+    else:
+      raise ValueError(
+          'Expected `model` to be a BaseModel or a Config[BaseModel].')
 
     # instantiate the metrics aggregation helper
     if p.metrics:
@@ -1009,16 +1015,12 @@ class SingleTask(base_task.BaseTask):
 
     if p.infer_writer:
       self._inference_runner = p.infer_writer.inference_runner.Instantiate(
-          model=self._model_inst
+          model=self.model
       )
 
   @property
   def learners(self) -> Sequence[learners_lib.Learner]:
     return self._learners
-
-  @property
-  def model(self) -> base_model.BaseModel:
-    return self._model_inst
 
   @property
   def metrics_aggregator(self) -> base_metrics.MeanMetrics:
