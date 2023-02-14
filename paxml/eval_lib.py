@@ -2270,8 +2270,9 @@ def infer_and_write_pmap(
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in inputs_p
   ]
 
-  for input_p, input_gen, num_steps in zip(inputs_p, inputs, num_steps):
-    logging.info('Starting output generation on input "%s"', input_p.name)
+  for input_gen, num_steps in zip(inputs, num_steps):
+    name = input_gen.hparams.name
+    logging.info('Starting output generation on input "%s"', name)
 
     # Feed each (device, input) pair a unique seed
     prng_key, output_seed = jax.random.split(prng_key)
@@ -2281,7 +2282,7 @@ def infer_and_write_pmap(
       logging.info('total number of steps: %d', num_steps)
 
     # Only write from one process
-    dirname = job_log_dir / 'output' / input_p.name
+    dirname = job_log_dir / 'output' / name
     fq_filename = dirname / 'output'
     if jax.process_index() == 0:
       # Create output dirs if DNE
@@ -2296,7 +2297,7 @@ def infer_and_write_pmap(
       tfds.core.MetadataDict(
           restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
           restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,
-          input_name=input_p.name,
+          input_name=name,
           model_name=task_p.model.name,
       ).save_metadata(dirname)
 
