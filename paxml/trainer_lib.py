@@ -1585,7 +1585,8 @@ class _PmapPartitioner(Partitioner):
     )
     sample_inputs = input_fn()
     self._train_inputs_shape_dtype = jax.tree_map(
-        py_utils.get_global_input_shape_dtype, sample_inputs
+        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+        sample_inputs,
     )
     _write_input_specs(self._train_inputs_shape_dtype, self._job_log_dir)
 
