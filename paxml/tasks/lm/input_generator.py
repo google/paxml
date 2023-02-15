@@ -75,7 +75,6 @@ class TFRecordBertInput(base_input.BaseInput):
     num_samples: int = -1
 
   def __init__(self, hparams: TFRecordBertInput.HParams) -> None:
-    hparams = hparams.clone()  # Ensure input hparams are not mutated.
     if not hparams.is_training:
       hparams.reset_for_eval = True
       hparams.enable_packing = False
