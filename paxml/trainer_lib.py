@@ -31,6 +31,7 @@ from jax import numpy as jnp
 from jax.experimental import pjit
 from jax.interpreters import pxla
 from paxml import base_metrics
+from paxml import programs
 from paxml import sgf
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -42,6 +43,7 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
+import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
 
@@ -1617,6 +1619,7 @@ class _PmapPartitioner(Partitioner):
       discard_opt_states: bool = False,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning."""
+
     if not self._train_state_metadata:
       self._train_state_metadata = self._get_train_state_metadata_default()
     return self._maybe_discard_opt_states(
@@ -1632,6 +1635,9 @@ class _PmapPartitioner(Partitioner):
     """Partitions the step function."""
     del inputs_shape_dtype
 
+    # Guard the case where get_train_state_metadata isn't called.
+    train_state_metadata = self.get_train_state_metadata(is_eval)
+
     def _wrapped_step_fn(state, prng_key, inputs):
       return step_fn(
           self._jax_task,
@@ -1639,7 +1645,7 @@ class _PmapPartitioner(Partitioner):
           prng_key,
           inputs,
           self._jax_task.hparams.model.fprop_dtype,
-          self._train_state_metadata.var_weight_hparams,
+          train_state_metadata.var_weight_hparams,
       )
 
     partitioned_step_fn = jax.pmap(
@@ -2405,21 +2411,103 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
   return call
 
 
-class SingleTaskPjitTrainProgram:
-  """Trainer that assumes a single taks on a single dataset."""
+class PeekableInput:
+  """Wraps a BaseInput to provide a peek() method. Single thread access only."""
+
+  def __init__(self, inp: base_input.BaseInput) -> None:
+    self._inp = inp
+    self._peek = None
+
+  @property
+  def hparams(self):
+    return self._inp.hparams
+
+  @classmethod
+  def get_global_batch_size(cls, hparams: base_input.BaseInput.HParams) -> int:
+    return hparams.cls.get_global_batch_size(hparams)
+
+  def get_next_padded(self):
+    if self._peek is None:
+      return self._inp.get_next_padded()
+    peek = self._peek
+    self._peek = None
+    return peek
+
+  def peek_padded(self):
+    if self._peek is None:
+      try:
+        self._peek = self._inp.get_next_padded()
+      except (tf.errors.OutOfRangeError, StopIteration):
+        self._peek = None
+    return self._peek
+
+  # Re-direct to underlying BaseInput class.
+  def __getattr__(self, attr):
+    return getattr(self._inp, attr)
+
+
+class BaseTrainProgram(programs.BasePartitionedProgram):
+  """A lean interface of a basic train program.
+
+  Users should inherit from BaseTrainProgram and implement methods required to
+  form a custom train program.
+
+  TODO(hthu): Write a custom program example.
+  """
+
+  @property
+  def train_inputs_shape_dtype(self) -> NestedShapeDtypeLike:
+    raise NotImplementedError(
+        'Subclass must implement train_inputs_global_shape_dtype'
+    )
+
+  @property
+  def train_state_metadata(self) -> TrainStateMetadata:
+    """Gets the TrainStateMetadata used for partitioning.
+
+    Deliberately duplicate so that we can eventually move train_state_metadata
+    away from partitioner.
+
+    Returns:
+      TrainStateMetadata that represents the metadata used during train.
+    """
+    raise NotImplementedError('Subclass must implement train_state_metadata')
+
+  @property
+  def task(self) -> tasks_lib.SingleTask:
+    raise NotImplementedError('Subclass must implement task')
+
+  @property
+  def train_input(self) -> PeekableInput:
+    raise NotImplementedError('Subclass must implement train_input')
+
+  @property
+  def train_unpadded_global_batch_size(self) -> int:
+    raise NotImplementedError(
+        'Subclass must implement train_unpadded_global_batch_size'
+    )
+
+
+class SingleTaskTrainProgram(BaseTrainProgram):
+  """Train program that assumes a single task on a single dataset."""
 
   def __init__(
       self,
       task: tasks_lib.SingleTask,
-      train_input: base_input.BaseInput,
-      partitioner: _PjitPartitioner,
+      train_input: PeekableInput,
+      partitioner: Partitioner,
   ):
+    super().__init__(partitioner)
     self._task = task
     self._train_input = train_input
-    self._partitioner = partitioner
-    # Lazily initialized values after calling `compile_step`.
+    self._train_unpadded_global_batch_size = (
+        train_input.hparams.cls.get_global_batch_size(train_input.hparams)
+    )
+    # Lazily initialized values.
+    self._train_state_metadata = None
     self._step_fn = None
     self._input_pspecs = None
+    self._train_inputs_shape_dtype = None
 
   def partition_step(self) -> Tuple[Any, NestedPartitionSpec]:
     """PJIT and cache the pjit-ed step_fn.
@@ -2427,28 +2515,66 @@ class SingleTaskPjitTrainProgram:
     Returns:
       A tuple of (partitioned step function, partitioned input spec).
     """
-    if self._step_fn is None:
-      self._step_fn, self._input_pspecs = self._partitioner.partition(
-          train_step_single_learner,
-          self._partitioner.train_inputs_shape_dtype,
-          is_eval=False,
+    if self._partitioned_step_fn is None:
+      self._partitioned_step_fn, self._partitioned_input_spec = (
+          self._partitioner.partition(
+              train_step_single_learner,
+              self._partitioner.train_inputs_shape_dtype,
+              is_eval=False,
+          )
       )
-    return self._step_fn, self._input_pspecs
+    return self._partitioned_step_fn, self._partitioned_input_spec
 
-  def train_step(
+  def run_step(
       self,
       state: TrainState,
       prng_key: jax.random.KeyArray,
       inputs: Any,
       unpadded_global_batch_size: int,
-  ):
-    if self._step_fn is None:
-      # Compile and get the step_fn.
-      # NOTE: The compilation turns of auto sharding so the partition_spec is
-      # not modified upon returning.
-      self.partition_step()
-    return self._step_fn(state, prng_key, inputs, unpadded_global_batch_size)
+  ) -> programs.ProgramOutput:
+    (
+        partitioned_train_state,
+        loss,
+        weighted_scalars,
+        per_example_out,
+        summary_tensors,
+    ) = self.partitioned_step_fn(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
+    return programs.ProgramOutput(
+        partitioned_train_state,
+        aux={
+            'loss': loss,
+            'weighted_scalars': weighted_scalars,
+            'per_example_out': per_example_out,
+            'summary_tensors': summary_tensors,
+        },
+    )
+
+  @property
+  def train_inputs_shape_dtype(self) -> NestedShapeDtypeLike:
+    return self._partitioner.train_inputs_shape_dtype
+
+  @property
+  def train_state_metadata(self) -> TrainStateMetadata:
+    """Gets the TrainStateMetadata used for partitioning.
+
+    Deliberately duplicate so that we can eventually move train_state_metadata
+    away from partitioner.
+
+    Returns:
+      TrainStateMetadata that represents the
+    """
+    return self._partitioner.get_train_state_metadata()
 
   @property
   def task(self) -> tasks_lib.SingleTask:
     return self._task
+
+  @property
+  def train_input(self) -> PeekableInput:
+    return self._train_input
+
+  @property
+  def train_unpadded_global_batch_size(self) -> int:
+    return self._train_unpadded_global_batch_size

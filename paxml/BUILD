@@ -511,6 +511,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_metrics",
+        ":programs",
         ":sgf",
         ":summary_utils",
         ":tasks_lib",
@@ -528,6 +529,7 @@ pytype_strict_library(
         "//praxis:base_model",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
