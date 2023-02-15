@@ -15,7 +15,7 @@
 
 import jax.numpy as jnp
 from paxml.tasks.lm.params.c4 import configure_gpt3_task, TransformerLmSpmdAdam, C4SpmdPipelineGpt3AdamOrgHP
-from contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
+from contrib.gpu.scripts_gpu.tasks import LambadaDataset, PileUnsupervisedDataset
 from paxml import experiment_registry
 from paxml import tasks_lib
 from praxis import base_layer
@@ -28,7 +28,7 @@ WeightInit = base_layer.WeightInit
 
 ## 8 node
 @experiment_registry.register
-class GPT126M(TransformerLmSpmdAdam, PileUnsupervisedDataset):
+class GPT126M(TransformerLmSpmdAdam):
     
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [64,1,1]
@@ -100,9 +100,25 @@ class GPT126M(TransformerLmSpmdAdam, PileUnsupervisedDataset):
     
     return task_p
 
+@experiment_registry.register
+class Pile126M(GPT126M, PileUnsupervisedDataset):
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    return task_p
+
+@experiment_registry.register
+class Lambada126M(GPT126M, LambadaDataset):
+  
+  ICI_MESH_SHAPE = [8,1,1]
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    task_p.train.always_use_train_for_model_init=False
+    return task_p
+
 ## 32 node
 @experiment_registry.register
-class GPT5B(GPT126M):
+class GPT5B(Pile126M):
   
   USE_REPEATED_LAYER = True
   ICI_MESH_SHAPE = [4,1,2]
@@ -162,7 +178,7 @@ class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
 
 ## single node training
 @experiment_registry.register
-class SmallPileTest(GPT126M):
+class SmallPileTest(Pile126M):
   """Base config for an SPMD model."""
   ICI_MESH_SHAPE = [8,1,1]
     
