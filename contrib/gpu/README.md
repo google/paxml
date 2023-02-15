@@ -21,6 +21,12 @@ bash contrib/gpu/scripts_gpu/run_pile_singlenode.sh <TFDS_DATA_DIR> <VOCAB_PATH>
 ```
 where `TFDS_DATA_DIR` is the path to the downloaded datasets, `VOCAB_PATH` is the path to the pretrained SentencePiece `.model` file, and `LOGDIR` is the relative path of the directory to which to write checkpoints and logging information.
 
+See `scripts_gpu/run_lambada_singlenode` for an example of running zero-shot evaluation on the 126m model using the Lambada dataset. Use the following command to run this script:
+``` 
+bash contrib/gpu/scripts_gpu/run_lambada_singlenode.sh <TFDS_DATA_DIR> <VOCAB_PATH> <LOGDIR>
+```
+`TFDS_DATA_DIR` should contain the path to the Lambada dataset and `<LOGDIR>` should match the `<LOGDIR>` from the pretraining run.
+
 #### Multi Node
 See `scripts_gpu/example_slurm_pile.sub` for an example slurm submit file that launches an 8 node run with a 126 million parameter GPT model. Note that this script must be edited with your slurm account information. 
 
@@ -29,8 +35,6 @@ To launch `example_slurm_pile.sub`, simply run the following command:
 sbatch contrib/gpu/scripts_gpu/example_slurm_pretrain_pile.sub
 ```
 Note that hyperparameters currently cannot be overwritten from the command line. In order to change a training hyperparameter (e.g. number of nodes, number of layers, precision), add a new config to `scripts_gpu/configs.py` which inherits from the desired config and overwrites the relevant hyperparameters. See the [configs](##Configs) section below for more information about the provided base configs, and see `SmallPileTest` in `scripts_gpu/configs.py` for an example config that overwrites the number of GPUs from an existing base config. 
-
-To run evaluation using the Lambada dataset, be sure that your experiment config inherits from `LambadaDataset` in `scripts_gpu/tasks.py`. Also make sure to use the `--mode='eval'` command line flag and set the hyperparameter `task_p.train.always_use_train_for_model_init=False` within the Experiment's `task` function. See `scripts_gpu/configs` for example experiment configs and `task` functions. 
 
 ## Configs
 We provide three "base" model configs in `scripts_gpu/configs.py`. The first is a 126 million parameter GPT model. Convergence using The Pile dataset has been verified with this model. See the table below for convergence results. 
