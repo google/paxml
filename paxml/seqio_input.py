@@ -428,12 +428,15 @@ class SeqIOInput(base_input.BaseInput):
     annotate_padding_fields: bool = False
 
   def __init__(self, hparams: ParamsT) -> None:
+
     # Modify hparams in-place before freezing hparams
     if not hparams.name:
+      hparams = hparams.clone()  # Ensure input hparams are not mutated.
       mixture_name = hparams.mixture_name or hparams.mixture_or_task.name
       hparams.name = f'{mixture_name}_{hparams.split_name}'
     if (not hparams.is_training and hparams.input_random_seed is None
         and hparams.use_enumeration):
+      hparams = hparams.clone()  # Ensure input hparams are not mutated.
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
       hparams.input_random_seed = 42
