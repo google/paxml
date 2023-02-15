@@ -33,15 +33,12 @@ class GPT126M(TransformerLmSpmdAdam, PileUnsupervisedDataset):
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [64,1,1]
   FPROP_DTYPE = jnp.bfloat16
-  ## needed for stable training on GPUs
-  REDUCTIONS_IN_FP32 = True
   MAX_STEPS = 600000
   
   MAX_SEQ_LEN = 2048
   VOCAB_SIZE = 50304
   PACKED_INPUT = True
   PERCORE_BATCH_SIZE = 4
-  APPLY_EVAL_SAMPLE_WEIGHTS = True
   
   NUM_LAYERS = 12
   NUM_HEADS = 12
@@ -142,7 +139,6 @@ class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
   PERCORE_BATCH_SIZE = 2
   MICROBATCH_SIZE = 24
   MAX_STEPS = 75000
-
 
   LEARNING_RATE = 2e-5
   
