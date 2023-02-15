@@ -1928,10 +1928,9 @@ class _PjitPartitioner(Partitioner):
 
     # Here the metadata is derived from input_spec which includes all possible
     # inputs. Thus metadata includes the full TrainState. The unpadded_state
-    # here could be derived from a eval/decode dataset (e.g.,
-    # get_spmd_model_step_fns_from_inputs) so it only includes a subset of
-    # TrainState. Here we project the metadata according to the actual state.
-
+    # here could be derived from a eval/decode dataset so it only includes a
+    # subset of TrainState. Here we project the metadata according to the
+    # actual state.
     partition_specs = metadata.partition_specs.replace(
         mdl_vars=filter_nestedmap(
             metadata.partition_specs.mdl_vars, unpadded_state.mdl_vars
@@ -2338,53 +2337,6 @@ def create_partitioner(
           job_log_dir,
       )
   return partitioner
-
-
-# TODO(laigd): remove this and just partition the step function once for all the
-# inputs.
-def get_spmd_model_step_fns_from_inputs(
-    padded_input_ps: Sequence[base_input.BaseInput.HParams],
-    partitioner: Partitioner,
-    mode: RunningMode,
-) -> Tuple[
-    Sequence[Partitioner.PartitionedStepFn], Sequence[NestedPartitionSpec]
-]:
-  """Partition step functions for each input in padded_input_ps.
-
-  Note: This method instantiates all the input pipelines passed in
-    `padded_input_ps` to get a sample input.
-
-  Args:
-    padded_input_ps: inputs hparams list, may be padded.
-    mode: One of TRAIN, EVAL, and DECODE, that determines the step function to
-      use.
-
-  Returns:
-    (partitioned_step_fns, input_partition_specs):
-    The partitioned step functions, partition specs for the inputs,
-    and shape/dtype information for the inputs.
-  """
-  if not padded_input_ps:
-    return [], []
-
-  step_fn, is_eval = get_step_fn(mode)
-  input_p = padded_input_ps[0]
-  # TODO(pax-dev): Investigate if we can use model input specs
-  # instead of instantiating this input pipeline.
-  _, inputs_shape_dtype = get_inputs_shape_dtype(input_p)
-  partitioned_step_fn, inputs_partition_spec = partitioner.partition(
-      step_fn, inputs_shape_dtype, is_eval
-  )
-
-  # We don't need to manually repartition the step functions because of
-  # different unpadded_global_batch_size, which will be passed as an arg to the
-  # partitioned step function (see PartitionedStepFn for more info). Currently
-  # the training loop and related eval/decode utils are still referencing this
-  # function, so to make it work (before we clean it up) we just partition it
-  # once using the first input.
-  partitioned_step_fns = [partitioned_step_fn] * len(padded_input_ps)
-  input_partition_specs = [inputs_partition_spec] * len(padded_input_ps)
-  return partitioned_step_fns, input_partition_specs
 
 
 def check_unique_names(inputs: Sequence[base_input.BaseInput]) -> None:

@@ -280,8 +280,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   ) -> Tuple[
       train_states.TrainState,
       trainer_lib.TrainStateMetadata,
-      Sequence[trainer_lib.Partitioner.PartitionedStepFn],
-      Sequence[NestedPartitionSpec],
+      trainer_lib.Partitioner.PartitionedStepFn,
+      Optional[NestedPartitionSpec],
   ]:
     """Gets a partitioned model states and the step function."""
     global_mesh = self._partitioner.global_mesh
@@ -301,14 +301,27 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
 
-    # If auto sharding is enabled, we need to get the updated partition specs
-    # before using it to restore checkpoints.
-    step_fns, inputs_partition_specs = (
-        trainer_lib.get_spmd_model_step_fns_from_inputs(
-            padded_decode_input_ps if is_decode else padded_eval_input_ps,
-            self._partitioner,
-            RunningMode.DECODE if is_decode else RunningMode.EVAL,
-        )
+    mode = RunningMode.DECODE if is_decode else RunningMode.EVAL
+    step_fn, is_eval = trainer_lib.get_step_fn(mode)
+    assert is_eval
+
+    padded_input_ps = (
+        padded_decode_input_ps if is_decode else padded_eval_input_ps
+    )
+    if padded_input_ps:
+      _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+          padded_input_ps[0]
+      )
+    else:
+      # This means there is no input to run, and currently this happens only
+      # when user runs decode() with eval input, i.e. `mode` is set to DECODE
+      # above. In that case, the partitioned step_fn won't get used since there
+      # is no decode input, and we simply use the training input shapes to
+      # partition.
+      # TODO(laigd): avoid cases like this.
+      inputs_shape_dtype = self._partitioner.train_inputs_shape_dtype
+    step_fn, inputs_partition_spec = self._partitioner.partition(
+        step_fn, inputs_shape_dtype, is_eval
     )
     if self.use_ema:
       # Make sure the opt_states exists before restoring
@@ -342,8 +355,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     return (
         partitioned_train_state,
         train_state_metadata,
-        step_fns,
-        inputs_partition_specs,
+        step_fn,
+        inputs_partition_spec,
     )
 
 
@@ -477,12 +490,12 @@ def _create_checkpointer(
 def run_eval_loop_over_test_splits(
     partitioner: trainer_lib.Partitioner,
     num_steps: List[int],
-    eval_steps: Sequence[Callable[[NestedJTensor, Optional[int]], Any]],
+    eval_step: Callable[[NestedJTensor, Optional[int]], Any],
     summary_writers: List[SummaryWriter],
     step: int,
     model_inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
-    eval_inputs_pspecs: Optional[Sequence[NestedPartitionSpec]] = None,
+    eval_inputs_pspec: Optional[NestedPartitionSpec] = None,
 ) -> Tuple[
     List[Optional[Dict[str, float]]],  # eval metrics.
     List[Optional[Dict[str, float]]],  # eval scoring metrics.
@@ -493,12 +506,12 @@ def run_eval_loop_over_test_splits(
   Args:
     partitioner: The Partitioner used to partition the computations.
     num_steps: A list of steps for each test split to evaluate on.
-    eval_steps: Sequence of eval step functions to call to evaluate the model.
+    eval_step: Eval step functions to call to evaluate the model.
     summary_writers: The summary writer objects to log summaries.
     step: The step at which we are evaling the model.
     model_inputs: List of BaseInput instances.
     job_log_dir: Job's log directory in which scoring outputs will be written.
-    eval_inputs_pspecs: Sequence of PartitionSpec for eval inputs.
+    eval_inputs_pspec: PartitionSpec for eval inputs.
 
   Returns:
     A tuple of (a list of eval metrics,
@@ -544,7 +557,7 @@ def run_eval_loop_over_test_splits(
       eval_inputs = partitioner.preprocess_inputs(
           model_inputs[split],
           eval_inputs,
-          eval_inputs_pspecs[split] if eval_inputs_pspecs else None,
+          eval_inputs_pspec if eval_inputs_pspec else None,
       )
       # TODO(bencaine): Rename eval_metrics here weighted scalars?
       (
@@ -552,7 +565,7 @@ def run_eval_loop_over_test_splits(
           eval_metrics,
           per_example_output,
           eval_summary_tensors,
-      ) = eval_steps[split](
+      ) = eval_step(
           eval_inputs,
           model_inputs[split].get_global_batch_size(
               model_inputs[split].hparams
@@ -790,7 +803,7 @@ class _PmapEvalRunner:
     return run_eval_loop_over_test_splits(
         self._partitioner,
         self._eval_num_steps,
-        [eval_step_fn] * len(self._eval_input_pipelines),
+        eval_step_fn,
         eval_summary_writers,
         step_i,
         self._eval_input_pipelines,
@@ -871,8 +884,8 @@ class _SpmdEvalRunner:
   Example usage:
 
     checkpointer: _SpmdEvalCheckpointer = ...
-    (partitioned_train_state, train_state_metadata, step_fns,
-     inputs_partition_specs, inputs_shape_dtypes) = (
+    (partitioned_train_state, train_state_metadata, step_fn,
+     inputs_partition_spec, inputs_shape_dtypes) = (
          checkpointer.get_model_states(
          init_key, train_input_specs, eval_input_ps=eval_input_ps))
 
@@ -889,8 +902,8 @@ class _SpmdEvalRunner:
       jax_task: tasks_lib.SingleTask,
       partitioner: trainer_lib.Partitioner,
       job_log_dir: epath.Path,
-      partitioned_eval_step_fns: Optional[Sequence[Callable[..., Any]]] = None,
-      inputs_partition_specs: Optional[Sequence[NestedPartitionSpec]] = None,
+      partitioned_eval_step_fn: Optional[Callable[..., Any]] = None,
+      inputs_partition_spec: Optional[NestedPartitionSpec] = None,
   ):
     self._padded_eval_input_ps = [
         trainer_lib.adjust_input_params_for_small_batch(
@@ -912,16 +925,18 @@ class _SpmdEvalRunner:
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner
 
-    if partitioned_eval_step_fns:
-      assert inputs_partition_specs is not None
-      self._eval_steps = partitioned_eval_step_fns
-      self._inputs_partition_specs = inputs_partition_specs
+    if partitioned_eval_step_fn:
+      assert inputs_partition_spec is not None
+      self._eval_step = partitioned_eval_step_fn
+      self._inputs_partition_spec = inputs_partition_spec
     else:
-      (
-          self._eval_steps,
-          self._inputs_partition_specs,
-      ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
-          self._padded_eval_input_ps, self._partitioner, RunningMode.EVAL
+      step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+      assert is_eval
+      _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+          self._padded_eval_input_ps[0]
+      )
+      self._eval_step, self._inputs_partition_spec = (
+          self._partitioner.partition(step_fn, inputs_shape_dtype, is_eval)
       )
 
   @classmethod
@@ -948,23 +963,21 @@ class _SpmdEvalRunner:
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
-    eval_step_fns = [
-        functools.partial(
-            step_fn, partitioned_train_state.to_eval_state(), eval_key)
-        for step_fn in self._eval_steps
-    ]
+    eval_step_fn = functools.partial(
+        self._eval_step, partitioned_train_state.to_eval_state(), eval_key
+    )
 
     # Run the eval loop.
     with self._partitioner.global_mesh:
       return run_eval_loop_over_test_splits(
           self._partitioner,
           self._eval_num_steps,
-          eval_step_fns,
+          eval_step_fn,
           eval_summary_writers,
           step_i,
           self._eval_input_pipelines,
           self._job_log_dir,
-          self._inputs_partition_specs,
+          self._inputs_partition_spec,
       )
 
   def get_partition_run_one_step_fn(self, eval_key):
@@ -1024,8 +1037,8 @@ def evaluate_spmd_model(
   (
       partitioned_train_state,
       train_state_metadata,
-      step_fns,
-      inputs_partition_specs,
+      step_fn,
+      inputs_partition_spec,
   ) = checkpointer.get_model_states(
       init_key, is_decode=False, eval_input_ps=eval_input_p
   )
@@ -1037,8 +1050,8 @@ def evaluate_spmd_model(
       jax_task,
       partitioner,
       job_log_dir,
-      step_fns,
-      inputs_partition_specs,
+      step_fn,
+      inputs_partition_spec,
   ).get_partition_run_one_step_fn(eval_key)
 
   decode_once_fn = None
@@ -1664,8 +1677,8 @@ def decode_spmd_model(
   (
       partitioned_train_state,
       train_state_metadata,
-      decode_step_fns,
-      inputs_partition_specs,
+      decode_step_fn,
+      inputs_partition_spec,
   ) = checkpointer.get_model_states(
       init_key,
       is_decode=True,
@@ -1680,14 +1693,11 @@ def decode_spmd_model(
       input_p,
       job_log_dir,
       prng_key,
-      decode_step_fns,
-      inputs_partition_specs,
+      decode_step_fn,
+      inputs_partition_spec,
   )
   eval_one_step_fn = _SpmdEvalRunner(
-      eval_input_p,
-      jax_task,
-      partitioner,
-      job_log_dir,
+      eval_input_p, jax_task, partitioner, job_log_dir
   ).get_partition_run_one_step_fn(eval_key)
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
@@ -1720,13 +1730,11 @@ def partition_decode_once_spmd_model(
     input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     prng_key: JTensor,
-    decode_step_fns: Sequence[
-        Callable[
-            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
-            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-        ]
+    decode_step_fn: Callable[
+        [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
+        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
-    inputs_partition_specs: Sequence[NestedPartitionSpec],
+    inputs_partition_spec: NestedPartitionSpec,
 ) -> Callable[
     [train_states.TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics
 ]:
@@ -1749,8 +1757,8 @@ def partition_decode_once_spmd_model(
           partitioned_train_state,
           summary_writers,
           prng_key,
-          decode_step_fns,
-          inputs_partition_specs,
+          decode_step_fn,
+          inputs_partition_spec,
       )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
@@ -1778,13 +1786,11 @@ def decode_once_spmd_model(
     train_state: train_states.TrainState,
     summary_writers: List[SummaryWriter],
     prng_key: JTensor,
-    decode_step_fns: Sequence[
-        Callable[
-            [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
-            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-        ]
+    decode_step_fn: Callable[
+        [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
+        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
-    inputs_partition_specs: Sequence[NestedPartitionSpec],
+    inputs_partition_spec: NestedPartitionSpec,
 ) -> Tuple[
     List[Optional[Dict[str, float]]],  # decode metrics.
     List[Optional[Dict[str, float]]],  # processed decode metrics.
@@ -1802,8 +1808,8 @@ def decode_once_spmd_model(
     train_state: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
     prng_key: The prng key used for decoding.
-    decode_step_fns: sequence of pjit'ed decode functions.
-    inputs_partition_specs: Partition specs for inputs.
+    decode_step_fn: pjit'ed decode functions.
+    inputs_partition_spec: Partition specs for inputs.
 
   Returns:
     A tuple of (a list of decode metrics,
@@ -1832,9 +1838,9 @@ def decode_once_spmd_model(
   # use a single global key instead to rely on pjit to split for different
   # replicas.
   logging.info('decode prng_key: %s', prng_key)
-  spmd_decode_step_fns = [
-      functools.partial(fn, train_state.to_eval_state(), prng_key)
-      for fn in decode_step_fns]
+  spmd_decode_step_fn = functools.partial(
+      decode_step_fn, train_state.to_eval_state(), prng_key
+  )
 
   num_steps_per_input = [
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
@@ -1877,10 +1883,10 @@ def decode_once_spmd_model(
         inputs[split].reset()
         break
       batch = partitioner.preprocess_inputs(
-          inputs[split], batch, inputs_partition_specs[split]
+          inputs[split], batch, inputs_partition_spec
       )
       (weighted_scalars, out, updated_metrics), updated_vars = (
-          spmd_decode_step_fns[split](
+          spmd_decode_step_fn(
               batch, inputs[split].get_global_batch_size(inputs[split].hparams)
           )
       )

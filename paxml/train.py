@@ -729,7 +729,6 @@ def train_and_evaluate_pmap(
   p_eval_step, _ = partitioner.partition(
       eval_step_fn, global_inputs_shape_dtype, is_eval
   )
-  p_eval_steps = [p_eval_step] * len(eval_input_p)
 
   is_vars_replicated = True
 
@@ -746,11 +745,11 @@ def train_and_evaluate_pmap(
         -1 if p.reset_for_eval else p.eval_loop_num_batches
         for p in eval_input_p
     ]
-    eval_test_inputs_pspecs = None
+    eval_test_inputs_pspec = None
     return (
         eval_input_pipelines,
         eval_num_steps,
-        eval_test_inputs_pspecs,
+        eval_test_inputs_pspec,
         eval_input_p,
     )
 
@@ -788,7 +787,6 @@ def train_and_evaluate_pmap(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated,
-      p_eval_steps,
       p_eval_step,
       train_prng_seed,
   )
@@ -850,7 +848,7 @@ def train_and_evaluate_spmd_model(
 
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
   assert is_eval
-  p_eval_on_train_step, _ = partitioner.partition(
+  p_eval_step, _ = partitioner.partition(
       eval_step_fn,
       global_inputs_shape_dtype,
       is_eval,
@@ -859,49 +857,40 @@ def train_and_evaluate_spmd_model(
   global_mesh = partitioner.global_mesh
   is_vars_replicated = False
 
-  p_eval_steps = []
-  padded_eval_input_p = eval_input_p
-  if eval_input_p:
-    padded_eval_input_p = [
+  def partition_eval_input_fns(eval_input_ps):
+    assert eval_input_ps, 'eval_input_ps must not be empty'
+    padded_eval_input_ps = [
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
-        for input_p in eval_input_p
+        for input_p in eval_input_ps
     ]
-    p_eval_steps, _ = trainer_lib.get_spmd_model_step_fns_from_inputs(
-        padded_eval_input_p, partitioner, RunningMode.EVAL
-    )
-
-  def partition_eval_input_fns(padded_eval_input_ps):
-    assert padded_eval_input_ps, 'padded_eval_input_ps must not be empty'
     eval_input_pipelines = [
         instantiate(input_p) for input_p in padded_eval_input_ps]
     trainer_lib.check_unique_names(eval_input_pipelines)
 
-    eval_num_steps = []
-    eval_test_inputs_pspecs = []
-    for p in padded_eval_input_ps:
-      # Do not mutate eval_input_pipelines itself. Instantiate a new one
-      # to get sample input.
-      sample_eval_model_inputs = instantiate(p).get_next_padded()
-      inputs_shape_dtype = jax.tree_util.tree_map(
-          py_utils.get_global_input_shape_dtype, sample_eval_model_inputs)
-      eval_test_inputs_pspecs.append(
-          trainer_lib.get_input_partition_specs(
-              task_p.model.mesh_axis_names, inputs_shape_dtype
-          )
-      )
+    # Do not mutate eval_input_pipelines itself. Instantiate a new one
+    # to get sample input.
+    _, eval_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+        padded_eval_input_ps[0]
+    )
+    eval_test_inputs_pspec = trainer_lib.get_input_partition_specs(
+        task_p.model.mesh_axis_names, eval_inputs_shape_dtype
+    )
 
-      # We either run p.eval_loop_num_batches steps or one epoch (when supported
-      # by a resettable input) per eval loop during training. When
-      # p.reset_for_eval is set to True, we run the eval loop until
-      # tf.errors.OutOfRangeError (or StopIteration) is raised, which can be
-      # triggered either because input pipeline has reached the end of the input
-      # sequence, or a pre-determined num_batches has reached.
-      eval_num_steps.append(-1 if p.reset_for_eval else p.eval_loop_num_batches)
+    # We either run p.eval_loop_num_batches steps or one epoch (when supported
+    # by a resettable input) per eval loop during training. When
+    # p.reset_for_eval is set to True, we run the eval loop until
+    # tf.errors.OutOfRangeError (or StopIteration) is raised, which can be
+    # triggered either because input pipeline has reached the end of the input
+    # sequence, or a pre-determined num_batches has reached.
+    eval_num_steps = [
+        -1 if p.reset_for_eval else p.eval_loop_num_batches
+        for p in padded_eval_input_ps
+    ]
 
     return (
         eval_input_pipelines,
         eval_num_steps,
-        eval_test_inputs_pspecs,
+        eval_test_inputs_pspec,
         padded_eval_input_ps,
     )
 
@@ -922,13 +911,15 @@ def train_and_evaluate_spmd_model(
         instantiate(input_p) for input_p in padded_decode_input_ps
     ]
     trainer_lib.check_unique_names(padded_decode_input_pipelines)
+    _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+        padded_decode_input_ps[0]
+    )
 
     # TODO(pax-dev): Support auto-sharding for decoder step.
-    (
-        decode_step_fns,
-        decode_input_partition_specs,
-    ) = trainer_lib.get_spmd_model_step_fns_from_inputs(
-        padded_decode_input_ps, partitioner, RunningMode.DECODE
+    step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.DECODE)
+    assert is_eval
+    decode_step_fn, decode_input_partition_spec = partitioner.partition(
+        step_fn, decode_inputs_shape_dtype, is_eval
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
@@ -939,8 +930,8 @@ def train_and_evaluate_spmd_model(
         padded_decode_input_ps,
         job_log_dir,
         decode_key,
-        decode_step_fns,
-        decode_input_partition_specs,
+        decode_step_fn,
+        decode_input_partition_spec,
     )
 
     return decode_once_fn, prng_key
@@ -949,7 +940,7 @@ def train_and_evaluate_spmd_model(
       train_program,
       partitioned_train_state,
       prng_key,
-      padded_eval_input_p,
+      eval_input_p,
       decode_input_p,
       total_num_params,
       early_stopping_fn,
@@ -959,8 +950,7 @@ def train_and_evaluate_spmd_model(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated,
-      p_eval_steps,
-      p_eval_on_train_step,
+      p_eval_step,
       train_prng_seed,
   )
 
@@ -1035,8 +1025,7 @@ def _train_and_evaluate_common(
     job_log_dir,
     eval_prng_seed,
     is_vars_replicated,
-    p_eval_steps,
-    p_eval_on_train_step,
+    p_eval_step,
     train_prng_seed,
 ):
   """Training loop code common to both pmap and spmd."""
@@ -1239,15 +1228,15 @@ def _train_and_evaluate_common(
         # If we have eval test then also evaluate on test.
         if eval_input_p:
           logging.debug('  Performing eval_step() runs on test splits.')
-          eval_step_fns = [functools.partial(
-              step_fn, eval_partitioned_train_state,
-              eval_prng_seed) for step_fn in p_eval_steps]
+          eval_step_fn = functools.partial(
+              p_eval_step, eval_partitioned_train_state, eval_prng_seed
+          )
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
                     train_program.partitioner,
                     eval_num_steps,
-                    eval_step_fns,
+                    eval_step_fn,
                     eval_test_summary_writers,
                     step_i,
                     eval_input_pipelines,
@@ -1281,7 +1270,7 @@ def _train_and_evaluate_common(
                 train_program.partitioned_input_spec,
             )
 
-            loss, weighted_scalars, _, summary_tensors = p_eval_on_train_step(
+            loss, weighted_scalars, _, summary_tensors = p_eval_step(
                 eval_partitioned_train_state,
                 eval_prng_seed,
                 eval_inputs,
