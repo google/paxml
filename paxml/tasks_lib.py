@@ -749,6 +749,7 @@ def create_state_padded_shapes(
 class SingleTask(base_task.BaseTask):
   """A JAX task."""
 
+  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
   model: base_model.BaseModel
 
   class InferWriterHParams(base_hyperparams.BaseHyperParams):
@@ -942,6 +943,7 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
     """
+    # TODO(b/269191093) Should this type be relaxed to BaseLayer?
     model: Optional[base_model.BaseModel] = None
 
     # Implementation note: `SingleTask` is not defined in the interpreter
@@ -987,7 +989,7 @@ class SingleTask(base_task.BaseTask):
     assert p.model is not None
     if isinstance(p.model, pax_fiddle.Config):
       self.model = instantiate(p.model)
-    elif isinstance(p.model, base_model.BaseModel):
+    elif isinstance(p.model, base_layer.BaseLayer):
       self.model = p.model
     else:
       raise ValueError(
