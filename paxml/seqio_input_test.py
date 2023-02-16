@@ -685,16 +685,12 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
     def dataset_fn(split, shuffle_files=None, seed=42):
       del split, shuffle_files, seed
-      return tf.data.Dataset.from_tensor_slices({
-          'inputs':
-              np.arange(
-                  num_examples * task_feature_lengths['inputs'],
-                  dtype=np.int32).reshape(num_examples, -1),
-          'targets':
-              np.arange(
-                  num_examples * task_feature_lengths['targets'],
-                  dtype=np.int32).reshape(num_examples, -1),
-      })
+      d = {}
+      for k in task_feature_lengths:
+        d[k] = np.arange(
+            num_examples * task_feature_lengths[k], dtype=np.int32
+        ).reshape(num_examples, -1)
+      return tf.data.Dataset.from_tensor_slices(d)
 
     def pred_metric(targets, predictions):
       del targets, predictions
@@ -743,6 +739,41 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         'pred_and_score_task',
         'score_task',
     ])
+
+  def test_get_eval_hparams_for_seqio_scoring_keeps_lengths(self):
+    feature_lengths = {'inputs': 1024, 'targets': 3, 'weights': 3}
+    self._setup_seqio_test_registry(task_feature_lengths=feature_lengths)
+    mixture_name = 'test_mixture'
+    batch_size = 32
+    seed = 123
+    score_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture_name,
+        batch_size,
+        feature_lengths,
+        seed,
+        seqio_input.MetricType.SCORE,
+        eval_metrics_retain_task_features=True,
+        feature_converter=seqio.PassThroughFeatureConverter(),
+    )
+    inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
+    self.assertSameElements(inp._hparams.task_feature_lengths.keys(),
+                            ['inputs', 'targets', 'weights'])
+
+    score_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture_name,
+        batch_size,
+        feature_lengths,
+        seed,
+        seqio_input.MetricType.SCORE,
+        eval_metrics_retain_task_features=False,
+        feature_converter=seqio.PassThroughFeatureConverter(),
+    )
+    inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
+    inp.get_next()
+    self.assertSameElements(
+        inp._hparams.task_feature_lengths.keys(),
+        ['inputs', 'targets'],
+    )
 
   def test_repeat_on_full_eval_fails(self):
     self._setup_seqio_test_registry()

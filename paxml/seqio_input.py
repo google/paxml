@@ -1690,6 +1690,7 @@ def get_eval_hparams_for_seqio(
     use_cached: bool = False,
     shuffle: bool = None,
     require_metric_fns: bool = True,
+    eval_metrics_retain_task_features: bool = False,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1733,6 +1734,7 @@ def get_eval_hparams_for_seqio(
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
+    eval_metrics_retain_task_features: retain the provided feature lengths.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1753,16 +1755,20 @@ def get_eval_hparams_for_seqio(
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
   if metric_type is MetricType.PREDICT:
     p.eval_metrics_targets_length = feature_lengths['targets']
-    targets_feature_length = 1  # we don't want any targets, except an EOS
+    p.task_feature_lengths = {
+        'inputs': feature_lengths['inputs'],
+        'targets': 1,  # we don't want any targets, except an EOS
+    }
   elif metric_type is MetricType.SCORE:
-    targets_feature_length = feature_lengths['targets']
+    if eval_metrics_retain_task_features:
+      p.task_feature_lengths = feature_lengths
+    else:
+      p.task_feature_lengths = {
+          'inputs': feature_lengths['inputs'],
+          'targets': feature_lengths['targets'],
+      }
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
-
-  p.task_feature_lengths = {
-      'inputs': feature_lengths['inputs'],
-      'targets': targets_feature_length,
-  }
 
   # Split hparams per tasks and filter by metric type.
   tasks: Sequence[seqio.Task] = seqio.get_subtasks(
