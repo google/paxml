@@ -960,8 +960,8 @@ class SingleTask(base_task.BaseTask):
         lazy_ref=lambda: SingleTask.InferHParams
     )
 
-    metrics: Any = None
-    loss_aggregator: Any = None
+    metrics: Optional[base_hyperparams.BaseHyperParams] = None
+    loss_aggregator: Optional[base_hyperparams.BaseHyperParams] = None
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
     track_decoder_metric: Optional[str] = None
