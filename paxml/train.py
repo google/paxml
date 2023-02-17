@@ -724,34 +724,25 @@ def train_and_evaluate_pmap(
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
 
+  # TODO(hthu): Construct a TrainEval instead.
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
   assert is_eval
   p_eval_step, _ = partitioner.partition(
       eval_step_fn, global_inputs_shape_dtype, is_eval
   )
-
-  is_vars_replicated = True
-
-  def partition_eval_input_fns(eval_input_p):
-    eval_input_pipelines = [instantiate(input_p) for input_p in eval_input_p]
-    trainer_lib.check_unique_names(eval_input_pipelines)
-    # We either run p.eval_loop_num_batches steps or one epoch (when supported
-    # by a resettable input) per eval loop during training. When
-    # p.reset_for_eval is set to True, we run the eval loop until
-    # tf.errors.OutOfRangeError (or StopIteration) is raised, which can be
-    # triggered either because input pipeline has reached the end of the input
-    # sequence, or a pre-determined num_batches has reached.
-    eval_num_steps = [
-        -1 if p.reset_for_eval else p.eval_loop_num_batches
-        for p in eval_input_p
-    ]
-    eval_test_inputs_pspec = None
-    return (
-        eval_input_pipelines,
-        eval_num_steps,
-        eval_test_inputs_pspec,
-        eval_input_p,
-    )
+  # Construct a list of Eval programs on test data.
+  test_eval_programs = [
+      trainer_lib.SingleTaskEvalProgram(
+          train_program.task, e_input_p, partitioner
+      )
+      for e_input_p in eval_input_p
+  ]
+  trainer_lib.check_unique_names(
+      [
+          eval_program.eval_input.wrapped_input
+          for eval_program in test_eval_programs
+      ]
+  )
 
   def partition_decode_once_fns(prng_key, decode_input_p):
     decode_input_pipelines = [
@@ -777,18 +768,17 @@ def train_and_evaluate_pmap(
       train_program,
       partitioned_train_state,
       prng_key,
-      eval_input_p,
+      test_eval_programs,
       decode_input_p,
       total_num_params,
       early_stopping_fn,
       checkpointer,
-      partition_eval_input_fns,
       partition_decode_once_fns,
       job_log_dir,
       eval_prng_seed,
-      is_vars_replicated,
-      p_eval_step,
-      train_prng_seed,
+      is_vars_replicated=True,
+      p_eval_step=p_eval_step,
+      train_prng_seed=train_prng_seed,
   )
 
 
@@ -857,42 +847,13 @@ def train_and_evaluate_spmd_model(
   global_mesh = partitioner.global_mesh
   is_vars_replicated = False
 
-  def partition_eval_input_fns(eval_input_ps):
-    assert eval_input_ps, 'eval_input_ps must not be empty'
-    padded_eval_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
-        for input_p in eval_input_ps
-    ]
-    eval_input_pipelines = [
-        instantiate(input_p) for input_p in padded_eval_input_ps]
-    trainer_lib.check_unique_names(eval_input_pipelines)
-
-    # Do not mutate eval_input_pipelines itself. Instantiate a new one
-    # to get sample input.
-    _, eval_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-        padded_eval_input_ps[0]
-    )
-    eval_test_inputs_pspec = trainer_lib.get_input_partition_specs(
-        task_p.model.mesh_axis_names, eval_inputs_shape_dtype
-    )
-
-    # We either run p.eval_loop_num_batches steps or one epoch (when supported
-    # by a resettable input) per eval loop during training. When
-    # p.reset_for_eval is set to True, we run the eval loop until
-    # tf.errors.OutOfRangeError (or StopIteration) is raised, which can be
-    # triggered either because input pipeline has reached the end of the input
-    # sequence, or a pre-determined num_batches has reached.
-    eval_num_steps = [
-        -1 if p.reset_for_eval else p.eval_loop_num_batches
-        for p in padded_eval_input_ps
-    ]
-
-    return (
-        eval_input_pipelines,
-        eval_num_steps,
-        eval_test_inputs_pspec,
-        padded_eval_input_ps,
-    )
+  # Construct a list of Eval programs on test data.
+  test_eval_programs = [
+      trainer_lib.SingleTaskEvalProgram(
+          train_program.task, e_input_p, partitioner
+      )
+      for e_input_p in eval_input_p
+  ]
 
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
@@ -940,12 +901,11 @@ def train_and_evaluate_spmd_model(
       train_program,
       partitioned_train_state,
       prng_key,
-      eval_input_p,
+      test_eval_programs,
       decode_input_p,
       total_num_params,
       early_stopping_fn,
       checkpointer,
-      partition_eval_input_fns,
       partition_decode_once_fns,
       job_log_dir,
       eval_prng_seed,
@@ -1015,12 +975,12 @@ def _train_and_evaluate_common(
     train_program: trainer_lib.BaseTrainProgram,
     partitioned_train_state,
     prng_key,
-    eval_input_p,
+    # TODO(hthu): Take a more generalized form of EvalProgram interface.
+    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,
     checkpointer,
-    partition_eval_input_fns,
     partition_decode_once_fns,
     job_log_dir,
     eval_prng_seed,
@@ -1034,14 +994,6 @@ def _train_and_evaluate_common(
   partitioner = train_program.partitioner
   train_state_metadata = partitioner.get_train_state_metadata()
 
-  if eval_input_p:
-    (
-        eval_input_pipelines,
-        eval_num_steps,
-        eval_test_inputs_pspecs,
-        eval_input_p,
-    ) = partition_eval_input_fns(eval_input_p)
-
   if decode_input_p:
     decode_once_fn, prng_key = partition_decode_once_fns(
         prng_key, decode_input_p
@@ -1050,10 +1002,16 @@ def _train_and_evaluate_common(
   logging.info('Training loop starting...')
 
   with _SummaryContextManager(
-      job_log_dir, eval_input_p, decode_input_p,
-      train_p.eval_skip_train) as (train_summary_writer, eval_summary_writer,
-                                   eval_test_summary_writers,
-                                   decode_summary_writers):
+      job_log_dir,
+      [eval_progarm.eval_input.hparams for eval_progarm in test_eval_programs],
+      decode_input_p,
+      train_p.eval_skip_train,
+  ) as (
+      train_summary_writer,
+      eval_summary_writer,
+      eval_test_summary_writers,
+      decode_summary_writers,
+  ):
     # This only prints the view from the first host machine.
     summary_utils.write_model_structure(
         train_summary_writer,
@@ -1226,30 +1184,29 @@ def _train_and_evaluate_common(
         else:
           eval_partitioned_train_state = partitioned_train_state.to_eval_state()
         # If we have eval test then also evaluate on test.
-        if eval_input_p:
+        if test_eval_programs:
           logging.debug('  Performing eval_step() runs on test splits.')
-          eval_step_fn = functools.partial(
-              p_eval_step, eval_partitioned_train_state, eval_prng_seed
-          )
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
-                    train_program.partitioner,
-                    eval_num_steps,
-                    eval_step_fn,
+                    test_eval_programs,
+                    eval_partitioned_train_state,
+                    eval_prng_seed,
                     eval_test_summary_writers,
                     step_i,
-                    eval_input_pipelines,
                     job_log_dir,
-                    eval_test_inputs_pspecs,
                 )
             )
           eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
-              input_p=eval_input_p,
+              input_p=[
+                  eval_program.eval_input.hparams
+                  for eval_program in test_eval_programs
+              ],
               metrics_list=eval_metrics_list,
               scoring_metrics_list=eval_scoring_metrics_list,
-              steps_per_sec=eval_steps_per_sec)
+              steps_per_sec=eval_steps_per_sec,
+          )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
               eval_period.elapsed)

@@ -2374,6 +2374,11 @@ class PeekableInput:
   def hparams(self):
     return self._inp.hparams
 
+  @property
+  def wrapped_input(self) -> base_input.BaseInput:
+    """Returns the wrapped underlying BaseInput."""
+    return self._inp
+
   @classmethod
   def get_global_batch_size(cls, hparams: base_input.BaseInput.HParams) -> int:
     return hparams.cls.get_global_batch_size(hparams)
@@ -2530,3 +2535,95 @@ class SingleTaskTrainProgram(BaseTrainProgram):
   @property
   def train_unpadded_global_batch_size(self) -> int:
     return self._train_unpadded_global_batch_size
+
+
+class SingleTaskEvalProgram(programs.BasePartitionedProgram):
+  """Eval program that assumes a single task on a single dataset."""
+
+  def __init__(
+      self,
+      task: tasks_lib.SingleTask,
+      input_p: base_input.BaseInput.HParams,
+      partitioner: Partitioner,
+  ):
+    super().__init__(partitioner)
+    self._task = task
+    self._input_p = input_p
+    # Lazily initialized per first use.
+    self._eval_input_pipeline = None
+
+  def _init_pipeline(self) -> PeekableInput:
+    """Initialize the pipeline for eval_input."""
+    if self._eval_input_pipeline is None:
+      return PeekableInput(
+          instantiate(self._partitioner.preprocess_input_params(self._input_p))
+      )
+    return self._eval_input_pipeline
+
+  @property
+  def task(self) -> tasks_lib.SingleTask:
+    return self._task
+
+  @property
+  def eval_input(self) -> PeekableInput:
+    if self._eval_input_pipeline is None:
+      logging.debug('Initializing eval_input pipeline : %s', self._input_p)
+      self._eval_input_pipeline = self._init_pipeline()
+    return self._eval_input_pipeline
+
+  @property
+  def eval_num_steps(self) -> int:
+    return (
+        -1
+        if self._input_p.reset_for_eval
+        else self._input_p.eval_loop_num_batches
+    )
+
+  def partition_step(self) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+    if self._partitioned_step_fn is None:
+      # A bit of unfortunate conditioning but we have to branch out pmap/pjit
+      # case here -- As Pmap can simply take the train_inputs_shape_dtype from
+      # the partitioner whearas Pjit need to actually look at current eval input
+      # and get shape from there.
+      input_shape_dtype = self._partitioner.train_inputs_shape_dtype
+      if isinstance(
+          self._partitioner, (_PjitPartitioner, _AutoShardingPjitPartitioner)
+      ):
+        input_shape_dtype = jax.tree_map(
+            py_utils.get_global_input_shape_dtype, self.eval_input.peek_padded()
+        )
+      self._partitioned_step_fn, self._partitioned_input_spec = (
+          # TODO(laigd): Get rid of inputs_shape_dtype here.
+          self._partitioner.partition(
+              eval_step_single_learner,
+              inputs_shape_dtype=input_shape_dtype,
+              is_eval=True,
+          )
+      )
+
+    return self._partitioned_step_fn, self._partitioned_input_spec
+
+  def run_step(
+      self,
+      state: TrainState,
+      prng_key: jax.random.KeyArray,
+      inputs: Any,
+      unpadded_global_batch_size: int,
+  ) -> programs.ProgramOutput:
+    (
+        loss,
+        weighted_scalars,
+        per_example_out,
+        summary_tensors,
+    ) = self.partitioned_step_fn(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
+    return programs.ProgramOutput(
+        state,
+        aux={
+            'loss': loss,
+            'weighted_scalars': weighted_scalars,
+            'per_example_out': per_example_out,
+            'summary_tensors': summary_tensors,
+        },
+    )

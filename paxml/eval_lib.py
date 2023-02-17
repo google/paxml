@@ -275,21 +275,16 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
       self,
       init_key: PRNGKey,
       is_decode: bool = False,
-      eval_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
       decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
   ) -> Tuple[
       train_states.TrainState,
       trainer_lib.TrainStateMetadata,
-      trainer_lib.Partitioner.PartitionedStepFn,
+      Optional[trainer_lib.Partitioner.PartitionedStepFn],
       Optional[NestedPartitionSpec],
   ]:
     """Gets a partitioned model states and the step function."""
     global_mesh = self._partitioner.global_mesh
     _, step_key = jax.random.split(init_key)
-    padded_eval_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
-        for input_p in (eval_input_ps or [])
-    ]
     padded_decode_input_ps = [
         trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
         for input_p in (decode_input_ps or [])
@@ -301,28 +296,30 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
 
-    mode = RunningMode.DECODE if is_decode else RunningMode.EVAL
-    step_fn, is_eval = trainer_lib.get_step_fn(mode)
-    assert is_eval
+    step_fn = None
+    inputs_partition_spec = None
+    # Eval has been migrated to use EvalProgram, whereas each program
+    # encapsulates its own step function and input_partition_spec.
+    # TODO(hthu): Migrate decode to use the same concept.
+    if is_decode:
+      step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.DECODE)
+      assert is_eval
 
-    padded_input_ps = (
-        padded_decode_input_ps if is_decode else padded_eval_input_ps
-    )
-    if padded_input_ps:
-      _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-          padded_input_ps[0]
+      if padded_decode_input_ps:
+        _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+            padded_decode_input_ps[0]
+        )
+      else:
+        # This means there is no input to run, and currently this happens only
+        # when user runs decode() with eval input, i.e. `mode` is set to DECODE
+        # above. In that case, the partitioned step_fn won't get used since
+        # there is no decode input, and we simply use the training input shapes
+        # to partition.
+        # TODO(laigd): avoid cases like this.
+        inputs_shape_dtype = self._partitioner.train_inputs_shape_dtype
+      step_fn, inputs_partition_spec = self._partitioner.partition(
+          step_fn, inputs_shape_dtype, is_eval
       )
-    else:
-      # This means there is no input to run, and currently this happens only
-      # when user runs decode() with eval input, i.e. `mode` is set to DECODE
-      # above. In that case, the partitioned step_fn won't get used since there
-      # is no decode input, and we simply use the training input shapes to
-      # partition.
-      # TODO(laigd): avoid cases like this.
-      inputs_shape_dtype = self._partitioner.train_inputs_shape_dtype
-    step_fn, inputs_partition_spec = self._partitioner.partition(
-        step_fn, inputs_shape_dtype, is_eval
-    )
     if self.use_ema:
       # Make sure the opt_states exists before restoring
       # This is combined with the decoding test
@@ -488,14 +485,12 @@ def _create_checkpointer(
 
 
 def run_eval_loop_over_test_splits(
-    partitioner: trainer_lib.Partitioner,
-    num_steps: List[int],
-    eval_step: Callable[[NestedJTensor, Optional[int]], Any],
+    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    eval_partitioned_train_state: train_states.TrainState,
+    eval_prng_seed: jax.random.KeyArray,
     summary_writers: List[SummaryWriter],
     step: int,
-    model_inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
-    eval_inputs_pspec: Optional[NestedPartitionSpec] = None,
 ) -> Tuple[
     List[Optional[Dict[str, float]]],  # eval metrics.
     List[Optional[Dict[str, float]]],  # eval scoring metrics.
@@ -504,14 +499,12 @@ def run_eval_loop_over_test_splits(
   """Run evaluation in a loop over a list of test sets.
 
   Args:
-    partitioner: The Partitioner used to partition the computations.
-    num_steps: A list of steps for each test split to evaluate on.
-    eval_step: Eval step functions to call to evaluate the model.
+    test_eval_programs: A list of EvalPrograms to conduct eval.
+    eval_prng_seed: RNG seed for eval programs.
     summary_writers: The summary writer objects to log summaries.
     step: The step at which we are evaling the model.
     model_inputs: List of BaseInput instances.
     job_log_dir: Job's log directory in which scoring outputs will be written.
-    eval_inputs_pspec: PartitionSpec for eval inputs.
 
   Returns:
     A tuple of (a list of eval metrics,
@@ -522,18 +515,29 @@ def run_eval_loop_over_test_splits(
   eval_metrics_list = []
   eval_scoring_metrics_list = []
   num_eval_steps = []
-  for split, num_split_steps in enumerate(num_steps):
-    if _can_load_written_outputs(job_log_dir, model_inputs[split].hparams.name,
-                                 EvaluationMode.EVAL, step):
-      logging.info('Eval on input %s at step %d already done, skipping.',
-                   model_inputs[split].hparams.name, step)
+  for split, eval_program in enumerate(test_eval_programs):
+    if _can_load_written_outputs(
+        job_log_dir,
+        eval_program.eval_input.hparams.name,
+        EvaluationMode.EVAL,
+        step,
+    ):
+      logging.info(
+          'Eval on input %s at step %d already done, skipping.',
+          eval_program.eval_input.hparams.name,
+          step,
+      )
       eval_metrics_list.append(None)
       eval_scoring_metrics_list.append(None)
       num_eval_steps.append(0)
       continue
 
-    logging.info('Starting eval data split=%d (%s) with num_steps=%d',
-                 split, model_inputs[split].hparams.name, num_split_steps)
+    logging.info(
+        'Starting eval data split=%d (%s) with num_steps=%d',
+        split,
+        eval_program.eval_input.hparams.name,
+        eval_program.eval_num_steps,
+    )
     # Reset loss and summary tensors for each test split.
     loss = []
     summary_tensors = {}
@@ -542,59 +546,76 @@ def run_eval_loop_over_test_splits(
     per_example_scores = []
     # Use num_split_steps < 0 to indicate running all of the input until
     # out of range.
-    while num_split_steps < 0 or step_num < num_split_steps:
+    while (
+        eval_program.eval_num_steps < 0
+        or step_num < eval_program.eval_num_steps
+    ):
       step_num += 1
       try:
-        eval_inputs = model_inputs[split].get_next_padded()
+        eval_inputs = eval_program.eval_input.get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
-        if num_split_steps > 0:
+        if eval_program.eval_num_steps > 0:
           raise
-        logging.info('Exhausted eval data split=%d after %d steps', split,
-                     step_num - 1)
-        model_inputs[split].reset()
+        logging.info(
+            'Exhausted eval data split=%d after %d steps', split, step_num - 1
+        )
+        eval_program.eval_input.reset()
         break
 
-      eval_inputs = partitioner.preprocess_inputs(
-          model_inputs[split],
+      eval_inputs = eval_program.partitioner.preprocess_inputs(
+          eval_program.eval_input,
           eval_inputs,
-          eval_inputs_pspec if eval_inputs_pspec else None,
+          # Pmap partitioner would have returned None as partitioned_input_spec.
+          eval_program.partitioned_input_spec,
       )
-      # TODO(bencaine): Rename eval_metrics here weighted scalars?
-      (
-          eval_loss,
-          eval_metrics,
-          per_example_output,
-          eval_summary_tensors,
-      ) = eval_step(
+
+      eval_program_output = eval_program.run_step(
+          eval_partitioned_train_state,
+          eval_prng_seed,
           eval_inputs,
-          model_inputs[split].get_global_batch_size(
-              model_inputs[split].hparams
+          eval_program.eval_input.get_global_batch_size(
+              eval_program.eval_input.hparams
           ),
       )
+      eval_loss = eval_program_output.aux['loss']
+      eval_weighted_scalars = eval_program_output.aux['weighted_scalars']
+      eval_per_example_output = eval_program_output.aux['per_example_out']
+      eval_summary_tensors = eval_program_output.aux['summary_tensors']
 
-      logging.info('Finished eval step on input batch %d for %s',
-                   step_num, model_inputs[split].hparams.name)
+      logging.info(
+          'Finished eval step on input batch %d for %s',
+          step_num,
+          eval_program.eval_input.hparams.name,
+      )
 
       eval_loss = py_utils.maybe_unreplicate_for_fully_replicated(eval_loss)
-      eval_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-          eval_metrics)
-      per_example_output = py_utils.maybe_unreplicate_for_fully_replicated(
-          per_example_output)
+      eval_weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+          eval_weighted_scalars
+      )
+      eval_per_example_output = py_utils.maybe_unreplicate_for_fully_replicated(
+          eval_per_example_output
+      )
       eval_summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-          eval_summary_tensors)
-      per_example_scores.append(jax.tree_map(np.asarray, per_example_output))
+          eval_summary_tensors
+      )
+      per_example_scores.append(
+          jax.tree_map(np.asarray, eval_per_example_output)
+      )
       loss += [eval_loss]
       eval_summary_tensors = summary_utils.flatten_summary_dict(
-          eval_summary_tensors)
+          eval_summary_tensors
+      )
       for k, v in eval_summary_tensors:
         if k in summary_tensors:
           summary_tensors[k] += [v]
         else:
           summary_tensors[k] = [v]
-      for k in eval_metrics:
-        metrics[k].append(eval_metrics[k])
+      for k in eval_weighted_scalars:
+        metrics[k].append(eval_weighted_scalars[k])
 
-    logging.info('Finished eval on input %s', model_inputs[split].hparams.name)
+    logging.info(
+        'Finished eval on input %s', eval_program.eval_input.hparams.name
+    )
     # Flatten scoring outputs to simplify input for metrics eval computation.
     # Constructs a new flattened array of single example outputs from original
     # array containing batches of outputs.
@@ -603,12 +624,22 @@ def run_eval_loop_over_test_splits(
       for ex in py_utils.tree_unstack(batch, 0):
         flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
     eval_scoring_metrics = None
-    output_dir = (job_log_dir / f'{EvaluationMode.EVAL.value}_out'
-                  / model_inputs[split].hparams.name)
-    if seqio_input.should_process_outputs(model_inputs[split]):
+    output_dir = (
+        job_log_dir
+        / f'{EvaluationMode.EVAL.value}_out'
+        / eval_program.eval_input.hparams.name
+    )
+    if seqio_input.should_process_outputs(
+        eval_program.eval_input.wrapped_input
+    ):
       eval_scoring_metrics = seqio_input.process_outputs(
-          model_inputs[split], flat_scoring_outputs, summary_writers[split],
-          seqio_input.MetricType.SCORE, step, output_dir)
+          eval_program.eval_input.wrapped_input,
+          flat_scoring_outputs,
+          summary_writers[split],
+          seqio_input.MetricType.SCORE,
+          step,
+          output_dir,
+      )
 
     loss = np.array(loss)
     for k in summary_tensors:
@@ -620,10 +651,15 @@ def run_eval_loop_over_test_splits(
       # scalars.
       weighted_average = metric_utils.as_float(values)
       sum_metric_weights = np.sum(np.stack([v[1] for v in values]))
-      logging.info('  %s=%f (weight=%f)', key, weighted_average,
-                   sum_metric_weights.item())
-    summary_utils.write_summary_entry(summary_writers[split], step, loss,
-                                      metrics, summary_tensors)
+      logging.info(
+          '  %s=%f (weight=%f)',
+          key,
+          weighted_average,
+          sum_metric_weights.item(),
+      )
+    summary_utils.write_summary_entry(
+        summary_writers[split], step, loss, metrics, summary_tensors
+    )
     eval_metrics_list.append(metric_utils.as_float_dict(metrics))
     eval_scoring_metrics_list.append(eval_scoring_metrics)
     num_eval_steps.append(step_num)
@@ -747,14 +783,14 @@ class _PmapEvalRunner:
     if not self._eval_input_p:
       return
     self._jax_task = jax_task
-    self._eval_input_pipelines = [
-        instantiate(input_p) for input_p in eval_input_p
+    eval_programs = [
+        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        for ep in eval_input_p
     ]
-    trainer_lib.check_unique_names(self._eval_input_pipelines)
-    self._eval_num_steps = [
-        -1 if p.reset_for_eval else p.eval_loop_num_batches
-        for p in eval_input_p
-    ]
+    trainer_lib.check_unique_names(
+        [program.eval_input.wrapped_input for program in eval_programs]
+    )
+    self._eval_programs = eval_programs
     self._run_pmap(pmap_prng_key)
 
   def _run_pmap(self, prng_key: PRNGKey):
@@ -779,34 +815,27 @@ class _PmapEvalRunner:
       self,
       replicated_model_states: train_states.TrainState,
       eval_summary_writers: List[SummaryWriter],
-  ) -> Tuple[List[Optional[Dict[str, float]]],  # eval metrics list.
-             List[Optional[Dict[str, float]]],  # seqio metrics list.
-             List[int]  # actual eval steps.
-            ]:
+  ) -> Tuple[
+      List[Optional[Dict[str, float]]],  # eval metrics list.
+      List[Optional[Dict[str, float]]],  # seqio metrics list.
+      List[int],  # actual eval steps.
+  ]:
     """Runs evaluate for one step for all test splits."""
     if not self._eval_input_p:
       return [], [], []
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
-            replicated_model_states.step))
-
-    def eval_step_fn(inputs, unpadded_global_batch_size):
-      # TODO(pax): shall we eval all sub-models during eval?
-      return self._pmap_eval_step(
-          replicated_model_states,
-          self._eval_prng_seed,
-          inputs,
-          unpadded_global_batch_size,
-      )
+            replicated_model_states.step
+        )
+    )
 
     # Run the eval loop.
     return run_eval_loop_over_test_splits(
-        self._partitioner,
-        self._eval_num_steps,
-        eval_step_fn,
+        self._eval_programs,
+        replicated_model_states,
+        self._eval_prng_seed,
         eval_summary_writers,
         step_i,
-        self._eval_input_pipelines,
         self._job_log_dir,
     )
 
@@ -902,42 +931,18 @@ class _SpmdEvalRunner:
       jax_task: tasks_lib.SingleTask,
       partitioner: trainer_lib.Partitioner,
       job_log_dir: epath.Path,
-      partitioned_eval_step_fn: Optional[Callable[..., Any]] = None,
-      inputs_partition_spec: Optional[NestedPartitionSpec] = None,
   ):
-    self._padded_eval_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(
-            input_p, partitioner.global_mesh
-        )
-        for input_p in eval_input_ps
-    ]
-    if not self._padded_eval_input_ps:
-      return
     self._jax_task = jax_task
-    self._eval_input_pipelines = [
-        instantiate(input_p) for input_p in self._padded_eval_input_ps
+    eval_programs = [
+        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        for ep in eval_input_ps
     ]
-    trainer_lib.check_unique_names(self._eval_input_pipelines)
-    self._eval_num_steps = [
-        -1 if p.reset_for_eval else p.eval_loop_num_batches
-        for p in self._padded_eval_input_ps
-    ]
+    trainer_lib.check_unique_names(
+        [ep.eval_input.wrapped_input for ep in eval_programs]
+    )
+    self._eval_programs = eval_programs
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner
-
-    if partitioned_eval_step_fn:
-      assert inputs_partition_spec is not None
-      self._eval_step = partitioned_eval_step_fn
-      self._inputs_partition_spec = inputs_partition_spec
-    else:
-      step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
-      assert is_eval
-      _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-          self._padded_eval_input_ps[0]
-      )
-      self._eval_step, self._inputs_partition_spec = (
-          self._partitioner.partition(step_fn, inputs_shape_dtype, is_eval)
-      )
 
   @classmethod
   def get_inputs_shape_dtype_for_init(
@@ -957,27 +962,22 @@ class _SpmdEvalRunner:
              List[int]  # performed eval steps.
             ]:
     """Runs evaluate for one step. Requires calling self._run_pjit() prior."""
-    if not self._padded_eval_input_ps:
+    if not self._eval_programs:
       return [], [], []
 
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
-    eval_step_fn = functools.partial(
-        self._eval_step, partitioned_train_state.to_eval_state(), eval_key
-    )
 
     # Run the eval loop.
     with self._partitioner.global_mesh:
       return run_eval_loop_over_test_splits(
-          self._partitioner,
-          self._eval_num_steps,
-          eval_step_fn,
+          self._eval_programs,
+          partitioned_train_state.to_eval_state(),
+          eval_key,
           eval_summary_writers,
           step_i,
-          self._eval_input_pipelines,
           self._job_log_dir,
-          self._inputs_partition_spec,
       )
 
   def get_partition_run_one_step_fn(self, eval_key):
@@ -990,10 +990,11 @@ class _SpmdEvalRunner:
         )
 
       return tuning_lib.EvalMetrics(
-          input_p=self._padded_eval_input_ps,
+          input_p=[ep.eval_input.hparams for ep in self._eval_programs],
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+      )
 
     return eval_one_step_fn
 
@@ -1039,19 +1040,17 @@ def evaluate_spmd_model(
       train_state_metadata,
       step_fn,
       inputs_partition_spec,
-  ) = checkpointer.get_model_states(
-      init_key, is_decode=False, eval_input_ps=eval_input_p
-  )
+  ) = checkpointer.get_model_states(init_key, is_decode=False)
+  if step_fn or inputs_partition_spec:
+    raise AssertionError(
+        "Eval doesn't construct step_fns anymore during model state"
+        ' initialization time. This should not happen'
+    )
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
   eval_one_step_fn = _SpmdEvalRunner(
-      eval_input_p,
-      jax_task,
-      partitioner,
-      job_log_dir,
-      step_fn,
-      inputs_partition_spec,
+      eval_input_p, jax_task, partitioner, job_log_dir
   ).get_partition_run_one_step_fn(eval_key)
 
   decode_once_fn = None
@@ -1665,6 +1664,8 @@ def decode_spmd_model(
   inputs = [instantiate(p) for p in padded_input_p]
   trainer_lib.check_unique_names(inputs)
 
+  # TODO(hthu): Remove eval_input_p as it basically isn't effective.
+  # get_model_states below would always use decode_input when is_decode = True.
   # Either decoder or eval inputs is not empty.
   assert list(input_p) + list(eval_input_p)
 
@@ -1683,7 +1684,6 @@ def decode_spmd_model(
       init_key,
       is_decode=True,
       decode_input_ps=input_p,
-      eval_input_ps=eval_input_p,
   )
   decode_once_fn = partition_decode_once_spmd_model(
       jax_task,
