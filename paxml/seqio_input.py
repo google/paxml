@@ -22,7 +22,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -526,6 +526,10 @@ class SeqIOInput(base_input.BaseInput):
   def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task_inst
 
+  @property
+  def task_inst(self) -> seqio.Task:
+    return cast(seqio.Task, self.mixture_or_task_inst)
+
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
 
@@ -853,7 +857,7 @@ class SeqIOInput(base_input.BaseInput):
         inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
       key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
       t = _get_targets_str(example, self.mixture_or_task_inst)
-      targets[key].append(self.mixture_or_task_inst.postprocess_fn(
+      targets[key].append(self.task_inst.postprocess_fn(
           t, example=example, is_target=True))
       examples[key].append(example)
 
@@ -875,7 +879,7 @@ class SeqIOInput(base_input.BaseInput):
       seqio_postprocessed_predictions = []
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
-        prediction = self.mixture_or_task_inst.postprocess_fn(
+        prediction = self.task_inst.postprocess_fn(
             answer, example=e, is_target=False)
         predictions_list.append(prediction)
         seqio_postprocessed_predictions.append(prediction)
@@ -907,10 +911,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = examples[k][0]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
@@ -990,13 +994,13 @@ class SeqIOInput(base_input.BaseInput):
       answer = ans[_LM_DECODER_OUT_KEY]
 
       # postprocess model's decoder output
-      prediction = self.mixture_or_task_inst.postprocess_fn(
+      prediction = self.task_inst.postprocess_fn(
           answer, example=targets[k], is_target=False)
       predictions_list.append(prediction)
 
       # postprocess target example for target decoder output str
       t = _get_targets_str(targets[k], self.mixture_or_task_inst)
-      seqio_target = self.mixture_or_task_inst.postprocess_fn(
+      seqio_target = self.task_inst.postprocess_fn(
           t, example=targets[k], is_target=True)
       targets_list.append(seqio_target)
 
@@ -1012,10 +1016,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = targets[k]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
@@ -1074,7 +1078,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       prefix_targets_list = []
       for e in targets[k]:
-        target_post = self.mixture_or_task_inst.postprocess_fn(
+        target_post = self.task_inst.postprocess_fn(
             target, example=e, is_target=True)
         targets_list.append(target_post)
         prefix_targets_list.append(target_post)
@@ -1124,7 +1128,7 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
-      target_post = self.mixture_or_task_inst.postprocess_fn(
+      target_post = self.task_inst.postprocess_fn(
           score, example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
