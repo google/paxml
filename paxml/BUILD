@@ -141,6 +141,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit jax.experimental.global_device_array dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
@@ -187,6 +188,7 @@ pytype_strict_library(
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
+        # Implicit jax.experimental.global_device_array dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
@@ -330,6 +332,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit clu.values dependency.
         # Implicit jax dependency.
+        # Implicit jax.experimental.global_device_array dependency.
         # Implicit numpy dependency.
         # Implicit internal platform check dependency.
         "//praxis:base_input",
@@ -440,6 +443,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit jax.experimental.global_device_array dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         "//paxml:checkpoints",
