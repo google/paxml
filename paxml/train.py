@@ -41,8 +41,6 @@ from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
 from paxml import tuning_lib
-# TODO(hthu): Remove once downstream usecases are migrated.
-from paxml.trainer_lib import PeekableInput as _PeekableInput  # pylint:disable=unused-import
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
