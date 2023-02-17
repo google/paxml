@@ -62,7 +62,6 @@ PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
 TrainState = train_states.TrainState
-PeekableInput = trainer_lib.PeekableInput
 
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
@@ -594,17 +593,17 @@ def train_and_evaluate(
 
 
 def _maybe_update_latest_model_step(
-    train_input: PeekableInput,
+    train_input: base_input.BaseInput,
     train_input_p: base_input.BaseInput.HParams,
     initial_global_step: int,
-) -> PeekableInput:
+) -> base_input.BaseInput:
   """Updates `train_input_p` in place its latest model step."""
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     return train_input
   dp = train_input_p.deterministic_input_start_index
   dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
   logging.info('Reinstanting input because _latest_model_step is updated.')
-  return PeekableInput(instantiate(train_input_p))
+  return instantiate(train_input_p)
 
 
 class _SummaryContextManager(contextlib.ExitStack):
@@ -736,10 +735,7 @@ def train_and_evaluate_pmap(
       for e_input_p in eval_input_p
   ]
   trainer_lib.check_unique_names(
-      [
-          eval_program.eval_input.wrapped_input
-          for eval_program in test_eval_programs
-      ]
+      [eval_program.eval_input for eval_program in test_eval_programs]
   )
 
   def partition_decode_once_fns(prng_key, decode_input_p):
@@ -933,7 +929,7 @@ def _create_program_and_states(
       job_log_dir=job_log_dir,
   )
   train_input_p = partitioner.preprocess_input_params(train_input_p)
-  train_input_pipeline = PeekableInput(instantiate(train_input_p))
+  train_input_pipeline = instantiate(train_input_p)
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
   train_program = trainer_lib.SingleTaskTrainProgram(
       jax_task, train_input_pipeline, partitioner

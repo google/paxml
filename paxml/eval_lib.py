@@ -629,11 +629,9 @@ def run_eval_loop_over_test_splits(
         / f'{EvaluationMode.EVAL.value}_out'
         / eval_program.eval_input.hparams.name
     )
-    if seqio_input.should_process_outputs(
-        eval_program.eval_input.wrapped_input
-    ):
+    if seqio_input.should_process_outputs(eval_program.eval_input):
       eval_scoring_metrics = seqio_input.process_outputs(
-          eval_program.eval_input.wrapped_input,
+          eval_program.eval_input,
           flat_scoring_outputs,
           summary_writers[split],
           seqio_input.MetricType.SCORE,
@@ -788,7 +786,7 @@ class _PmapEvalRunner:
         for ep in eval_input_p
     ]
     trainer_lib.check_unique_names(
-        [program.eval_input.wrapped_input for program in eval_programs]
+        [program.eval_input for program in eval_programs]
     )
     self._eval_programs = eval_programs
     self._run_pmap(pmap_prng_key)
@@ -937,9 +935,7 @@ class _SpmdEvalRunner:
         trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_ps
     ]
-    trainer_lib.check_unique_names(
-        [ep.eval_input.wrapped_input for ep in eval_programs]
-    )
+    trainer_lib.check_unique_names([ep.eval_input for ep in eval_programs])
     self._eval_programs = eval_programs
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner

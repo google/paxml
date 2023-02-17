@@ -43,7 +43,6 @@ from praxis import base_layer
 from praxis import base_model
 from praxis import py_utils
 from praxis import pytypes
-import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
 
@@ -2363,46 +2362,6 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
   return call
 
 
-class PeekableInput:
-  """Wraps a BaseInput to provide a peek() method. Single thread access only."""
-
-  def __init__(self, inp: base_input.BaseInput) -> None:
-    self._inp = inp
-    self._peek = None
-
-  @property
-  def hparams(self):
-    return self._inp.hparams
-
-  @property
-  def wrapped_input(self) -> base_input.BaseInput:
-    """Returns the wrapped underlying BaseInput."""
-    return self._inp
-
-  @classmethod
-  def get_global_batch_size(cls, hparams: base_input.BaseInput.HParams) -> int:
-    return hparams.cls.get_global_batch_size(hparams)
-
-  def get_next_padded(self):
-    if self._peek is None:
-      return self._inp.get_next_padded()
-    peek = self._peek
-    self._peek = None
-    return peek
-
-  def peek_padded(self):
-    if self._peek is None:
-      try:
-        self._peek = self._inp.get_next_padded()
-      except (tf.errors.OutOfRangeError, StopIteration):
-        self._peek = None
-    return self._peek
-
-  # Re-direct to underlying BaseInput class.
-  def __getattr__(self, attr):
-    return getattr(self._inp, attr)
-
-
 class BaseTrainProgram(programs.BasePartitionedProgram):
   """A lean interface of a basic train program.
 
@@ -2435,7 +2394,7 @@ class BaseTrainProgram(programs.BasePartitionedProgram):
     raise NotImplementedError('Subclass must implement task')
 
   @property
-  def train_input(self) -> PeekableInput:
+  def train_input(self) -> base_input.BaseInput:
     raise NotImplementedError('Subclass must implement train_input')
 
   @property
@@ -2451,7 +2410,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
   def __init__(
       self,
       task: tasks_lib.SingleTask,
-      train_input: PeekableInput,
+      train_input: base_input.BaseInput,
       partitioner: Partitioner,
   ):
     super().__init__(partitioner)
@@ -2529,7 +2488,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
     return self._task
 
   @property
-  def train_input(self) -> PeekableInput:
+  def train_input(self) -> base_input.BaseInput:
     return self._train_input
 
   @property
@@ -2552,11 +2511,11 @@ class SingleTaskEvalProgram(programs.BasePartitionedProgram):
     # Lazily initialized per first use.
     self._eval_input_pipeline = None
 
-  def _init_pipeline(self) -> PeekableInput:
+  def _init_pipeline(self) -> base_input.BaseInput:
     """Initialize the pipeline for eval_input."""
     if self._eval_input_pipeline is None:
-      return PeekableInput(
-          instantiate(self._partitioner.preprocess_input_params(self._input_p))
+      return instantiate(
+          self._partitioner.preprocess_input_params(self._input_p)
       )
     return self._eval_input_pipeline
 
@@ -2565,7 +2524,7 @@ class SingleTaskEvalProgram(programs.BasePartitionedProgram):
     return self._task
 
   @property
-  def eval_input(self) -> PeekableInput:
+  def eval_input(self) -> base_input.BaseInput:
     if self._eval_input_pipeline is None:
       logging.debug('Initializing eval_input pipeline : %s', self._input_p)
       self._eval_input_pipeline = self._init_pipeline()
