@@ -2404,7 +2404,7 @@ class BaseTrainProgram(programs.BasePartitionedProgram):
     )
 
 
-class SingleTaskTrainProgram(BaseTrainProgram):
+class SingleTaskTrainProgram(programs.BaseTrainProgram):
   """Train program that assumes a single task on a single dataset."""
 
   def __init__(

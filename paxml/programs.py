@@ -20,7 +20,9 @@ from typing import Any, Callable, Dict, Optional, Protocol, Tuple
 
 import jax
 
+from paxml import tasks_lib
 from paxml import train_states
+from praxis import base_input
 from praxis import pytypes
 
 
@@ -70,7 +72,7 @@ class BasePartitionedProgram(Program, metaclass=abc.ABCMeta):
     partitioned_step_fn attribute, along with its partitioned input spec into
     partitioned_input_spec.
     """
-    raise NotImplementedError("Subclass must implement partition_step().")
+    raise NotImplementedError('Subclass must implement partition_step().')
 
   def run_step(
       self,
@@ -106,3 +108,47 @@ class BasePartitionedProgram(Program, metaclass=abc.ABCMeta):
           self.partition_step()
       )
     return self._partitioned_input_spec
+
+
+class BaseTrainProgram(BasePartitionedProgram):
+  """A lean interface of a basic train program.
+
+  Users should inherit from BaseTrainProgram and implement methods required to
+  form a custom train program.
+
+  TODO(hthu): Write a custom program example.
+  """
+
+  @property
+  def train_inputs_shape_dtype(self) -> pytypes.NestedShapeDtypeLike:
+    raise NotImplementedError(
+        'Subclass must implement train_inputs_global_shape_dtype'
+    )
+
+  # TODO(hthu): Move TrainStateMetadata into common library to break up
+  # dependency on trainer.
+  @property
+  def train_state_metadata(self):
+    """Gets the TrainStateMetadata used for partitioning.
+
+    Deliberately duplicate so that we can eventually move train_state_metadata
+    away from partitioner.
+
+    Returns:
+      TrainStateMetadata that represents the metadata used during train.
+    """
+    raise NotImplementedError('Subclass must implement train_state_metadata')
+
+  @property
+  def task(self) -> tasks_lib.SingleTask:
+    raise NotImplementedError('Subclass must implement task')
+
+  @property
+  def train_input(self) -> base_input.BaseInput:
+    raise NotImplementedError('Subclass must implement train_input')
+
+  @property
+  def train_unpadded_global_batch_size(self) -> int:
+    raise NotImplementedError(
+        'Subclass must implement train_unpadded_global_batch_size'
+    )

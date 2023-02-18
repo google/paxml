@@ -479,6 +479,7 @@ pytype_strict_library(
         ":eval_lib",
         ":experiment_utils",
         ":metric_utils",
+        ":programs",
         ":summary_utils",
         ":tasks_lib",
         ":train_states",
@@ -503,8 +504,10 @@ pytype_strict_library(
     srcs = ["programs.py"],
     srcs_version = "PY3",
     deps = [
+        ":tasks_lib",
         ":train_states",
         # Implicit jax dependency.
+        "//praxis:base_input",
         "//praxis:pytypes",
     ],
 )

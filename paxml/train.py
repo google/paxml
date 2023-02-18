@@ -36,6 +36,7 @@ from paxml import checkpoint_managers
 from paxml import eval_lib
 from paxml import experiment_utils
 from paxml import metric_utils
+from paxml import programs
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import train_states
@@ -966,7 +967,7 @@ def _create_program_and_states(
 
 
 def _train_and_evaluate_common(
-    train_program: trainer_lib.BaseTrainProgram,
+    train_program: programs.BaseTrainProgram,
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
