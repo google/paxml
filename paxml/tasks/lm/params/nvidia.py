@@ -36,6 +36,7 @@ WeightInit = base_layer.WeightInit
 class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   """Pipelined Transformer using Adam optimizer."""
   USE_FLASH_ATTENTION = True
+  USE_TRITON_LAYER_NORM = True
 
   USE_REPEATED_LAYER = False
   DCN_MESH_SHAPE = [2, 1, 1, 1]
@@ -101,6 +102,15 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
       )
       fused_tr_atten_tpl.copy_fields_from(layer_p.tr_atten_tpl)
       layer_p.tr_atten_tpl = fused_tr_atten_tpl
+
+    # Use Triton Layer Norm.
+    if self.USE_TRITON_LAYER_NORM:
+      assert layer_p.ln_tpl.cls == layers.LayerNorm
+      fused_ln_tpl = pax_fiddle.Config(
+          gpu_fast_attention.GpuTritonFusedLayerNorm,
+      )
+      fused_ln_tpl.copy_fields_from(layer_p.ln_tpl)
+      layer_p.ln_tpl = fused_ln_tpl
 
     scale = self.SOFTMAX_INIT_STD
     if not scale:
