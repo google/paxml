@@ -1112,8 +1112,9 @@ def initialize_partitioned_model_states(
 
   init_fn = pjit.pjit(
       init_model_from_seed,
-      in_axis_resources=(prng_key_partition_spec),
-      out_axis_resources=train_state_partition_specs)
+      in_shardings=prng_key_partition_spec,
+      out_shardings=train_state_partition_specs,
+  )
   init_fn = bind_mesh(init_fn, global_mesh)
 
   partitioned_vars = init_fn(prng_key)
@@ -1746,9 +1747,7 @@ class _PjitPartitioner(Partitioner):
           return x
 
         with self._global_mesh:
-          return pjit.pjit(
-              _identity, in_axis_resources=None, out_axis_resources=None
-          )(k)
+          return pjit.pjit(_identity, in_shardings=None, out_shardings=None)(k)
 
       self._broadcast_key_fn = _broadcast_key
 
