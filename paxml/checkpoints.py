@@ -25,7 +25,6 @@ from etils import epath
 import flax.serialization
 import jax
 from jax.experimental import multihost_utils
-from jax.experimental.global_device_array import GlobalDeviceArray
 import numpy as np
 import optax
 import orbax.checkpoint
@@ -162,8 +161,6 @@ def retrieve_checkpoint_type(
   """Retrieves the CheckpointType given the input arguments."""
   using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
   if using_pjit or py_utils.pmap_use_tensorstore():
-    if using_pjit:
-      assert py_utils.gda_or_jax_array(), 'pjit requires GDA or jax.Array'
     if maybe_use_persistence_checkpointing:
       return CheckpointType.PERSISTENCE
     else:
@@ -521,13 +518,13 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     self._set_param_names(flattened_nested_names)
 
     def create_restore_args(pspec, shape_struct):
-      restore_type = jax.Array if jax.config.jax_array else GlobalDeviceArray
       return orbax.checkpoint.ArrayRestoreArgs(
-          restore_type=restore_type,
+          restore_type=jax.Array,
           mesh=mesh,
           mesh_axes=pspec,
           global_shape=shape_struct.shape,
-          dtype=shape_struct.dtype)
+          dtype=shape_struct.dtype,
+      )
 
     restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
                                 flattened_train_state)

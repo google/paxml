@@ -344,14 +344,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       if py_utils.pmap_use_tensorstore():
         logging.info('Saving a ckpt at %sstep: %d',
                      'final ' if is_final else '', step_i)
-        if jax.config.jax_array:
-          fully_replicated_gda_train_state = jax.tree_map(
-              py_utils.convert_host_local_array_to_global_array,
-              partitioned_train_state)
-        else:
-          fully_replicated_gda_train_state = jax.tree_map(
-              py_utils.convert_fully_replicated_sda_to_gda,
-              partitioned_train_state)
+        fully_replicated_gda_train_state = jax.tree_map(
+            py_utils.convert_host_local_array_to_global_array,
+            partitioned_train_state,
+        )
         self._save_with_args(step_i, fully_replicated_gda_train_state)
       else:
         unreplicated_train_state = jax.tree_map(lambda x: x[0],
@@ -692,10 +688,6 @@ def train_and_evaluate_pmap(
       should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
-  if jax.config.jax_parallel_functions_output_gda:
-    logging.warning('--jax_use_gda is set to True but ignored for pmap.')
-  if jax.config.jax_array:
-    logging.warning('--jax_array is set to True')
 
   train_program, partitioned_train_state, total_num_params, prng_key = (
       _create_program_and_states(
@@ -802,7 +794,6 @@ def train_and_evaluate_spmd_model(
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
   """
   logging.info('Using SPMD sharding for model parallelism.')
-  assert py_utils.gda_or_jax_array(), 'GDA or jax.Array must be enabled'
   (
       train_program,
       partitioned_train_state,

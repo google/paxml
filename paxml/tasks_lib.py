@@ -32,7 +32,6 @@ from etils import epath
 import flax
 import jax
 from jax import numpy as jnp
-from jax.experimental import global_device_array
 import numpy as np
 import optax
 from paxml import base_inference_runner
@@ -231,9 +230,6 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
     loaded_var = loaded_vars[init_var_name]
     if init_var_name not in used_vars:
       used_vars.add(init_var_name)
-    # Copy the var if it's used more than once.
-    elif isinstance(loaded_var, global_device_array.GlobalDeviceArray):
-      loaded_var = py_utils.copy_gda(loaded_var)
     else:
       # Allow the copy of cross-host Jax arrays.
       with jax.spmd_mode('allow_all'):
@@ -423,25 +419,15 @@ def restore_pmap_from_tensorstore(
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.PERSISTENCE:
-    if jax.config.jax_array:
-      fully_replicated_array_model_states = jax.tree_map(
-          py_utils.convert_fully_replicated_array_to_pmap_array,
-          fully_replicated_gda_model_states)
-      return fully_replicated_array_model_states
-    else:
-      fully_replicated_sda_model_states = jax.tree_map(
-          py_utils.convert_fully_replicated_gda_to_sda,
-          fully_replicated_gda_model_states)
-    return fully_replicated_sda_model_states
+    return jax.tree_map(
+        py_utils.convert_fully_replicated_array_to_pmap_array,
+        fully_replicated_gda_model_states,
+    )
   # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
-  if jax.config.jax_array:
-    model_states = jax.tree_map(lambda x: x.addressable_data(0),
-                                fully_replicated_gda_model_states)
-  else:
-    model_states = jax.tree_map(lambda x: x.addressable_data(0),
-                                fully_replicated_gda_model_states)
-  return model_states
+  return jax.tree_map(
+      lambda x: x.addressable_data(0), fully_replicated_gda_model_states
+  )
 
 
 class CheckpointLoadingRules(NamedTuple):

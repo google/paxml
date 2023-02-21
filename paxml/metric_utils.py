@@ -23,7 +23,6 @@ from absl import logging
 import clu.values as clu_values
 import jax
 from jax import numpy as jnp
-from jax.experimental import global_device_array
 import numpy as np
 from paxml import summary_utils
 # Internal platform import
@@ -216,7 +215,6 @@ def is_scalar(v: Any) -> bool:
       numbers.Number,
       np.ndarray,
       jnp.ndarray,
-      global_device_array.GlobalDeviceArray,
       jax.Array,
   ]
   # Internal scalar types
