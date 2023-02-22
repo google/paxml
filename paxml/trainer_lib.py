@@ -315,7 +315,7 @@ def adjust_input_params_for_small_batch(
   # LINT.IfChange(PspecSharding)
   if jax.process_count() == 1:
     # If there is only one host, valid examples are already contiguous so we can
-    # use default GDA creation.
+    # use default Jax array creation.
     # Inputs use pspec sharding (see praxis.BaseInput.reshard_for_spmd).
     return copy
   # LINT.ThenChange(trainer_lib.py:UsePspecOnArrayInputs)
@@ -2123,9 +2123,9 @@ class _AutoShardingPjitPartitioner(_PjitPartitioner):
     # `step_fn`. Then we can extract the input shardings returned by XLA's
     # auto spmd partitioner from the compiled object.
 
-    # We provide input_partition_spec because GDA creation is specialized to the
-    # input partition specs created here. If we use partition specs returned by
-    # XLA, it errors out.
+    # We provide input_partition_spec because Jax Array creation is specialized
+    # to the input partition specs created here. If we use partition specs
+    # returned by XLA, it errors out.
     prng_key_partition_spec = PartitionSpec(None)
     fn_in_partition_specs = (pjit.AUTO, prng_key_partition_spec,
                              input_partition_spec)

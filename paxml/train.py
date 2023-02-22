@@ -251,8 +251,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       )
 
     logging.info(
-        'partitioned_train_state shapes '
-        '(global shape for GDA, host-local shape for non-GDA: %s',
+        'partitioned_train_state shapes (global shape for Jax array): %s',
         jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
     total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)

@@ -160,8 +160,8 @@ flags.DEFINE_integer(
     'Port for hosting Pythia service when non-Vizier built-in algorithms '
     'is used')
 
-# Flags --jax_parallel_functions_output_gda, --jax_backend_target,
-# --jax_xla_backend, --jax_enable_checks are available through JAX.
+# Flags --jax_backend_target, --jax_xla_backend, --jax_enable_checks are
+# available through JAX.
 
 
 def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:

@@ -422,7 +422,6 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         discard_opt_states=py_utils.pmap_use_tensorstore() and not self.use_ema,
     )
 
-    # Pmap does not use GDA, and so global_mesh and mesh_axes are None.
     model_states = self._restore(self.restore_checkpoint_step,
                                  train_state_metadata.unpadded_global_shapes)
     if model_states is None:
@@ -1895,8 +1894,8 @@ def decode_once_spmd_model(
       weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
           weighted_scalars)
 
-      # Because outputs of the decode step in pjit are annotated to be on the
-      # GDA, they are already fully replicated across shards and we can just
+      # Because outputs of the decode step in pjit are annotated to be Jax
+      # Arrays, they are already fully replicated across shards and we can just
       # unreplicate.
       # This also means we don't need to call an all_gather and a reduce()
       # on each clu.metric like we do in pmap mode.
@@ -1908,7 +1907,7 @@ def decode_once_spmd_model(
 
       summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
       summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-      del updated_vars  # release GDA memory allocations
+      del updated_vars  # release Jax Arrays memory allocations
 
       summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
           summary_tensors)

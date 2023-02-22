@@ -101,7 +101,7 @@ def pretty_repr_shapes(replicated_vars: NestedJTensor,
       return 'x'.join(str(e) for e in x.shape[1:])
     else:
       # If var is not replicated, no need to remove the first dim.
-      # Retrieves the global shape for GDA; otherwise host-local shape.
+      # Retrieves the global shape for Jax array; otherwise host-local shape.
       x_sda = x
       return 'x'.join(str(e) for e in x_sda.shape)
 
@@ -380,7 +380,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
   """Writes a summary entry into the provided SummaryWriter."""
   work_unit = platform.work_unit()
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
-  # SPMD training may produce GDA.
+  # SPMD training will produce a Jax Array.
   loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
   weighted_scalars_list = py_utils.maybe_unreplicate_for_fully_replicated(
       weighted_scalars_list)

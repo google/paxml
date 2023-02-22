@@ -240,7 +240,7 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
       _set_nested_dict_value(model_vars, var_name, loaded_var)
 
 
-def _make_gda_train_state(
+def _make_train_state(
     rules: CheckpointLoadingRules,
     ckpt_train_state: TrainState,
     train_state_pspecs: TrainState,
@@ -386,8 +386,9 @@ def restore_pmap_from_tensorstore(
     step: Step to restore checkpoint from.
     global_mesh: If set, use this mesh to restore the checkpoint (meaning that
       the checkpoint is restored as part of an init_checkpoint_rules() call for
-      a pjit model) and return a GDA. If unset, use a dummy mesh and return a
-      regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
+      a pjit model) and return a Jax Array. If unset, use a dummy mesh and
+      return a regular `DeviceArray` or `ShardedDeviceArray` to be used with
+      pmap.
     checkpoint_type: The type of checkpoint to use.
 
   Returns:
@@ -423,7 +424,7 @@ def restore_pmap_from_tensorstore(
         py_utils.convert_fully_replicated_array_to_pmap_array,
         fully_replicated_gda_model_states,
     )
-  # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
+  # model_states is jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
   return jax.tree_map(
       lambda x: x.addressable_data(0), fully_replicated_gda_model_states
@@ -1275,7 +1276,7 @@ class SingleTask(base_task.BaseTask):
         target_partition_specs=target_partition_specs)
 
     if uses_gda:
-      ckpt_train_state, train_state_pspecs = _make_gda_train_state(
+      ckpt_train_state, train_state_pspecs = _make_train_state(
           rules,
           ckpt_train_state,
           train_state_pspecs,
