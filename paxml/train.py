@@ -571,21 +571,21 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
 
   if task_p.model.ici_mesh_shape is not None:
-    train_fn = train_and_evaluate_spmd_model
-    extra_kwargs = dict(enable_auto_sharding=enable_auto_sharding)
+    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
+                                  checkpointer, checkpoint_type, eval_input_p,
+                                  decode_input_p, early_stopping_fn,
+                                  enable_auto_sharding)
   else:
-    train_fn = train_and_evaluate_pmap
-    extra_kwargs = {}
-  train_fn(
-      task_p,
-      train_input_p,
-      job_log_dir,
-      checkpointer,
-      eval_input_p,
-      decode_input_p,
-      early_stopping_fn,
-      **extra_kwargs,
-  )
+    train_and_evaluate_pmap(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpointer,
+        checkpoint_type,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+    )
 
 
 def _maybe_update_latest_model_step(
@@ -668,6 +668,7 @@ def train_and_evaluate_pmap(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    checkpoint_type: CheckpointType,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -679,6 +680,7 @@ def train_and_evaluate_pmap(
     train_input_p: HParams for the train data input pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
+    checkpoint_type: The type of checkpoint to use.
     eval_input_p: list of hparams for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -687,13 +689,13 @@ def train_and_evaluate_pmap(
       should_stop_early.
   """
   logging.info('Using pmap for data parallelism.')
-
   train_program, partitioned_train_state, total_num_params, prng_key = (
       _create_program_and_states(
           task_p,
           train_input_p,
           job_log_dir,
           checkpointer,
+          checkpoint_type,
       )
   )
   partitioner = train_program.partitioner
@@ -773,6 +775,7 @@ def train_and_evaluate_spmd_model(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    checkpoint_type: CheckpointType,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -784,6 +787,7 @@ def train_and_evaluate_spmd_model(
     train_input_p: Params for the train data pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
+    checkpoint_type: The type of checkpoint to use.
     eval_input_p: list of params for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -803,6 +807,7 @@ def train_and_evaluate_spmd_model(
       train_input_p,
       job_log_dir,
       checkpointer,
+      checkpoint_type,
       enable_auto_sharding,
   )
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
@@ -905,8 +910,10 @@ def _create_program_and_states(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
 ):
+  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   jax_task = instantiate(task_p)
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
@@ -916,6 +923,7 @@ def _create_program_and_states(
   partitioner = trainer_lib.create_partitioner(
       jax_task,
       init_key,
+      reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
       job_log_dir=job_log_dir,
   )
