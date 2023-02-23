@@ -143,6 +143,7 @@ class PjitPartitionerTest(TrainLibTestBase):
       return trainer_lib._AutoShardingPjitPartitioner(
           self.task,
           jax.random.PRNGKey(0),
+          reshard_inputs=True,
           auto_sharding_info=auto_sharding_info,
           train_inputs_shape_dtype=self._inputs_shape_dtype,
           init_is_eval=False,
@@ -151,6 +152,7 @@ class PjitPartitionerTest(TrainLibTestBase):
       return trainer_lib._PjitPartitioner(
           self.task,
           jax.random.PRNGKey(0),
+          reshard_inputs=True,
           train_inputs_shape_dtype=self._inputs_shape_dtype,
           init_is_eval=False,
       )
@@ -210,16 +212,17 @@ class SingleTaskPjitTrainProgramTest(TrainLibTestBase):
     partitioner = trainer_lib._PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
+        reshard_inputs=True,
         train_inputs_shape_dtype=inputs_shape_dtype,
         init_is_eval=False,
     )
-    train_pg = trainer_lib.SingleTaskPjitTrainProgram(
+    train_pg = trainer_lib.SingleTaskTrainProgram(
         self.task, self.train_input, partitioner
     )
     step_fn, _ = train_pg.partition_step()
 
     self.assertIsNotNone(train_pg.task)
-    self.assertEqual(step_fn, train_pg._step_fn)
+    self.assertEqual(step_fn, train_pg.partitioned_step_fn)
 
 
 if __name__ == '__main__':

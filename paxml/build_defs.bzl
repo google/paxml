@@ -169,6 +169,14 @@ def pax_targets(
             exec_properties = {"mem": "24g"},
         )
 
+        # Add a test to check that the experiments are importable in a GPU build.
+        # This prevents libraries that are incompatible with GPU (e.g. those that
+        # runs TensorFlow ops during import).
+        test_name = "gpu_import_test"
+        test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
+
+        # Google-internal tests.
+
     test_name = "all_experiments_smoke_test"
     test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
 

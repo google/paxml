@@ -101,7 +101,7 @@ def pretty_repr_shapes(replicated_vars: NestedJTensor,
       return 'x'.join(str(e) for e in x.shape[1:])
     else:
       # If var is not replicated, no need to remove the first dim.
-      # Retrieves the global shape for GDA; otherwise host-local shape.
+      # Retrieves the global shape for Jax array; otherwise host-local shape.
       x_sda = x
       return 'x'.join(str(e) for e in x_sda.shape)
 
@@ -317,13 +317,14 @@ def write_summary_tensor(
   # Tensors are often pushed in step ascending order. Iterate over the most
   # recent ones. Only useful for non-aggregated summaries.
   tensors_it = reversed(tensors)
-  if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
+  base_summary_type = base_layer.get_summary_base_type(summary_type)
+  if base_summary_type == SummaryType.SCALAR:
     # Force DeviceArray to NumPy array conversion before taking the mean.
     np_tensors = [np.array(t) for t in tensors_it]
     logging.info('summary tensor at step=%s %s %s', step_i, key, np_tensors)
     tensor = np.mean(np_tensors).item()
     tf_summary.scalar(key, tensor, step_i)
-  elif base_layer.get_summary_base_type(summary_type) == SummaryType.IMAGE:
+  elif base_summary_type == SummaryType.IMAGE:
     remaining_max_images = MAX_IMAGES_PER_SUMMARY
     for tensor in tensors_it:
       if remaining_max_images <= 0:
@@ -334,7 +335,7 @@ def write_summary_tensor(
       for i in range(min(tensor.shape[0], remaining_max_images)):
         tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
       remaining_max_images -= tensor.shape[0]
-  elif base_layer.get_summary_base_type(summary_type) == SummaryType.AUDIO:
+  elif base_summary_type == SummaryType.AUDIO:
     remaining_max_audios = MAX_AUDIOS_PER_SUMMARY
     for tensor in tensors_it:
       if remaining_max_audios <= 0:
@@ -345,7 +346,7 @@ def write_summary_tensor(
         tf_summary.audio(f'{key}/{i}', tensor[i:i + 1],
                          AUDIO_SUMMARY_SAMPLE_RATE, step_i)
       remaining_max_audios -= tensor.shape[0]
-  elif base_layer.get_summary_base_type(summary_type) == SummaryType.TEXT:
+  elif base_summary_type == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
     for tensor in tensors_it:
       if remaining_max_texts <= 0:
@@ -362,6 +363,10 @@ def write_summary_tensor(
     # Ensure that only one video summary is passed at a time.
     assert len(tensors) == 1
     tf_summary.write(tag=key, tensor=tensors[0], metadata=metadata, step=step_i)
+  elif base_summary_type == SummaryType.HISTOGRAM:
+    # Similar to the scalar case, we merge the histogram values. We expect the
+    # same number of elements per tensor in `tensors`.
+    tf_summary.histogram(key, np.concatenate(tensors), step_i)
   else:
     assert False, 'Unsupported summary type: ' + str(summary_type)
 
@@ -377,7 +382,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
   """Writes a summary entry into the provided SummaryWriter."""
   work_unit = platform.work_unit()
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
-  # SPMD training may produce GDA.
+  # SPMD training will produce a Jax Array.
   loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
   weighted_scalars_list = py_utils.maybe_unreplicate_for_fully_replicated(
       weighted_scalars_list)

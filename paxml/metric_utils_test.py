@@ -25,6 +25,7 @@ import clu.metrics as clu_metrics
 import clu.values as clu_values
 import flax
 import numpy as np
+import numpy.testing as npt
 from paxml import metric_utils
 from paxml import summary_utils
 # Internal platform import
@@ -170,6 +171,9 @@ class MetricUtilsTest(absltest.TestCase):
             'list_1': [clu_values.Scalar(1), clu_values.Text('test')],
             'tuple_0': (_mock_image(None), _mock_image(5)),
             'image_0': _mock_image(5),
+            'histogram_0': clu_values.Histogram(
+                np.array([1, 2, 3]), num_buckets=2
+            ),
         }
 
     metrics = {'test': MixedDictMetric()}
@@ -185,8 +189,10 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/tuple_0_0'].value.shape, (12, 12, 3))
     self.assertEqual(
         metric_values['test/tuple_0_1'].value.shape, (5, 12, 12, 3))
-    # Finally we just have an image.
+    # We have an image.
     self.assertEqual(metric_values['test/image_0'].value.shape, (5, 12, 12, 3))
+    # And a histogram.
+    npt.assert_array_equal(metric_values['test/histogram_0'].value, [1, 2, 3])
 
   def test_write_clu_metric_summaries(self):
     @flax.struct.dataclass
@@ -201,6 +207,9 @@ class MetricUtilsTest(absltest.TestCase):
             'image_0': _mock_image(5),
             'video_0': _mock_video(None),
             'video_1': _mock_video(2),
+            'histogram_0': clu_values.Histogram(
+                np.array([1, 2, 3]), num_buckets=2
+            ),
         }
 
     metrics = {'test': MixedDictMetric()}
@@ -223,6 +232,11 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertFalse(
         metric_utils.is_float_convertible(seqio.metrics.Text('abc')))
     self.assertFalse(metric_utils.is_float_convertible(clu_values.Text('abc')))
+    self.assertFalse(
+        metric_utils.is_float_convertible(
+            clu_values.Histogram(np.array([1, 2, 3]))
+        )
+    )
 
   def test_as_float(self):
     self.assertEqual(metric_utils.as_float(0.2), 0.2)

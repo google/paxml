@@ -180,8 +180,8 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     'host_idx', None, help='index of current host' )
 
-# Flags --jax_parallel_functions_output_gda, --jax_backend_target,
-# --jax_xla_backend, --jax_enable_checks are available through JAX.
+# Flags --jax_backend_target, --jax_xla_backend, --jax_enable_checks are
+# available through JAX.
 
 
 def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
@@ -337,8 +337,9 @@ def run(experiment_config: base_experiment.BaseExperiment,
   work_unit = platform.work_unit()
   work_unit.set_task_status(f'process_index: {jax.process_index()}, '
                             f'process_count: {jax.process_count()}')
-  work_unit.create_artifact(platform.ArtifactType.DIRECTORY,
-                            str(FLAGS.job_log_dir), 'job_log_dir')
+  if jax.process_index() == 0:
+    work_unit.create_artifact(platform.ArtifactType.DIRECTORY,
+                              str(FLAGS.job_log_dir), 'job_log_dir')
 
   # Start jax.profiler for TensorBoard and profiling in open source.
   if FLAGS.jax_profiler_port is not None:
@@ -417,7 +418,7 @@ if __name__ == '__main__':
   # Only dump from Borg task 0.
   if 'BORG_TASK_HANDLE' in os.environ:
     handle = os.getenv('BORG_TASK_HANDLE')
-    task_id, _, _ = _TASK_HANDLE_RE.match(handle).groups()
+    task_id, _, _ = _TASK_HANDLE_RE.match(handle).groups()  # pytype: disable=attribute-error  # re-none
     if int(task_id) == 0:
       dump_dir = os.getenv('XLA_DUMP_TO')
       if dump_dir:

@@ -22,7 +22,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -215,15 +215,11 @@ def maybe_update_decode_output_keys(
     return process_decode_output
 
   enum_keys = []
-  for idx, ex in enumerate(py_utils.tree_unstack(enum_key_fields, 0)):
-    if not decode_out.eval_sample_weights[idx]:
-      # skip padded examples
-      continue
-
+  for ex in py_utils.tree_unstack(enum_key_fields, 0):
     if not (key := py_utils.get_enumeration_id(ex)):
       raise ValueError(f'Not able to construct enum-id with {ex}.')
-
-    enum_keys.append(key)
+    if not _is_padding(ex):
+      enum_keys.append(key)
 
   if len(enum_keys) != len(process_decode_output):
     raise RuntimeError(
@@ -424,7 +420,7 @@ class SeqIOInput(base_input.BaseInput):
     deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
         sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
-    use_enumeration: bool = False
+    use_enumeration: bool = True
     annotate_padding_fields: bool = False
 
   def __init__(self, hparams: ParamsT) -> None:
@@ -525,6 +521,10 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task_inst
+
+  @property
+  def task_inst(self) -> seqio.Task:
+    return cast(seqio.Task, self.mixture_or_task_inst)
 
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
@@ -853,7 +853,7 @@ class SeqIOInput(base_input.BaseInput):
         inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
       key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
       t = _get_targets_str(example, self.mixture_or_task_inst)
-      targets[key].append(self.mixture_or_task_inst.postprocess_fn(
+      targets[key].append(self.task_inst.postprocess_fn(
           t, example=example, is_target=True))
       examples[key].append(example)
 
@@ -875,7 +875,7 @@ class SeqIOInput(base_input.BaseInput):
       seqio_postprocessed_predictions = []
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
-        prediction = self.mixture_or_task_inst.postprocess_fn(
+        prediction = self.task_inst.postprocess_fn(
             answer, example=e, is_target=False)
         predictions_list.append(prediction)
         seqio_postprocessed_predictions.append(prediction)
@@ -907,10 +907,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = examples[k][0]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
@@ -990,13 +990,13 @@ class SeqIOInput(base_input.BaseInput):
       answer = ans[_LM_DECODER_OUT_KEY]
 
       # postprocess model's decoder output
-      prediction = self.mixture_or_task_inst.postprocess_fn(
+      prediction = self.task_inst.postprocess_fn(
           answer, example=targets[k], is_target=False)
       predictions_list.append(prediction)
 
       # postprocess target example for target decoder output str
       t = _get_targets_str(targets[k], self.mixture_or_task_inst)
-      seqio_target = self.mixture_or_task_inst.postprocess_fn(
+      seqio_target = self.task_inst.postprocess_fn(
           t, example=targets[k], is_target=True)
       targets_list.append(seqio_target)
 
@@ -1012,10 +1012,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = targets[k]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
@@ -1074,7 +1074,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       prefix_targets_list = []
       for e in targets[k]:
-        target_post = self.mixture_or_task_inst.postprocess_fn(
+        target_post = self.task_inst.postprocess_fn(
             target, example=e, is_target=True)
         targets_list.append(target_post)
         prefix_targets_list.append(target_post)
@@ -1124,7 +1124,7 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
-      target_post = self.mixture_or_task_inst.postprocess_fn(
+      target_post = self.task_inst.postprocess_fn(
           score, example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
@@ -1216,13 +1216,17 @@ class SeqIOInput(base_input.BaseInput):
 
     answers = dict(decoder_outputs)
     if p.use_enumeration:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_enum(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_enum(
+              answers, verbose_entries, plain_text_output
+          )
+      )
     else:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_prefix(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_prefix(
+              answers, verbose_entries, plain_text_output
+          )
+      )
 
     metrics = []
     for fn in task.predict_metric_fns:
@@ -1682,10 +1686,11 @@ def get_eval_hparams_for_seqio(
     split_name: Union[str, Callable[[str], str]] = 'validation',
     feature_converter: Optional[seqio.FeatureConverter] = None,
     num_infeed_hosts: int = 0,
-    use_enumeration: bool = False,
+    use_enumeration: bool = True,
     use_cached: bool = False,
     shuffle: bool = None,
     require_metric_fns: bool = True,
+    eval_metrics_retain_task_features: bool = False,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1729,6 +1734,7 @@ def get_eval_hparams_for_seqio(
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
+    eval_metrics_retain_task_features: retain the provided feature lengths.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1749,16 +1755,20 @@ def get_eval_hparams_for_seqio(
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
   if metric_type is MetricType.PREDICT:
     p.eval_metrics_targets_length = feature_lengths['targets']
-    targets_feature_length = 1  # we don't want any targets, except an EOS
+    p.task_feature_lengths = {
+        'inputs': feature_lengths['inputs'],
+        'targets': 1,  # we don't want any targets, except an EOS
+    }
   elif metric_type is MetricType.SCORE:
-    targets_feature_length = feature_lengths['targets']
+    if eval_metrics_retain_task_features:
+      p.task_feature_lengths = feature_lengths
+    else:
+      p.task_feature_lengths = {
+          'inputs': feature_lengths['inputs'],
+          'targets': feature_lengths['targets'],
+      }
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
-
-  p.task_feature_lengths = {
-      'inputs': feature_lengths['inputs'],
-      'targets': targets_feature_length,
-  }
 
   # Split hparams per tasks and filter by metric type.
   tasks: Sequence[seqio.Task] = seqio.get_subtasks(
