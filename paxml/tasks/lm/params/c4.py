@@ -423,6 +423,15 @@ class LmCloudSpmdAdam(TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   ICI_MESH_SHAPE = [1, 4, 2]
 
 
+@experiment_registry.register
+class LmCloudSpmdAdamLimitSteps(LmCloudSpmdAdam):
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    task_p = super().task()
+    task_p.train.num_train_steps = 4000
+    return task_p
+
+
 def configure_gpt3_task(
     cls,
     task_p: tasks_lib.SingleTask.HParams,
