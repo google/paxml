@@ -77,14 +77,6 @@ NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 
-def _is_vectorized(states: train_states.TrainState) -> bool:
-  """Determines whether it is a vectorized model."""
-  if not states.opt_states:
-    raise ValueError(
-        'cannot decide if it is vectorized model without opt_states')
-  return NO_PREFIX_KEY in states.opt_states[0]
-
-
 def _get_dir_names(
     input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[epath.Path]:
   """Returns a list of same length for parent dir names for each dataset."""
@@ -140,48 +132,6 @@ def _wait_until_step(checkpointer, start_step):
     time.sleep(300)
 
 
-def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
-  """Determines whether ema is used or not."""
-  return task_p.train.learner.optimizer.ema_decay > 0.
-
-
-def extract_ema(
-    model_states: train_states.TrainState) -> train_states.TrainState:
-  """Finds the ema state from optimizer states."""
-  if len(model_states.opt_states) != 1:
-    raise ValueError('EMA currently only supports a single learner (got '
-                     f'`{len(model_states.opt_states)}`).')
-  is_vectorized = _is_vectorized(model_states)
-  if not is_vectorized:
-    for v in model_states.opt_states[0]:
-      if isinstance(v, dict) and 'ema' in v:
-        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
-  else:
-    ret = None
-    # For vectorized model, the structure looks like this:
-    # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
-    # It is a list of dictionaries. The key corresponds to the #stages.
-    # Here the ema is constructed by combining the ema state from all those
-    # dictionaries. Each parameter belongs to one dictionary and is labelled as
-    # masked node in others.
-    for item in model_states.opt_states[0].values():
-      if isinstance(item, tuple):
-        for v in item:
-          if isinstance(v, dict) and 'ema' in v:
-            if ret is None:
-              ret = v.ema
-            else:
-              ret = jax.tree_map(
-                  lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
-                  ret,
-                  v.ema,
-                  is_leaf=py_utils.is_optax_masked_node)
-    if ret is not None:
-      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
-  raise ValueError('Could not find EMA states in `%r`.' %
-                   model_states.opt_states)
-
-
 def _get_train_input_specs(task_p: tasks_lib.SingleTask.HParams,
                            experiment_config: base_experiment.BaseExperiment):
   """Gets the shape/dtype of the inputs to the model."""
@@ -221,7 +171,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.job_log_dir = job_log_dir
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
-    self.use_ema: bool = has_ema(jax_task.hparams)
+    self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -261,7 +211,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}')
     if partitioned_train_state and self.use_ema:
-      partitioned_train_state = extract_ema(partitioned_train_state)
+      partitioned_train_state = tasks_lib.extract_ema(partitioned_train_state)
     return partitioned_train_state
 
   def load_checkpoint_for_step(
@@ -398,7 +348,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step)
     if model_states:
       if self.use_ema:
-        model_states = extract_ema(model_states)
+        model_states = tasks_lib.extract_ema(model_states)
       elif not self.track_metric:
         model_states = model_states.to_eval_state()
     return model_states
@@ -2271,6 +2221,8 @@ def infer_and_write_pmap(
 
   if not inputs_p:
     return
+
+  assert isinstance(checkpointer, _PmapEvalCheckpointer)
   replicated_model_states, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )

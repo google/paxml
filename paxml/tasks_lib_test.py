@@ -16,6 +16,7 @@
 """Unit tests for tasks_lib."""
 
 from __future__ import annotations
+import re
 from typing import Tuple
 
 from absl.testing import absltest
@@ -510,6 +511,97 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         self.assertFalse(np.allclose(x_tensor, y_tensor))
       else:
         self.assertAllClose(x_tensor, y_tensor)
+
+  def test_load_ema_prefixed(self):
+    """Checks that EMA vars can be loaded from ckpts with repeated layers."""
+
+    model_dims = 128
+
+    # Initialize external task and save checkpoint
+    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p.model = pax_fiddle.Config(layers.LanguageModel, name='lm')
+    model_p = ext_task_p.model
+    model_p.lm_tpl.model_dims = model_dims
+    stacked_transformer_tpl = model_p.lm_tpl.stacked_transformer_tpl.clone()
+    stacked_transformer_tpl.hidden_dims = model_dims * 4
+    stacked_transformer_tpl.num_layers = 1
+    stacked_transformer_tpl.num_heads = 4
+    model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+        layers.StackedTransformerRepeated
+    )
+    model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
+    model_p.lm_tpl.stacked_transformer_tpl.x_times = 2
+    model_p.lm_tpl.vocab_size = 64
+
+    lp = ext_task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    # Enable ema
+    lp.optimizer.ema_decay = 0.9999
+
+    sample_inputs = get_model_inputs()
+    ext_train_state = trainer_lib.initialize_replicate_model_state(
+        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs
+    )
+
+    ext_opt_states_flat, treedef = jax.tree_util.tree_flatten(
+        flax.serialization.to_state_dict(ext_train_state.opt_states)
+    )
+    randomized_opt_states_flat = [
+        v
+        if py_utils.is_optax_masked_node(v)
+        else np.random.normal(size=v.shape)
+        for v in ext_opt_states_flat
+    ]
+    randomized_opt_states = jax.tree_util.tree_unflatten(
+        treedef, randomized_opt_states_flat
+    )
+    ext_train_state = ext_train_state.replace(opt_states=randomized_opt_states)
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+
+    # Create task with warm-start
+    task_p = ext_task_p.clone()
+    task_p.train.learner = lp.clone()
+    load_rules = [(r'params/(.*)', 'ema/params/{}')]
+    ignore_rules = ['.*softmax.*']
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            ignore_rules=ignore_rules,
+            input_specs_provider_p=LMInputSpecsProvider.HParams(),
+            load_ema_states=True,
+        ),
+    }
+    task = instantiate(task_p)
+
+    # Now initialize also includes warm start (loading from ckpt)
+    train_state = trainer_lib.initialize_model_state(
+        task, jax.random.PRNGKey(1), sample_inputs
+    )
+
+    mdl_vars = tasks_lib._flatten_dict(
+        flax.serialization.to_state_dict(train_state.mdl_vars)
+    )
+    ext_opt_states = tasks_lib._flatten_dict(
+        flax.serialization.to_state_dict(ext_train_state.opt_states)
+    )
+
+    param_name_to_ema_value = {}
+    for k, v in ext_opt_states:
+      if 'ema.params' in k:
+        param_name_to_ema_value[re.sub(r'.*?ema\.params', 'params', k)] = v
+
+    self.assertEqual(len(mdl_vars), len(param_name_to_ema_value))
+    for k, v in mdl_vars:
+      ema_v = param_name_to_ema_value[k]
+      if 'softmax' in k:
+        self.assertFalse(np.allclose(v, ema_v))
+      else:
+        self.assertAllClose(v, ema_v, err_msg=k)
 
   @parameterized.named_parameters(('partial_load_opt_states_true', True),
                                   ('partial_load_opt_states_false', False))

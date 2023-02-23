@@ -1166,13 +1166,14 @@ def _train_and_evaluate_common(
         logging.debug('  Starting eval_step().')
 
         if train_p.eval_use_ema_states:
-          if not eval_lib.has_ema(task_p):
+          if not tasks_lib.has_ema(task_p):
             raise ValueError(
                 'eval_use_ema_states is requested but the '
                 'learner does not seem to have ema enabled'
             )
-          eval_partitioned_train_state = eval_lib.extract_ema(
-              partitioned_train_state).to_eval_state()
+          eval_partitioned_train_state = tasks_lib.extract_ema(
+              partitioned_train_state
+          ).to_eval_state()
           logging.debug('  Performing eval_step() with ema states.')
         else:
           eval_partitioned_train_state = partitioned_train_state.to_eval_state()
@@ -1236,13 +1237,14 @@ def _train_and_evaluate_common(
       if (decode_input_p and train_p.decode_interval_steps and
           step_i % train_p.decode_interval_steps == 0):
         if train_p.decode_use_ema_states:
-          if not eval_lib.has_ema(task_p):
+          if not tasks_lib.has_ema(task_p):
             raise ValueError(
                 'decode_use_ema_states is requested but the '
                 'learner does not seem to have ema enabled'
             )
-          decode_partitioned_train_state = eval_lib.extract_ema(
-              partitioned_train_state)
+          decode_partitioned_train_state = tasks_lib.extract_ema(
+              partitioned_train_state
+          )
           logging.debug('  Performing decode_once_fn() with ema states.')
         else:
           decode_partitioned_train_state = partitioned_train_state
