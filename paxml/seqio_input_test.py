@@ -867,24 +867,35 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     # fails when model.process_decode_out doesn't filter out padded eval samples
     common_kv = {SHARD_INDEX_KEY: 0, NUM_SHARDS_KEY: 1}
     process_decode_output = [
-        ('prefix-key-0', NestedMap.FromNestedDict({
-            'eval_sample_weights': 1, INDEX_WITHIN_SHARD_KEY: 0, **common_kv})),
-        ('prefix-key-1', NestedMap.FromNestedDict({
-            'eval_sample_weights': 1, INDEX_WITHIN_SHARD_KEY: 1, **common_kv})),
-        ('prefix-key-2', NestedMap.FromNestedDict(
-            {'eval_sample_weights': 0, INDEX_WITHIN_SHARD_KEY: 2, **common_kv}))
-        ]
+        (
+            'prefix-key-0',
+            NestedMap.FromNestedDict({INDEX_WITHIN_SHARD_KEY: 0, **common_kv}),
+        ),
+        (
+            'prefix-key-1',
+            NestedMap.FromNestedDict({INDEX_WITHIN_SHARD_KEY: 1, **common_kv}),
+        ),
+        (
+            'prefix-key-2',
+            NestedMap.FromNestedDict({
+                SHARD_INDEX_KEY: -1,
+                NUM_SHARDS_KEY: -1,
+                INDEX_WITHIN_SHARD_KEY: -1,
+            }),
+        ),
+    ]
     decode_out = NestedMap.FromNestedDict({
-        'eval_sample_weights': np.array([1, 1, 0], dtype=np.float32),
-        SHARD_INDEX_KEY: np.zeros(3, dtype=np.float32),
-        NUM_SHARDS_KEY: np.ones(3, dtype=np.float32),
-        INDEX_WITHIN_SHARD_KEY: np.arange(3, dtype=np.float32)})
+        SHARD_INDEX_KEY: np.array([0, 0, -1]),
+        NUM_SHARDS_KEY: np.array([1, 1, -1]),
+        INDEX_WITHIN_SHARD_KEY: np.array([0, 1, -1]),
+    })
 
     with self.assertRaisesRegex(
-        RuntimeError,
-        'The length of enum keys != num kv-pairs returned by .*'):
-      _ = seqio_input.maybe_update_decode_output_keys(process_decode_output,
-                                                      decode_out)
+        RuntimeError, 'The length of enum keys != num kv-pairs returned by .*'
+    ):
+      _ = seqio_input.maybe_update_decode_output_keys(
+          process_decode_output, decode_out
+      )
 
   def test_update_decode_output_keys(self):
     common_kv = {

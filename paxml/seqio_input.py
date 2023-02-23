@@ -215,15 +215,11 @@ def maybe_update_decode_output_keys(
     return process_decode_output
 
   enum_keys = []
-  for idx, ex in enumerate(py_utils.tree_unstack(enum_key_fields, 0)):
-    if not decode_out.eval_sample_weights[idx]:
-      # skip padded examples
-      continue
-
+  for ex in py_utils.tree_unstack(enum_key_fields, 0):
     if not (key := py_utils.get_enumeration_id(ex)):
       raise ValueError(f'Not able to construct enum-id with {ex}.')
-
-    enum_keys.append(key)
+    if not _is_padding(ex):
+      enum_keys.append(key)
 
   if len(enum_keys) != len(process_decode_output):
     raise RuntimeError(
