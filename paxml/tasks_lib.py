@@ -139,7 +139,7 @@ def extract_ema(
     # Here the ema is constructed by combining the ema state from all those
     # dictionaries. Each parameter belongs to one dictionary and is labelled as
     # masked node in others.
-    for item in model_states.opt_states[0].values():
+    for item in model_states.opt_states[0].values():  # pytype: disable=attribute-error  # jax-ndarray
       if isinstance(item, tuple):
         for v in item:
           if isinstance(v, dict) and 'ema' in v:
@@ -367,7 +367,7 @@ def _make_train_state(
             new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
         else:
           filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v['ema'])
-          v['ema'] = filtered_ema
+          v['ema'] = filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
           new_states.append(v)
           if train_state_pspecs is not None:
             v_pspecs = train_state_pspecs.opt_states[0][i]
@@ -395,7 +395,7 @@ def _make_train_state(
       if train_state_pspecs is not None:
         new_states_pspecs0 = train_state_pspecs.opt_states[0]
 
-      for key, item in ckpt_train_state.opt_states[0].items():
+      for key, item in ckpt_train_state.opt_states[0].items():  # pytype: disable=attribute-error  # jax-ndarray
         if isinstance(item, tuple):
           # (dict, dict, dict, ...). One or more dicts contain an 'ema' key
 
@@ -405,9 +405,9 @@ def _make_train_state(
               v['ema'] = ema_pspecs if update_pspecs else filtered_vars
             return v
 
-          new_states0[key] = tuple(update_for_ema(v) for v in item)
+          new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray
           if new_states_pspecs0 is not None:
-            new_states_pspecs0[key] = tuple(
+            new_states_pspecs0[key] = tuple(  # pytype: disable=unsupported-operands  # jax-ndarray
                 update_for_ema(v, update_pspecs=True)
                 for v in new_states_pspecs0[key]
             )
