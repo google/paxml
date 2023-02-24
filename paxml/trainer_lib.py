@@ -1383,13 +1383,13 @@ class Partitioner(metaclass=abc.ABCMeta):
   # TODO(pax-dev): remove this method and switch to train_inputs_shape_dtype
   # provided during construction once all experiments provide input specs.
   @abc.abstractmethod
-  def set_train_inputs_shape_dtype(self, train_input_pipeline: Any) -> None:
+  def set_train_inputs_shape_dtype(
+      self, train_input_pipeline: base_input.BaseInput
+  ) -> None:
     """Sets training shape/dtype using sample inputs from the input pipeline.
 
     Args:
-      train_input_pipeline: The training input pipeline that provides a
-        peek_padded() or get_next_padded() method to get sample input batches.
-        TODO(laigd): consider using a protocol instead.
+      train_input_pipeline: The training input pipeline.
     """
 
   @property
@@ -1428,7 +1428,7 @@ class Partitioner(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def preprocess_inputs(
       self,
-      input_pipeline: Any,  # TODO(laigd): add a typing.Protocol for this.
+      input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
       partition_specs: Optional[NestedPartitionSpec],
   ) -> NestedJTensor:
@@ -1576,18 +1576,16 @@ class Partitioner(metaclass=abc.ABCMeta):
 
 class _PmapPartitioner(Partitioner):
 
-  def set_train_inputs_shape_dtype(self, train_input_pipeline: Any) -> None:
+  def set_train_inputs_shape_dtype(
+      self, train_input_pipeline: base_input.BaseInput
+  ) -> None:
     assert (
         not self._train_inputs_shape_dtype
     ), 'train_inputs_shape_dtype has been set before.'
-    input_fn = (
-        train_input_pipeline.peek_padded
-        if hasattr(train_input_pipeline, 'peek_padded')
-        else train_input_pipeline.get_next_padded
-    )
+    sample_inputs = train_input_pipeline.peek_padded()
     # Reshard inputs and only keep the inputs corresponding to a given device.
     sample_inputs = self.preprocess_inputs(
-        train_input_pipeline, input_fn(), partition_specs=None
+        train_input_pipeline, sample_inputs, partition_specs=None
     )
     self._train_inputs_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype),
@@ -1609,7 +1607,7 @@ class _PmapPartitioner(Partitioner):
 
   def preprocess_inputs(
       self,
-      input_pipeline: Any,
+      input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
       partition_specs: Optional[NestedPartitionSpec],
   ) -> NestedJTensor:
@@ -1714,16 +1712,13 @@ class _PjitPartitioner(Partitioner):
 
     self._broadcast_key_fn = None
 
-  def set_train_inputs_shape_dtype(self, train_input_pipeline: Any) -> None:
+  def set_train_inputs_shape_dtype(
+      self, train_input_pipeline: base_input.BaseInput
+  ) -> None:
     assert (
         not self._train_inputs_shape_dtype
     ), 'train_inputs_shape_dtype has been set before.'
-    input_fn = (
-        train_input_pipeline.peek_padded
-        if hasattr(train_input_pipeline, 'peek_padded')
-        else train_input_pipeline.get_next_padded
-    )
-    sample_inputs = input_fn()
+    sample_inputs = train_input_pipeline.peek_padded()
     self._train_inputs_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
@@ -1762,7 +1757,7 @@ class _PjitPartitioner(Partitioner):
 
   def preprocess_inputs(
       self,
-      input_pipeline: Any,
+      input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
       partition_specs: Optional[NestedPartitionSpec],
   ) -> NestedJTensor:
