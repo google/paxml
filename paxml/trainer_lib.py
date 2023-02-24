@@ -1585,9 +1585,12 @@ class _PmapPartitioner(Partitioner):
         if hasattr(train_input_pipeline, 'peek_padded')
         else train_input_pipeline.get_next_padded
     )
-    sample_inputs = input_fn()
+    # Reshard inputs and only keep the inputs corresponding to a given device.
+    sample_inputs = self.preprocess_inputs(
+        train_input_pipeline, input_fn(), partition_specs=None
+    )
     self._train_inputs_shape_dtype = jax.tree_map(
-        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
+        lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype),
         sample_inputs,
     )
     _write_input_specs(self._train_inputs_shape_dtype, self._job_log_dir)
