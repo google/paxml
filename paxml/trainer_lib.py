@@ -105,7 +105,7 @@ def filter_nestedmap(full_set, partial_set):
   if type(full_set) is not dict:
     return full_set
   ret = NestedMap() if type(full_set) is NestedMap else {}
-  for i in partial_set.keys():
+  for i in partial_set.keys():  # pytype: disable=attribute-error  # jax-ndarray
     ret[i] = filter_nestedmap(full_set[i], partial_set[i])
   return ret
 
@@ -549,7 +549,7 @@ def _maybe_aggregate_metrics_summaries(
     # No aggregation of summaries is needed.
     aggregated_summaries = summary_dict
 
-  return (weighted_loss, mean_loss, loss_weight, aggregated_scalars,
+  return (weighted_loss, mean_loss, loss_weight, aggregated_scalars,  # pytype: disable=bad-return-type  # jax-ndarray
           aggregated_summaries, per_example_out)
 
 
@@ -717,12 +717,12 @@ def train_step_single_learner(
   # numbers depends on global step.
   #
   # TODO(yonghui): also fold in the replica id.
-  prng_key = jax.random.fold_in(prng_key, states.step)
+  prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
 
   if not var_weight_hparams:
     with base_layer.JaxContext.new_context(hparams=context_p):
       var_weight_hparams = model.abstract_init_with_metadata(inputs)
-  updated_mdl_vars = jax_task.maybe_adjust_train_state(
+  updated_mdl_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
       states.step, states.mdl_vars, var_weight_hparams, prng_key)
 
   def _loss_fn(
@@ -813,10 +813,10 @@ def train_step_single_learner(
       pass
 
     # Add a summary for learning rate
-    learner.plot_learning_rate(states.step)
+    learner.plot_learning_rate(states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
 
     # Apply gradient transformations.
-    mdl_vars = states.mdl_vars.copy()
+    mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
     # Make updated nontrainable variable peekable from GradientTransformers.
     # Some optimizers, e.g. `optimizers.DynamicAccumulator`, assume special
     # non-trainable variables being set during fprop for controlling their
@@ -896,7 +896,7 @@ def eval_step_single_learner(
   context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
-  prng_key = jax.random.fold_in(prng_key, states.step)
+  prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
   mdl_vars = states.mdl_vars
   # assert not states.opt_states
 
@@ -978,7 +978,7 @@ def decode_step(
   if prng_key_fold_with_global_step:
     # Fold in global_step as part of the random seed key, so that random
     # numbers depends on global step.
-    prng_key = jax.random.fold_in(prng_key, states.step)
+    prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
   mdl_vars = states.mdl_vars
 
   assert not states.opt_states
@@ -1097,7 +1097,7 @@ def initialize_partitioned_model_states(
         global_input_shapes,
         discard_opt_states,
         do_init_checkpoint_rules=False)
-    return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,
+    return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
                                               train_state_unpadded_shapes,
                                               model.hparams.mesh_shape,
                                               model.hparams.mesh_axis_names)
@@ -1947,7 +1947,7 @@ class _PjitPartitioner(Partitioner):
         )
     )
 
-    return py_utils.maybe_pad_uneven_sharding(
+    return py_utils.maybe_pad_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
         unpadded_state,
         partition_specs,
         state_unpadded_shapes,
@@ -1972,7 +1972,7 @@ class _PjitPartitioner(Partitioner):
             state_unpadded_shapes.mdl_vars, padded_state.mdl_vars
         )
     )
-    return py_utils.maybe_slice_uneven_sharding(
+    return py_utils.maybe_slice_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
         padded_state,
         partition_specs,
         state_unpadded_shapes,

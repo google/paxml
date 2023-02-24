@@ -656,7 +656,7 @@ class SeqIOInput(base_input.BaseInput):
     self._gen_targets_iter()
     self.is_targets_init = True
 
-  def get_next(self) -> NestedNpTensor:
+  def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     return next(self._iter)
 
   def reset(self) -> None:

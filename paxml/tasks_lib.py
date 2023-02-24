@@ -1376,7 +1376,7 @@ class SingleTask(base_task.BaseTask):
     ]
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
-    var_names = [x[0] for x in model_vars.FlattenItems()]
+    var_names = [x[0] for x in model_vars.FlattenItems()]  # pytype: disable=attribute-error  # jax-ndarray
     # matched_pspecs: pspecs for the init checkpoint, inferred from model_vars.
     # model_vars_mapping: Mapping from names in model_vars to names in the init
     #                     checkpoint.
@@ -1525,5 +1525,5 @@ class SingleTask(base_task.BaseTask):
 
     # Convert mdl_vars back to Python dict for compatibility.
     train_state = train_state.replace(
-        mdl_vars=train_state.mdl_vars.ToNestedDict())
+        mdl_vars=train_state.mdl_vars.ToNestedDict())  # pytype: disable=attribute-error  # jax-ndarray
     return train_state, not load_status[2]

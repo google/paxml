@@ -159,7 +159,7 @@ class Learner(base_hyperparams.BaseParameterizable):
     return self._stochastic_gradient_inst
 
   def plot_learning_rate(self, step: int) -> None:
-    learning_rate = self.optimizer_inst.get_learning_rate(step)
+    learning_rate = self.optimizer_inst.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
     base_layer.add_global_summary(
         'lr', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
@@ -307,7 +307,7 @@ class Learner(base_hyperparams.BaseParameterizable):
           clipped_grad_norm,
           SummaryType.AGGREGATE_SCALAR,
       )
-    return grads, valid_step
+    return grads, valid_step  # pytype: disable=bad-return-type  # jax-ndarray
 
   def update_states(
       self,

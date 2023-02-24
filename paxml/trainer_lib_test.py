@@ -74,10 +74,10 @@ class TestModel(base_model.BaseModel):
   def compute_predictions(self, input_batch: NestedMap) -> Predictions:
     return self.layer_a(input_batch['image'])
 
-  def compute_loss(
+  def compute_loss(  # pytype: disable=signature-mismatch  # jax-ndarray
       self, predictions: Union[JTensor, NestedMap],
       input_batch: NestedMap) -> Tuple[WeightedScalars, Dict[str, Any]]:
-    return {'loss': (jnp.sum(predictions), 1)}, NestedMap()
+    return {'loss': (jnp.sum(predictions), 1)}, NestedMap()  # pytype: disable=bad-return-type  # jax-ndarray
 
   def decode(self, input_batch: base_model.NestedMap):
     return {'a': (1, 1)}, {}, {}
