@@ -110,7 +110,7 @@ class BasePartitionedProgram(Program, metaclass=abc.ABCMeta):
     return self._partitioned_input_spec
 
 
-class BaseTrainProgram(BasePartitionedProgram):
+class BaseTrainProgram(BasePartitionedProgram, metaclass=abc.ABCMeta):
   """A lean interface of a basic train program.
 
   Users should inherit from BaseTrainProgram and implement methods required to
@@ -120,6 +120,7 @@ class BaseTrainProgram(BasePartitionedProgram):
   """
 
   @property
+  @abc.abstractmethod
   def train_inputs_shape_dtype(self) -> pytypes.NestedShapeDtypeLike:
     raise NotImplementedError(
         'Subclass must implement train_inputs_global_shape_dtype'
@@ -128,6 +129,7 @@ class BaseTrainProgram(BasePartitionedProgram):
   # TODO(hthu): Move TrainStateMetadata into common library to break up
   # dependency on trainer.
   @property
+  @abc.abstractmethod
   def train_state_metadata(self):
     """Gets the TrainStateMetadata used for partitioning.
 
@@ -140,14 +142,17 @@ class BaseTrainProgram(BasePartitionedProgram):
     raise NotImplementedError('Subclass must implement train_state_metadata')
 
   @property
+  @abc.abstractmethod
   def task(self) -> tasks_lib.SingleTask:
     raise NotImplementedError('Subclass must implement task')
 
   @property
+  @abc.abstractmethod
   def train_input(self) -> base_input.BaseInput:
     raise NotImplementedError('Subclass must implement train_input')
 
   @property
+  @abc.abstractmethod
   def train_unpadded_global_batch_size(self) -> int:
     raise NotImplementedError(
         'Subclass must implement train_unpadded_global_batch_size'

@@ -20,9 +20,10 @@ to a specific ML experiment.
 """
 
 import abc
-from typing import Dict, List, Type, TypeVar
+from typing import Dict, List, Optional, Type, TypeVar
 from paxml import automl
 from paxml import base_task
+from paxml import programs
 from praxis import base_input
 
 _BaseExperimentT = TypeVar('_BaseExperimentT', bound='BaseExperiment')
@@ -114,6 +115,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
       A dict of sub-experiment ID to sub-experiment class.
     """
     return {'': self.__class__}
+
+  def train_program(self) -> Optional[programs.BaseTrainProgram]:
+    """Returns the train_program to use in the main loop."""
+    return None
 
   def __init_subclass__(cls):
     """Modifications to the subclasses."""

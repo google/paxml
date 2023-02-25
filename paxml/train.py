@@ -571,10 +571,18 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
-                                  checkpointer, checkpoint_type, eval_input_p,
-                                  decode_input_p, early_stopping_fn,
-                                  enable_auto_sharding)
+    train_and_evaluate_spmd_model(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpointer,
+        checkpoint_type,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+        enable_auto_sharding,
+        experiment_train_program=experiment_config.train_program(),
+    )
   else:
     train_and_evaluate_pmap(
         task_p,
@@ -585,6 +593,7 @@ def train_and_evaluate(
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
+        experiment_train_program=experiment_config.train_program(),
     )
 
 
@@ -672,6 +681,7 @@ def train_and_evaluate_pmap(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ) -> None:
   """Runs the training and evaluation loop with PMAP.
 
@@ -687,6 +697,8 @@ def train_and_evaluate_pmap(
       and determining whether to early stop current training. The callable
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
+    experiment_train_program: An embedded train_program that's constructed in
+      experiment. If specified, the program will be used for train steps.
   """
   logging.info('Using pmap for data parallelism.')
   train_program, partitioned_train_state, total_num_params, prng_key = (
@@ -698,6 +710,9 @@ def train_and_evaluate_pmap(
           checkpoint_type,
       )
   )
+  # TODO(hthu): We should always take a train_program from main.
+  if experiment_train_program is not None:
+    train_program = experiment_train_program
   partitioner = train_program.partitioner
   assert not partitioner.global_mesh
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
@@ -779,7 +794,9 @@ def train_and_evaluate_spmd_model(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    enable_auto_sharding: bool = False) -> None:
+    enable_auto_sharding: bool = False,
+    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
+) -> None:
   """Runs the training and evaluation loop with PJIT.
 
   Args:
@@ -795,6 +812,8 @@ def train_and_evaluate_spmd_model(
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
+    experiment_train_program: An embedded train_program that's constructed in
+      experiment. If specified, the program will be used for train steps.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   (
@@ -810,6 +829,10 @@ def train_and_evaluate_spmd_model(
       checkpoint_type,
       enable_auto_sharding,
   )
+  # TODO(hthu): We should always take a train_program from main.
+  if experiment_train_program is not None:
+    train_program = experiment_train_program
+
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
 
   # We do not fold in jax.process_index in contrast to the pmap version and

@@ -90,6 +90,7 @@ pytype_strict_library(
     deps = [
         ":automl",
         ":base_task",
+        ":programs",
         "//praxis:base_input",
     ],
 )
