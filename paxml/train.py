@@ -712,6 +712,7 @@ def train_and_evaluate_pmap(
   )
   # TODO(hthu): We should always take a train_program from main.
   if experiment_train_program is not None:
+    logging.info('Using customized train program.')
     train_program = experiment_train_program
   partitioner = train_program.partitioner
   assert not partitioner.global_mesh
@@ -831,6 +832,7 @@ def train_and_evaluate_spmd_model(
   )
   # TODO(hthu): We should always take a train_program from main.
   if experiment_train_program is not None:
+    logging.info('Using customized train program.')
     train_program = experiment_train_program
 
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
