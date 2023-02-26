@@ -35,6 +35,8 @@ def setup_jax(globally_use_hardware_rng: bool,
   if globally_use_hardware_rng:
     py_utils.set_globally_use_rbg_prng_key()
 
+  # Log tracing and compilation time.
+  jax.config.update('jax_log_compiles', True)
   # We use xmap only with SPMD.
   jax.config.update('experimental_xmap_spmd_lowering', True)
   # Use the manual partitioning lowering of xmap to avoid vectorization.
