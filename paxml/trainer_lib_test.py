@@ -33,11 +33,13 @@ from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import schedules
+from praxis import test_utils
 
 BaseModel = base_model.BaseModel
 BaseLayer = base_layer.BaseLayer
 BaseInput = base_input.BaseInput
 NestedMap = py_utils.NestedMap
+PartitionSpec = jax.sharding.PartitionSpec
 Predictions = base_model.Predictions
 RunningMode = trainer_lib.RunningMode
 
@@ -45,6 +47,30 @@ JTensor = pytypes.JTensor
 WeightedScalars = pytypes.WeightedScalars
 
 instantiate = base_layer.instantiate
+
+
+class TrainLibTest(test_utils.TestCase):
+
+  @parameterized.parameters([(NestedMap, dict), (dict, NestedMap)])
+  def test_filter_nested_map_basics(self, src_type, filter_type):
+    full_set = src_type(a=1, b=src_type(c=2, d=[3, src_type(e=6, f=7)]))
+    partial_set = filter_type(a=0, b=filter_type(d=[0, filter_type(e=0)]))
+
+    expected = src_type(a=1, b=src_type(d=[3, src_type(e=6)]))
+    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
+
+    self.assertIsInstance(actual, src_type)
+    self.assertEqual(expected, actual)
+
+  def test_filter_nested_map_with_partition_spec(self):
+    full_set = dict(a=[PartitionSpec(None), dict(b=2, c=PartitionSpec(None))])
+    partial_set = dict(a=[0, dict(c=0)])
+
+    expected = dict(a=[PartitionSpec(None), dict(c=PartitionSpec(None))])
+    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
+
+    self.assertIsInstance(actual, dict)
+    self.assertEqual(expected, actual)
 
 
 class TestInput(base_input.BaseInput):
@@ -83,7 +109,7 @@ class TestModel(base_model.BaseModel):
     return {'a': (1, 1)}, {}, {}
 
 
-class TrainLibTestBase(parameterized.TestCase):
+class TrainLibTestBase(test_utils.TestCase):
   """Trainer_lib tests under 2 CPU devices."""
 
   mesh = None

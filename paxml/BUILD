@@ -798,6 +798,7 @@ pytype_strict_test(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:schedules",
+        "//praxis:test_utils",
         "//praxis/layers",
     ],
 )

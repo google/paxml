@@ -86,28 +86,29 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 instantiate = base_hyperparams.instantiate
 
 
-def update_nestedmap(full_set, partial_set):
-  # Update full_set according to partial_set when name matches.
-
-  if type(full_set) is not dict:
-    return partial_set
-  ret = NestedMap() if type(full_set) is NestedMap else {}
-  for i in full_set.keys():
-    if i in partial_set.keys():
-      ret[i] = filter_nestedmap(full_set[i], partial_set[i])
-    else:
-      ret[i] = full_set[i]
-  return ret
-
-
-def filter_nestedmap(full_set, partial_set):
-  # Project full_set into partial set
-  if type(full_set) is not dict:
-    return full_set
-  ret = NestedMap() if type(full_set) is NestedMap else {}
-  for i in partial_set.keys():  # pytype: disable=attribute-error  # jax-ndarray
-    ret[i] = filter_nestedmap(full_set[i], partial_set[i])
-  return ret
+def filter_nestedmap(full_specs, partial_specs):
+  """Project full_specs into partial_specs."""
+  if isinstance(full_specs, dict):
+    result = type(full_specs)()
+    for key in partial_specs.keys():
+      result[key] = filter_nestedmap(full_specs[key], partial_specs[key])
+    return result
+  elif isinstance(full_specs, list):
+    # This handles the case where a list of children layers are added using
+    # `BaseLayer.create_children()`.
+    # Note we don't handle `tuple` since `PartitionSpec` is a subclass of it,
+    # and we want to treat `ParttionSpec` as leaf.
+    assert len(full_specs) == len(partial_specs), (
+        f'Length mismatch. {len(full_specs)=} vs {len(partial_specs)=}. '
+        f'Full content: {full_specs=} vs {partial_specs=}'
+    )
+    result = [
+        filter_nestedmap(lhs, rhs)
+        for lhs, rhs in zip(full_specs, partial_specs)
+    ]
+    return result
+  else:
+    return full_specs
 
 
 class RunningMode(enum.Flag):
