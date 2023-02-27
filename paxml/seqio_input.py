@@ -44,6 +44,7 @@ NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
 SummaryWriter = tf.summary.SummaryWriter
 
+MixtureRegistry = seqio.MixtureRegistry
 SHARD_INDEX_KEY = py_utils.SHARD_INDEX_KEY
 NUM_SHARDS_KEY = py_utils.NUM_SHARDS_KEY
 INDEX_WITHIN_SHARD_KEY = py_utils.INDEX_WITHIN_SHARD_KEY
@@ -393,6 +394,8 @@ class SeqIOInput(base_input.BaseInput):
         `.padding` fields for examples. It is preferable that users use
         `.eval_sample_weights` field that gets set to `=0` for padded eval
         examples.
+      log_mixing_proportions: whether to log mixing proportions, it's a seqio
+        arg, only effective for mixtures.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -422,6 +425,7 @@ class SeqIOInput(base_input.BaseInput):
     eval_metrics_targets_length: Optional[int] = None
     use_enumeration: bool = True
     annotate_padding_fields: bool = False
+    log_mixing_proportions: bool = True
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -523,6 +527,10 @@ class SeqIOInput(base_input.BaseInput):
     return self._mixture_or_task_inst
 
   @property
+  def is_mixture(self) -> bool:
+    return self.mixture_or_task_inst.name in MixtureRegistry.names()
+
+  @property
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
 
@@ -588,15 +596,14 @@ class SeqIOInput(base_input.BaseInput):
           index=host_idx, num_shards=p.num_infeed_hosts
       )
       ds_shard = self.mixture_or_task_inst.get_dataset(
-          sequence_length={'inputs': inputs_length,
-                           'targets': targets_length},
+          sequence_length={'inputs': inputs_length, 'targets': targets_length},
           split=p.split_name,
           shuffle=False,
           num_epochs=1,
           shard_info=shard_info,
           seed=p.input_random_seed,
           use_cached=p.use_cached,
-          trim_output_features=p.trim_output_features
+          trim_output_features=p.trim_output_features,
       )
       if p.use_enumeration:
         ds_shard = _enumerate_dataset(
@@ -690,7 +697,7 @@ class SeqIOInput(base_input.BaseInput):
                       num_epochs: int,
                       shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
     p = self.hparams
-    ds = self.mixture_or_task_inst.get_dataset(
+    kwargs = dict(
         sequence_length=p.task_feature_lengths,
         split=p.split_name,
         shuffle=shuffle,
@@ -698,7 +705,12 @@ class SeqIOInput(base_input.BaseInput):
         shard_info=shard_info,
         use_cached=p.use_cached,
         seed=p.input_random_seed,
-        trim_output_features=p.trim_output_features)
+        trim_output_features=p.trim_output_features,
+    )
+    if self.is_mixture:
+      kwargs['log_mixing_proportions'] = self.hparams.log_mixing_proportions
+    ds = self.mixture_or_task_inst.get_dataset(**kwargs)
+
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
 
     if p.use_enumeration:
