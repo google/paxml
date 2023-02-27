@@ -949,7 +949,7 @@ class SeqIOInput(base_input.BaseInput):
       try:
         example = next(self.targets_iter)
         if self.ds_ragged_tensor_keys:
-          example_orig = next(self.targets_ds_ori)
+          example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
           raise Exception(
