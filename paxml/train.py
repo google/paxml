@@ -180,11 +180,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
 
-  def _save_with_args(self, step_i, partitioned_train_state):
+  def _save_with_args(self, step_i, partitioned_train_state, force=False):
     if not self._enable_checkpoint_saving:
       return
     with py_utils.timeit() as save_period:
-      self.checkpoint_manager.save(step_i, partitioned_train_state)
+      self.checkpoint_manager.save(step_i, partitioned_train_state, force=force)
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
@@ -203,8 +203,10 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     )
 
   def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
-    logging.info('Saving a ckpt at final step: %d', step_i)
-    self._save_with_args(step_i, partitioned_train_state)
+    latest_step = self.checkpoint_manager.latest_step()
+    if latest_step is None or latest_step < step_i:
+      logging.info('Saving a ckpt at final step: %d', step_i)
+      self._save_with_args(step_i, partitioned_train_state, force=True)
 
   def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
     if not self.checkpoint_manager.should_save(step_i):
@@ -332,8 +334,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     total_num_params = total_num_params // jax.local_device_count()
     return partitioned_train_state, total_num_params
 
-  def _save_with_args(self, step_i, train_state):
-    self.checkpoint_manager.save(step_i, train_state)
+  def _save_with_args(self, step_i, train_state, force=False):
+    self.checkpoint_manager.save(step_i, train_state, force=force)
 
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
@@ -347,11 +349,13 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
             py_utils.convert_host_local_array_to_global_array,
             partitioned_train_state,
         )
-        self._save_with_args(step_i, fully_replicated_gda_train_state)
+        self._save_with_args(
+            step_i, fully_replicated_gda_train_state, force=is_final
+        )
       else:
         unreplicated_train_state = jax.tree_map(lambda x: x[0],
                                                 partitioned_train_state)
-        self._save_with_args(step_i, unreplicated_train_state)
+        self._save_with_args(step_i, unreplicated_train_state, force=is_final)
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
