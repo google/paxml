@@ -394,8 +394,6 @@ class SeqIOInput(base_input.BaseInput):
         `.padding` fields for examples. It is preferable that users use
         `.eval_sample_weights` field that gets set to `=0` for padded eval
         examples.
-      log_mixing_proportions: whether to log mixing proportions, it's a seqio
-        arg, only effective for mixtures.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -425,7 +423,6 @@ class SeqIOInput(base_input.BaseInput):
     eval_metrics_targets_length: Optional[int] = None
     use_enumeration: bool = True
     annotate_padding_fields: bool = False
-    log_mixing_proportions: bool = True
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -707,8 +704,6 @@ class SeqIOInput(base_input.BaseInput):
         seed=p.input_random_seed,
         trim_output_features=p.trim_output_features,
     )
-    if self.is_mixture:
-      kwargs['log_mixing_proportions'] = self.hparams.log_mixing_proportions
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
 
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
