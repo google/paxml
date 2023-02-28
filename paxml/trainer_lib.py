@@ -1575,7 +1575,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     """
 
 
-class _PmapPartitioner(Partitioner):
+class PmapPartitioner(Partitioner):
 
   def set_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
@@ -2319,7 +2319,7 @@ def create_partitioner(
     A Partitioner instance.
   """
   if jax_task.hparams.model.ici_mesh_shape is None:
-    partitioner = _PmapPartitioner(
+    partitioner = PmapPartitioner(
         jax_task,
         init_key,
         train_inputs_shape_dtype,
