@@ -90,7 +90,7 @@ def filter_nestedmap(full_specs, partial_specs):
   """Project full_specs into partial_specs."""
   if isinstance(full_specs, dict):
     result = type(full_specs)()
-    for key in partial_specs.keys():
+    for key in partial_specs.keys():  # pytype: disable=attribute-error  # jax-ndarray
       result[key] = filter_nestedmap(full_specs[key], partial_specs[key])
     return result
   elif isinstance(full_specs, list):
