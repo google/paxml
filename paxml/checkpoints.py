@@ -62,6 +62,7 @@ class CheckpointType(str, enum.Enum):
   FLAX = 'flax'
   GDA = 'gda'
   PERSISTENCE = 'persistence'
+  GDA_VERSION_SUBDIR = 'gda_version_subdir'
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
@@ -136,6 +137,8 @@ def checkpoint_name(
 ) -> str:
   if checkpoint_type == CheckpointType.FLAX:
     return f'{CHECKPOINT_PREFIX}{step}'
+  elif checkpoint_type == CheckpointType.GDA_VERSION_SUBDIR:
+    return str(step)
   else:
     return f'{CHECKPOINT_PREFIX}{step:08d}'
 
@@ -150,6 +153,8 @@ def make_checkpoint_step_dir(
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   checkpoint_dir = epath.Path(checkpoint_dir)
+  if checkpoint_dir.name.isdigit():
+    return int(checkpoint_dir.name)
   if is_tmp_checkpoint_asset(checkpoint_dir):
     return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX):])
   return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX):])
@@ -325,7 +330,7 @@ def restore_checkpoint(
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
-  if checkpoint_type == CheckpointType.GDA:
+  if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
