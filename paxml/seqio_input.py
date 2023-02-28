@@ -394,6 +394,8 @@ class SeqIOInput(base_input.BaseInput):
         `.padding` fields for examples. It is preferable that users use
         `.eval_sample_weights` field that gets set to `=0` for padded eval
         examples.
+      overridden_vocab: the vocab overridden. If not set, it would be derived
+        from `output_features` of underlining task_or_mixture.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -423,6 +425,7 @@ class SeqIOInput(base_input.BaseInput):
     eval_metrics_targets_length: Optional[int] = None
     use_enumeration: bool = True
     annotate_padding_fields: bool = False
+    overridden_vocab: Optional[seqio.Vocabulary] = None
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -666,20 +669,25 @@ class SeqIOInput(base_input.BaseInput):
   def reset(self) -> None:
     self._iter = self._dataset.as_numpy_iterator()
 
+  def _get_vocab(self, key) -> seqio.Vocabulary:
+    if self.hparams.overridden_vocab is not None:
+      return self.hparams.overridden_vocab
+
+    features = self.mixture_or_task_inst.output_features
+    if key not in ('src', 'tgt', None):
+      raise ValueError(
+          f"arg 'key' must be one of [None, 'src', 'tgt'], got key={key}."
+      )
+
+    real_key = 'targets' if key in (None, 'tgt') else 'inputs'
+    return features[real_key].vocabulary
+
   def ids_to_strings(
       self, ids: pytypes.NpTensor,
       lengths: Union[pytypes.NpTensor, Sequence[pytypes.NpTensor]],
       key: Optional[str] = None) -> Sequence[str]:
-    features = self.mixture_or_task_inst.output_features
-    if key is None:
-      vocab = features['targets'].vocabulary
-    elif key not in ['src', 'tgt']:
-      raise ValueError("arg 'key' must be one of [None, 'src', 'tgt'], got "
-                       f'key={key}.')
-    else:
-      vocab = (
-          features['targets'].vocabulary
-          if key == 'tgt' else features['inputs'].vocabulary)
+    vocab = self._get_vocab(key)
+
     if lengths is None:
       lengths = [ids.shape[1]] * ids.shape[0]
     ret = []
