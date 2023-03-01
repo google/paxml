@@ -474,7 +474,7 @@ class SeqIOInput(base_input.BaseInput):
           "Only one of 'mixture_name' and 'mixture_or_task' can be set."
           " Got %s and %s." % (p.mixture_name, p.mixture_or_task))
     if p.is_training and p.split_name != 'train':
-      logging.warn(
+      logging.warning(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
 
