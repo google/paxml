@@ -25,7 +25,7 @@ import enum
 import itertools
 import re
 import typing
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -62,6 +62,7 @@ JTensor = base_layer.JTensor
 PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
+EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
 PRNGKey = pytypes.PRNGKey
 PyTreeDef = pytypes.PyTreeDef
@@ -1044,6 +1045,9 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
+      early_stopping_fn: HParams to control whether to stop the training loop
+        early; the instantiated class should be callable with signature matching
+        trainer_lib.EarlyStoppingFn.
     """
     # TODO(b/269191093) Should this type be relaxed to BaseLayer?
     model: Optional[base_model.BaseModel] = None
@@ -1070,6 +1074,7 @@ class SingleTask(base_task.BaseTask):
     track_decoder_metric_min_or_max: Optional[
         SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
+    early_stopping_fn: Optional[base_hyperparams.BaseHyperParams] = None
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)
@@ -1117,6 +1122,11 @@ class SingleTask(base_task.BaseTask):
           loss_key=self._learners[0].loss_name)
       self._loss_aggregator_inst = instantiate(loss_p)
 
+    if p.early_stopping_fn is not None:
+      self._early_stopping_fn_inst = instantiate(p.early_stopping_fn)
+    else:
+      self._early_stopping_fn_inst = None
+
     if p.infer_writer:
       self._inference_runner = p.infer_writer.inference_runner.Instantiate(
           model=self.model
@@ -1133,6 +1143,10 @@ class SingleTask(base_task.BaseTask):
   @property
   def loss_aggregator_inst(self) -> base_metrics.LossAggregator:
     return self._loss_aggregator_inst
+
+  @property
+  def early_stopping_fn(self) -> Optional[EarlyStoppingFn]:
+    return self._early_stopping_fn_inst
 
   @property
   def has_ema_decay(self):

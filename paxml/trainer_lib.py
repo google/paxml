@@ -233,7 +233,7 @@ def compile_for_auto_sharding(step_fn: Any,
   return compiled, compiled.input_shardings[0]
 
 
-EarlyStoppingFn = Callable[[Dict[str, float], RunningMode, int, bool], bool]
+EarlyStoppingFn = tasks_lib.EarlyStoppingFn
 
 
 def write_post_init_model_hparams_file(

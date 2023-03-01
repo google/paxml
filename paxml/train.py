@@ -753,6 +753,14 @@ def train_and_evaluate_pmap(
   eval_prng_seed = jax.random.split(eval_key, num=num_devices)
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
+  if train_program.task.early_stopping_fn is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = train_program.task.early_stopping_fn
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
 
   # TODO(hthu): Construct a TrainEval instead.
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
@@ -870,6 +878,15 @@ def train_and_evaluate_spmd_model(
   partitioner = train_program.partitioner
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
+  if train_program.task.early_stopping_fn is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = train_program.task.early_stopping_fn
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
+
   # TODO(pax): Support auto-sharding for eval step. In this case, we would
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
