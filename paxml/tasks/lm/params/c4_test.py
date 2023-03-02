@@ -76,6 +76,10 @@ class C4Test(test_utils.TestCase):
         task_p.train.eval_interval_steps * global_batch_size, 24 * 1024
     )
 
+    # Early stopping fn
+    self.assertEqual(task_p.early_stopping_fn.cls, c4.EarlyStoppingFn)
+    self.assertAlmostEqual(task_p.early_stopping_fn.target_log_pplx, 2.69)
+
     # optimizer and HPs
     optimizer_p = task_p.train.learner.optimizer
     self.assertEqual(optimizer_p.cls, optimizers.Adam)
