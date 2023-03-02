@@ -17,6 +17,7 @@
 #   Language modeling model configurations.
 
 load("//paxml:paxml.bzl", "pytype_library")
+load("//paxml:paxml.bzl", "py_strict_test")
 load("//paxml:build_defs.bzl", "pax_targets")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
@@ -57,6 +58,24 @@ pytype_library(
         # Implicit seqio dependency.
         # Implicit t5.data dependency.
         # Implicit t5.data.preprocessors dependency.
+    ],
+)
+
+py_strict_test(
+    name = "c4_test",
+    timeout = "long",
+    srcs = ["c4_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [
+        ":params",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
+        "//praxis:base_hyperparams",
+        "//praxis:optimizers",
+        "//praxis:schedules",
+        "//praxis:test_utils",
+        "//praxis/layers",
     ],
 )
 
