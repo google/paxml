@@ -2001,17 +2001,7 @@ class _PjitPartitioner(Partitioner):
         input_partition_spec,
     )
 
-    def init_model_from_seed(init_key):
-      states = initialize_model_state(
-          self._jax_task,
-          init_key,
-          inputs_shape_dtype,
-          discard_opt_states=is_eval,
-          do_init_checkpoint_rules=False,
-      )
-      return self._pad_states(metadata, states)
-
-    var_shapes = jax.eval_shape(init_model_from_seed, self._init_key)
+    var_shapes = metadata.padded_global_shapes
     out_shapes = jax.eval_shape(
         step_fn, var_shapes, self._init_key, inputs_shape_dtype, None
     )
