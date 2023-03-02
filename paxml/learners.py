@@ -106,6 +106,9 @@ class Learner(base_hyperparams.BaseParameterizable):
       bprop_variable_exclusion: Regular expression or a list of regular
         expressions. If a variable name matches one of the regular expressions,
         the variable should be fixed during model training.
+      bprop_variable_inclusion: Regular expression or a list of regular
+        expressions. If a variable name matches one of the regular expressions,
+        the variable should be updated during model training.
       repeat_prefix_sep: Repeat prefix separator character, for use in filename
         separator during checkpointing.
     """
@@ -125,6 +128,9 @@ class Learner(base_hyperparams.BaseParameterizable):
     skip_step_gradient_norm_value: float = 0.0
     enable_skip_step_on_gradient_anomalies: bool = True
     bprop_variable_exclusion: Union[str, Sequence[str]] = dataclasses.field(
+        default_factory=list
+    )
+    bprop_variable_inclusion: Union[str, Sequence[str]] = dataclasses.field(
         default_factory=list
     )
     repeat_prefix_sep: str = '#'

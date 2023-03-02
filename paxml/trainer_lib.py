@@ -839,11 +839,21 @@ def train_step_single_learner(
             var_weight_hparams[collection])
 
     # lastly, we avoid updating variables in learner.bprop_variable_exclusion.
-    mdl_vars = py_utils.update_matched_variables(
-        states.mdl_vars,
-        mdl_vars,
-        learner.hparams.bprop_variable_exclusion,
-        invert=True)
+    if learner.hparams.bprop_variable_inclusion:
+      assert not learner.hparams.bprop_variable_exclusion, (
+          'Providing both bprop_variable_exclusion and bprop_variable_inclusion'
+          ' is not supported.'
+      )
+      mdl_vars = py_utils.update_matched_variables(
+          states.mdl_vars, mdl_vars, learner.hparams.bprop_variable_inclusion
+      )
+    else:
+      mdl_vars = py_utils.update_matched_variables(
+          states.mdl_vars,
+          mdl_vars,
+          learner.hparams.bprop_variable_exclusion,
+          invert=True,
+      )
     new_states = states.new_state(
         mdl_vars=mdl_vars, opt_states=[new_opt_states])
     # Finally fetch all backward summary tensors. We do not aggregate the scalar
