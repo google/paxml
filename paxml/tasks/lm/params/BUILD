@@ -36,19 +36,24 @@ pytype_library(
     srcs_version = "PY3",
     tags = ["keep_dep"],
     deps = [
+        # Implicit absl.logging dependency.
         # Implicit jax dependency.
         "//paxml:base_experiment",
         "//paxml:experiment_registry",
         "//paxml:seqio_input",
         "//paxml:tasks_lib",
+        "//paxml:trainer_lib",
         "//paxml/tasks/lm:input_generator",
         "//paxml/tasks/lm:model_params",
+        "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:optimizers",
+        "//praxis:pax_fiddle",
         "//praxis:schedules",
         "//praxis/layers",
         "//praxis/layers:gpu_fast_attention",
+        "//praxis/layers:transformers",
         # Implicit seqio dependency.
         # Implicit t5.data dependency.
         # Implicit t5.data.preprocessors dependency.
