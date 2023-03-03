@@ -65,6 +65,10 @@ class CheckpointType(str, enum.Enum):
   GDA_VERSION_SUBDIR = 'gda_version_subdir'
 
 
+def _is_gda_version_subdir(checkpoint_path_with_step: epath.Path) -> bool:
+  return checkpoint_path_with_step.name.isdigit()
+
+
 def is_checkpoint_asset(x: epath.Path) -> bool:
   """Determines whether path is a checkpoint."""
   return bool(CHECKPOINT_PATTERN_RE.match(x.name))
@@ -153,11 +157,32 @@ def make_checkpoint_step_dir(
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   checkpoint_dir = epath.Path(checkpoint_dir)
-  if checkpoint_dir.name.isdigit():
+  if _is_gda_version_subdir(checkpoint_dir):
     return int(checkpoint_dir.name)
   if is_tmp_checkpoint_asset(checkpoint_dir):
     return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX):])
   return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX):])
+
+
+def maybe_update_checkpoint_type(
+    user_specified_type: CheckpointType,
+    checkpoint_path_with_step: epath.Path,
+) -> CheckpointType:
+  """Returns the GDA checkpoint type that matches the provided path.
+
+  Args:
+    user_specified_type: CheckpointType of the checkpoint provided by the user.
+    checkpoint_path_with_step: Absolute path to the checkpoint directory that
+      includes the step number e.g. "/some/path/checkpoints/checkpoint_001".
+
+  Returns:
+    The updated CheckpointType matching the provided absolute path.
+  """
+  if user_specified_type != CheckpointType.GDA:
+    return user_specified_type
+  if _is_gda_version_subdir(checkpoint_path_with_step):
+    return CheckpointType.GDA_VERSION_SUBDIR
+  return CheckpointType.GDA
 
 
 def retrieve_checkpoint_type(

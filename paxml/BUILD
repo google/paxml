@@ -150,7 +150,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "checkpoints_test",
     srcs = ["checkpoints_test.py"],
     deps = [
