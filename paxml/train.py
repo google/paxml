@@ -218,13 +218,17 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
         step_i, train_state_global_shapes, restore_kwargs=restore_args
     )
 
-  def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_final(self, step_i, partitioned_train_state,
+                 train_state_pspecs=None):
+    del train_state_pspecs
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
       logging.info('Saving a ckpt at final step: %d', step_i)
       self._save_with_args(step_i, partitioned_train_state, force=True)
 
-  def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_if_needed(self, step_i, partitioned_train_state,
+                     train_state_pspecs=None):
+    del train_state_pspecs
     if not self.checkpoint_manager.should_save(step_i):
       return
     self._save_with_args(step_i, partitioned_train_state)
