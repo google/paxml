@@ -109,7 +109,7 @@ class TestModel(base_model.BaseModel):
     return {'a': (1, 1)}, {}, {}
 
 
-class TrainLibTestBase(test_utils.TestCase):
+class ProgramTestBase(test_utils.TestCase):
   """Trainer_lib tests under 2 CPU devices."""
 
   mesh = None
@@ -143,99 +143,14 @@ class TrainLibTestBase(test_utils.TestCase):
     cls.task = instantiate(task_p)
 
 
-class PjitPartitionerTest(TrainLibTestBase):
-
-  def setUp(self):
-    super().setUp()
-    train_sample_inputs = self.train_input.get_next()
-    # Single-host test, per-host shape/dtype is global.
-    self._inputs_shape_dtype = jax.tree_map(
-        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
-        train_sample_inputs,
-    )
-
-  def _create_partitioner(
-      self, auto_sharding_step_fn=None, auto_sharding_is_eval=False
-  ):
-    auto_sharding_info = None
-    if auto_sharding_step_fn:
-      auto_sharding_info = (
-          trainer_lib._AutoShardingPjitPartitioner.AutoShardingInfo(
-              auto_sharding_step_fn,
-              is_eval=auto_sharding_is_eval,
-              replicate_output=False,
-          )
-      )
-      return trainer_lib._AutoShardingPjitPartitioner(
-          self.task,
-          jax.random.PRNGKey(0),
-          reshard_inputs=True,
-          auto_sharding_info=auto_sharding_info,
-          train_inputs_shape_dtype=self._inputs_shape_dtype,
-          init_is_eval=False,
-      )
-    else:
-      return trainer_lib._PjitPartitioner(
-          self.task,
-          jax.random.PRNGKey(0),
-          reshard_inputs=True,
-          train_inputs_shape_dtype=self._inputs_shape_dtype,
-          init_is_eval=False,
-      )
-
-  @parameterized.parameters([True, False])
-  def test_output_spec(self, use_auto_sharding):
-    prng_key = jax.random.PRNGKey(0)
-    metadata = trainer_lib.create_train_state_metadata(
-        self.task, self._inputs_shape_dtype
-    )
-    partitioner = self._create_partitioner(
-        trainer_lib.train_step_single_learner if use_auto_sharding else None
-    )
-    train_state_partition_spec = partitioner.get_train_state_metadata(
-    ).partition_specs
-
-    if use_auto_sharding:
-      self.assertIsNotNone(train_state_partition_spec)
-      self.assertNotEqual(metadata.partition_specs, train_state_partition_spec)
-    else:
-      self.assertEqual(metadata.partition_specs, train_state_partition_spec)
-
-  @parameterized.parameters(
-      [RunningMode.TRAIN, RunningMode.EVAL, RunningMode.DECODE]
-  )
-  def test_cache_auto_sharding_result(self, mode):
-    prng_key = jax.random.PRNGKey(0)
-    step_fn, is_eval = trainer_lib.get_step_fn(mode)
-    partitioner = self._create_partitioner(step_fn, is_eval)
-    # TODO(laigd): split the get_train_state_metadata logic to separate test
-    # cases.
-    metadata_1 = partitioner.get_train_state_metadata(
-        discard_opt_states=is_eval
-    )
-    metadata_2 = partitioner.get_train_state_metadata(
-        discard_opt_states=is_eval
-    )
-    self.assertEqual(metadata_1.partition_specs, metadata_2.partition_specs)
-
-    partitioned_step_fn_1, input_partition_specs_1 = partitioner.partition(
-        step_fn, self._inputs_shape_dtype, is_eval
-    )
-    partitioned_step_fn_2, input_partition_specs_2 = partitioner.partition(
-        step_fn, self._inputs_shape_dtype, is_eval
-    )
-    self.assertIs(partitioned_step_fn_1, partitioned_step_fn_2)
-    self.assertIs(input_partition_specs_1, input_partition_specs_2)
-
-
-class SingleTaskPjitTrainProgramTest(TrainLibTestBase):
+class SingleTaskPjitTrainProgramTest(ProgramTestBase):
 
   def test_train_program_partitioned_step(self):
     inputs_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )
-    partitioner = trainer_lib._PjitPartitioner(
+    partitioner = trainer_lib.PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
         reshard_inputs=True,

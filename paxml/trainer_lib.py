@@ -1679,7 +1679,7 @@ class PmapPartitioner(Partitioner):
     return _wrapped_partitioned_step, None  # Input partition spec.
 
 
-class _PjitPartitioner(Partitioner):
+class PjitPartitioner(Partitioner):
   """Used for partitioning a step function of a SPMD model."""
 
   def __init__(
@@ -1791,7 +1791,6 @@ class _PjitPartitioner(Partitioner):
     """
     if not self._train_state_metadata:
       self._train_state_metadata = self._get_train_state_metadata_default()
-
     return self._maybe_discard_opt_states(
         self._train_state_metadata, discard_opt_states
     )
@@ -2039,7 +2038,7 @@ class _PjitPartitioner(Partitioner):
     return partitioned_step_fn
 
 
-class _AutoShardingPjitPartitioner(_PjitPartitioner):
+class AutoShardingPjitPartitioner(PjitPartitioner):
   """PJIT partitioner that automatically select partition strategies."""
 
   @dataclasses.dataclass
@@ -2221,7 +2220,7 @@ class _AutoShardingPjitPartitioner(_PjitPartitioner):
         return partitioned_step_fn(state, prng_key, inputs)
 
       self._auto_sharding_result = (
-          _AutoShardingPjitPartitioner._AutoShardingResult(
+          AutoShardingPjitPartitioner._AutoShardingResult(
               _wrapped_partitioned_step,
               train_state_pspec,
               input_pspec,
@@ -2331,10 +2330,10 @@ def create_partitioner(
     if auto_sharding_mode:
       step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
-      auto_sharding_info = _AutoShardingPjitPartitioner.AutoShardingInfo(
+      auto_sharding_info = AutoShardingPjitPartitioner.AutoShardingInfo(
           step_fn, step_fn_is_eval, replicate_output
       )
-      partitioner = _AutoShardingPjitPartitioner(
+      partitioner = AutoShardingPjitPartitioner(
           jax_task,
           init_key,
           reshard_inputs,
@@ -2344,7 +2343,7 @@ def create_partitioner(
           job_log_dir,
       )
     else:
-      partitioner = _PjitPartitioner(
+      partitioner = PjitPartitioner(
           jax_task,
           init_key,
           reshard_inputs,
@@ -2563,7 +2562,7 @@ class SingleTaskEvalProgram(programs.BasePartitionedProgram):
       # and get shape from there.
       input_shape_dtype = self._partitioner.train_inputs_shape_dtype
       if isinstance(
-          self._partitioner, (_PjitPartitioner, _AutoShardingPjitPartitioner)
+          self._partitioner, (PjitPartitioner, AutoShardingPjitPartitioner)
       ):
         # Instantiate a stanalone pipeline for one-time use to get sample inputs
         # since the peek_padded() can return None if the pipeline is exhausted.
