@@ -257,7 +257,7 @@ def tune(trial_fn: TrialFn,
         # Mark trial as infeasible on NaN. PAX user can add more error
         # through `SearchHParams.errors_to_skip`.
         with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
-          trial_fn(sub_experiment_cls(),
+          trial_fn(sub_experiment_cls(),  # pytype: disable=wrong-arg-types  # re-none
                    work_unit,
                    trial_dirname,
                    early_stopping_fn)  # pytype: disable=not-instantiable
