@@ -48,7 +48,7 @@ get_version_key = checkpoint_version.get_version_key
 get_version = checkpoint_version.get_version
 
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
-PyTreeDef = pytypes.PyTreeDef
+PyTree = Any
 AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
 Checkpointer = orbax.checkpoint.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
@@ -499,24 +499,24 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   from a state dict.
   """
 
-  _param_names: PyTreeDef = None
+  _param_names: PyTree = None
 
-  def _set_param_names(self, param_names: PyTreeDef):
+  def _set_param_names(self, param_names: PyTree):
     self._param_names = param_names
 
-  def _get_param_names(self, item: PyTreeDef) -> PyTreeDef:
+  def _get_param_names(self, item: PyTree) -> PyTree:
     return self._param_names
 
-  async def _write_aggregate_file(self, directory: epath.Path, item: PyTreeDef,
-                                  param_infos: PyTreeDef, save_args: PyTreeDef):
+  async def _write_aggregate_file(self, directory: epath.Path, item: PyTree,
+                                  param_infos: PyTree, save_args: PyTree):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
 
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTreeDef,
-      save_args: Optional[PyTreeDef] = None,
+      item: PyTree,
+      save_args: Optional[PyTree] = None,
       version: Optional[float] = None,
   ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
@@ -533,11 +533,11 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTreeDef] = None,
-      specs: Optional[PyTreeDef] = None,
+      item: Optional[PyTree] = None,
+      specs: Optional[PyTree] = None,
       mesh: Optional[jax.sharding.Mesh] = None,
       version: Optional[float] = None,
-  ) -> PyTreeDef:
+  ) -> PyTree:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
       raise ValueError('Expected version for restoration.')
@@ -569,7 +569,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
 
     return restored_train_state
 
-  def structure(self, directory: epath.Path) -> PyTreeDef:
+  def structure(self, directory: epath.Path) -> PyTree:
     return jax.tree_util.tree_map(
         orbax.checkpoint.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names))
@@ -584,8 +584,8 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTreeDef,
-      save_args: Optional[PyTreeDef] = None,
+      item: PyTree,
+      save_args: Optional[PyTree] = None,
       version: Optional[float] = None,
   ) -> Any:
     if version is None:
@@ -612,12 +612,12 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTreeDef] = None,
-      restore_args: Optional[PyTreeDef] = None,
-      transforms: Optional[PyTreeDef] = None,
+      item: Optional[PyTree] = None,
+      restore_args: Optional[PyTree] = None,
+      transforms: Optional[PyTree] = None,
       transforms_default_to_original: bool = True,
       version: Optional[float] = None,
-  ) -> PyTreeDef:
+  ) -> PyTree:
     if version is None:
       raise ValueError('Expected version for restoration.')
     # Input the same data structure as in save_checkpoint().

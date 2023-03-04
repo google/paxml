@@ -55,7 +55,6 @@ NestedNpTensor = pytypes.NestedNpTensor
 NestedShape = NestedMap
 PRNGKey = pytypes.PRNGKey
 ParamsT = pytypes.HParamsT
-PyTreeDef = pytypes.PyTreeDef
 Nested = pytypes.Nested
 NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct

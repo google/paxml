@@ -65,7 +65,6 @@ NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
 PRNGKey = pytypes.PRNGKey
-PyTreeDef = pytypes.PyTreeDef
 sub_config_field = base_hyperparams.sub_config_field
 RegexStr = str
 
