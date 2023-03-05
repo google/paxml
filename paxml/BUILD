@@ -759,6 +759,7 @@ py_strict_test(
     srcs_version = "PY3",
     deps = [
         ":checkpoints",
+        ":learners",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.

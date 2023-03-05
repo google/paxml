@@ -146,15 +146,17 @@ def extract_ema(
             if ret is None:
               ret = v.ema
             else:
-              is_masked = lambda x: (
-                  isinstance(x, tuple) and x == ()
-              ) or py_utils.is_optax_masked_node(x)
               ret = jax.tree_map(
-                  lambda x, y: y if is_masked(x) else x,
+                  lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
                   ret,
                   v.ema,
-                  is_leaf=is_masked,
+                  is_leaf=py_utils.is_optax_masked_node,
               )
+    ret = jax.tree_map(
+        lambda x: None if py_utils.is_optax_masked_node(x) else x,
+        ret,
+        is_leaf=py_utils.is_optax_masked_node,
+    )
     if ret is not None:
       return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
   raise ValueError(
@@ -340,8 +342,8 @@ def _make_train_state(
     for i in range(len(flatten_prefix)):
       k = flatten_prefix[i]
       if k not in matched_pspecs:
-        flatten_prefix[i] = ()
-        flatten_variable[i] = ()
+        flatten_prefix[i] = optax.MaskedNode()
+        flatten_variable[i] = optax.MaskedNode()
       else:
         flatten_prefix[i] = matched_pspecs[k]
     return jax.tree_util.tree_unflatten(
@@ -366,8 +368,10 @@ def _make_train_state(
           if train_state_pspecs is not None:
             new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
         else:
-          filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v['ema'])
-          v['ema'] = filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
+          filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v)
+          v = (
+              filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
+          )
           new_states.append(v)
           if train_state_pspecs is not None:
             v_pspecs = train_state_pspecs.opt_states[0][i]
@@ -401,8 +405,8 @@ def _make_train_state(
 
           def update_for_ema(v, update_pspecs=False):
             if isinstance(v, dict) and 'ema' in v:
-              filtered_vars, ema_pspecs = _filter_vars_and_get_pspecs(v['ema'])
-              v['ema'] = ema_pspecs if update_pspecs else filtered_vars
+              filtered_vars, ema_pspecs = _filter_vars_and_get_pspecs(v)
+              v = ema_pspecs if update_pspecs else filtered_vars
             return v
 
           new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray

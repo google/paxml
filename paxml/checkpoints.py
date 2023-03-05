@@ -435,8 +435,12 @@ def _tensorstore_prepare(
       instances have been filtered out.
   """
   # This replaces MaskedNode instances by None values ...
-  train_state_none = jax.tree_map(_masked_node_to_none, train_state,
-                                  train_state)
+  train_state_none = jax.tree_map(
+      _masked_node_to_none,
+      train_state,
+      train_state,
+      is_leaf=py_utils.is_optax_masked_node,
+  )
   if state_specs is not None:
     state_specs_none = jax.tree_map(
         _masked_node_to_none,

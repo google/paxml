@@ -26,6 +26,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from paxml import checkpoints
+from paxml import learners
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
@@ -114,6 +115,40 @@ class TestModel01(base_model.BaseModel):
     return NestedMap(
         loss=(loss, jnp.array(1.0, loss.dtype)),
         loss02=(loss02, jnp.array(1.0, loss02.dtype))), per_example_out
+
+
+class TestModel02(base_model.BaseModel):
+  """Similar as above but with two variables.
+
+  Attributes:
+    input_dims: Depth of the input.
+    output_dims: Depth of the output.
+  """
+
+  input_dims: int = 0
+  output_dims: int = 0
+
+  def setup(self) -> None:
+    sub_p = pax_fiddle.Config(layers.FeedForward, input_dims=2, output_dims=2)
+    p = pax_fiddle.Config(
+        layers.Repeat, name='repeated_ffn', sub_tpl=sub_p, x_times=3
+    )
+    self.create_child('repeated_ffn', p)
+    self.create_variable(
+        'var01',
+        base_layer.WeightHParams(shape=[self.input_dims, self.output_dims]),
+    )
+
+  def compute_predictions(self, input_batch: NestedMap) -> JTensor:
+    return self.repeated_ffn(input_batch.inputs)
+
+  def compute_loss(
+      self, predictions: JTensor, input_batch: NestedMap
+  ) -> Tuple[NestedMap, NestedMap]:
+    del input_batch
+    loss = jnp.sum(predictions)
+    per_example_out = NestedMap()
+    return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
 
 
 class BaseTaskTest(test_utils.TestCase):
@@ -605,52 +640,67 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
   @parameterized.named_parameters(('partial_load_opt_states_true', True),
                                   ('partial_load_opt_states_false', False))
-  def test_load_ema(self, partial_load_opt_states):
-    input_dims = 3
-    output_dims = 5
+  def test_load_ema_gda(self, partial_load_opt_states):
+    input_dims = 2
+    output_dims = 2
 
     # Initialize external task and save checkpoint
     ext_task_p = tasks_lib.SingleTask.HParams(name='task')
     ext_task_p.model = pax_fiddle.Config(
-        TestModel01,
+        TestModel02,
         name='mdl_ext',
         input_dims=input_dims,
         output_dims=output_dims,
     )
-    lp = ext_task_p.train.learner
-    lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
-
-    # Enable ema
-    lp.optimizer.ema_decay = 0.9999
+    ext_task_p.train.learner = learners.MultiOptimizerLearner.HParams().set(
+        loss_name='loss',
+        optimizer=optimizers.ShardedSgd.HParams().set(
+            learning_rate=0.0,
+            lr_schedule=schedules.Constant.HParams(value=0.0),
+            ema_decay=0.9999,
+        ),
+        auxiliary_optimizers=[
+            optimizers.ShardedAdafactor.HParamsAdamB().set(
+                lr_schedule=schedules.Constant.HParams()
+            )
+        ],
+        auxiliary_regex=(['.*var01']),
+        auxiliary_names=(['var01']),
+    )
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
-    ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
-
-    # Modify var01 to be random
-    var_shape = ext_train_state.mdl_vars['params']['var01'].shape
-    random_var = jnp.array(np.random.normal(size=var_shape))
-    ext_train_state.mdl_vars['params']['var01'] = random_var
+    ext_train_state = trainer_lib.initialize_model_state(
+        instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
+    )
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+    )
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
     task_p.model = pax_fiddle.Config(
-        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+        TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
-    task_p.train.learner = lp.clone()
+    task_p.train.learner = ext_task_p.train.learner.clone()
     task_p.train.init_from_checkpoint_rules = {
-        tempdir.full_path:
-            tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p,
-                load_rules=[(r'params/(.*)', 'ema/params/{}')],
-                input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                    input_dims=input_dims),
-                partial_load_opt_states=partial_load_opt_states),
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=[
+                (
+                    r'params/repeated_ffn/sub/bias/b',
+                    'ema/params/repeated_ffn/sub/bias/b',
+                ),
+                (r'params/var01', 'ema/params/var01'),
+            ],
+            input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                input_dims=input_dims
+            ),
+            partial_load_opt_states=partial_load_opt_states,
+        ),
     }
     task = instantiate(task_p)
 
@@ -661,16 +711,29 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Now initialize also includes warm start (loading from ckpt)
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
-    train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs)
+    train_state = trainer_lib.initialize_model_state(
+        task,
+        jax.random.PRNGKey(5678),
+        sample_inputs,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+    )
 
-    self.assertAllClose(ext_ema['params']['var01'],
-                        train_state.mdl_vars['params']['var01'][0])
+    self.assertAllClose(
+        ext_train_state.mdl_vars['params']['var01'],
+        train_state.mdl_vars['params']['var01'],
+    )
+
+    self.assertAllClose(
+        ext_train_state.mdl_vars['params']['repeated_ffn']['sub']['bias']['b'],
+        train_state.mdl_vars['params']['repeated_ffn']['sub']['bias']['b'],
+    )
 
     for v in train_state.opt_states[0]:
       if 'ema' in v:
-        self.assertAllClose(ext_ema['params']['var01'],
-                            v.ema['params']['var01'][0])
+        self.assertAllClose(
+            ext_train_state.mdl_vars['params']['var01'],
+            v.ema['params']['var01'],
+        )
 
 
 if __name__ == '__main__':
