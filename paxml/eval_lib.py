@@ -838,14 +838,14 @@ def evaluate_pmap_model(
       partitioner, eval_input_p, jax_task, prng_key, job_log_dir
   ).get_partition_run_one_step_fn()
   decode_once_fn = None
-  input_p = None
+  decode_input_p = None
   continuous_decode = True
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
       checkpointer,
       jax_task.hparams,
       job_log_dir,
-      input_p,
+      decode_input_p,
       eval_input_p,
       eval_one_step_fn,
       decode_once_fn,
@@ -1967,7 +1967,7 @@ def _common_eval_or_decode_loop(
     checkpointer: _EvalCheckpointer,
     task_p: tasks_lib.SingleTask.HParams,
     job_log_dir: epath.Path,
-    input_p: Optional[Sequence[base_input.BaseInput.HParams]],
+    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
@@ -1979,15 +1979,15 @@ def _common_eval_or_decode_loop(
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
   summary_base_dir = job_log_dir / 'summaries'
-  if input_p:
+  if decode_input_p:
     summary_decode_dirs = [
-        summary_base_dir / f'decode_test_{p.name}' for p in input_p
+        summary_base_dir / f'decode_test_{p.name}' for p in decode_input_p
     ]
   summary_eval_dirs = [
       summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
   ]
   with contextlib.ExitStack() as exit_stack:
-    if input_p:
+    if decode_input_p:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
@@ -2006,7 +2006,7 @@ def _common_eval_or_decode_loop(
       with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
                                         mode):
         decode_metrics = None
-        if input_p:
+        if decode_input_p:
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
           decode_metrics = decode_once_fn(partitioned_train_state,
                                           summary_writers)
