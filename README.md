@@ -34,6 +34,8 @@ After ssh-ing the VM, paxml can be installed using
 
 ```bash
 $ python3 -m pip install -U pip
+# Temporary requirement to fix the version mismatch caused by the new orbax 0.1.2 release
+$ python3 -m pip install orbax==0.1.1
 $ python3 -m pip install paxml jax[tpu] \
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```

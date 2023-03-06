@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,14 +25,13 @@ import enum
 import itertools
 import re
 import typing
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
 import flax
 import jax
 from jax import numpy as jnp
-from jax.experimental import global_device_array
 import numpy as np
 import optax
 from paxml import base_inference_runner
@@ -63,9 +62,9 @@ JTensor = base_layer.JTensor
 PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
+EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
 PRNGKey = pytypes.PRNGKey
-PyTreeDef = pytypes.PyTreeDef
 sub_config_field = base_hyperparams.sub_config_field
 RegexStr = str
 
@@ -102,6 +101,67 @@ def _flatten_dict(
   else:
     ret = [(prefix, node)]
   return ret
+
+
+def is_vectorized(states: TrainState) -> bool:
+  """Determines whether it is a vectorized model."""
+  if not states.opt_states:
+    raise ValueError(
+        'cannot decide if it is vectorized model without opt_states'
+    )
+  return NO_PREFIX_KEY in states.opt_states[0]
+
+
+def has_ema(task_p: SingleTask.HParams) -> bool:
+  """Determines whether ema is used or not."""
+  return task_p.train.learner.optimizer.ema_decay > 0.0
+
+
+def extract_ema(
+    model_states: train_states.TrainState,
+) -> train_states.TrainState:
+  """Finds the ema state from optimizer states."""
+  if len(model_states.opt_states) != 1:
+    raise ValueError(
+        'EMA currently only supports a single learner (got '
+        f'`{len(model_states.opt_states)}`).'
+    )
+  vectorized = is_vectorized(model_states)
+  if not vectorized:
+    for v in model_states.opt_states[0]:
+      if isinstance(v, dict) and 'ema' in v:
+        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
+  else:
+    ret = None
+    # For vectorized model, the structure looks like this:
+    # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
+    # It is a list of dictionaries. The key corresponds to the #stages.
+    # Here the ema is constructed by combining the ema state from all those
+    # dictionaries. Each parameter belongs to one dictionary and is labelled as
+    # masked node in others.
+    for item in model_states.opt_states[0].values():  # pytype: disable=attribute-error  # jax-ndarray
+      if isinstance(item, tuple):
+        for v in item:
+          if isinstance(v, dict) and 'ema' in v:
+            if ret is None:
+              ret = v.ema
+            else:
+              ret = jax.tree_map(
+                  lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
+                  ret,
+                  v.ema,
+                  is_leaf=py_utils.is_optax_masked_node,
+              )
+    ret = jax.tree_map(
+        lambda x: None if py_utils.is_optax_masked_node(x) else x,
+        ret,
+        is_leaf=py_utils.is_optax_masked_node,
+    )
+    if ret is not None:
+      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
+  raise ValueError(
+      'Could not find EMA states in `%r`.' % model_states.opt_states
+  )
 
 
 def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
@@ -231,9 +291,6 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
     loaded_var = loaded_vars[init_var_name]
     if init_var_name not in used_vars:
       used_vars.add(init_var_name)
-    # Copy the var if it's used more than once.
-    elif isinstance(loaded_var, global_device_array.GlobalDeviceArray):
-      loaded_var = py_utils.copy_gda(loaded_var)
     else:
       # Allow the copy of cross-host Jax arrays.
       with jax.spmd_mode('allow_all'):
@@ -244,7 +301,7 @@ def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
       _set_nested_dict_value(model_vars, var_name, loaded_var)
 
 
-def _make_gda_train_state(
+def _make_train_state(
     rules: CheckpointLoadingRules,
     ckpt_train_state: TrainState,
     train_state_pspecs: TrainState,
@@ -269,55 +326,113 @@ def _make_gda_train_state(
       train_state_pspecs = train_state_pspecs.replace(opt_states={})
 
   def _filter_vars_and_get_pspecs(variables):
-    filtered_vars = []
-    pspecs = []
-    for k, v in variables.FlattenItems():
-      if k in matched_pspecs:
-        filtered_vars.append(v)
-        pspecs.append(matched_pspecs[k])
-      else:
-        filtered_vars.append(())
-        pspecs.append(())
-    return variables.Pack(filtered_vars), variables.Pack(pspecs)
+    prefix = py_utils.extract_prefixed_keys_from_nested_map(
+        variables, key_separator='.'
+    )
+    flatten_prefix, treedef = jax.tree_util.tree_flatten(
+        prefix, is_leaf=py_utils.is_optax_masked_node
+    )
+    flatten_variable, _ = jax.tree_util.tree_flatten(
+        variables, is_leaf=py_utils.is_optax_masked_node
+    )
 
-  filtered_vars, pspecs = _filter_vars_and_get_pspecs(
-      NestedMap(ckpt_train_state.mdl_vars))
+    if len(flatten_prefix) != len(flatten_variable):
+      raise ValueError('variables and its prefix has different length')
+
+    for i in range(len(flatten_prefix)):
+      k = flatten_prefix[i]
+      if k not in matched_pspecs:
+        flatten_prefix[i] = optax.MaskedNode()
+        flatten_variable[i] = optax.MaskedNode()
+      else:
+        flatten_prefix[i] = matched_pspecs[k]
+    return jax.tree_util.tree_unflatten(
+        treedef, flatten_variable
+    ), jax.tree_util.tree_unflatten(treedef, flatten_prefix)
+
+  filtered_vars, pspecs = _filter_vars_and_get_pspecs(ckpt_train_state.mdl_vars)
   ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
   if train_state_pspecs is not None:
     train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
+
+  # TODO(nanxinchen): move this to a helper function
   if load_ema_states:
     new_states = []
     new_states_pspecs = []
-    # TODO(pax-dev): This doesn't work with prefix dims.
-    if NO_PREFIX_KEY in ckpt_train_state.opt_states[0]:
-      raise NotImplementedError(
-          'b/264556712: loading ema states is not supported for vectorized'
-          ' models'
+    vectorized = is_vectorized(ckpt_train_state)
+
+    if not vectorized:
+      for i, v in enumerate(ckpt_train_state.opt_states[0]):
+        if 'ema' not in v:
+          new_states.append(v)
+          if train_state_pspecs is not None:
+            new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
+        else:
+          filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v)
+          v = (
+              filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
+          )
+          new_states.append(v)
+          if train_state_pspecs is not None:
+            v_pspecs = train_state_pspecs.opt_states[0][i]
+            v_pspecs['ema'] = ema_pspecs
+            new_states_pspecs.append(v_pspecs)
+      tuple_type = type(ckpt_train_state.opt_states[0])
+      outer_tuple_type = type(ckpt_train_state.opt_states)
+      new_states0 = outer_tuple_type([tuple_type(new_states)])
+      ckpt_train_state.replace(
+          opt_states=new_states0 + ckpt_train_state.opt_states[1:]
       )
-    for i, v in enumerate(ckpt_train_state.opt_states[0]):
-      if 'ema' not in v:
-        new_states.append(v)
-        if train_state_pspecs is not None:
-          new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
-      else:
-        v = NestedMap.FromNestedDict(v)
-        filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v.ema)
-        v.ema = filtered_ema
-        new_states.append(v)
-        if train_state_pspecs is not None:
-          v_pspecs = NestedMap.FromNestedDict(
-              train_state_pspecs.opt_states[0][i])
-          v_pspecs.ema = ema_pspecs
-          new_states_pspecs.append(v_pspecs)
-    tuple_type = type(ckpt_train_state.opt_states[0])
-    outer_tuple_type = type(ckpt_train_state.opt_states)
-    new_states0 = outer_tuple_type([tuple_type(new_states)])
-    ckpt_train_state.replace(opt_states=new_states0 +
-                             ckpt_train_state.opt_states[1:])
-    if train_state_pspecs is not None:
-      new_states_pspecs0 = outer_tuple_type([tuple_type(new_states_pspecs)])
-      train_state_pspecs.replace(opt_states=new_states_pspecs0 +
-                                 train_state_pspecs.opt_states[1:])
+      if train_state_pspecs is not None:
+        new_states_pspecs0 = outer_tuple_type([tuple_type(new_states_pspecs)])
+        train_state_pspecs.replace(
+            opt_states=new_states_pspecs0 + train_state_pspecs.opt_states[1:]
+        )
+    else:
+      # For vectorized model, the structure looks like this:
+      # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
+      # It is a list of dictionaries. The key corresponds to the #stages.
+      ckpt_opt_states_0 = ckpt_train_state.opt_states[0]
+
+      new_states0 = ckpt_train_state.opt_states[0]
+      new_states_pspecs0 = None
+      if train_state_pspecs is not None:
+        new_states_pspecs0 = train_state_pspecs.opt_states[0]
+
+      for key, item in ckpt_train_state.opt_states[0].items():  # pytype: disable=attribute-error  # jax-ndarray
+        if isinstance(item, tuple):
+          # (dict, dict, dict, ...). One or more dicts contain an 'ema' key
+
+          def update_for_ema(v, update_pspecs=False):
+            if isinstance(v, dict) and 'ema' in v:
+              filtered_vars, ema_pspecs = _filter_vars_and_get_pspecs(v)
+              v = ema_pspecs if update_pspecs else filtered_vars
+            return v
+
+          new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray
+          if new_states_pspecs0 is not None:
+            new_states_pspecs0[key] = tuple(  # pytype: disable=unsupported-operands  # jax-ndarray
+                update_for_ema(v, update_pspecs=True)
+                for v in new_states_pspecs0[key]
+            )
+
+      outer_tuple_type = type(ckpt_train_state.opt_states)
+      ckpt_train_state.replace(
+          opt_states=outer_tuple_type(
+              new_states0,
+          )
+          + ckpt_train_state.opt_states[1:]
+      )
+      if train_state_pspecs is not None:
+        train_state_pspecs.replace(
+            opt_states=outer_tuple_type(
+                [
+                    new_states_pspecs0,
+                ]
+                + train_state_pspecs.opt_states[1:]
+            )
+        )
+
   return ckpt_train_state, train_state_pspecs
 
 
@@ -390,8 +505,9 @@ def restore_pmap_from_tensorstore(
     step: Step to restore checkpoint from.
     global_mesh: If set, use this mesh to restore the checkpoint (meaning that
       the checkpoint is restored as part of an init_checkpoint_rules() call for
-      a pjit model) and return a GDA. If unset, use a dummy mesh and return a
-      regular `DeviceArray` or `ShardedDeviceArray` to be used with pmap.
+      a pjit model) and return a Jax Array. If unset, use a dummy mesh and
+      return a regular `DeviceArray` or `ShardedDeviceArray` to be used with
+      pmap.
     checkpoint_type: The type of checkpoint to use.
 
   Returns:
@@ -423,25 +539,15 @@ def restore_pmap_from_tensorstore(
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.PERSISTENCE:
-    if jax.config.jax_array:
-      fully_replicated_array_model_states = jax.tree_map(
-          py_utils.convert_fully_replicated_array_to_pmap_array,
-          fully_replicated_gda_model_states)
-      return fully_replicated_array_model_states
-    else:
-      fully_replicated_sda_model_states = jax.tree_map(
-          py_utils.convert_fully_replicated_gda_to_sda,
-          fully_replicated_gda_model_states)
-    return fully_replicated_sda_model_states
-  # model_states is GDA or jax.Array; we convert back to DA or jax.Array with
+    return jax.tree_map(
+        py_utils.convert_fully_replicated_array_to_pmap_array,
+        fully_replicated_gda_model_states,
+    )
+  # model_states is jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
-  if jax.config.jax_array:
-    model_states = jax.tree_map(lambda x: x.addressable_data(0),
-                                fully_replicated_gda_model_states)
-  else:
-    model_states = jax.tree_map(lambda x: x.addressable_data(0),
-                                fully_replicated_gda_model_states)
-  return model_states
+  return jax.tree_map(
+      lambda x: x.addressable_data(0), fully_replicated_gda_model_states
+  )
 
 
 class CheckpointLoadingRules(NamedTuple):
@@ -749,6 +855,9 @@ def create_state_padded_shapes(
 class SingleTask(base_task.BaseTask):
   """A JAX task."""
 
+  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
+  model: base_model.BaseModel
+
   class InferWriterHParams(base_hyperparams.BaseHyperParams):
     """Parameters for generating and writing outputs from a model.
 
@@ -939,10 +1048,12 @@ class SingleTask(base_task.BaseTask):
       track_decoder_metric: which decoding metric to track, e.g. 'wer'.
       track_decoder_metric_min_or_max: track min or max metric value.
       infer_writer: specifies how to generate and write some output with a model
+      early_stopping_fn: HParams to control whether to stop the training loop
+        early; the instantiated class should be callable with signature matching
+        trainer_lib.EarlyStoppingFn.
     """
-    model: Optional[pax_fiddle.Config[base_model.BaseModel]] = sub_config_field(
-        None
-    )
+    # TODO(b/269191093) Should this type be relaxed to BaseLayer?
+    model: Optional[base_model.BaseModel] = None
 
     # Implementation note: `SingleTask` is not defined in the interpreter
     # context here, so we need to wrap it in a lambda which will look it up from
@@ -958,14 +1069,15 @@ class SingleTask(base_task.BaseTask):
         lazy_ref=lambda: SingleTask.InferHParams
     )
 
-    metrics: Any = None
-    loss_aggregator: Any = None
+    metrics: Optional[base_hyperparams.BaseHyperParams] = None
+    loss_aggregator: Optional[base_hyperparams.BaseHyperParams] = None
     vn: SingleTask.VariationalNoiseHParams = sub_config_field(
         lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
     track_decoder_metric: Optional[str] = None
     track_decoder_metric_min_or_max: Optional[
         SingleTask.TrackDecoderMetricMode] = None
     infer_writer: Optional[SingleTask.InferWriterHParams] = None
+    early_stopping_fn: Optional[base_hyperparams.BaseHyperParams] = None
 
   def __init__(self, hparams: SingleTask.HParams) -> None:
     super().__init__(hparams)
@@ -985,7 +1097,13 @@ class SingleTask(base_task.BaseTask):
     self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
 
     assert p.model is not None
-    self._model_inst: base_model.BaseModel = instantiate(p.model)
+    if isinstance(p.model, pax_fiddle.Config):
+      self.model = instantiate(p.model)
+    elif isinstance(p.model, base_layer.BaseLayer):
+      self.model = p.model
+    else:
+      raise ValueError(
+          'Expected `model` to be a BaseModel or a Config[BaseModel].')
 
     # instantiate the metrics aggregation helper
     if p.metrics:
@@ -1007,18 +1125,19 @@ class SingleTask(base_task.BaseTask):
           loss_key=self._learners[0].loss_name)
       self._loss_aggregator_inst = instantiate(loss_p)
 
+    if p.early_stopping_fn is not None:
+      self._early_stopping_fn_inst = instantiate(p.early_stopping_fn)
+    else:
+      self._early_stopping_fn_inst = None
+
     if p.infer_writer:
       self._inference_runner = p.infer_writer.inference_runner.Instantiate(
-          model=self._model_inst
+          model=self.model
       )
 
   @property
   def learners(self) -> Sequence[learners_lib.Learner]:
     return self._learners
-
-  @property
-  def model(self) -> base_model.BaseModel:
-    return self._model_inst
 
   @property
   def metrics_aggregator(self) -> base_metrics.MeanMetrics:
@@ -1027,6 +1146,10 @@ class SingleTask(base_task.BaseTask):
   @property
   def loss_aggregator_inst(self) -> base_metrics.LossAggregator:
     return self._loss_aggregator_inst
+
+  @property
+  def early_stopping_fn_inst(self) -> Optional[EarlyStoppingFn]:
+    return self._early_stopping_fn_inst
 
   @property
   def has_ema_decay(self):
@@ -1270,7 +1393,7 @@ class SingleTask(base_task.BaseTask):
     ]
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
-    var_names = [x[0] for x in model_vars.FlattenItems()]
+    var_names = [x[0] for x in model_vars.FlattenItems()]  # pytype: disable=attribute-error  # jax-ndarray
     # matched_pspecs: pspecs for the init checkpoint, inferred from model_vars.
     # model_vars_mapping: Mapping from names in model_vars to names in the init
     #                     checkpoint.
@@ -1285,7 +1408,7 @@ class SingleTask(base_task.BaseTask):
         target_partition_specs=target_partition_specs)
 
     if uses_gda:
-      ckpt_train_state, train_state_pspecs = _make_gda_train_state(
+      ckpt_train_state, train_state_pspecs = _make_train_state(
           rules,
           ckpt_train_state,
           train_state_pspecs,
@@ -1318,13 +1441,17 @@ class SingleTask(base_task.BaseTask):
 
     # Load EMA state if specified
     if load_ema_states:
-      # TODO(pax-dev): This doesn't work with prefix dims.
-      for v in loaded_train_state.opt_states[0]:
-        if 'ema' in v:
-          loaded_vars.update(
-              NestedMap.FromNestedDict({
-                  'ema': v.ema
-              }).FlattenItems())
+      ema_required = False
+      for _, ref in rules.load_rules:
+        if ref.startswith('ema/'):
+          ema_required = True
+
+      if ema_required:
+        loaded_vars.update(
+            NestedMap.FromNestedDict(
+                {'ema': extract_ema(loaded_train_state).mdl_vars}
+            ).FlattenItems()
+        )
     else:
       # Check if rules use ema state
       for _, ref in rules.load_rules:
@@ -1415,5 +1542,5 @@ class SingleTask(base_task.BaseTask):
 
     # Convert mdl_vars back to Python dict for compatibility.
     train_state = train_state.replace(
-        mdl_vars=train_state.mdl_vars.ToNestedDict())
+        mdl_vars=train_state.mdl_vars.ToNestedDict())  # pytype: disable=attribute-error  # jax-ndarray
     return train_state, not load_status[2]

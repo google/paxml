@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -90,6 +90,7 @@ pytype_strict_library(
     deps = [
         ":automl",
         ":base_task",
+        ":programs",
         "//praxis:base_input",
     ],
 )
@@ -149,7 +150,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "checkpoints_test",
     srcs = ["checkpoints_test.py"],
     deps = [
@@ -475,6 +476,7 @@ pytype_strict_library(
         ":eval_lib",
         ":experiment_utils",
         ":metric_utils",
+        ":programs",
         ":summary_utils",
         ":tasks_lib",
         ":train_states",
@@ -499,8 +501,10 @@ pytype_strict_library(
     srcs = ["programs.py"],
     srcs_version = "PY3",
     deps = [
+        ":tasks_lib",
         ":train_states",
         # Implicit jax dependency.
+        "//praxis:base_input",
         "//praxis:pytypes",
     ],
 )
@@ -511,6 +515,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_metrics",
+        ":programs",
         ":sgf",
         ":summary_utils",
         ":tasks_lib",
@@ -754,6 +759,7 @@ py_strict_test(
     srcs_version = "PY3",
     deps = [
         ":checkpoints",
+        ":learners",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -793,6 +799,7 @@ pytype_strict_test(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:schedules",
+        "//praxis:test_utils",
         "//praxis/layers",
     ],
 )
