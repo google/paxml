@@ -240,5 +240,5 @@ class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
 @experiment_registry.register
 class SmallPileTest(Pile126M):
   """Base config for an SPMD model."""
-  ICI_MESH_SHAPE = [2,1,1]
+  ICI_MESH_SHAPE = [8,1,1]
     
