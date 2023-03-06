@@ -1148,7 +1148,7 @@ class SingleTask(base_task.BaseTask):
     return self._loss_aggregator_inst
 
   @property
-  def early_stopping_fn(self) -> Optional[EarlyStoppingFn]:
+  def early_stopping_fn_inst(self) -> Optional[EarlyStoppingFn]:
     return self._early_stopping_fn_inst
 
   @property

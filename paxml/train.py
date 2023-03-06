@@ -742,9 +742,9 @@ def train_and_evaluate_pmap(
   eval_prng_seed = jax.random.split(eval_key, num=num_devices)
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
-  if train_program.task.early_stopping_fn is not None:
+  if train_program.task.early_stopping_fn_inst is not None:
     if early_stopping_fn is None:
-      early_stopping_fn = train_program.task.early_stopping_fn
+      early_stopping_fn = train_program.task.early_stopping_fn_inst
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '
@@ -867,9 +867,9 @@ def train_and_evaluate_spmd_model(
   partitioner = train_program.partitioner
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
-  if train_program.task.early_stopping_fn is not None:
+  if train_program.task.early_stopping_fn_inst is not None:
     if early_stopping_fn is None:
-      early_stopping_fn = train_program.task.early_stopping_fn
+      early_stopping_fn = train_program.task.early_stopping_fn_inst
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '
