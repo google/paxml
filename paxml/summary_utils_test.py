@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -75,9 +75,10 @@ class SummaryUtilsTest(parameterized.TestCase):
         'output_1': (jnp.array([4., 7., 8.]), jnp.array([1, 1, 1])),
     }
     summary_tensors_1 = {
-        'summary_a_scalar': jnp.array([9., 8.]),
+        'summary_a_scalar': jnp.array([9.0, 8.0]),
         'summary_b_image': jnp.ones(shape=[1, 4, 4], dtype=jnp.float32),
         'summary_c_audio': jnp.zeros(shape=[10, 3], dtype=jnp.float32),
+        'summary_d_histogram': jnp.array([1, 2, 3]),
     }
     steps_per_sec_1 = 37.
 
@@ -87,9 +88,10 @@ class SummaryUtilsTest(parameterized.TestCase):
         'output_1': (jnp.array([14., 17., 18.]), jnp.array([11, 11, 11])),
     }
     summary_tensors_2 = {
-        'summary_a_scalar': jnp.array([7., 6.]),
+        'summary_a_scalar': jnp.array([7.0, 6.0]),
         'summary_b_image': 10 * jnp.ones(shape=[2, 3, 4], dtype=jnp.float32),
         'summary_c_audio': jnp.zeros(shape=[12, 1], dtype=jnp.float32),
+        'summary_d_histogram': jnp.array([4, 5, 6]),
     }
     steps_per_sec_2 = 35.
 
@@ -99,19 +101,24 @@ class SummaryUtilsTest(parameterized.TestCase):
           tf.summary, 'image', return_value=None) as mock_tf_summary_image:
         with mock.patch.object(
             tf.summary, 'audio', return_value=None) as mock_tf_summary_audio:
-          summary_handler.process(
-              step=1,
-              loss=loss_1,
-              weighted_scalars=weighted_scalars_1,
-              summary_tensors=summary_tensors_1,
-              steps_per_sec=steps_per_sec_1)
-          summary_handler.process(
-              step=2,
-              loss=loss_2,
-              weighted_scalars=weighted_scalars_2,
-              summary_tensors=summary_tensors_2,
-              steps_per_sec=steps_per_sec_2)
-          summary_handler.close()
+          with mock.patch.object(
+              tf.summary, 'histogram', return_value=None
+          ) as mock_tf_summary_histogram:
+            summary_handler.process(
+                step=1,
+                loss=loss_1,
+                weighted_scalars=weighted_scalars_1,
+                summary_tensors=summary_tensors_1,
+                steps_per_sec=steps_per_sec_1,
+            )
+            summary_handler.process(
+                step=2,
+                loss=loss_2,
+                weighted_scalars=weighted_scalars_2,
+                summary_tensors=summary_tensors_2,
+                steps_per_sec=steps_per_sec_2,
+            )
+            summary_handler.close()
     # In this test all summaries use the latest values from step 2.
     expected_loss = jnp.mean(loss_2)
     mock_tf_summary_scalar.assert_any_call('loss',
@@ -150,6 +157,11 @@ class SummaryUtilsTest(parameterized.TestCase):
         'summary_c_audio/0',
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_c_audio'])),
         44000, 2)
+    mock_tf_summary_histogram.assert_any_call(
+        'summary_d_histogram',
+        MatcherArrayAlmostEqual(np.array([4, 5, 6])),
+        2,
+    )
 
   @parameterized.named_parameters(
       ('', False),

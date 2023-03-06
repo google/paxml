@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,6 +65,46 @@ class CheckpointsTest(parameterized.TestCase):
     ckpt = self.directory / 'checkpoint'
     ckpt.write_text('some data')
     self.assertFalse(checkpoints.is_tmp_checkpoint_asset(ckpt))
+
+  @parameterized.parameters(
+      (
+          epath.Path('/tmp/checkpoints/checkpoint_1234'),
+          1234,
+      ),
+      (
+          epath.Path('/tmp/checkpoints/1234'),
+          1234,
+      ),
+  )
+  def test_get_step_from_checkpoint_asset(self, path, expected_step):
+    self.assertEqual(
+        checkpoints.get_step_from_checkpoint_asset(path), expected_step
+    )
+
+  @parameterized.parameters(
+      (
+          checkpoints.CheckpointType.UNSPECIFIED,
+          epath.Path('/tmp/checkpoints/1234'),
+          checkpoints.CheckpointType.UNSPECIFIED,
+      ),
+      (
+          checkpoints.CheckpointType.GDA,
+          epath.Path('/tmp/checkpoint_1234'),
+          checkpoints.CheckpointType.GDA,
+      ),
+      (
+          checkpoints.CheckpointType.GDA,
+          epath.Path('/tmp/checkpoints/1234'),
+          checkpoints.CheckpointType.GDA_VERSION_SUBDIR,
+      ),
+  )
+  def test_maybe_update_checkpoint_type(
+      self, specified_format, path, expected_format
+  ):
+    self.assertEqual(
+        checkpoints.maybe_update_checkpoint_type(specified_format, path),
+        expected_format,
+    )
 
 
 if __name__ == '__main__':

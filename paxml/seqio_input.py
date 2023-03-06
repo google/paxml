@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -44,6 +44,7 @@ NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
 SummaryWriter = tf.summary.SummaryWriter
 
+MixtureRegistry = seqio.MixtureRegistry
 SHARD_INDEX_KEY = py_utils.SHARD_INDEX_KEY
 NUM_SHARDS_KEY = py_utils.NUM_SHARDS_KEY
 INDEX_WITHIN_SHARD_KEY = py_utils.INDEX_WITHIN_SHARD_KEY
@@ -215,15 +216,11 @@ def maybe_update_decode_output_keys(
     return process_decode_output
 
   enum_keys = []
-  for idx, ex in enumerate(py_utils.tree_unstack(enum_key_fields, 0)):
-    if not decode_out.eval_sample_weights[idx]:
-      # skip padded examples
-      continue
-
+  for ex in py_utils.tree_unstack(enum_key_fields, 0):
     if not (key := py_utils.get_enumeration_id(ex)):
       raise ValueError(f'Not able to construct enum-id with {ex}.')
-
-    enum_keys.append(key)
+    if not _is_padding(ex):
+      enum_keys.append(key)
 
   if len(enum_keys) != len(process_decode_output):
     raise RuntimeError(
@@ -397,6 +394,8 @@ class SeqIOInput(base_input.BaseInput):
         `.padding` fields for examples. It is preferable that users use
         `.eval_sample_weights` field that gets set to `=0` for padded eval
         examples.
+      overridden_vocab: the vocab overridden. If not set, it would be derived
+        from `output_features` of underlining task_or_mixture.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -424,8 +423,9 @@ class SeqIOInput(base_input.BaseInput):
     deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
         sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
     eval_metrics_targets_length: Optional[int] = None
-    use_enumeration: bool = False
+    use_enumeration: bool = True
     annotate_padding_fields: bool = False
+    overridden_vocab: Optional[seqio.Vocabulary] = None
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -474,7 +474,7 @@ class SeqIOInput(base_input.BaseInput):
           "Only one of 'mixture_name' and 'mixture_or_task' can be set."
           " Got %s and %s." % (p.mixture_name, p.mixture_or_task))
     if p.is_training and p.split_name != 'train':
-      logging.warn(
+      logging.warning(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
 
@@ -525,6 +525,14 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task_inst
+
+  @property
+  def is_mixture(self) -> bool:
+    return self.mixture_or_task_inst.name in MixtureRegistry.names()
+
+  @property
+  def task_inst(self) -> seqio.Task:
+    return cast(seqio.Task, self.mixture_or_task_inst)
 
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
@@ -588,15 +596,14 @@ class SeqIOInput(base_input.BaseInput):
           index=host_idx, num_shards=p.num_infeed_hosts
       )
       ds_shard = self.mixture_or_task_inst.get_dataset(
-          sequence_length={'inputs': inputs_length,
-                           'targets': targets_length},
+          sequence_length={'inputs': inputs_length, 'targets': targets_length},
           split=p.split_name,
           shuffle=False,
           num_epochs=1,
           shard_info=shard_info,
           seed=p.input_random_seed,
           use_cached=p.use_cached,
-          trim_output_features=p.trim_output_features
+          trim_output_features=p.trim_output_features,
       )
       if p.use_enumeration:
         ds_shard = _enumerate_dataset(
@@ -656,26 +663,31 @@ class SeqIOInput(base_input.BaseInput):
     self._gen_targets_iter()
     self.is_targets_init = True
 
-  def get_next(self) -> NestedNpTensor:
+  def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     return next(self._iter)
 
   def reset(self) -> None:
     self._iter = self._dataset.as_numpy_iterator()
 
+  def _get_vocab(self, key) -> seqio.Vocabulary:
+    if self.hparams.overridden_vocab is not None:
+      return self.hparams.overridden_vocab
+
+    features = self.mixture_or_task_inst.output_features
+    if key not in ('src', 'tgt', None):
+      raise ValueError(
+          f"arg 'key' must be one of [None, 'src', 'tgt'], got key={key}."
+      )
+
+    real_key = 'targets' if key in (None, 'tgt') else 'inputs'
+    return features[real_key].vocabulary
+
   def ids_to_strings(
       self, ids: pytypes.NpTensor,
       lengths: Union[pytypes.NpTensor, Sequence[pytypes.NpTensor]],
       key: Optional[str] = None) -> Sequence[str]:
-    features = self.mixture_or_task_inst.output_features
-    if key is None:
-      vocab = features['targets'].vocabulary
-    elif key not in ['src', 'tgt']:
-      raise ValueError("arg 'key' must be one of [None, 'src', 'tgt'], got "
-                       f'key={key}.')
-    else:
-      vocab = (
-          features['targets'].vocabulary
-          if key == 'tgt' else features['inputs'].vocabulary)
+    vocab = self._get_vocab(key)
+
     if lengths is None:
       lengths = [ids.shape[1]] * ids.shape[0]
     ret = []
@@ -690,7 +702,7 @@ class SeqIOInput(base_input.BaseInput):
                       num_epochs: int,
                       shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
     p = self.hparams
-    ds = self.mixture_or_task_inst.get_dataset(
+    kwargs = dict(
         sequence_length=p.task_feature_lengths,
         split=p.split_name,
         shuffle=shuffle,
@@ -698,7 +710,10 @@ class SeqIOInput(base_input.BaseInput):
         shard_info=shard_info,
         use_cached=p.use_cached,
         seed=p.input_random_seed,
-        trim_output_features=p.trim_output_features)
+        trim_output_features=p.trim_output_features,
+    )
+    ds = self.mixture_or_task_inst.get_dataset(**kwargs)
+
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
 
     if p.use_enumeration:
@@ -853,7 +868,7 @@ class SeqIOInput(base_input.BaseInput):
         inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
       key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
       t = _get_targets_str(example, self.mixture_or_task_inst)
-      targets[key].append(self.mixture_or_task_inst.postprocess_fn(
+      targets[key].append(self.task_inst.postprocess_fn(
           t, example=example, is_target=True))
       examples[key].append(example)
 
@@ -875,7 +890,7 @@ class SeqIOInput(base_input.BaseInput):
       seqio_postprocessed_predictions = []
       for target, e in zip(targets[k], examples[k]):
         targets_list.append(target)
-        prediction = self.mixture_or_task_inst.postprocess_fn(
+        prediction = self.task_inst.postprocess_fn(
             answer, example=e, is_target=False)
         predictions_list.append(prediction)
         seqio_postprocessed_predictions.append(prediction)
@@ -907,10 +922,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = examples[k][0]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
@@ -937,7 +952,7 @@ class SeqIOInput(base_input.BaseInput):
       try:
         example = next(self.targets_iter)
         if self.ds_ragged_tensor_keys:
-          example_orig = next(self.targets_ds_ori)
+          example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
           raise Exception(
@@ -990,13 +1005,13 @@ class SeqIOInput(base_input.BaseInput):
       answer = ans[_LM_DECODER_OUT_KEY]
 
       # postprocess model's decoder output
-      prediction = self.mixture_or_task_inst.postprocess_fn(
+      prediction = self.task_inst.postprocess_fn(
           answer, example=targets[k], is_target=False)
       predictions_list.append(prediction)
 
       # postprocess target example for target decoder output str
       t = _get_targets_str(targets[k], self.mixture_or_task_inst)
-      seqio_target = self.mixture_or_task_inst.postprocess_fn(
+      seqio_target = self.task_inst.postprocess_fn(
           t, example=targets[k], is_target=True)
       targets_list.append(seqio_target)
 
@@ -1012,10 +1027,10 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       e = targets[k]
       answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.mixture_or_task_inst.postprocess_fn(
+      answer_processed = self.task_inst.postprocess_fn(
           answer, example=e, is_target=False)
       target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.mixture_or_task_inst.postprocess_fn(
+      target_processed = self.task_inst.postprocess_fn(
           target, example=e, is_target=True)
       logging.info(
           'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
@@ -1074,7 +1089,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       prefix_targets_list = []
       for e in targets[k]:
-        target_post = self.mixture_or_task_inst.postprocess_fn(
+        target_post = self.task_inst.postprocess_fn(
             target, example=e, is_target=True)
         targets_list.append(target_post)
         prefix_targets_list.append(target_post)
@@ -1124,7 +1139,7 @@ class SeqIOInput(base_input.BaseInput):
       ans = answers[k]
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
-      target_post = self.mixture_or_task_inst.postprocess_fn(
+      target_post = self.task_inst.postprocess_fn(
           score, example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
@@ -1216,13 +1231,17 @@ class SeqIOInput(base_input.BaseInput):
 
     answers = dict(decoder_outputs)
     if p.use_enumeration:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_enum(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_enum(
+              answers, verbose_entries, plain_text_output
+          )
+      )
     else:
-      (predictions_list,
-       targets_list) = self._build_predict_metric_inputs_with_prefix(
-           answers, verbose_entries, plain_text_output)
+      (predictions_list, targets_list) = (
+          self._build_predict_metric_inputs_with_prefix(
+              answers, verbose_entries, plain_text_output
+          )
+      )
 
     metrics = []
     for fn in task.predict_metric_fns:
@@ -1682,10 +1701,11 @@ def get_eval_hparams_for_seqio(
     split_name: Union[str, Callable[[str], str]] = 'validation',
     feature_converter: Optional[seqio.FeatureConverter] = None,
     num_infeed_hosts: int = 0,
-    use_enumeration: bool = False,
+    use_enumeration: bool = True,
     use_cached: bool = False,
     shuffle: bool = None,
     require_metric_fns: bool = True,
+    eval_metrics_retain_task_features: bool = False,
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1729,6 +1749,7 @@ def get_eval_hparams_for_seqio(
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
+    eval_metrics_retain_task_features: retain the provided feature lengths.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1749,16 +1770,20 @@ def get_eval_hparams_for_seqio(
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
   if metric_type is MetricType.PREDICT:
     p.eval_metrics_targets_length = feature_lengths['targets']
-    targets_feature_length = 1  # we don't want any targets, except an EOS
+    p.task_feature_lengths = {
+        'inputs': feature_lengths['inputs'],
+        'targets': 1,  # we don't want any targets, except an EOS
+    }
   elif metric_type is MetricType.SCORE:
-    targets_feature_length = feature_lengths['targets']
+    if eval_metrics_retain_task_features:
+      p.task_feature_lengths = feature_lengths
+    else:
+      p.task_feature_lengths = {
+          'inputs': feature_lengths['inputs'],
+          'targets': feature_lengths['targets'],
+      }
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
-
-  p.task_feature_lengths = {
-      'inputs': feature_lengths['inputs'],
-      'targets': targets_feature_length,
-  }
 
   # Split hparams per tasks and filter by metric type.
   tasks: Sequence[seqio.Task] = seqio.get_subtasks(
@@ -1773,6 +1798,11 @@ def get_eval_hparams_for_seqio(
     hp.split_name = _select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
     if require_metric_fns:
+      if not task.metric_fns:
+        logging.warning(
+            ('task %s is not being added to hparam list as it has no metric_fns'
+             'defined. If you want the task evaluated regardless, set '
+             'require_metric_fns=False'), task.name)
       if task.predict_metric_fns and metric_type is MetricType.PREDICT:
         hparams.append(hp)
       if task.score_metric_fns and metric_type is MetricType.SCORE:
