@@ -2016,11 +2016,12 @@ def _common_eval_or_decode_loop(
                                         eval_summary_writers)
 
       if not continuous_decode:
-        break
+        last_checkpoint_step = last_checkpoint_step or 1
 
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
+        is_last_ckpt = (exceeded_ckpt > task_p.train.num_train_steps
+                        or not continuous_decode)
         if tuning_lib.should_early_stop(
             early_stopping_fn,
             last_checkpoint_step,
