@@ -13,3 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import paxml.contrib.gpu.scripts_gpu.tfds_pile
+import tensorflow_datasets as tfds
+
+# This will download 'ThePile' to TFDS_DATA_DIR (environment variable).
+ds = tfds.load('ThePile')

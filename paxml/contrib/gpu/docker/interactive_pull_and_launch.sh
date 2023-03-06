@@ -1,4 +1,5 @@
-# coding=utf-8
+#!/bin/bash
+
 # Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,3 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set -x
+
+CONTAINER=${1}
+echo $CONTAINER
+docker pull $CONTAINER
+
+DATASET_PATH=${2} 
+VOCAB_PATH=${3}
+
+## !! Uncomment this to add a custom path to workspace dir !!##
+## By default `<CURRENT_WORKING_DIRECTORY>/workspace` is selected
+# WORKSPACE_PATH=<ADD CUSTOM PATH TO `workspace` dir>
+
+docker run -ti --runtime=nvidia --net=host --ipc=host -v ${PWD}:/pax/paxml -v ${DATASET_PATH}:/pax/paxml/datasets -v ${WORKSPACE_PATH:-${PWD}/workspace}:/pax/paxml/workspace -v ${VOCAB_PATH}:/pax/paxml/vocab --privileged $CONTAINER /bin/bash
+
+set +x
