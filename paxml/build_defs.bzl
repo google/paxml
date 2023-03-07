@@ -223,6 +223,7 @@ def pax_targets(
             "//praxis:base_hyperparams",
             "//praxis:base_layer",
             "//praxis:py_utils",
+            # Implicit pyglove dependency.
             # Implicit tensorflow_no_contrib dependency.
         ] + extra_deps,
         exp_sources = exp_sources,
