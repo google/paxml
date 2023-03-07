@@ -17,20 +17,17 @@
 
 import abc
 import contextlib
-import dataclasses
 import datetime
-import functools
 import gc
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
+from typing import Callable, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from etils import epath
 import jax
 from jax import monitoring
-from jax.experimental import pjit
 import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_managers
@@ -395,6 +392,7 @@ def _create_checkpointer(
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
 
+  checkpoints.reregister_type_handlers(train_p.tensorstore_metadata_key)
   options = checkpoint_managers.CheckpointManagerOptions(
       max_to_keep=max_to_keep,
       save_interval_steps=save_interval_steps,

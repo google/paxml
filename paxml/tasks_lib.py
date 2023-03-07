@@ -957,6 +957,8 @@ class SingleTask(base_task.BaseTask):
       random_seed: Random seed to use at the beginning of the training.
       apply_mutable_list: A list of allowed collections to be mutated during
         train apply.
+      tensorstore_metadata_key: The name applied to metadata files created by
+        Tensorstore. Uses Tensorstore default if not specified.
     """
     learner: learners_lib.Learner.HParams = sub_config_field(
         learners_lib.Learner.HParams)
@@ -988,6 +990,7 @@ class SingleTask(base_task.BaseTask):
     apply_mutable_list: List[str] = dataclasses.field(
         default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST
     )
+    tensorstore_metadata_key: Optional[str] = None
 
   class DecodeHParams(base_hyperparams.BaseHyperParams):
     """Parameters for decoding.

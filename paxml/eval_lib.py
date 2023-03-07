@@ -416,6 +416,9 @@ def _create_checkpointer(
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
+  checkpoints.reregister_type_handlers(
+      jax_task.hparams.train.tensorstore_metadata_key
+  )
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
     extra_kwargs = {}

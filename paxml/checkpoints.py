@@ -16,7 +16,6 @@
 """Checkpointing-related utilities to handle TrainState instances."""
 
 import enum
-import os
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
@@ -373,6 +372,51 @@ def restore_checkpoint(
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
+
+
+def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
+  """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
+  if tensorstore_metadata_key is None:
+    return
+  types_to_register = [
+      (
+          int,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, int),
+      ),
+      (
+          float,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, float),
+      ),
+      (
+          np.number,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, np.number),
+      ),
+      (
+          np.ndarray,
+          orbax.checkpoint.type_handlers.NumpyHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, np.ndarray),
+      ),
+      (
+          jax.Array,
+          orbax.checkpoint.type_handlers.ArrayHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, jax.Array),
+      ),
+  ]
+  for tup in types_to_register:
+    orbax.checkpoint.type_handlers.register_type_handler(*tup, override=True)
 
 
 def _extract_nested_prefix_names(
