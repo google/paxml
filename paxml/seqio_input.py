@@ -1803,10 +1803,20 @@ def get_eval_hparams_for_seqio(
             ('task %s is not being added to hparam list as it has no metric_fns'
              'defined. If you want the task evaluated regardless, set '
              'require_metric_fns=False'), task.name)
-      if task.predict_metric_fns and metric_type is MetricType.PREDICT:
-        hparams.append(hp)
-      if task.score_metric_fns and metric_type is MetricType.SCORE:
-        hparams.append(hp)
+      if metric_type is MetricType.PREDICT:
+        if task.predict_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no predict_metric_fns'
+             'defined although metric_type=MetricType.Predict. '), task.name)
+      elif metric_type is MetricType.SCORE:
+        if task.score_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no score_metric_fns'
+             'defined although metric_type=MetricType.Score. '), task.name)
     else:
       if not task.score_metric_fns and not task.predict_metric_fns:
         # Show PPLX
