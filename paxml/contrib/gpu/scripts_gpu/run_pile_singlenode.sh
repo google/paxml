@@ -13,3 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#! /bin/bash
+
+TFDS_DATA_DIR=$1
+VOCAB_PATH=$2
+LOG_DIR=${3:-"test_logdir"}
+
+export VOCAB_PATH=$VOCAB_PATH
+
+mkdir -p ${PWD}/${LOG_DIR}
+python3 /pax/paxml/paxml/main.py \
+    --job_log_dir=${PWD}/${LOG_DIR} \
+    --exp=paxml.contrib.gpu.scripts_gpu.configs.SmallPileTest \
+    --tfds_data_dir=$TFDS_DATA_DIR \
+    --should_log_compiles=True \
+    --alsologtostderr &> ${PWD}/${LOG_DIR}/output.log
+

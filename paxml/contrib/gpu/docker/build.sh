@@ -13,3 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#!/bin/bash
+
+echo "Ensure you run this script from the top-level directory of the repo"
+
+CONTAINER="pax"
+if [ $# -eq 1 ]
+then
+    echo $1
+    CONTAINER=$1
+else
+    echo "Usage: bash build <container name>"
+    exit
+fi
+
+# building container here 
+docker build -t $CONTAINER . -f contrib/gpu/Dockerfile
