@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,6 +49,14 @@ setup(
     install_requires=install_requires,
     url='https://github.com/google/paxml',
     license='Apache-2.0',
+    extras_require={
+        'gpu': [
+            'jsonlines==3.1.0',
+            'pysimdjson==5.0.2',
+            'zstandard==0.18.0',
+            'jax-triton==0.1.3'
+            ],
+    },
     classifiers=[
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',

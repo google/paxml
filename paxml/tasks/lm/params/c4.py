@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@
 """Language Model configurations on the T5/C4 dataset."""
 
 import functools
+from typing import Dict, List, Optional
 import math
-from typing import List, Optional
 
 from absl import logging
 import jax
@@ -26,8 +26,10 @@ from paxml import base_experiment
 from paxml import experiment_registry
 from paxml import seqio_input
 from paxml import tasks_lib
+from paxml import trainer_lib
 from paxml.tasks.lm import model_params
 from paxml.tasks.lm.params import lm_cloud
+from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import layers
@@ -37,7 +39,6 @@ from praxis.layers import transformers
 import seqio
 import t5.data
 from t5.data import preprocessors as t5_preprocessors
-
 
 WeightInit = base_layer.WeightInit
 
@@ -151,6 +152,8 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
   """Used for training Baseline ULM."""
   PERCORE_BATCH_SIZE = 1
   MAX_SEQ_LEN = 1024
+  TRAINING_SEED = 9876
+  TRAINING_NUM_BATCHES_TO_SKIP = None
 
   def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
     num_local_devices = jax.local_device_count()
@@ -175,7 +178,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         num_infeed_hosts = 1
     seed = None
     if is_training:
-      seed = 9876
+      seed = self.TRAINING_SEED
       # TODO(sgpyc): enable sync of seeds across hosts, currently the
       # following failed because of "sync_global_devices name mismatch"
       # seed = jnp.int32(multihost_utils.broadcast_one_to_all(seed))
@@ -199,6 +202,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
         input_random_seed=(seed if is_training else 4321),
         batch_size=batch_size_per_process,
         drop_remainder=True if is_training else False,
+        num_batches_to_skip=self.TRAINING_NUM_BATCHES_TO_SKIP,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
         annotate_padding_fields=True,
@@ -432,6 +436,36 @@ class LmCloudSpmdAdamLimitSteps(LmCloudSpmdAdam):
     return task_p
 
 
+class EarlyStoppingFn(base_hyperparams.BaseParameterizable):
+  r"""Early stopping function to log eval log_pplx and stop when reaching target."""
+
+  class HParams(base_hyperparams.BaseParameterizable.HParams):
+    """Hyper-parameters associated with the early stopping function.
+
+    Attributes:
+      target_log_pplx: target log pplx value to stop training when eval log pplx
+        reaches this value.
+    """
+
+    target_log_pplx: Optional[float] = None
+
+  def __call__(
+      self,
+      metrics: Dict[str, float],
+      running_mode: trainer_lib.RunningMode,
+      global_step: int,
+      is_last_ckpt: bool,
+  ) -> bool:
+    """Returns True if run should be stopped early."""
+    if 'eval_test_C4Validation/metrics/log_pplx' not in metrics.keys():
+      return False
+    log_pplx = metrics['eval_test_C4Validation/metrics/log_pplx']
+
+    if log_pplx <= self.hparams.target_log_pplx:
+      return True
+    return False
+
+
 def configure_gpt3_task(
     cls,
     task_p: tasks_lib.SingleTask.HParams,
@@ -485,6 +519,10 @@ def configure_gpt3_task(
       continue
     atten_wp = atten_p.weight_split_dims_mapping
     atten_wp.proj = ['data', 'mdl', None]
+
+  if task_p.early_stopping_fn is None:
+    task_p.early_stopping_fn = EarlyStoppingFn.HParams()
+    task_p.early_stopping_fn.target_log_pplx = cls.TARGET_LOG_PPLX
 
   return task_p
 
@@ -542,7 +580,7 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdAdam):
   VOCAB_SIZE = 50257
   USE_REPEATED_LAYER = True
 
-  # HPs
+  # Model configs
   ACTIVATION_CLS = layers.GELU
   USE_GATED_ACTIVATION = False
   SEPARATE_EMBEDDING = False
@@ -550,6 +588,7 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdAdam):
   TRAINABLE_PE_MAX_SEQ_LEN = 16384
   ATTEN_LOGIT_CAP = -1.0  # Disable logits cap in atten
 
+  # HPs
   LEARNING_RATE = 6e-5
   WEIGHT_DECAY = 0.1
   ADAM_BETA1 = 0.9
@@ -566,6 +605,9 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdAdam):
   LR_COS_DECAY_END = 108600
   LR_COS_MAX = 1.0
   LR_COS_MIN_RATIO = 0.1
+
+  # Training target
+  TARGET_LOG_PPLX = 2.69
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
@@ -654,7 +696,7 @@ class C4SpmdPipelineGpt3AdamOrgHP(C4SpmdPipelineAdam):
   VOCAB_SIZE = 50257
   USE_REPEATED_LAYER = False
 
-  # HPs
+  # Model configs
   ACTIVATION_CLS = layers.GELU
   USE_GATED_ACTIVATION = False
   SEPARATE_EMBEDDING = False
@@ -662,6 +704,7 @@ class C4SpmdPipelineGpt3AdamOrgHP(C4SpmdPipelineAdam):
   TRAINABLE_PE_MAX_SEQ_LEN = 16384
   ATTEN_LOGIT_CAP = -1.0  # Disable logits cap in atten
 
+  # HPs
   LEARNING_RATE = 6e-5
   WEIGHT_DECAY = 0.1
   ADAM_BETA1 = 0.9
@@ -678,6 +721,9 @@ class C4SpmdPipelineGpt3AdamOrgHP(C4SpmdPipelineAdam):
   LR_COS_DECAY_END = 108600
   LR_COS_MAX = 1.0
   LR_COS_MIN_RATIO = 0.1
+
+  # Training target
+  TARGET_LOG_PPLX = 2.69
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
@@ -950,26 +996,28 @@ class C4SpmdGpt3L16AdamOrgHP(C4SpmdGpt3AdamOrgHP):
 
 
 @experiment_registry.register
-class C4SpmdPipelineGpt3SmallAdam64Replicas(C4SpmdPipelineGpt3AdamOrgHP):
-  """Small GPT-3 config in bf16 for 64 replicas with 512 global batch size.
+class C4SpmdPipelineGpt3SmallAdam8Replicas(C4SpmdPipelineGpt3AdamOrgHP):
+  """Small GPT-3 config in bf16 for 8 replicas with 512 global batch size.
 
   This was called GPT-3 XL in the GPT-3 paper, with 1.3B parameters.
   """
-  NUM_STAGES = 4
+
+  NUM_STAGES = 2
   NUM_LAYERS = 24
   NUM_HEADS = 24
   MODEL_DIMS = 3072
   # Known as MLP_DIM in t5x
   HIDDEN_DIMS = MODEL_DIMS * 4
   DIMS_PER_HEAD = 128
+  VOCAB_SIZE = 51200
 
-  PER_CORE_BATCH_SIZE = 8
-  MICROBATCH_SIZE = 16
+  PERCORE_BATCH_SIZE = 64
+  MICROBATCH_SIZE = 8
   FPROP_DTYPE = jnp.bfloat16
   LEARNING_RATE = 2.0e-4
-  ICI_MESH_SHAPE = [4, 1, 4, 4]
+  ICI_MESH_SHAPE = [2, 1, 2, 2]
 
   CHECKPOINT_MAX_TO_KEEP = 1000
-  EVAL_INTERVAL_STEPS = 100
-  SUMMARY_INTERVAL_STEPS = 1
+  EVAL_INTERVAL_STEPS = 10
+  SUMMARY_INTERVAL_STEPS = 5
   CHECKPOINT_EVERY_N_STEPS = 200

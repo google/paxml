@@ -215,7 +215,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   image_summaries = {}
   audio_summaries = {}
   video_summaries = {}
-  for k, v in summary_tensors.items():
+  for k, v in summary_tensors.items():  # pytype: disable=attribute-error  # jax-ndarray
     summary_type = base_layer.get_summary_type_from_key(k)
     if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
       scalar_summaries[k] = v
@@ -248,7 +248,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
       lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
       video_summaries)
 
-  summary_tensors = summary_tensors.copy()
+  summary_tensors = summary_tensors.copy()  # pytype: disable=attribute-error  # jax-ndarray
   for summary_dict in (
       scalar_summaries,
       image_summaries,

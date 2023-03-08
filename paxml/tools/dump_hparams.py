@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@ from paxml import experiment_registry
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import py_utils
+import pyglove as pg
 import tensorflow.compat.v2 as tf
 
 
@@ -137,7 +138,15 @@ def main(argv) -> None:
 
   logging.info('Dumping out params for experiment: %s', FLAGS.exp)
   experiment_config = _get_experiment(FLAGS.exp)()
-  task_p = experiment_config.task()
+
+  # NOTE(daiyip): putting `task()`, `datasets()` and `decoder_datasets()` under
+  # an AutoML context allows dynamic evaluation of hyperparameters that is to
+  # be swept. The first values of all `pg.oneof` will be used.
+  automl_context = pg.hyper.DynamicEvaluationContext(require_hyper_name=True)
+  with automl_context.collect():
+    task_p = experiment_config.task()
+    datasets = experiment_config.datasets()
+    dec_datasets = experiment_config.decoder_datasets()
 
   num_cores = _extract_num_cores(task_p.model)
 
@@ -151,13 +160,11 @@ def main(argv) -> None:
 
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
-    datasets = experiment_config.datasets()
     for dataset in datasets:
       params_file.write(dataset.to_text())
       params_file.write('\n\n')
 
     params_file.write('============= Decoder datasets.\n\n')
-    dec_datasets = experiment_config.decoder_datasets()
     for dataset in dec_datasets:
       params_file.write(dataset.to_text())
       params_file.write('\n\n')

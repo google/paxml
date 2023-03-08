@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ PRNGKey = pytypes.PRNGKey
 @struct.dataclass
 class GradAuxInfo:
   aux_info: Any
-  loss_weight: JTensor = 1.0
+  loss_weight: JTensor = 1.0  # pytype: disable=annotation-type-mismatch  # jax-ndarray
 
 
 class BaseStochasticGradient(
@@ -168,7 +168,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
     return clipped_grads_mean, frac_clipped, batch_size
 
-  def _add_noise(
+  def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
       self,
       grads: NestedMap,
       noise_stddev: float,

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
 SummaryWriter = tf.summary.SummaryWriter
 
+MixtureRegistry = seqio.MixtureRegistry
 SHARD_INDEX_KEY = py_utils.SHARD_INDEX_KEY
 NUM_SHARDS_KEY = py_utils.NUM_SHARDS_KEY
 INDEX_WITHIN_SHARD_KEY = py_utils.INDEX_WITHIN_SHARD_KEY
@@ -393,6 +394,8 @@ class SeqIOInput(base_input.BaseInput):
         `.padding` fields for examples. It is preferable that users use
         `.eval_sample_weights` field that gets set to `=0` for padded eval
         examples.
+      overridden_vocab: the vocab overridden. If not set, it would be derived
+        from `output_features` of underlining task_or_mixture.
     """
     # Required params.
     mixture_name: Optional[str] = None
@@ -422,6 +425,7 @@ class SeqIOInput(base_input.BaseInput):
     eval_metrics_targets_length: Optional[int] = None
     use_enumeration: bool = True
     annotate_padding_fields: bool = False
+    overridden_vocab: Optional[seqio.Vocabulary] = None
 
   def __init__(self, hparams: ParamsT) -> None:
     # Modify hparams in-place before freezing hparams
@@ -470,7 +474,7 @@ class SeqIOInput(base_input.BaseInput):
           "Only one of 'mixture_name' and 'mixture_or_task' can be set."
           " Got %s and %s." % (p.mixture_name, p.mixture_or_task))
     if p.is_training and p.split_name != 'train':
-      logging.warn(
+      logging.warning(
           'SeqIO input hparams p.is_training=True but p.split_name is '
           'not "train" but p.split_name=%s', p.split_name)
 
@@ -521,6 +525,10 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
     return self._mixture_or_task_inst
+
+  @property
+  def is_mixture(self) -> bool:
+    return self.mixture_or_task_inst.name in MixtureRegistry.names()
 
   @property
   def task_inst(self) -> seqio.Task:
@@ -588,15 +596,14 @@ class SeqIOInput(base_input.BaseInput):
           index=host_idx, num_shards=p.num_infeed_hosts
       )
       ds_shard = self.mixture_or_task_inst.get_dataset(
-          sequence_length={'inputs': inputs_length,
-                           'targets': targets_length},
+          sequence_length={'inputs': inputs_length, 'targets': targets_length},
           split=p.split_name,
           shuffle=False,
           num_epochs=1,
           shard_info=shard_info,
           seed=p.input_random_seed,
           use_cached=p.use_cached,
-          trim_output_features=p.trim_output_features
+          trim_output_features=p.trim_output_features,
       )
       if p.use_enumeration:
         ds_shard = _enumerate_dataset(
@@ -656,26 +663,31 @@ class SeqIOInput(base_input.BaseInput):
     self._gen_targets_iter()
     self.is_targets_init = True
 
-  def get_next(self) -> NestedNpTensor:
+  def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     return next(self._iter)
 
   def reset(self) -> None:
     self._iter = self._dataset.as_numpy_iterator()
 
+  def _get_vocab(self, key) -> seqio.Vocabulary:
+    if self.hparams.overridden_vocab is not None:
+      return self.hparams.overridden_vocab
+
+    features = self.mixture_or_task_inst.output_features
+    if key not in ('src', 'tgt', None):
+      raise ValueError(
+          f"arg 'key' must be one of [None, 'src', 'tgt'], got key={key}."
+      )
+
+    real_key = 'targets' if key in (None, 'tgt') else 'inputs'
+    return features[real_key].vocabulary
+
   def ids_to_strings(
       self, ids: pytypes.NpTensor,
       lengths: Union[pytypes.NpTensor, Sequence[pytypes.NpTensor]],
       key: Optional[str] = None) -> Sequence[str]:
-    features = self.mixture_or_task_inst.output_features
-    if key is None:
-      vocab = features['targets'].vocabulary
-    elif key not in ['src', 'tgt']:
-      raise ValueError("arg 'key' must be one of [None, 'src', 'tgt'], got "
-                       f'key={key}.')
-    else:
-      vocab = (
-          features['targets'].vocabulary
-          if key == 'tgt' else features['inputs'].vocabulary)
+    vocab = self._get_vocab(key)
+
     if lengths is None:
       lengths = [ids.shape[1]] * ids.shape[0]
     ret = []
@@ -690,7 +702,7 @@ class SeqIOInput(base_input.BaseInput):
                       num_epochs: int,
                       shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
     p = self.hparams
-    ds = self.mixture_or_task_inst.get_dataset(
+    kwargs = dict(
         sequence_length=p.task_feature_lengths,
         split=p.split_name,
         shuffle=shuffle,
@@ -698,7 +710,10 @@ class SeqIOInput(base_input.BaseInput):
         shard_info=shard_info,
         use_cached=p.use_cached,
         seed=p.input_random_seed,
-        trim_output_features=p.trim_output_features)
+        trim_output_features=p.trim_output_features,
+    )
+    ds = self.mixture_or_task_inst.get_dataset(**kwargs)
+
     ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
 
     if p.use_enumeration:
@@ -937,7 +952,7 @@ class SeqIOInput(base_input.BaseInput):
       try:
         example = next(self.targets_iter)
         if self.ds_ragged_tensor_keys:
-          example_orig = next(self.targets_ds_ori)
+          example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
           raise Exception(
@@ -1783,10 +1798,25 @@ def get_eval_hparams_for_seqio(
     hp.split_name = _select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
     if require_metric_fns:
-      if task.predict_metric_fns and metric_type is MetricType.PREDICT:
-        hparams.append(hp)
-      if task.score_metric_fns and metric_type is MetricType.SCORE:
-        hparams.append(hp)
+      if not task.metric_fns:
+        logging.warning(
+            ('task %s is not being added to hparam list as it has no metric_fns'
+             'defined. If you want the task evaluated regardless, set '
+             'require_metric_fns=False'), task.name)
+      if metric_type is MetricType.PREDICT:
+        if task.predict_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no predict_metric_fns'
+             'defined although metric_type=MetricType.Predict. '), task.name)
+      elif metric_type is MetricType.SCORE:
+        if task.score_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no score_metric_fns'
+             'defined although metric_type=MetricType.Score. '), task.name)
     else:
       if not task.score_metric_fns and not task.predict_metric_fns:
         # Show PPLX

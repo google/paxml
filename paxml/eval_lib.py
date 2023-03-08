@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ from paxml import base_metrics
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
+from paxml import programs
 from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -75,14 +76,6 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 PRNGKey = pytypes.PRNGKey
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
-
-
-def _is_vectorized(states: train_states.TrainState) -> bool:
-  """Determines whether it is a vectorized model."""
-  if not states.opt_states:
-    raise ValueError(
-        'cannot decide if it is vectorized model without opt_states')
-  return NO_PREFIX_KEY in states.opt_states[0]
 
 
 def _get_dir_names(
@@ -140,48 +133,6 @@ def _wait_until_step(checkpointer, start_step):
     time.sleep(300)
 
 
-def has_ema(task_p: tasks_lib.SingleTask.HParams) -> bool:
-  """Determines whether ema is used or not."""
-  return task_p.train.learner.optimizer.ema_decay > 0.
-
-
-def extract_ema(
-    model_states: train_states.TrainState) -> train_states.TrainState:
-  """Finds the ema state from optimizer states."""
-  if len(model_states.opt_states) != 1:
-    raise ValueError('EMA currently only supports a single learner (got '
-                     f'`{len(model_states.opt_states)}`).')
-  is_vectorized = _is_vectorized(model_states)
-  if not is_vectorized:
-    for v in model_states.opt_states[0]:
-      if isinstance(v, dict) and 'ema' in v:
-        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
-  else:
-    ret = None
-    # For vectorized model, the structure looks like this:
-    # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
-    # It is a list of dictionaries. The key corresponds to the #stages.
-    # Here the ema is constructed by combining the ema state from all those
-    # dictionaries. Each parameter belongs to one dictionary and is labelled as
-    # masked node in others.
-    for item in model_states.opt_states[0].values():
-      if isinstance(item, tuple):
-        for v in item:
-          if isinstance(v, dict) and 'ema' in v:
-            if ret is None:
-              ret = v.ema
-            else:
-              ret = jax.tree_map(
-                  lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
-                  ret,
-                  v.ema,
-                  is_leaf=py_utils.is_optax_masked_node)
-    if ret is not None:
-      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
-  raise ValueError('Could not find EMA states in `%r`.' %
-                   model_states.opt_states)
-
-
 def _get_train_input_specs(task_p: tasks_lib.SingleTask.HParams,
                            experiment_config: base_experiment.BaseExperiment):
   """Gets the shape/dtype of the inputs to the model."""
@@ -221,7 +172,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.job_log_dir = job_log_dir
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
-    self.use_ema: bool = has_ema(jax_task.hparams)
+    self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -261,7 +212,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}')
     if partitioned_train_state and self.use_ema:
-      partitioned_train_state = extract_ema(partitioned_train_state)
+      partitioned_train_state = tasks_lib.extract_ema(partitioned_train_state)
     return partitioned_train_state
 
   def load_checkpoint_for_step(
@@ -398,7 +349,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step)
     if model_states:
       if self.use_ema:
-        model_states = extract_ema(model_states)
+        model_states = tasks_lib.extract_ema(model_states)
       elif not self.track_metric:
         model_states = model_states.to_eval_state()
     return model_states
@@ -466,6 +417,9 @@ def _create_checkpointer(
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
+  checkpoints.reregister_type_handlers(
+      jax_task.hparams.train.tensorstore_metadata_key
+  )
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
     extra_kwargs = {}
@@ -484,7 +438,7 @@ def _create_checkpointer(
 
 
 def run_eval_loop_over_test_splits(
-    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
     eval_partitioned_train_state: train_states.TrainState,
     eval_prng_seed: jax.random.KeyArray,
     summary_writers: List[SummaryWriter],
@@ -783,7 +737,7 @@ class _PmapEvalRunner:
       return
     self._jax_task = jax_task
     eval_programs = [
-        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_p
     ]
     trainer_lib.check_unique_names(
@@ -888,14 +842,14 @@ def evaluate_pmap_model(
       partitioner, eval_input_p, jax_task, prng_key, job_log_dir
   ).get_partition_run_one_step_fn()
   decode_once_fn = None
-  input_p = None
+  decode_input_p = None
   continuous_decode = True
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
       checkpointer,
       jax_task.hparams,
       job_log_dir,
-      input_p,
+      decode_input_p,
       eval_input_p,
       eval_one_step_fn,
       decode_once_fn,
@@ -933,7 +887,7 @@ class _SpmdEvalRunner:
   ):
     self._jax_task = jax_task
     eval_programs = [
-        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_ps
     ]
     trainer_lib.check_unique_names([ep.eval_input for ep in eval_programs])
@@ -2017,7 +1971,7 @@ def _common_eval_or_decode_loop(
     checkpointer: _EvalCheckpointer,
     task_p: tasks_lib.SingleTask.HParams,
     job_log_dir: epath.Path,
-    input_p: Optional[Sequence[base_input.BaseInput.HParams]],
+    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
@@ -2029,15 +1983,15 @@ def _common_eval_or_decode_loop(
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
   summary_base_dir = job_log_dir / 'summaries'
-  if input_p:
+  if decode_input_p:
     summary_decode_dirs = [
-        summary_base_dir / f'decode_test_{p.name}' for p in input_p
+        summary_base_dir / f'decode_test_{p.name}' for p in decode_input_p
     ]
   summary_eval_dirs = [
       summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
   ]
   with contextlib.ExitStack() as exit_stack:
-    if input_p:
+    if decode_input_p:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
@@ -2056,7 +2010,7 @@ def _common_eval_or_decode_loop(
       with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step,
                                         mode):
         decode_metrics = None
-        if input_p:
+        if decode_input_p:
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
           decode_metrics = decode_once_fn(partitioned_train_state,
                                           summary_writers)
@@ -2066,11 +2020,12 @@ def _common_eval_or_decode_loop(
                                         eval_summary_writers)
 
       if not continuous_decode:
-        break
+        last_checkpoint_step = last_checkpoint_step or 1
 
       if last_checkpoint_step is not None:
         exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = exceeded_ckpt > task_p.train.num_train_steps
+        is_last_ckpt = (exceeded_ckpt > task_p.train.num_train_steps
+                        or not continuous_decode)
         if tuning_lib.should_early_stop(
             early_stopping_fn,
             last_checkpoint_step,
@@ -2271,6 +2226,8 @@ def infer_and_write_pmap(
 
   if not inputs_p:
     return
+
+  assert isinstance(checkpointer, _PmapEvalCheckpointer)
   replicated_model_states, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )

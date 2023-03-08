@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2022 Google LLC.
+# Copyright 2022 The Pax Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 """Checkpointing-related utilities to handle TrainState instances."""
 
 import enum
-import os
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
@@ -48,7 +47,7 @@ get_version_key = checkpoint_version.get_version_key
 get_version = checkpoint_version.get_version
 
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
-PyTreeDef = pytypes.PyTreeDef
+PyTree = Any
 AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
 Checkpointer = orbax.checkpoint.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
@@ -62,6 +61,11 @@ class CheckpointType(str, enum.Enum):
   FLAX = 'flax'
   GDA = 'gda'
   PERSISTENCE = 'persistence'
+  GDA_VERSION_SUBDIR = 'gda_version_subdir'
+
+
+def _is_gda_version_subdir(checkpoint_path_with_step: epath.Path) -> bool:
+  return checkpoint_path_with_step.name.isdigit()
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
@@ -136,6 +140,8 @@ def checkpoint_name(
 ) -> str:
   if checkpoint_type == CheckpointType.FLAX:
     return f'{CHECKPOINT_PREFIX}{step}'
+  elif checkpoint_type == CheckpointType.GDA_VERSION_SUBDIR:
+    return str(step)
   else:
     return f'{CHECKPOINT_PREFIX}{step:08d}'
 
@@ -150,9 +156,32 @@ def make_checkpoint_step_dir(
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   checkpoint_dir = epath.Path(checkpoint_dir)
+  if _is_gda_version_subdir(checkpoint_dir):
+    return int(checkpoint_dir.name)
   if is_tmp_checkpoint_asset(checkpoint_dir):
     return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX):])
   return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX):])
+
+
+def maybe_update_checkpoint_type(
+    user_specified_type: CheckpointType,
+    checkpoint_path_with_step: epath.Path,
+) -> CheckpointType:
+  """Returns the GDA checkpoint type that matches the provided path.
+
+  Args:
+    user_specified_type: CheckpointType of the checkpoint provided by the user.
+    checkpoint_path_with_step: Absolute path to the checkpoint directory that
+      includes the step number e.g. "/some/path/checkpoints/checkpoint_001".
+
+  Returns:
+    The updated CheckpointType matching the provided absolute path.
+  """
+  if user_specified_type != CheckpointType.GDA:
+    return user_specified_type
+  if _is_gda_version_subdir(checkpoint_path_with_step):
+    return CheckpointType.GDA_VERSION_SUBDIR
+  return CheckpointType.GDA
 
 
 def retrieve_checkpoint_type(
@@ -325,7 +354,7 @@ def restore_checkpoint(
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
-  if checkpoint_type == CheckpointType.GDA:
+  if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler())
     restored_train_state = checkpointer.restore(
@@ -343,6 +372,51 @@ def restore_checkpoint(
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
+
+
+def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
+  """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
+  if tensorstore_metadata_key is None:
+    return
+  types_to_register = [
+      (
+          int,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, int),
+      ),
+      (
+          float,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, float),
+      ),
+      (
+          np.number,
+          orbax.checkpoint.type_handlers.ScalarHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, np.number),
+      ),
+      (
+          np.ndarray,
+          orbax.checkpoint.type_handlers.NumpyHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, np.ndarray),
+      ),
+      (
+          jax.Array,
+          orbax.checkpoint.type_handlers.ArrayHandler(
+              metadata_key=tensorstore_metadata_key
+          ),
+          lambda ty: issubclass(ty, jax.Array),
+      ),
+  ]
+  for tup in types_to_register:
+    orbax.checkpoint.type_handlers.register_type_handler(*tup, override=True)
 
 
 def _extract_nested_prefix_names(
@@ -405,8 +479,12 @@ def _tensorstore_prepare(
       instances have been filtered out.
   """
   # This replaces MaskedNode instances by None values ...
-  train_state_none = jax.tree_map(_masked_node_to_none, train_state,
-                                  train_state)
+  train_state_none = jax.tree_map(
+      _masked_node_to_none,
+      train_state,
+      train_state,
+      is_leaf=py_utils.is_optax_masked_node,
+  )
   if state_specs is not None:
     state_specs_none = jax.tree_map(
         _masked_node_to_none,
@@ -469,24 +547,24 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   from a state dict.
   """
 
-  _param_names: PyTreeDef = None
+  _param_names: PyTree = None
 
-  def _set_param_names(self, param_names: PyTreeDef):
+  def _set_param_names(self, param_names: PyTree):
     self._param_names = param_names
 
-  def _get_param_names(self, item: PyTreeDef) -> PyTreeDef:
+  def _get_param_names(self, item: PyTree) -> PyTree:
     return self._param_names
 
-  async def _write_aggregate_file(self, directory: epath.Path, item: PyTreeDef,
-                                  param_infos: PyTreeDef, save_args: PyTreeDef):
+  async def _write_aggregate_file(self, directory: epath.Path, item: PyTree,
+                                  param_infos: PyTree, save_args: PyTree):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
 
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTreeDef,
-      save_args: Optional[PyTreeDef] = None,
+      item: PyTree,
+      save_args: Optional[PyTree] = None,
       version: Optional[float] = None,
   ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
@@ -503,11 +581,11 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTreeDef] = None,
-      specs: Optional[PyTreeDef] = None,
+      item: Optional[PyTree] = None,
+      specs: Optional[PyTree] = None,
       mesh: Optional[jax.sharding.Mesh] = None,
       version: Optional[float] = None,
-  ) -> PyTreeDef:
+  ) -> PyTree:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
       raise ValueError('Expected version for restoration.')
@@ -539,7 +617,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
 
     return restored_train_state
 
-  def structure(self, directory: epath.Path) -> PyTreeDef:
+  def structure(self, directory: epath.Path) -> PyTree:
     return jax.tree_util.tree_map(
         orbax.checkpoint.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names))
@@ -554,8 +632,8 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTreeDef,
-      save_args: Optional[PyTreeDef] = None,
+      item: PyTree,
+      save_args: Optional[PyTree] = None,
       version: Optional[float] = None,
   ) -> Any:
     if version is None:
@@ -582,12 +660,12 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTreeDef] = None,
-      restore_args: Optional[PyTreeDef] = None,
-      transforms: Optional[PyTreeDef] = None,
+      item: Optional[PyTree] = None,
+      restore_args: Optional[PyTree] = None,
+      transforms: Optional[PyTree] = None,
       transforms_default_to_original: bool = True,
       version: Optional[float] = None,
-  ) -> PyTreeDef:
+  ) -> PyTree:
     if version is None:
       raise ValueError('Expected version for restoration.')
     # Input the same data structure as in save_checkpoint().

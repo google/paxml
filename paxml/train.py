@@ -17,20 +17,18 @@
 
 import abc
 import contextlib
-import dataclasses
 import datetime
-import functools
 import gc
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
+from typing import Callable, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from etils import epath
 import jax
 from jax import monitoring
-from jax.experimental import pjit
+import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import eval_lib
@@ -181,11 +179,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
 
-  def _save_with_args(self, step_i, partitioned_train_state):
+  def _save_with_args(self, step_i, partitioned_train_state, force=False):
     if not self._enable_checkpoint_saving:
       return
     with py_utils.timeit() as save_period:
-      self.checkpoint_manager.save(step_i, partitioned_train_state)
+      self.checkpoint_manager.save(step_i, partitioned_train_state, force=force)
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
@@ -203,11 +201,17 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
         step_i, train_state_global_shapes, restore_kwargs=restore_args
     )
 
-  def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
-    logging.info('Saving a ckpt at final step: %d', step_i)
-    self._save_with_args(step_i, partitioned_train_state)
+  def save_final(self, step_i, partitioned_train_state,
+                 train_state_pspecs=None):
+    del train_state_pspecs
+    latest_step = self.checkpoint_manager.latest_step()
+    if latest_step is None or latest_step < step_i:
+      logging.info('Saving a ckpt at final step: %d', step_i)
+      self._save_with_args(step_i, partitioned_train_state, force=True)
 
-  def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_if_needed(self, step_i, partitioned_train_state,
+                     train_state_pspecs=None):
+    del train_state_pspecs
     if not self.checkpoint_manager.should_save(step_i):
       return
     self._save_with_args(step_i, partitioned_train_state)
@@ -333,8 +337,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     total_num_params = total_num_params // jax.local_device_count()
     return partitioned_train_state, total_num_params
 
-  def _save_with_args(self, step_i, train_state):
-    self.checkpoint_manager.save(step_i, train_state)
+  def _save_with_args(self, step_i, train_state, force=False):
+    self.checkpoint_manager.save(step_i, train_state, force=force)
 
   def _save(self, step_i, partitioned_train_state, is_final=False):
     if not self._enable_checkpoint_saving:
@@ -348,11 +352,13 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
             py_utils.convert_host_local_array_to_global_array,
             partitioned_train_state,
         )
-        self._save_with_args(step_i, fully_replicated_gda_train_state)
+        self._save_with_args(
+            step_i, fully_replicated_gda_train_state, force=is_final
+        )
       else:
         unreplicated_train_state = jax.tree_map(lambda x: x[0],
                                                 partitioned_train_state)
-        self._save_with_args(step_i, unreplicated_train_state)
+        self._save_with_args(step_i, unreplicated_train_state, force=is_final)
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
@@ -387,6 +393,7 @@ def _create_checkpointer(
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
 
+  checkpoints.reregister_type_handlers(train_p.tensorstore_metadata_key)
   options = checkpoint_managers.CheckpointManagerOptions(
       max_to_keep=max_to_keep,
       save_interval_steps=save_interval_steps,
@@ -517,6 +524,9 @@ def train_and_evaluate(
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
 
+  # in case the user passed in a string dtype, convert it to an actual dtype
+  task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
+
   input_p = experiment_config.datasets()
   # Note that we modify input params below with runtime information, therefore
   # experiment_config.datasets() should not be called again as it won't have the
@@ -572,10 +582,18 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(task_p, train_input_p, job_log_dir,
-                                  checkpointer, checkpoint_type, eval_input_p,
-                                  decode_input_p, early_stopping_fn,
-                                  enable_auto_sharding)
+    train_and_evaluate_spmd_model(
+        task_p,
+        train_input_p,
+        job_log_dir,
+        checkpointer,
+        checkpoint_type,
+        eval_input_p,
+        decode_input_p,
+        early_stopping_fn,
+        enable_auto_sharding,
+        experiment_train_program=experiment_config.train_program(),
+    )
   else:
     train_and_evaluate_pmap(
         task_p,
@@ -586,6 +604,7 @@ def train_and_evaluate(
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
+        experiment_train_program=experiment_config.train_program(),
     )
 
 
@@ -673,6 +692,7 @@ def train_and_evaluate_pmap(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ) -> None:
   """Runs the training and evaluation loop with PMAP.
 
@@ -688,6 +708,8 @@ def train_and_evaluate_pmap(
       and determining whether to early stop current training. The callable
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
+    experiment_train_program: An embedded train_program that's constructed in
+      experiment. If specified, the program will be used for train steps.
   """
   logging.info('Using pmap for data parallelism.')
   train_program, partitioned_train_state, total_num_params, prng_key = (
@@ -699,6 +721,10 @@ def train_and_evaluate_pmap(
           checkpoint_type,
       )
   )
+  # TODO(hthu): We should always take a train_program from main.
+  if experiment_train_program is not None:
+    logging.info('Using customized train program.')
+    train_program = experiment_train_program
   partitioner = train_program.partitioner
   assert not partitioner.global_mesh
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
@@ -715,6 +741,14 @@ def train_and_evaluate_pmap(
   eval_prng_seed = jax.random.split(eval_key, num=num_devices)
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
+  if train_program.task.early_stopping_fn_inst is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = train_program.task.early_stopping_fn_inst
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
 
   # TODO(hthu): Construct a TrainEval instead.
   eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
@@ -724,9 +758,7 @@ def train_and_evaluate_pmap(
   )
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(train_program.task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
   trainer_lib.check_unique_names(
@@ -780,7 +812,9 @@ def train_and_evaluate_spmd_model(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    enable_auto_sharding: bool = False) -> None:
+    enable_auto_sharding: bool = False,
+    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
+) -> None:
   """Runs the training and evaluation loop with PJIT.
 
   Args:
@@ -796,6 +830,8 @@ def train_and_evaluate_spmd_model(
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
+    experiment_train_program: An embedded train_program that's constructed in
+      experiment. If specified, the program will be used for train steps.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   (
@@ -811,6 +847,11 @@ def train_and_evaluate_spmd_model(
       checkpoint_type,
       enable_auto_sharding,
   )
+  # TODO(hthu): We should always take a train_program from main.
+  if experiment_train_program is not None:
+    logging.info('Using customized train program.')
+    train_program = experiment_train_program
+
   global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
 
   # We do not fold in jax.process_index in contrast to the pmap version and
@@ -823,6 +864,15 @@ def train_and_evaluate_spmd_model(
   partitioner = train_program.partitioner
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
+  if train_program.task.early_stopping_fn_inst is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = train_program.task.early_stopping_fn_inst
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
+
   # TODO(pax): Support auto-sharding for eval step. In this case, we would
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
@@ -840,9 +890,7 @@ def train_and_evaluate_spmd_model(
 
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(train_program.task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
 
@@ -931,7 +979,7 @@ def _create_program_and_states(
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = instantiate(train_input_p)
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
-  train_program = trainer_lib.SingleTaskTrainProgram(
+  train_program = programs.SingleTaskTrainProgram(
       jax_task, train_input_pipeline, partitioner
   )
   train_state_metadata = train_program.train_state_metadata
@@ -970,7 +1018,7 @@ def _train_and_evaluate_common(
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
-    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,
@@ -1180,13 +1228,14 @@ def _train_and_evaluate_common(
         logging.debug('  Starting eval_step().')
 
         if train_p.eval_use_ema_states:
-          if not eval_lib.has_ema(task_p):
+          if not tasks_lib.has_ema(task_p):
             raise ValueError(
                 'eval_use_ema_states is requested but the '
                 'learner does not seem to have ema enabled'
             )
-          eval_partitioned_train_state = eval_lib.extract_ema(
-              partitioned_train_state).to_eval_state()
+          eval_partitioned_train_state = tasks_lib.extract_ema(
+              partitioned_train_state
+          ).to_eval_state()
           logging.debug('  Performing eval_step() with ema states.')
         else:
           eval_partitioned_train_state = partitioned_train_state.to_eval_state()
@@ -1250,13 +1299,14 @@ def _train_and_evaluate_common(
       if (decode_input_p and train_p.decode_interval_steps and
           step_i % train_p.decode_interval_steps == 0):
         if train_p.decode_use_ema_states:
-          if not eval_lib.has_ema(task_p):
+          if not tasks_lib.has_ema(task_p):
             raise ValueError(
                 'decode_use_ema_states is requested but the '
                 'learner does not seem to have ema enabled'
             )
-          decode_partitioned_train_state = eval_lib.extract_ema(
-              partitioned_train_state)
+          decode_partitioned_train_state = tasks_lib.extract_ema(
+              partitioned_train_state
+          )
           logging.debug('  Performing decode_once_fn() with ema states.')
         else:
           decode_partitioned_train_state = partitioned_train_state
