@@ -26,7 +26,6 @@ import os
 import random
 import re
 import time
-import seqio
 import typing
 from typing import Optional, Sequence
 
@@ -51,6 +50,7 @@ from paxml import tuning_lib
 from praxis import pax_fiddle
 from praxis import py_utils
 import pyglove as pg
+import seqio
 
 # internal experiment module import
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
@@ -391,7 +391,7 @@ def main(argv: Sequence[str]) -> None:
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
                       FLAGS.jax_traceback_filtering_option,
                       FLAGS.jax_fully_async_checkpoint or FLAGS.multiprocess_gpu,
-                      FLAGS.should_log_compiles, 
+                      FLAGS.should_log_compiles,
                       setup_jax.JaxDistributedOptions(FLAGS.server_addr,
                                                       FLAGS.num_hosts,
                                                       FLAGS.host_idx)
@@ -409,7 +409,7 @@ def main(argv: Sequence[str]) -> None:
       enable_checkpoint_saving=FLAGS.enable_checkpoint_saving)
 
   e2e_time = time.time() - start
-  logging.info('E2E time: {}'.format(e2e_time))
+  logging.info(f'E2E time: {e2e_time}')
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')

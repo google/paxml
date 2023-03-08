@@ -398,7 +398,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
       status_msg += f', steps/sec {steps_per_sec}'
       write_summary_tensor(step_i, 'Steps/sec', steps_per_sec,
                            SummaryType.AGGREGATE_SCALAR)
-        
+
       if global_bs is not None:
         seqs_per_sec = num_sub_batches*global_bs*steps_per_sec
         status_msg += f', seqs/sec {seqs_per_sec}'

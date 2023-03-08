@@ -1122,7 +1122,7 @@ def _train_and_evaluate_common(
 
       loss_tracker = []
       for ga_step in range(num_sub_batches):
-        
+
         # Get new model inputs
         logging.debug('  Retrieving inputs.')
         # TODO(hthu): Probably we should just internalize directly into step().

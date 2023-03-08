@@ -15,10 +15,10 @@
 
 r"""Utilities to set up JAX global configs."""
 
+import dataclasses
 from typing import Optional
 
 from absl import logging
-import dataclasses
 import jax
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
@@ -34,7 +34,7 @@ def setup_jax(globally_use_hardware_rng: bool,
               jax_enable_checks: bool,
               jax_traceback_filtering_option: str = 'auto',
               should_initialize_jax_distributed: bool = False,
-              should_log_compiles: bool = False, 
+              should_log_compiles: bool = False,
               jax_distributed_options: Optional[JaxDistributedOptions] = None,) -> None:
   """Setups JAX and logs information about this job."""
 
@@ -69,7 +69,7 @@ def setup_jax(globally_use_hardware_rng: bool,
 
   if should_initialize_jax_distributed:
     if jax_distributed_options:
-      jax.distributed.initialize(jax_distributed_options.coordinator_address, 
+      jax.distributed.initialize(jax_distributed_options.coordinator_address,
                                  jax_distributed_options.num_processes,
                                  jax_distributed_options.process_id)
     else:
