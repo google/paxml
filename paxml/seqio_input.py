@@ -118,7 +118,7 @@ def _convert_bytes_to_str(tree: Any) -> Any:
   return jax.tree_map(_convert_fn, tree)
 
 
-def _select_split(
+def select_split(
     task: str,
     split_name: Union[str, Callable[[str], str]],
 ) -> str:
@@ -1795,7 +1795,7 @@ def get_eval_hparams_for_seqio(
                        use_cached=use_cached)
     # Allow selecting split based on `Callable` `split_name` if mixture contains
     # tasks with varying splits.
-    hp.split_name = _select_split(task.name, split_name)
+    hp.split_name = select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
     if require_metric_fns:
       if not task.metric_fns:
