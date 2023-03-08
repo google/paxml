@@ -43,14 +43,11 @@ LayerTpl = pax_fiddle.Config[base_layer.BaseLayer]
 
 class ImageClassificationInputSpecsProvider(base_input.BaseInputSpecsProvider):
   """Encapsulates input specs for image classification tasks."""
-
-  class HParams(base_input.BaseInputSpecsProvider.HParams):
-    """Hyper-parameters for this parameterizable component."""
-    height: int = 224
-    width: int = 224
-    num_color_channels: int = 3
-    num_classes: int = 1000
-    batch_size: int = 1
+  height: int = 224
+  width: int = 224
+  num_color_channels: int = 3
+  num_classes: int = 1000
+  batch_size: int = 1
 
   def get_input_specs(self) -> NestedShapeDtypeStruct:
     """Returns specs from the input pipeline for model init."""

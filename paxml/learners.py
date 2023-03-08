@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union
 
 import jax
 from jax import numpy as jnp
@@ -30,6 +30,7 @@ from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import optimizer_prefix_vectorization as opt_vec
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 
 JTensor = jnp.ndarray
@@ -49,7 +50,7 @@ def _compute_grad_norm(grads: NestedMap) -> JTensor:
   return jnp.sqrt(jnp.sum(jnp.stack(grad_norms_squared)))
 
 
-class Learner(base_hyperparams.BaseParameterizable):
+class Learner(base_hyperparams.FiddleBaseParameterizable):
   """A learner.
 
   Example client code:
@@ -69,79 +70,78 @@ class Learner(base_hyperparams.BaseParameterizable):
     grads0, opt_states0, mdl_vars, var_weight_hparams)
   updated_mdl_vars = learner.apply_gradient(
     mdl_vars, grads1, var_weight_hparams)
+
+  Attributes:
+    loss_name: Name of the loss this learner optimizes. If the task has a
+      loss_aggregator this param will be ignored and is expected to be None,
+      otherwise it must be set. This loss_name must be in the metrics dict (the
+      first return of compute_loss).
+    stochastic_gradient: Params for the stochastic gradient function.
+    optimizer: Params for the optimizer.
+    skip_zero_gradients: If set, skips aggregating zero gradients while
+      computing gradients.This helps in case where some weights may not be used
+      in forward computation, e.g., sparsely activated networks or switchable
+      layers in neural architectural search. Possible values are:
+      None: do not skip zero gradients; "variable": skip if the entire variable
+        gradients are almost zero.
+    grad_norm_summary: Whether or not to export accumulated grad_norm summaries.
+      Disable to save some compute.
+    grad_norm_individual_vars: Whether or not to export grad_norm for each
+      individual variable as summaries.
+    var_norm_summary: Whether or not to export accumulated var_norm summaries.
+      Disable to save some compute.
+    check_valid_step: Whether or not to run sanity check to ensure that the
+      training step is valid.
+    vectorize_on_repeat_prefix: Whether to vectorize optimizers on the
+      repeat_prefix dims of the variables. This allows stacking variables of
+      different layers while not affecting the behavior of optimizers like
+      Adafactor.
+    skip_step_gradient_norm_value: If non-zero, we skip a step entirely if
+      gradient_norm exceeds this value.
+    enable_skip_step_on_gradient_anomalies: Skips the step if gradient anomaly
+      (NaN/Inf) is detected.
+    bprop_variable_exclusion: Regular expression or a list of regular
+      expressions. If a variable name matches one of the regular expressions,
+      the variable should be fixed during model training.
+    bprop_variable_inclusion: Regular expression or a list of regular
+      expressions. If a variable name matches one of the regular expressions,
+      the variable should be updated during model training.
+    repeat_prefix_sep: Repeat prefix separator character, for use in filename
+      separator during checkpointing.
   """
 
-  class HParams(base_hyperparams.BaseParameterizable.HParams):
-    """Returns the Learner params.
+  # TODO(pax): loss_name is not used anywhere anymore other than to
+  # create a LossAggregator on the task. Consider moving loss_name to the
+  # task or having everyone set it through the loss_aggregator.
+  loss_name: Optional[str] = None
+  stochastic_gradient: Optional[
+      pax_fiddle.Config[sgf.BaseStochasticGradient]
+  ] = None
+  optimizer: Optional[pax_fiddle.Config[optimizers.BaseOptimizer]] = None
+  skip_zero_gradients: Optional[bool] = None
+  grad_norm_summary: bool = True
+  grad_norm_individual_vars: bool = False
+  var_norm_summary: bool = True
+  check_valid_step: bool = True
+  vectorize_on_repeat_prefix: bool = True
+  skip_step_gradient_norm_value: float = 0.0
+  enable_skip_step_on_gradient_anomalies: bool = True
+  bprop_variable_exclusion: Union[str, Sequence[str]] = (
+      pax_fiddle.instance_field(default_factory=list)
+  )
+  bprop_variable_inclusion: Union[str, Sequence[str]] = (
+      pax_fiddle.instance_field(default_factory=list)
+  )
+  repeat_prefix_sep: str = '#'
+  _optimizer_inst: Any = dataclasses.field(init=False, repr=False)
+  _stochastic_gradient_inst: Any = dataclasses.field(init=False, repr=False)
+  _get_grad_tx: Any = dataclasses.field(init=False, repr=False)
 
-    Attributes:
-      loss_name: Name of the loss this learner optimizes. If the task has a
-        loss_aggregator this param will be ignored and is expected to be None,
-        otherwise it must be set. This loss_name must be in the metrics dict
-        (the first return of compute_loss).
-      stochastic_gradient: Params for the stochastic gradient function.
-      optimizer: Params for the optimizer.
-      skip_zero_gradients: If set, skips aggregating zero gradients while
-        computing gradients.This helps in case where some weights may not be
-        used in forward computation, e.g., sparsely activated networks or
-        switchable layers in neural architectural search. Possible values are:
-        None: do not skip zero gradients; "variable": skip if the entire
-          variable gradients are almost zero.
-      grad_norm_summary: Whether or not to export accumulated grad_norm
-        summaries. Disable to save some compute.
-      grad_norm_individual_vars: Whether or not to export grad_norm for each
-        individual variable as summaries.
-      var_norm_summary: Whether or not to export accumulated var_norm summaries.
-        Disable to save some compute.
-      check_valid_step: Whether or not to run sanity check to ensure that the
-        training step is valid.
-      vectorize_on_repeat_prefix: Whether to vectorize optimizers on the
-        repeat_prefix dims of the variables. This allows stacking variables of
-        different layers while not affecting the behavior of optimizers like
-        Adafactor.
-      skip_step_gradient_norm_value: If non-zero, we skip a step entirely if
-        gradient_norm exceeds this value.
-      enable_skip_step_on_gradient_anomalies: Skips the step if gradient anomaly
-        (NaN/Inf) is detected.
-      bprop_variable_exclusion: Regular expression or a list of regular
-        expressions. If a variable name matches one of the regular expressions,
-        the variable should be fixed during model training.
-      bprop_variable_inclusion: Regular expression or a list of regular
-        expressions. If a variable name matches one of the regular expressions,
-        the variable should be updated during model training.
-      repeat_prefix_sep: Repeat prefix separator character, for use in filename
-        separator during checkpointing.
-    """
-
-    # TODO(pax): loss_name is not used anywhere anymore other than to
-    # create a LossAggregator on the task. Consider moving loss_name to the
-    # task or having everyone set it through the loss_aggregator.
-    loss_name: Optional[str] = None
-    stochastic_gradient: Optional[sgf.BaseStochasticGradient.HParams] = None
-    optimizer: Optional[optimizers.BaseOptimizer.HParams] = None
-    skip_zero_gradients: Optional[bool] = None
-    grad_norm_summary: bool = True
-    grad_norm_individual_vars: bool = False
-    var_norm_summary: bool = True
-    check_valid_step: bool = True
-    vectorize_on_repeat_prefix: bool = True
-    skip_step_gradient_norm_value: float = 0.0
-    enable_skip_step_on_gradient_anomalies: bool = True
-    bprop_variable_exclusion: Union[str, Sequence[str]] = dataclasses.field(
-        default_factory=list
-    )
-    bprop_variable_inclusion: Union[str, Sequence[str]] = dataclasses.field(
-        default_factory=list
-    )
-    repeat_prefix_sep: str = '#'
-
-  def __init__(self, hparams: Learner.HParams) -> None:
-    """Constructor for the learner."""
-    assert hparams.name, (
+  def __post_init__(self):
+    assert self.name, (
         'Learner params for %s must have a "name"' % self.__class__.__name__
     )
-    super().__init__(hparams)
-    module_name = hparams.name
+    module_name = self.name
     NestedMap.CheckKey(module_name)
 
     p = self._hparams
@@ -425,10 +425,6 @@ class Learner(base_hyperparams.BaseParameterizable):
     )
     # TODO(yonghui): export gradient / variable summaries.
 
-  @property
-  def loss_name(self) -> str:
-    return self._hparams.loss_name
-
 
 class MultiOptimizerLearner(Learner):
   """Multi-optimizer learner which supports multiple optimizers.
@@ -439,32 +435,33 @@ class MultiOptimizerLearner(Learner):
   `auxiliary_regex`, which will walk the PyTree of variables, and set all
   descendants to use the corresponding auxiliary optimizer. Note that the length
   of `auxiliary_optimizers` and `auxiliary_regex` must be the same.
+
+  Attributes:
+    auxiliary_optimizers: Additional auxiliary optimizers for optimizing a
+      subset of model variables.
+    auxiliary_regex: A regular expression which if matches the variable name,
+      will activate the corresponding auxiliary optimizer. The length of this
+      list must be the same as auxiliary optimiers.
+    auxiliary_names: Names of all auxiliary optimizers. This is mainly used for
+      tensorboard.
+    apply_separate_scaling: Whether to apply gradient scaling separately for
+      each auxiliary optimizer. By default, all gradients are scaled together so
+      all configurations under auxiliary optimizers are ignored.
   """
 
-  class HParams(Learner.HParams):
-    """HParams for MultiOptimizerLearner.
+  auxiliary_optimizers: Sequence[
+      pax_fiddle.Config[optimizers.BaseOptimizer]
+  ] = ()
+  auxiliary_regex: Sequence[str] = ()
+  auxiliary_names: Sequence[str] = ()
+  apply_separate_scaling: bool = False
+  _optimizer_inst: Any = dataclasses.field(init=False, repr=False)
+  _auxiliary_optimizer_insts: Any = dataclasses.field(init=False, repr=False)
+  _grad_tx_fn: Any = dataclasses.field(init=False, repr=False)
+  _auxiliary_grad_tx_fn: Any = dataclasses.field(init=False, repr=False)
 
-    Attributes:
-      auxiliary_optimizers: Additional auxiliary optimizers for optimizing a
-        subset of model variables.
-      auxiliary_regex: A regular expression which if matches the variable name,
-        will activate the corresponding auxiliary optimizer. The length of this
-        list must be the same as auxiliary optimiers.
-      auxiliary_names: Names of all auxiliary optimizers. This is mainly used
-        for tensorboard.
-      apply_separate_scaling: Whether to apply gradient scaling separately for
-        each auxiliary optimizer. By default, all gradients are scaled together
-        so all configurations under auxiliary optimizers are ignored.
-    """
-
-    auxiliary_optimizers: Sequence[optimizers.BaseOptimizer.HParams] = ()
-    auxiliary_regex: Sequence[str] = ()
-    auxiliary_names: Sequence[str] = ()
-    apply_separate_scaling: bool = False
-
-  def __init__(self, hparams: MultiOptimizerLearner.HParams) -> None:
-    """Constructor for the MultiOptimizer learner."""
-    super().__init__(hparams)
+  def __post_init__(self):
+    super().__post_init__()
     p = self._hparams
     asserts.not_none(p.optimizer)
     if len(p.auxiliary_optimizers) != len(p.auxiliary_regex) or len(
@@ -486,7 +483,7 @@ class MultiOptimizerLearner(Learner):
 
   def plot_learning_rate(self, step: int) -> None:
     p = self._hparams
-    learning_rate = self.optimizer_inst.get_learning_rate(step)
+    learning_rate = self.optimizer_inst.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
     base_layer.add_global_summary(
         'learning/lr_main', learning_rate, SummaryType.AGGREGATE_SCALAR
     )

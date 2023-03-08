@@ -18,7 +18,8 @@
 from __future__ import annotations
 
 import abc
-from typing import List
+import dataclasses
+from typing import Any, List
 
 from paxml import train_states
 from praxis import base_hyperparams
@@ -34,7 +35,7 @@ PRNGKey = pytypes.PRNGKey
 TrainState = train_states.TrainState
 
 
-class BaseInferenceRunner(base_hyperparams.BaseParameterizable, abc.ABC):
+class BaseInferenceRunner(base_hyperparams.FiddleBaseParameterizable, abc.ABC):
   """Abstract base class for users to override.
 
   This class is essentially a container for a functional infer method and
@@ -46,11 +47,11 @@ class BaseInferenceRunner(base_hyperparams.BaseParameterizable, abc.ABC):
   computations in a jit-ed context. We may eventually want to support non jax-
   native types such as strings.
   """
+  _model: Any = dataclasses.field(init=False, repr=False)
+  model: base_model.BaseModel = None
 
-  def __init__(self, hparams: BaseInferenceRunner.HParams,
-               model: base_model.BaseModel) -> None:
-    super().__init__(hparams)
-    self._model = model
+  def __post_init__(self):
+    self._model = self.model
 
   @abc.abstractmethod
   def infer(self, train_state: TrainState, prng_key: PRNGKey,

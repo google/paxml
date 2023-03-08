@@ -53,9 +53,7 @@ instantiate = base_layer.instantiate
 
 class TestInput(base_input.BaseInput):
   """Input for testing purpose."""
-
-  class HParams(base_input.BaseInput.HParams):
-    seq_length: int = 2
+  seq_length: int = 2
 
   def get_next(self):
     p = self.hparams

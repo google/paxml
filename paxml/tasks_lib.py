@@ -20,6 +20,7 @@ the `tasks` Python submodule.
 """
 
 from __future__ import annotations
+
 import dataclasses
 import enum
 import itertools
@@ -45,8 +46,8 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
-from praxis import optimizers
 from praxis import optimizer_prefix_vectorization
+from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
@@ -853,12 +854,31 @@ def create_state_padded_shapes(
 
 
 class SingleTask(base_task.BaseTask):
-  """A JAX task."""
+  """A JAX task.
+
+  Attributes:
+    name: Name of this task object, must be a valid identifier.
+    model: The underlying JAX model encapsulating all the layers.
+    train: HParams to control how this task should be trained.
+    decode: HParams to control how this task should be decoded.
+    metrics: A BaseMetrics aggregator class to determine how metrics are
+      computed.
+    loss_aggregator: A LossAggregator aggregator class to derermine how the
+      losses are aggregated (e.g single or MultiLoss)
+    vn: HParams to control variational noise.
+    track_decoder_metric: which decoding metric to track, e.g. 'wer'.
+    track_decoder_metric_min_or_max: track min or max metric value.
+    infer_writer: specifies how to generate and write some output with a model
+    early_stopping_fn: HParams to control whether to stop the training loop
+      early; the instantiated class should be callable with signature matching
+      trainer_lib.EarlyStoppingFn.
+  """
 
   # TODO(b/269191093) Should this type be relaxed to BaseLayer?
   model: base_model.BaseModel
 
-  class InferWriterHParams(base_hyperparams.BaseHyperParams):
+  @dataclasses.dataclass(frozen=True)
+  class InferWriter:
     """Parameters for generating and writing outputs from a model.
 
     Attributes:
@@ -875,10 +895,14 @@ class SingleTask(base_task.BaseTask):
     restore_checkpoint_step: Optional[int] = None
     inference_runner: Optional[BaseInferenceRunner.HParams] = None
     output_format: io_utils.OutputFormatType = (
-        io_utils.OutputFormatType.TFRECORD)
+        io_utils.OutputFormatType.TFRECORD
+    )
     output_num_shards: int = 32
 
-  class VariationalNoiseHParams(base_hyperparams.BaseHyperParams):
+  InferWriterHParams = base_hyperparams.FiddleHParamsClassStub(InferWriter)  # pylint: disable=invalid-name
+
+  @dataclasses.dataclass(frozen=True)
+  class VariationalNoise:
     """Parameters for variational noise.
 
     Attributes:
@@ -887,11 +911,17 @@ class SingleTask(base_task.BaseTask):
         variational noise.
       vn_start_step: Step starting from which variational noise is added.
     """
+
     vn_scale: float = 0.0
     vn_regex: str = ''
     vn_start_step: int = 0
 
-  class TrainHParams(base_hyperparams.BaseHyperParams):
+  VariationalNoiseHParams = base_hyperparams.FiddleHParamsClassStub(  # pylint: disable=invalid-name
+      VariationalNoise
+  )
+
+  @dataclasses.dataclass(frozen=True)
+  class Train:
     """Parameters for training.
 
     Attributes:
@@ -960,8 +990,10 @@ class SingleTask(base_task.BaseTask):
       tensorstore_metadata_key: The name applied to metadata files created by
         Tensorstore. Uses Tensorstore default if not specified.
     """
+
     learner: learners_lib.Learner.HParams = sub_config_field(
-        learners_lib.Learner.HParams)
+        learners_lib.Learner.HParams
+    )
     num_train_steps: float = 1e7
     save_interval_steps: int = 5000
     save_keep_interval_duration: str = '12h'
@@ -975,24 +1007,28 @@ class SingleTask(base_task.BaseTask):
     eval_skip_train: bool = False
     eval_use_ema_states: bool = False
     inputs_split_mapping: Optional[PartitionSpec] = None
-    init_from_checkpoint_rules: Dict[
-        str, CheckpointLoadingRules] = dataclasses.field(default_factory=dict)
+    init_from_checkpoint_rules: Dict[str, CheckpointLoadingRules] = (
+        pax_fiddle.instance_field(default_factory=dict)
+    )
     decode_interval_steps: Optional[int] = None
     decode_start_after_n_steps: int = 0
     # TODO(zhishuai): verify this for a pjit model.
     decode_use_ema_states: bool = False
     profiler_num_steps: int = 2
-    profiler_min_duration_sec: float = 1.
+    profiler_min_duration_sec: float = 1.0
     profiler_capture_step: Optional[int] = None
     profiler_max_num_hosts: Optional[int] = None
     always_use_train_for_model_init: bool = True
     random_seed: int = 1234
-    apply_mutable_list: List[str] = dataclasses.field(
-        default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST
+    apply_mutable_list: List[str] = pax_fiddle.instance_field(
+        default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST[:]
     )
     tensorstore_metadata_key: Optional[str] = None
 
-  class DecodeHParams(base_hyperparams.BaseHyperParams):
+  TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
+
+  @dataclasses.dataclass(frozen=True)
+  class Decode:
     """Parameters for decoding.
 
     Attributes:
@@ -1002,11 +1038,15 @@ class SingleTask(base_task.BaseTask):
         the checkpoint global step. Only effective for pmap decoding.
       random_seed: Random seed to use at the beginning of the decoding.
     """
+
     prng_key_fold_with_batch_index: bool = False
     prng_key_fold_with_global_step: bool = True
     random_seed: int = 1234
 
-  class EvaluateHParams(base_hyperparams.BaseHyperParams):
+  DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
+
+  @dataclasses.dataclass(frozen=True)
+  class Evaluate:
     """Parameters for evaluation.
 
     Attributes:
@@ -1016,11 +1056,14 @@ class SingleTask(base_task.BaseTask):
     """
 
     random_seed: int = 1234
-    apply_mutable_list: List[str] = dataclasses.field(
-        default_factory=lambda: EVAL_DEFAULT_MUTABLE_LIST
+    apply_mutable_list: List[str] = pax_fiddle.instance_field(
+        default_factory=lambda: EVAL_DEFAULT_MUTABLE_LIST[:]
     )
 
-  class InferHParams(base_hyperparams.BaseHyperParams):
+  EvaluateHParams = base_hyperparams.FiddleHParamsClassStub(Evaluate)  # pylint: disable=invalid-name
+
+  @dataclasses.dataclass(frozen=True)
+  class Infer:
     """Parameters for inference.
 
     Attributes:
@@ -1029,61 +1072,48 @@ class SingleTask(base_task.BaseTask):
 
     random_seed: int = 1234
 
+  InferHParams = base_hyperparams.FiddleHParamsClassStub(Infer)  # pylint: disable=invalid-name
+
   @enum.unique
   class TrackDecoderMetricMode(str, enum.Enum):
     """Two different modes for tracking a metric: min or max."""
+
     MAX = 'max'
     MIN = 'min'
+  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
+  model: Optional[base_model.BaseModel] = None
 
-  class HParams(base_task.BaseTask.HParams):
-    """Task parameters.
+  # Implementation note: `SingleTask` is not defined in the interpreter
+  # context here, so we need to wrap it in a lambda which will look it up from
+  # the global scope later.
+  train: pax_fiddle.Config[SingleTask.Train] = pax_fiddle.template_field(Train)
+  decode: pax_fiddle.Config[SingleTask.Decode] = pax_fiddle.template_field(
+      Decode
+  )
+  evaluate: pax_fiddle.Config[SingleTask.Evaluate] = pax_fiddle.template_field(
+      Evaluate
+  )
+  infer: pax_fiddle.Config[SingleTask.Infer] = pax_fiddle.template_field(Infer)
 
-    Attributes:
-      name: Name of this task object, must be a valid identifier.
-      model: The underlying JAX model encapsulating all the layers.
-      train: HParams to control how this task should be trained.
-      decode: HParams to control how this task should be decoded.
-      metrics: A BaseMetrics aggregator class to determine how metrics are
-        computed.
-      loss_aggregator: A LossAggregator aggregator class to derermine how the
-        losses are aggregated (e.g single or MultiLoss)
-      vn: HParams to control variational noise.
-      track_decoder_metric: which decoding metric to track, e.g. 'wer'.
-      track_decoder_metric_min_or_max: track min or max metric value.
-      infer_writer: specifies how to generate and write some output with a model
-      early_stopping_fn: HParams to control whether to stop the training loop
-        early; the instantiated class should be callable with signature matching
-        trainer_lib.EarlyStoppingFn.
-    """
-    # TODO(b/269191093) Should this type be relaxed to BaseLayer?
-    model: Optional[base_model.BaseModel] = None
+  metrics: Optional[pax_fiddle.Config[base_layer.BaseLayer]] = None
+  loss_aggregator: Optional[pax_fiddle.Config[base_layer.BaseLayer]] = None
+  vn: pax_fiddle.Config[SingleTask.VariationalNoise] = (
+      pax_fiddle.template_field(VariationalNoise)
+  )
+  track_decoder_metric: Optional[str] = None
+  track_decoder_metric_min_or_max: Optional[
+      SingleTask.TrackDecoderMetricMode
+  ] = None
+  infer_writer: Optional[pax_fiddle.Config[SingleTask.InferWriter]] = None
+  early_stopping_fn: Optional[pax_fiddle.Config] = None
+  _learners: Any = dataclasses.field(init=False, repr=False)
+  _metrics_aggregator: Any = dataclasses.field(init=False, repr=False)
+  _loss_aggregator_inst: Any = dataclasses.field(init=False, repr=False)
+  _early_stopping_fn_inst: Any = dataclasses.field(init=False, repr=False)
+  _inference_runner: Any = dataclasses.field(init=False, repr=False)
 
-    # Implementation note: `SingleTask` is not defined in the interpreter
-    # context here, so we need to wrap it in a lambda which will look it up from
-    # the global scope later.
-    train: SingleTask.TrainHParams = sub_config_field(
-        lazy_ref=lambda: SingleTask.TrainHParams)
-    decode: SingleTask.DecodeHParams = sub_config_field(
-        lazy_ref=lambda: SingleTask.DecodeHParams)
-    evaluate: SingleTask.EvaluateHParams = sub_config_field(
-        lazy_ref=lambda: SingleTask.EvaluateHParams
-    )
-    infer: SingleTask.InferHParams = sub_config_field(
-        lazy_ref=lambda: SingleTask.InferHParams
-    )
-
-    metrics: Optional[base_hyperparams.BaseHyperParams] = None
-    loss_aggregator: Optional[base_hyperparams.BaseHyperParams] = None
-    vn: SingleTask.VariationalNoiseHParams = sub_config_field(
-        lazy_ref=lambda: SingleTask.VariationalNoiseHParams)
-    track_decoder_metric: Optional[str] = None
-    track_decoder_metric_min_or_max: Optional[
-        SingleTask.TrackDecoderMetricMode] = None
-    infer_writer: Optional[SingleTask.InferWriterHParams] = None
-    early_stopping_fn: Optional[base_hyperparams.BaseHyperParams] = None
-
-  def __init__(self, hparams: SingleTask.HParams) -> None:
-    super().__init__(hparams)
+  def __post_init__(self):
+    super().__post_init__()
     p = self.hparams
 
     assert p.train.learner is not None

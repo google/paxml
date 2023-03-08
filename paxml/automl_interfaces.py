@@ -29,7 +29,9 @@ BaseParameterizable = base_hyperparams.BaseParameterizable
 MetricAggregationFn = Callable[[Sequence[float]], float]
 
 
-class BaseAlgorithm(BaseParameterizable, metaclass=abc.ABCMeta):
+class BaseAlgorithm(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Base class for search algorithms."""
 
   @abc.abstractmethod
@@ -37,7 +39,9 @@ class BaseAlgorithm(BaseParameterizable, metaclass=abc.ABCMeta):
     """Returns a PyGlove DNAGenerator."""
 
 
-class BaseEarlyStoppingPolicy(BaseParameterizable, metaclass=abc.ABCMeta):
+class BaseEarlyStoppingPolicy(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Base class for population-wise early stopping policy."""
 
   @abc.abstractmethod
@@ -45,7 +49,9 @@ class BaseEarlyStoppingPolicy(BaseParameterizable, metaclass=abc.ABCMeta):
     """Returns a PyGlove early stopping policy."""
 
 
-class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
+class BaseReward(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Base class for reward functions."""
 
   @abc.abstractmethod
@@ -73,7 +79,9 @@ class BaseReward(BaseParameterizable, metaclass=abc.ABCMeta):
     return any(m.is_decode_metric for m in self.used_metrics)
 
 
-class CrossStepMetricAggregator(BaseParameterizable, metaclass=abc.ABCMeta):
+class CrossStepMetricAggregator(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Aggregator for gathering metrics across multiple steps."""
 
   @abc.abstractmethod

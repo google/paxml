@@ -15,8 +15,10 @@
 
 """Tests for automl."""
 
+import dataclasses
 import math
-from typing import Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+
 from absl.testing import absltest
 from clu import platform
 from etils import epath
@@ -25,18 +27,15 @@ from paxml import base_experiment
 from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import base_hyperparams
-
 import pyglove as pg
 
 
 class StopWithLowerMetric(automl.BaseReward):
-
-  class HParams(automl.BaseReward.HParams):
-    metric: Optional[automl.Metric] = None
-    threshold: Union[float, List[Tuple[int, float]]] = 0.0
-    skip: bool = False
-    reward_replacement: Optional[float] = None
-    metrics_replacement: Optional[Dict[str, float]] = None
+  metric: Optional[automl.Metric] = None
+  threshold: Union[float, List[Tuple[int, float]]] = 0.0
+  skip: bool = False
+  reward_replacement: Optional[float] = None
+  metrics_replacement: Optional[Dict[str, float]] = None
 
   def get_threshold(self, global_step: int) -> float:
     p = self._hparams
@@ -76,21 +75,17 @@ class MockTask(pg.Dict):
     return 'MOCK_TASK_CONFIG'
 
 
-class MockDataset(base_hyperparams.BaseParameterizable):
+class MockDataset(base_hyperparams.FiddleBaseParameterizable):
+  dataset_param1: Optional[str] = None
+  dataset_param2: Optional[Callable[[], int]] = None
+  is_training: bool = False
+  param1: Any = dataclasses.field(init=False, repr=False)
+  param2: Any = dataclasses.field(init=False, repr=False)
 
-  class HParams(base_hyperparams.BaseParameterizable.HParams):
-    dataset_param1: Optional[str] = None
-    dataset_param2: Optional[Callable[[], int]] = None
-    is_training: bool = False
-
-    def to_text(self) -> str:
-      return 'MOCK_DATASET_CONFIG'
-
-  def __init__(self, hparams):
-    super().__init__(hparams)
-    self.param1 = hparams.dataset_param1
-    if callable(hparams.dataset_param2):
-      self.param2 = hparams.dataset_param2()
+  def __post_init__(self):
+    self.param1 = self.dataset_param1
+    if callable(self.dataset_param2):
+      self.param2 = self.dataset_param2()
 
 
 class TuningExperiment(base_experiment.BaseExperiment):
@@ -452,8 +447,11 @@ class TuneTest(absltest.TestCase):
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 21, 21, 21, 21])
     # Make sure experiment config is saved as trial metadata.
+    actual = result.trials[0].metadata.get('experiment_config')
+    actual['config']['']['datasets'][0] = 'MOCK_DATASET_CONFIG'
+    actual['config']['']['decoder_datasets'][0] = 'MOCK_DATASET_CONFIG'
     self.assertEqual(
-        result.trials[0].metadata.get('experiment_config'),
+        actual,
         {
             'format_version': 1.0,
             'source': 'pax',
@@ -461,9 +459,11 @@ class TuneTest(absltest.TestCase):
                 '': pg.Dict(
                     datasets=['MOCK_DATASET_CONFIG'],
                     decoder_datasets=['MOCK_DATASET_CONFIG'],
-                    task='MOCK_TASK_CONFIG')
-            }
-        })
+                    task='MOCK_TASK_CONFIG',
+                )
+            },
+        },
+    )
 
   def test_parameter_sweep_with_catesian_product(self):
     search_space = tuning_lib.get_search_space(

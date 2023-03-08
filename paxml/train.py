@@ -532,7 +532,9 @@ def train_and_evaluate(
   # experiment_config.datasets() should not be called again as it won't have the
   # correct runtime information populated.
   for inp in input_p:
-    if not isinstance(inp, base_input.BaseInput.HParams):
+    if not isinstance(
+        inp, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
+    ):
       raise ValueError('Expecting BaseInput.HParams from datasets(), got: '
                        f'{inp.ToText()}')
     if inp.num_infeed_hosts == 0:

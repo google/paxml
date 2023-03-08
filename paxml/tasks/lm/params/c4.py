@@ -16,8 +16,8 @@
 """Language Model configurations on the T5/C4 dataset."""
 
 import functools
-from typing import Dict, List, Optional
 import math
+from typing import Dict, List, Optional
 
 from absl import logging
 import jax
@@ -436,18 +436,15 @@ class LmCloudSpmdAdamLimitSteps(LmCloudSpmdAdam):
     return task_p
 
 
-class EarlyStoppingFn(base_hyperparams.BaseParameterizable):
-  r"""Early stopping function to log eval log_pplx and stop when reaching target."""
+class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
+  r"""Early stopping function to log eval log_pplx and stop when reaching target.
 
-  class HParams(base_hyperparams.BaseParameterizable.HParams):
-    """Hyper-parameters associated with the early stopping function.
+  Attributes:
+    target_log_pplx: target log pplx value to stop training when eval log pplx
+      reaches this value.
+  """
 
-    Attributes:
-      target_log_pplx: target log pplx value to stop training when eval log pplx
-        reaches this value.
-    """
-
-    target_log_pplx: Optional[float] = None
+  target_log_pplx: Optional[float] = None
 
   def __call__(
       self,

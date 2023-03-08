@@ -65,6 +65,7 @@ pytype_strict_library(
     deps = [
         ":automl_interfaces",
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         # Implicit pyglove dependency.
     ],
 )
@@ -120,6 +121,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
+        "//praxis:pax_fiddle",
     ],
 )
 
@@ -266,6 +268,7 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:optimizers",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
     ],
 )
@@ -377,6 +380,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit seqio dependency.

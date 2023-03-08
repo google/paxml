@@ -713,11 +713,9 @@ class EarlyStoppingErrorTest(absltest.TestCase):
 
 class MyTask(base_task.BaseTask):
   """Task for testing purpose."""
-
-  class HParams(base_task.BaseTask.HParams):
-    learning_rate: Optional[float] = None
-    batch_size: Optional[int] = None
-    program_str: Optional[str] = None
+  learning_rate: Optional[float] = None
+  batch_size: Optional[int] = None
+  program_str: Optional[str] = None
 
 
 class RegularExperiment(base_experiment.BaseExperiment):
