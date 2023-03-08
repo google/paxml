@@ -757,9 +757,7 @@ def train_and_evaluate_pmap(
   )
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(train_program.task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
   trainer_lib.check_unique_names(
@@ -891,9 +889,7 @@ def train_and_evaluate_spmd_model(
 
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(train_program.task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
 
@@ -982,7 +978,7 @@ def _create_program_and_states(
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = instantiate(train_input_p)
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
-  train_program = trainer_lib.SingleTaskTrainProgram(
+  train_program = programs.SingleTaskTrainProgram(
       jax_task, train_input_pipeline, partitioner
   )
   train_state_metadata = train_program.train_state_metadata
@@ -1021,7 +1017,7 @@ def _train_and_evaluate_common(
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
-    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,

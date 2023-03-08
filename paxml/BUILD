@@ -177,6 +177,7 @@ pytype_strict_library(
         ":io_utils",
         ":metric_tracker_utils",
         ":metric_utils",
+        ":programs",
         ":seqio_input",
         ":summary_utils",
         ":tasks_lib",
@@ -503,9 +504,37 @@ pytype_strict_library(
     deps = [
         ":tasks_lib",
         ":train_states",
+        ":trainer_lib",
+        # Implicit absl.logging dependency.
         # Implicit jax dependency.
+        "//praxis:base_hyperparams",
         "//praxis:base_input",
+        "//praxis:py_utils",
         "//praxis:pytypes",
+    ],
+)
+
+py_strict_test(
+    name = "programs_test",
+    srcs = ["programs_test.py"],
+    deps = [
+        ":programs",
+        ":tasks_lib",
+        ":trainer_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:base_model",
+        "//praxis:optimizers",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:schedules",
+        "//praxis:test_utils",
+        "//praxis/layers",
     ],
 )
 
@@ -515,7 +544,6 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_metrics",
-        ":programs",
         ":sgf",
         ":summary_utils",
         ":tasks_lib",
@@ -785,22 +813,12 @@ pytype_strict_test(
     name = "trainer_lib_test",
     srcs = ["trainer_lib_test.py"],
     deps = [
-        ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
-        # Implicit numpy dependency.
-        "//praxis:base_input",
-        "//praxis:base_layer",
-        "//praxis:base_model",
-        "//praxis:optimizers",
-        "//praxis:pax_fiddle",
         "//praxis:py_utils",
-        "//praxis:pytypes",
-        "//praxis:schedules",
         "//praxis:test_utils",
-        "//praxis/layers",
     ],
 )
 

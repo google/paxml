@@ -38,6 +38,7 @@ from paxml import base_metrics
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
+from paxml import programs
 from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -437,7 +438,7 @@ def _create_checkpointer(
 
 
 def run_eval_loop_over_test_splits(
-    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
     eval_partitioned_train_state: train_states.TrainState,
     eval_prng_seed: jax.random.KeyArray,
     summary_writers: List[SummaryWriter],
@@ -736,7 +737,7 @@ class _PmapEvalRunner:
       return
     self._jax_task = jax_task
     eval_programs = [
-        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_p
     ]
     trainer_lib.check_unique_names(
@@ -886,7 +887,7 @@ class _SpmdEvalRunner:
   ):
     self._jax_task = jax_task
     eval_programs = [
-        trainer_lib.SingleTaskEvalProgram(jax_task, ep, partitioner)
+        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_ps
     ]
     trainer_lib.check_unique_names([ep.eval_input for ep in eval_programs])
