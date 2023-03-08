@@ -22,6 +22,7 @@ from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 import numpy as np
+from paxml import partitioning
 from paxml import programs
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -128,7 +129,7 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )
-    partitioner = trainer_lib.PjitPartitioner(
+    partitioner = partitioning.PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
         reshard_inputs=True,

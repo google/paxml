@@ -38,6 +38,7 @@ from paxml import base_metrics
 from paxml import io_utils
 from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
+from paxml import partitioning
 from paxml import programs
 from paxml import seqio_input
 from paxml import summary_utils
@@ -164,7 +165,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       checkpoint_type: checkpoints.CheckpointType,
       restore_checkpoint_dir: epath.Path,
       restore_checkpoint_step: int,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -230,7 +231,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   ) -> Tuple[
       train_states.TrainState,
       trainer_lib.TrainStateMetadata,
-      Optional[trainer_lib.Partitioner.PartitionedStepFn],
+      Optional[partitioning.Partitioner.PartitionedStepFn],
       Optional[NestedPartitionSpec],
   ]:
     """Gets a partitioned model states and the step function."""
@@ -253,7 +254,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     # encapsulates its own step function and input_partition_spec.
     # TODO(hthu): Migrate decode to use the same concept.
     if is_decode:
-      step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.DECODE)
+      step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
       assert is_eval
 
       if padded_decode_input_ps:
@@ -317,7 +318,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       checkpoint_type: checkpoints.CheckpointType,
       restore_checkpoint_dir: epath.Path,
       restore_checkpoint_step: int,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
       mode: EvaluationMode,
   ):
     super().__init__(
@@ -405,7 +406,7 @@ def _create_checkpointer(
     mode: Optional[EvaluationMode],
     restore_checkpoint_dir: Optional[epath.PathLike],
     restore_checkpoint_step: Optional[int],
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
 ) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
@@ -665,7 +666,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
-  partitioner = trainer_lib.create_partitioner(
+  partitioner = partitioning.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
@@ -724,7 +725,7 @@ class _PmapEvalRunner:
 
   def __init__(
       self,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
       eval_input_p: Sequence[base_input.BaseInput.HParams],
       jax_task: tasks_lib.SingleTask,
       pmap_prng_key: PRNGKey,
@@ -756,7 +757,7 @@ class _PmapEvalRunner:
     self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
     logging.info('eval prng_seed: %s', self._eval_prng_seed)
 
-    eval_step, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+    eval_step, is_eval = partitioning.get_step_fn(RunningMode.EVAL)
     self._pmap_eval_step, _ = self._partitioner.partition(
         # Note inputs_shape_dtype is not used by pmap.
         eval_step,
@@ -811,7 +812,7 @@ class _PmapEvalRunner:
 def evaluate_pmap_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     checkpointer: _PmapEvalCheckpointer,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
@@ -882,7 +883,7 @@ class _SpmdEvalRunner:
       self,
       eval_input_ps: Sequence[base_input.BaseInput.HParams],
       jax_task: tasks_lib.SingleTask,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
   ):
     self._jax_task = jax_task
@@ -953,7 +954,7 @@ class _SpmdEvalRunner:
 def evaluate_spmd_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     checkpointer: _SpmdEvalCheckpointer,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
@@ -1086,7 +1087,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
-  partitioner = trainer_lib.create_partitioner(
+  partitioner = partitioning.create_partitioner(
       jax_task,
       prng_key,
       train_input_specs,
@@ -1171,7 +1172,7 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
 def decode_pmap_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     checkpointer: _PmapEvalCheckpointer,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
@@ -1264,7 +1265,7 @@ def decode_pmap_model(
 
 def partition_decode_once_pmap_model(
     jax_task: tasks_lib.SingleTask,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     var_weight_hparams: NestedWeightHParams,
     inputs: List[base_input.BaseInput],
@@ -1310,7 +1311,7 @@ def partition_decode_once_pmap_model(
 
 def decode_once_pmap_model(
     jax_task: tasks_lib.SingleTask,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     var_weight_hparams: NestedWeightHParams,
     inputs: List[base_input.BaseInput],
@@ -1582,7 +1583,7 @@ def decode_once_pmap_model(
 def decode_spmd_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     checkpointer: _SpmdEvalCheckpointer,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
@@ -1677,7 +1678,7 @@ def decode_spmd_model(
 
 def partition_decode_once_spmd_model(
     jax_task: tasks_lib.SingleTask,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
@@ -1731,7 +1732,7 @@ def _is_shape_dtype_struct(x):
 
 def decode_once_spmd_model(
     jax_task: tasks_lib.SingleTask,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
@@ -2175,7 +2176,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
       maybe_use_persistence_checkpointing, task.hparams
   )
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
-  partitioner = trainer_lib.create_partitioner(
+  partitioner = partitioning.create_partitioner(
       task,
       prng_key,
       train_input_specs,
@@ -2215,7 +2216,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
 def infer_and_write_pmap(
     task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
-    partitioner: trainer_lib.Partitioner,
+    partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
     inputs_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,

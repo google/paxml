@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, Optional, Protocol, Tuple
 import jax
 
 from absl import logging
+from paxml import partitioning
 from paxml import tasks_lib
 from paxml import trainer_lib
 from paxml import train_states
@@ -175,7 +176,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       self,
       task: tasks_lib.SingleTask,
       train_input: base_input.BaseInput,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
   ):
     super().__init__(partitioner)
     self._task = task
@@ -267,7 +268,7 @@ class SingleTaskEvalProgram(BasePartitionedProgram):
       self,
       task: tasks_lib.SingleTask,
       input_p: base_input.BaseInput.HParams,
-      partitioner: trainer_lib.Partitioner,
+      partitioner: partitioning.Partitioner,
   ):
     super().__init__(partitioner)
     self._task = task
@@ -312,8 +313,8 @@ class SingleTaskEvalProgram(BasePartitionedProgram):
       if isinstance(
           self._partitioner,
           (
-              trainer_lib.PjitPartitioner,
-              trainer_lib.AutoShardingPjitPartitioner,
+              partitioning.PjitPartitioner,
+              partitioning.AutoShardingPjitPartitioner,
           ),
       ):
         # Instantiate a stanalone pipeline for one-time use to get sample inputs

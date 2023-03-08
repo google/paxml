@@ -34,6 +34,7 @@ from paxml import checkpoint_managers
 from paxml import eval_lib
 from paxml import experiment_utils
 from paxml import metric_utils
+from paxml import partitioning
 from paxml import programs
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -750,7 +751,7 @@ def train_and_evaluate_pmap(
       )
 
   # TODO(hthu): Construct a TrainEval instead.
-  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+  eval_step_fn, is_eval = partitioning.get_step_fn(RunningMode.EVAL)
   assert is_eval
   p_eval_step, _ = partitioner.partition(
       eval_step_fn, global_inputs_shape_dtype, is_eval
@@ -876,7 +877,7 @@ def train_and_evaluate_spmd_model(
   # have to fix the sharding of the input to be the same as what's derived
   # from the train_step.
 
-  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
+  eval_step_fn, is_eval = partitioning.get_step_fn(RunningMode.EVAL)
   assert is_eval
   p_eval_step, _ = partitioner.partition(
       eval_step_fn,
@@ -915,7 +916,7 @@ def train_and_evaluate_spmd_model(
     )
 
     # TODO(pax-dev): Support auto-sharding for decoder step.
-    step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.DECODE)
+    step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
     assert is_eval
     decode_step_fn, decode_input_partition_spec = partitioner.partition(
         step_fn, decode_inputs_shape_dtype, is_eval
@@ -968,7 +969,7 @@ def _create_program_and_states(
 
   # The partitioner only needs shape/dtype information of the prng key.
   # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
-  partitioner = trainer_lib.create_partitioner(
+  partitioner = partitioning.create_partitioner(
       jax_task,
       init_key,
       reshard_inputs=reshard_inputs,
