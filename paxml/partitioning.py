@@ -799,7 +799,7 @@ class PjitPartitioner(Partitioner):
         static_argnums=(3,),  # unpadded_global_batch_size is static.
         **extra_kwargs,
     )
-    return bind_mesh(pjitted_fn, self.global_mesh)
+    return trainer_lib.bind_mesh(pjitted_fn, self.global_mesh)
 
   def _get_state_unpadded_shapes(self, metadata: TrainStateMetadata):
     return jax.tree_map(lambda x: x.shape, metadata.unpadded_global_shapes)
@@ -1224,18 +1224,3 @@ def create_partitioner(
           job_log_dir,
       )
   return partitioner
-
-
-def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
-  """Wraps a pjitted_fn with a mesh context."""
-
-  def call(*args):
-    with global_mesh:
-      return pjitted_fn(*args)
-
-  def lower(*args, **kwargs):
-    with global_mesh:
-      return pjitted_fn.lower(*args, **kwargs)
-
-  call.lower = lower
-  return call
