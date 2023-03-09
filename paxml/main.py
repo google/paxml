@@ -111,17 +111,18 @@ epath.DEFINE_path(
     'restore_checkpoint_dir', None,
     'If set, the directory from which to restore checkpoint. Only supported '
     'for --mode=decode_once and --mode=decode.')
-flags.DEFINE_integer(
+flags.DEFINE_multi_integer(
     'restore_checkpoint_step', None,
-    'If set, the checkpoint step to restore. Only supported when '
-    '--mode=decode_once.')
+    ('If set, the checkpoint step to restore. Only supported when '
+     '--mode=decode_once.'))
 flags.DEFINE_bool(
     'globally_use_hardware_rng', True,
     'Whether to globally use fast hardware RNG. Deterministic only at the '
     'same compiler version and with the same sharding')
 flags.DEFINE_integer(
     'jax_profiler_port', None,
-    'If set, the jax.profiler port to use. Only needed for profiling in open source.'
+    ('If set, the jax.profiler port to use. Only needed for profiling in open'
+     ' source.')
 )
 flags.DEFINE_bool('enable_auto_sharding', False,
                   'Enable the XLA Auto SPMD partitioner.')
@@ -269,21 +270,26 @@ def run_experiment(
         enable_checkpoint_saving=enable_checkpoint_saving,
         enable_auto_sharding=FLAGS.enable_auto_sharding)
   elif FLAGS.mode == 'decode_once':
-    work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
-                              f' {job_log_dir}')
-    eval_lib.decode(
-        experiment_config=experiment_config,
-        job_log_dir=job_log_dir,
-        maybe_use_persistence_checkpointing=FLAGS
-        .maybe_use_persistence_checkpointing,
-        restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
-        restore_checkpoint_step=FLAGS.restore_checkpoint_step,
-        continuous_decode=False,
-        run_eval=FLAGS.eval_during_decode,
-        early_stopping_fn=early_stopping_fn,
-        enable_auto_sharding=FLAGS.enable_auto_sharding,
-        output_pickle=FLAGS.decode_output_pickle,
-        )
+    if (restore_checkpoint_steps := FLAGS.restore_checkpoint_step) is None:
+      restore_checkpoint_steps = [None]
+
+    for restore_step in restore_checkpoint_steps:
+      work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
+                                f' {job_log_dir} for step={restore_step}')
+      restore_step = int(restore_step) if restore_step is not None else None
+      logging.info('Decode-once on step: %s', restore_step)
+      eval_lib.decode(
+          experiment_config=experiment_config,
+          job_log_dir=job_log_dir,
+          maybe_use_persistence_checkpointing=FLAGS
+          .maybe_use_persistence_checkpointing,
+          restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
+          restore_checkpoint_step=restore_step,
+          continuous_decode=False,
+          run_eval=FLAGS.eval_during_decode,
+          early_stopping_fn=early_stopping_fn,
+          enable_auto_sharding=FLAGS.enable_auto_sharding,
+          output_pickle=FLAGS.decode_output_pickle)
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
