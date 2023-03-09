@@ -981,10 +981,7 @@ def _create_program_and_states(
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = instantiate(train_input_p)
   partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
-  train_program = programs.SingleTaskTrainProgram(
-      jax_task, train_input_pipeline, partitioner
-  )
-  train_state_metadata = train_program.train_state_metadata
+  train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():
@@ -1007,12 +1004,10 @@ def _create_program_and_states(
   train_input_pipeline = _maybe_update_latest_model_step(
       train_input_pipeline, train_input_p, initial_global_step
   )
-  return (
-      train_program,
-      partitioned_train_state,
-      total_num_params,
-      prng_key,
+  train_program = programs.SingleTaskTrainProgram(
+      jax_task, train_input_pipeline, partitioner
   )
+  return train_program, partitioned_train_state, total_num_params, prng_key
 
 
 def _train_and_evaluate_common(
