@@ -283,9 +283,11 @@ def _get_var_mapping(
   return var_mapping, matched_pspecs
 
 
-def _assign_model_vars(model_vars: Union[NestedMap, Dict[str, Any]],
-                       loaded_vars: dict[str, Any],
-                       model_vars_mapping: dict[str, str]) -> None:
+def _assign_model_vars(
+    model_vars: Union[NestedMap, Dict[str, Any]],
+    loaded_vars: Dict[str, Any],
+    model_vars_mapping: Dict[str, str],
+) -> None:
   """Sets current model vars from loaded model vars using provided mapping."""
   used_vars = set()
   for var_name, init_var_name in model_vars_mapping.items():
