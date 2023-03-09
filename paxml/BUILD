@@ -198,6 +198,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:optimizer_prefix_vectorization",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.

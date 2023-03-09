@@ -50,6 +50,7 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import optimizer_prefix_vectorization
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
@@ -648,6 +649,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   """
   jax.monitoring.record_event('/jax/pax/evaluate/beacon')
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
+  eval_input_p = [_update_input_config(cfg) for cfg in eval_input_p]
   if not eval_input_p:
     logging.info('No eval datasets defined. Returning early.')
     return
@@ -1023,6 +1025,26 @@ def evaluate_spmd_model(
       continuous_decode,
   )
 
+def _update_input_config(cfg):
+  # Workaround to fix input hparams post fiddle migration.
+  # The long term solution is to read fields from the instantiated object.
+  cls = pax_fiddle.get_callable(cfg)
+  if not isinstance(cls, type) or not issubclass(cls, seqio_input.SeqIOInput):
+    return cfg
+
+  if not cfg.name:
+    mixture_name = cfg.mixture_name or cfg.mixture_or_task.name
+    cfg.name = f'{mixture_name}_{cfg.split_name}'
+  if (
+      not cfg.is_training
+      and cfg.input_random_seed is None
+      and cfg.use_enumeration
+  ):
+    # Since we want the enumeration to be deterministic, in the case that
+    # there's no explicit seed set, we default to a fixed seed for evals.
+    cfg.input_random_seed = 42
+  return cfg
+
 
 def decode(experiment_config: base_experiment.BaseExperiment,
            job_log_dir: epath.PathLike,
@@ -1064,7 +1086,10 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     restore_checkpoint_dir = epath.Path(restore_checkpoint_dir)
 
   decoder_inputs = experiment_config.decoder_datasets()
+  decoder_inputs = [_update_input_config(cfg) for cfg in decoder_inputs]
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
+  eval_inputs = [_update_input_config(cfg) for cfg in eval_inputs]
+
   if not run_eval:
     eval_inputs = []
   if not decoder_inputs and not eval_inputs:
