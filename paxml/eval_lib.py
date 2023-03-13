@@ -120,7 +120,7 @@ def _maybe_write_scoring_outputs(
   logging.info('Writing eval outputs to %s with %d entries',
                fq_fname, len(scoring_outputs))
 
-  io_utils.write_key_value_pairs(fq_fname, scoring_outputs)
+  _safe_write_key_value_pairs(fq_fname, scoring_outputs)
 
 
 def _wait_until_step(checkpointer, start_step):
@@ -152,6 +152,20 @@ def _get_train_input_specs(task_p: tasks_lib.SingleTask.HParams,
         'No training input specs available, while enabling '
         '`task_p.train.always_use_train_for_model_init` requires it.')
   return train_input_specs
+
+
+def _safe_write_key_value_pairs(
+    filename: epath.PathLike,
+    key_value_pairs: Sequence[Tuple[Optional[str], Any]],
+    cast_to_ndarray: bool = True,
+    write_pickle: bool = True,
+) -> None:
+  try:
+    io_utils.write_key_value_pairs(
+        filename, key_value_pairs, cast_to_ndarray, write_pickle
+    )
+  except TypeError:
+    logging.warning('Not serializable.')
 
 
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
@@ -1574,8 +1588,9 @@ def decode_once_pmap_model(
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
-      io_utils.write_key_value_pairs(
-          output_file, processed_decodes, output_pickle)
+      _safe_write_key_value_pairs(
+          output_file, processed_decodes, write_pickle=output_pickle
+      )
 
     merged_decode_metrics = metric_utils.update_float_dict(
         metric_utils.as_float_dict(decode_metric_dict),
@@ -1967,7 +1982,7 @@ def decode_once_spmd_model(
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
-      io_utils.write_key_value_pairs(output_file, processed_decodes)
+      _safe_write_key_value_pairs(output_file, processed_decodes)
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_p[split].name}')

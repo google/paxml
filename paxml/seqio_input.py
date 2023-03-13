@@ -89,8 +89,10 @@ def _get_targets_str(example: Mapping[str, Any], task: seqio.Task) -> str:
   if pretokenized_target_field_name in example:
     target = example[pretokenized_target_field_name]
   else:
-    target = task.output_features[target_field_name].vocabulary.decode(
-        [int(x) for x in example[target_field_name]])
+    target = example[target_field_name]
+    if np.issubdtype(target[0], np.integer):
+      target = [int(x) for x in target]
+    target = task.output_features[target_field_name].vocabulary.decode(target)
   if isinstance(target, bytes):
     target = target.decode('utf-8')
   return target
