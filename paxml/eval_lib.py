@@ -81,9 +81,9 @@ NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 
 
 def _get_dir_names(
-    input_p: Sequence[base_input.BaseInput.HParams]) -> Sequence[epath.Path]:
+    inputs: Sequence[base_input.BaseInput]) -> Sequence[epath.Path]:
   """Returns a list of same length for parent dir names for each dataset."""
-  return [epath.Path(p.name) for p in input_p]
+  return [epath.Path(p.name) for p in inputs]
 
 
 def _get_filename(step: Union[base_layer.JTensorOrPartitionSpec, int],
@@ -487,7 +487,7 @@ def run_eval_loop_over_test_splits(
   for split, eval_program in enumerate(test_eval_programs):
     if _can_load_written_outputs(
         job_log_dir,
-        eval_program.eval_input.hparams.name,
+        eval_program.eval_input.name,
         EvaluationMode.EVAL,
         step,
     ):
@@ -663,7 +663,6 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
   """
   jax.monitoring.record_event('/jax/pax/evaluate/beacon')
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
-  eval_input_p = [_update_input_config(cfg) for cfg in eval_input_p]
   if not eval_input_p:
     logging.info('No eval datasets defined. Returning early.')
     return
@@ -750,8 +749,6 @@ class _PmapEvalRunner:
     self._partitioner = partitioner
     self._eval_input_p = eval_input_p
     self._job_log_dir = job_log_dir
-    if not self._eval_input_p:
-      return
     self._jax_task = jax_task
     eval_programs = [
         programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
@@ -762,6 +759,10 @@ class _PmapEvalRunner:
     )
     self._eval_programs = eval_programs
     self._run_pmap(pmap_prng_key)
+
+  @property
+  def eval_programs(self):
+    return self._eval_programs
 
   def _run_pmap(self, prng_key: PRNGKey):
     """Calls pmap on the eval one step function."""
@@ -780,6 +781,7 @@ class _PmapEvalRunner:
         self._partitioner.train_inputs_shape_dtype,
         is_eval,
     )
+
 
   def run_one_step(
       self,
@@ -855,11 +857,14 @@ def evaluate_pmap_model(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  eval_one_step_fn = _PmapEvalRunner(
+  eval_runner = _PmapEvalRunner(
       partitioner, eval_input_p, jax_task, prng_key, job_log_dir
-  ).get_partition_run_one_step_fn()
+  )
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn()
+  eval_programs = eval_runner.eval_programs
   decode_once_fn = None
   decode_input_p = None
+  decode_inputs = None
   continuous_decode = True
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
@@ -874,6 +879,8 @@ def evaluate_pmap_model(
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
+      eval_programs,
+      decode_inputs,
   )
 
 
@@ -911,6 +918,10 @@ class _SpmdEvalRunner:
     self._eval_programs = eval_programs
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner
+
+  @property
+  def eval_programs(self):
+    return self._eval_programs
 
   @classmethod
   def get_inputs_shape_dtype_for_init(
@@ -1017,12 +1028,14 @@ def evaluate_spmd_model(
   logging.info('partitioned_train_state: %s',
                jax.tree_map(lambda x: x.shape, partitioned_train_state))
 
-  eval_one_step_fn = _SpmdEvalRunner(
-      eval_input_p, jax_task, partitioner, job_log_dir
-  ).get_partition_run_one_step_fn(eval_key)
+  eval_runner = _SpmdEvalRunner(
+      eval_input_p, jax_task, partitioner, job_log_dir)
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
+  eval_programs = eval_runner.eval_programs
 
   decode_once_fn = None
   input_p = None
+  decode_inputs = None
   continuous_decode = True
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
@@ -1037,27 +1050,9 @@ def evaluate_spmd_model(
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
+      eval_programs,
+      decode_inputs,
   )
-
-def _update_input_config(cfg):
-  # Workaround to fix input hparams post fiddle migration.
-  # The long term solution is to read fields from the instantiated object.
-  cls = pax_fiddle.get_callable(cfg)
-  if not isinstance(cls, type) or not issubclass(cls, seqio_input.SeqIOInput):
-    return cfg
-
-  if not cfg.name:
-    mixture_name = cfg.mixture_name or cfg.mixture_or_task.name
-    cfg.name = f'{mixture_name}_{cfg.split_name}'
-  if (
-      not cfg.is_training
-      and cfg.input_random_seed is None
-      and cfg.use_enumeration
-  ):
-    # Since we want the enumeration to be deterministic, in the case that
-    # there's no explicit seed set, we default to a fixed seed for evals.
-    cfg.input_random_seed = 42
-  return cfg
 
 
 def decode(experiment_config: base_experiment.BaseExperiment,
@@ -1100,9 +1095,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
     restore_checkpoint_dir = epath.Path(restore_checkpoint_dir)
 
   decoder_inputs = experiment_config.decoder_datasets()
-  decoder_inputs = [_update_input_config(cfg) for cfg in decoder_inputs]
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
-  eval_inputs = [_update_input_config(cfg) for cfg in eval_inputs]
 
   if not run_eval:
     eval_inputs = []
@@ -1253,9 +1246,12 @@ def decode_pmap_model(
       checkpointer.get_model_states(prng_key)
   )
 
-  eval_one_step_fn = _PmapEvalRunner(
+
+  eval_runner = _PmapEvalRunner(
       partitioner, eval_input_p, jax_task, eval_key, job_log_dir
-  ).get_partition_run_one_step_fn()
+  )
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn()
+  eval_programs = eval_runner.eval_programs
 
   # JaxContext needed for parameter sharing.
   context_p = base_layer.JaxContext.HParams(do_eval=True)
@@ -1286,6 +1282,7 @@ def decode_pmap_model(
       enable_checkpoint_saving=enable_checkpoint_saving,
   )
 
+  decode_inputs = inputs
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
@@ -1299,6 +1296,8 @@ def decode_pmap_model(
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
+      eval_programs,
+      decode_inputs,
   )
 
 
@@ -1466,7 +1465,7 @@ def decode_once_pmap_model(
       -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
   ]
   basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
-  dirnames = _get_dir_names(input_p)
+  dirnames = _get_dir_names(inputs)
   filename = _get_filename(
       replicated_model_states.step, EvaluationMode.DECODE.value)
   filenames = [basedir / s / filename for s in dirnames]
@@ -1477,16 +1476,17 @@ def decode_once_pmap_model(
   num_decode_steps = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
-    if _can_load_written_outputs(job_log_dir, input_p[split].name,
+    input_name = inputs[split].name
+    if _can_load_written_outputs(job_log_dir, input_name,
                                  EvaluationMode.DECODE, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
-                   input_p[split].name, step_i)
+                   input_name, step_i)
       decode_metrics_list.append(None)
       processed_decode_metrics_list.append(None)
       seqio_metrics_list.append(None)
       num_decode_steps.append(0)
       continue
-    logging.info('Start decoding on input %s', input_p[split].name)
+    logging.info('Start decoding on input %s', input_name)
     step_num = 0
     # decode_metrics and process_decode_metrics work on WeightedScalars
     # which are string -> (value, weight) pairs where value and weight
@@ -1517,7 +1517,7 @@ def decode_once_pmap_model(
       # side decode_step_fun
       decode_metrics.store(batch_metrics)
       logging.info('Finished decoding input batch %d for %s',
-                   step_num, input_p[split].name)
+                   step_num, input_name)
 
       # Merge clu.metrics to update for each minibatch.
       metrics = _merge_clu_metrics(metrics, updated_metrics)
@@ -1544,9 +1544,9 @@ def decode_once_pmap_model(
         logging.info('Finished processing decoded input batch %d', step_num)
 
       work_unit.set_task_status(
-          f'Finished decoding on {input_p[split].name} (batches={step_num})')
+          f'Finished decoding on {input_name} (batches={step_num})')
       logging.info('Finished decoding on %s (batches=%s)',
-                   input_p[split].name, step_num)
+                   input_name, step_num)
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
@@ -1606,12 +1606,13 @@ def decode_once_pmap_model(
 
     # Track metric specified by task_p.track_decoder_metric.
     if task_p.track_decoder_metric:
+      input_names = [inp.name for inp in inputs]
       _find_and_maybe_update_tracked_metric(
           basedir,
           split,
           dirnames,
           step_i,
-          input_p,
+          input_names,
           replicated_model_states,
           task_p, [merged_decode_metrics, merged_processed_decode_metrics],
           enable_checkpoint_saving=enable_checkpoint_saving)
@@ -1690,9 +1691,12 @@ def decode_spmd_model(
       decode_step_fn,
       inputs_partition_spec,
   )
-  eval_one_step_fn = _SpmdEvalRunner(
+  eval_runner = _SpmdEvalRunner(
       eval_input_p, jax_task, partitioner, job_log_dir
-  ).get_partition_run_one_step_fn(eval_key)
+  )
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(
+      eval_key)
+  eval_programs = eval_runner.eval_programs
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
       train_state_metadata.var_weight_hparams,
@@ -1700,6 +1704,7 @@ def decode_spmd_model(
       do_eval=True,
   )
 
+  decode_inputs = inputs
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
@@ -1713,6 +1718,8 @@ def decode_spmd_model(
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
+      eval_programs,
+      decode_inputs,
   )
 
 
@@ -1820,7 +1827,7 @@ def decode_once_spmd_model(
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
   basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
-  dirnames = _get_dir_names(input_p)
+  dirnames = _get_dir_names(inputs)
   filenames = [
       basedir / s / _get_filename(step_i, EvaluationMode.DECODE.value)
       for s in dirnames
@@ -1845,16 +1852,17 @@ def decode_once_spmd_model(
   num_decode_steps = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
-    if _can_load_written_outputs(job_log_dir, input_p[split].name,
+    input_name = inputs[split].name
+    if _can_load_written_outputs(job_log_dir, input_name,
                                  EvaluationMode.DECODE, step_i):
       logging.info('Decoding on input %s at step %d already done, skipping.',
-                   input_p[split].name, step_i)
+                   input_name, step_i)
       decode_metrics_list.append(None)
       processed_decode_metrics_list.append(None)
       seqio_metrics_list.append(None)
       num_decode_steps.append(0)
       continue
-    logging.info('Start decoding on input %s', input_p[split].name)
+    logging.info('Start decoding on input %s', input_name)
     step_num = 0
     # decode_metrics and process_decode_metrics work on WeightedScalars
     # which are string -> (value, weight) pairs where value and weight
@@ -1914,7 +1922,7 @@ def decode_once_spmd_model(
         all_summary_tensors[key].append(tensor)
 
       logging.info('Finished decoding input batch %d for %s',
-                   step_num, input_p[split].name)
+                   step_num, input_name)
       if jax.process_index() != 0:
         continue
       weighted_scalars = jax.tree_map(np.array, weighted_scalars)
@@ -1941,7 +1949,7 @@ def decode_once_spmd_model(
       logging.info('Finished processing decoded input batch %d', step_num)
 
     logging.info('Finished decoding on %s (batches=%s)',
-                 input_p[split].name, step_num)
+                 input_name, step_num)
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
@@ -1985,7 +1993,7 @@ def decode_once_spmd_model(
       _safe_write_key_value_pairs(output_file, processed_decodes)
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
-                              f'{input_p[split].name}')
+                              f'{input_name}')
 
     decode_metrics_list.append(
         metric_utils.update_float_dict(
@@ -2020,16 +2028,19 @@ def _common_eval_or_decode_loop(
     train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
+    eval_programs: Sequence[programs.SingleTaskEvalProgram],
+    decode_inputs: Optional[Sequence[base_input.BaseInput]],
 ):
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
   summary_base_dir = job_log_dir / 'summaries'
   if decode_input_p:
     summary_decode_dirs = [
-        summary_base_dir / f'decode_test_{p.name}' for p in decode_input_p
+        summary_base_dir / f'decode_test_{inp.name}' for inp in decode_inputs
     ]
   summary_eval_dirs = [
-      summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
+      summary_base_dir / f'eval_test_{prg.eval_input.name}'
+      for prg in eval_programs
   ]
   with contextlib.ExitStack() as exit_stack:
     if decode_input_p:
@@ -2156,7 +2167,7 @@ def _find_and_maybe_update_tracked_metric(
     split: int,
     dirnames: Sequence[epath.Path],
     step_i: int,
-    input_p: Sequence[base_input.BaseInput.HParams],
+    input_names: Sequence[str],
     replicated_model_states: train_states.TrainState,
     task_p: tasks_lib.SingleTask.HParams,
     decode_metrics_list: List[Dict[str, float]],
@@ -2185,12 +2196,12 @@ def _find_and_maybe_update_tracked_metric(
         tracker_dir_path,
         tracked_metric_name,
         track_min_or_max,
-        input_p[split].name,
+        input_names[split],
         replicated_model_states,
         enable_checkpoint_saving=enable_checkpoint_saving)
   else:
     logging.info('Cannot track metric %s on input %s.', tracked_metric,
-                 input_p[split].name)
+                 input_names[split])
 
 
 def infer_and_write(experiment_config: base_experiment.BaseExperiment,
