@@ -509,12 +509,14 @@ pytype_strict_library(
     srcs = ["programs.py"],
     srcs_version = "PY3",
     deps = [
+        ":metric_utils",
         ":partitioning",
         ":tasks_lib",
         ":train_states",
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
+        "//paxml:profiling",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:py_utils",
