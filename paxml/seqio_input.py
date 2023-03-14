@@ -1170,7 +1170,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
       target_post = self.task_inst.postprocess_fn(
-          score, example=example, is_target=True)
+          targets[k]['targets'], example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
       if verbose_entries_idx < verbose_entries:
