@@ -599,7 +599,6 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         "//praxis:base_hyperparams",
-        "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit internal pyglove dependency.

@@ -29,7 +29,6 @@ from paxml import base_experiment
 from paxml import metric_utils
 from paxml import trainer_lib
 from praxis import base_hyperparams
-from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
 
@@ -567,7 +566,7 @@ def _write_file_once(file_path: epath.Path, content: Text):
   if not file_path.exists():
     try:
       file_path.write_text(content)
-    except tf.errors.NotFoundError:
+    except (tf.errors.NotFoundError, IOError):
       logging.warn(
           'Cannot write file %r as another process is writing to the same '
           'file. This is not an issue as the file is only created for '
