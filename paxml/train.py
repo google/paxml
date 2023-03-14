@@ -718,7 +718,7 @@ def train_and_evaluate_pmap(
       job_log_dir,
       checkpointer,
       checkpoint_type,
-      experiment_train_program,
+      experiment_train_program=experiment_train_program,
   )
   assert not partitioner.global_mesh
 
