@@ -782,7 +782,6 @@ class _PmapEvalRunner:
         is_eval,
     )
 
-
   def run_one_step(
       self,
       replicated_model_states: train_states.TrainState,
@@ -819,10 +818,13 @@ class _PmapEvalRunner:
             self.run_one_step(replicated_model_states, eval_summary_writers))
 
       return tuning_lib.EvalMetrics(
-          input_p=self._eval_input_p,
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed)
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+          input_names=[
+              program.eval_input.name for program in self._eval_programs
+          ],
+      )
 
     return eval_one_step_fn
 
@@ -969,10 +971,10 @@ class _SpmdEvalRunner:
         )
 
       return tuning_lib.EvalMetrics(
-          input_p=[ep.eval_input.hparams for ep in self._eval_programs],
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
           steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+          input_names=[ep.eval_input.name for ep in self._eval_programs],
       )
 
     return eval_one_step_fn
@@ -1338,11 +1340,12 @@ def partition_decode_once_pmap_model(
       )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
-        input_p=input_p,
         metrics_list=decode_metrics_list,
         processed_metrics_list=processed_decode_metrics_list,
         seqio_metrics_list=decode_seqio_metrics_list,
-        steps_per_sec=decode_steps_per_sec)
+        steps_per_sec=decode_steps_per_sec,
+        input_names=[inp.name for inp in inputs],
+    )
 
   return decode_once_fn
 
@@ -1763,11 +1766,12 @@ def partition_decode_once_spmd_model(
       )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
-        input_p=input_p,
         metrics_list=decode_metrics_list,
         processed_metrics_list=processed_decode_metrics_list,
         seqio_metrics_list=decode_seqio_metrics_list,
-        steps_per_sec=decode_steps_per_sec)
+        steps_per_sec=decode_steps_per_sec,
+        input_names=[inp.name for inp in inputs],
+    )
 
   return decode_once_fn
 

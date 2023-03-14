@@ -617,17 +617,19 @@ class _SummaryContextManager(contextlib.ExitStack):
 
   _exit_callbacks = []
 
-  def __init__(self,
-               job_log_dir: epath.Path,
-               eval_input_p: Sequence[base_input.BaseInput.HParams],
-               decode_input_p: Sequence[base_input.BaseInput.HParams],
-               eval_skip_train: bool = False):
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      eval_input_names: Sequence[str],
+      decode_input_names: Sequence[str],
+      eval_skip_train: bool = False,
+  ):
     """Initialize context manager.
 
     Args:
       job_log_dir: Directory for the job logs.
-      eval_input_p: Optional list of params for the eval input pipelines.
-      decode_input_p: Optional list of hparams for the decode input pipelines.
+      eval_input_names: list of names for the eval input pipelines.
+      decode_input_names: list of names for the decode input pipelines.
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
@@ -637,16 +639,17 @@ class _SummaryContextManager(contextlib.ExitStack):
     self.summary_train_dir = self.summary_base_dir / 'train'
     self.summary_eval_dir = self.summary_base_dir / 'eval_train'
     self.summary_writer = summary_utils.get_summary_writer
-    if eval_input_p:
+    if eval_input_names:
       self.summary_eval_test_dirs = [
-          self.summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
+          self.summary_base_dir / f'eval_test_{name}'
+          for name in eval_input_names
       ]
     else:
       self.summary_eval_test_dirs = []
-    if decode_input_p:
+    if decode_input_names:
       self.summary_decode_dirs = [
-          self.summary_base_dir / f'decode_test_{p.name}'
-          for p in decode_input_p
+          self.summary_base_dir / f'decode_test_{name}'
+          for name in decode_input_names
       ]
     else:
       self.summary_decode_dirs = []
@@ -767,7 +770,8 @@ def train_and_evaluate_pmap(
         decode_prng_seed,
         job_log_dir,
     )
-    return decode_once_fn, prng_key
+    decode_input_names = [inp.name for inp in decode_input_pipelines]
+    return decode_once_fn, prng_key, decode_input_names
 
   _train_and_evaluate_common(
       task,
@@ -866,7 +870,11 @@ def train_and_evaluate_spmd_model(
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
       decode_input_ps: Sequence[base_input.BaseInput.HParams],
-  ) -> Tuple[Callable[..., tuning_lib.DecodeMetrics], jax.random.KeyArray]:
+  ) -> Tuple[
+      Callable[..., tuning_lib.DecodeMetrics],
+      jax.random.KeyArray,
+      Sequence[str],
+  ]:
     assert decode_input_ps, 'decode_input_p must not be empty'
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_key: %s', decode_key)
@@ -903,7 +911,8 @@ def train_and_evaluate_spmd_model(
         decode_input_partition_spec,
     )
 
-    return decode_once_fn, prng_key
+    decode_input_names = [inp.name for inp in padded_decode_input_pipelines]
+    return decode_once_fn, prng_key, decode_input_names
 
   _train_and_evaluate_common(
       task,
@@ -1014,16 +1023,20 @@ def _train_and_evaluate_common(
   train_state_metadata = partitioner.get_train_state_metadata()
 
   if decode_input_p:
-    decode_once_fn, prng_key = partition_decode_once_fns(
+    decode_once_fn, prng_key, decode_input_names = partition_decode_once_fns(
         prng_key, decode_input_p
     )
+  else:
+    decode_input_names = []
+
+  eval_input_names = [prg.eval_input.name for prg in test_eval_programs]
 
   logging.info('Training loop starting...')
 
   with _SummaryContextManager(
       job_log_dir,
-      [eval_progarm.eval_input.hparams for eval_progarm in test_eval_programs],
-      decode_input_p,
+      eval_input_names,
+      decode_input_names,
       train_p.eval_skip_train,
   ) as (
       train_summary_writer,
@@ -1120,13 +1133,13 @@ def _train_and_evaluate_common(
             )
           eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
-              input_p=[
-                  eval_program.eval_input.hparams
-                  for eval_program in test_eval_programs
-              ],
               metrics_list=eval_metrics_list,
               scoring_metrics_list=eval_scoring_metrics_list,
               steps_per_sec=eval_steps_per_sec,
+              input_names=[
+                  eval_program.eval_input.name
+                  for eval_program in test_eval_programs
+              ],
           )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',

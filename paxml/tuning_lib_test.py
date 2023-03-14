@@ -301,8 +301,7 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
       global_step=10,
       is_last_ckpt=False,
       eval_metrics=tuning_lib.EvalMetrics(
-          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
-          input_p=[pg.Dict(name='abc')],
+          input_names=['abc'],
           metrics_list=[dict(reward=reward)],
           steps_per_sec=1.0)):
     return
@@ -318,13 +317,11 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
       global_step=20,
       is_last_ckpt=True,
       eval_metrics=tuning_lib.EvalMetrics(
-          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
-          input_p=[pg.Dict(name='abc')],
+          input_names=['abc'],
           metrics_list=[dict(reward=reward * 3)],
           steps_per_sec=1.0),
       decode_metrics=tuning_lib.DecodeMetrics(
-          # Fake BaseInput.HParams using pg.Dict as only `name` was accessed.
-          input_p=[pg.Dict(name='abc')],
+          input_names=['abc'],
           metrics_list=[dict(reward=reward * 3)],
           steps_per_sec=1.0)):
     return
