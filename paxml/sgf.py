@@ -163,7 +163,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     clipped_grads_mean = jax.tree_map(lambda x: x / batch_size, sum_grads)
     frac_clipped = num_clipped / batch_size
 
-    return clipped_grads_mean, frac_clipped, batch_size
+    return clipped_grads_mean, frac_clipped, batch_size  # pytype: disable=bad-return-type  # jax-types
 
   def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
       self,
