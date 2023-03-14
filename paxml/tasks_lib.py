@@ -1359,9 +1359,6 @@ class SingleTask(base_task.BaseTask):
       rng_flat = jax.random.split(prng_key, len(params_flat))
       rng_tree = jax.tree_util.tree_unflatten(params_def, rng_flat)
 
-      # VN only updates trainable part and copy non-trainable
-      ret = mdl_vars.copy()
-
       def add_vn(params, rng, mask):
         if mask:
           return params + p.vn.vn_scale * jax.random.normal(
@@ -1369,6 +1366,7 @@ class SingleTask(base_task.BaseTask):
         else:
           return params
 
+      # VN only updates trainable part and copy non-trainable
       ret = jax.tree_map(add_vn, mdl_vars, rng_tree, vn_mask)
       return jax.tree_map(
           lambda x, y: jnp.where(step >= p.vn.vn_start_step, x, y), ret,
