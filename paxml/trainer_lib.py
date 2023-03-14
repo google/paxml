@@ -29,7 +29,6 @@ from flax.core import frozen_dict
 import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
-from jax.interpreters import pxla
 from paxml import base_metrics
 from paxml import sgf
 from paxml import summary_utils
@@ -384,8 +383,6 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
     # Skip the copy if it's already replicated.
     if (jax.config.jax_array and isinstance(state, jax.Array) and
         len(state.devices()) != 1):
-      return state
-    elif isinstance(state, pxla.ShardedDeviceArray):
       return state
     else:
       return jax.device_put_replicated(state, jax.local_devices())
