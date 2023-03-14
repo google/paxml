@@ -241,8 +241,18 @@ def adjust_input_params_for_small_batch(
   copy = inp_p.clone()
   if batch_size > local_device_count:
     if batch_size % local_device_count != 0:
-      raise NotImplementedError('Per-host batch size must be a multiple of per-'
-                                'host device count, or smaller than it.')
+      if jax.process_count() > 1:
+        # The custom device order resharding currently works only when
+        # batch_size < local_device_count.
+        raise NotImplementedError('Per-host batch size must be a multiple of'
+                                  'per-host device count, or smaller than it.')
+      else:
+        # Single-host input doesn't need to do custom order resharding.
+        copy.batch_padding_size = (
+            (batch_size + local_device_count)
+            // local_device_count
+            * local_device_count
+        ) - batch_size
   else:
     copy.batch_padding_size = local_device_count - batch_size
 
