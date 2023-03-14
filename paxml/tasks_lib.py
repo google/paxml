@@ -377,9 +377,7 @@ def _make_train_state(
           )
           new_states.append(v)
           if train_state_pspecs is not None:
-            v_pspecs = train_state_pspecs.opt_states[0][i]
-            v_pspecs['ema'] = ema_pspecs
-            new_states_pspecs.append(v_pspecs)
+            new_states_pspecs.append(ema_pspecs)
       tuple_type = type(ckpt_train_state.opt_states[0])
       outer_tuple_type = type(ckpt_train_state.opt_states)
       new_states0 = outer_tuple_type([tuple_type(new_states)])
