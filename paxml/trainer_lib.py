@@ -803,6 +803,11 @@ def train_step_single_learner(
           new_states.mdl_vars, prefix='vars', max_level=20)
       for name, norm in var_summary_tensors.items():
         base_layer.add_global_summary(name, norm)
+    if isinstance(
+        learner.stochastic_gradient_inst, sgf.DpSgdStochasticGradient
+    ):
+      base_layer.add_global_summary('frac_clipped',
+                                    aux_info.dp_aux_info['frac_clipped'])
     bwd_summary_tensors = base_layer.all_global_summaries()
 
   summary_tensors = NestedMap()

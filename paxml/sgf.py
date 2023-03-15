@@ -39,6 +39,11 @@ class GradAuxInfo:
   loss_weight: JTensor = 1.0  # pytype: disable=annotation-type-mismatch  # jax-ndarray
 
 
+@struct.dataclass
+class DPGradAuxInfo(GradAuxInfo):
+  dp_aux_info: Any = None
+
+
 class BaseStochasticGradient(
     base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
 ):
@@ -226,13 +231,21 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       )
 
       # Clip and aggregate gradients.
-      grads, _, _ = self._clip_and_mean_gradients(
+      grads, frac_clipped, _ = self._clip_and_mean_gradients(
           grads, aux.loss_weight * p.l2_norm_clip
       )
       # Aggregate values and aux.
       values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
       aux = self.process_aux_info(aux)
-      return (values, aux, grads)
+      return (
+          values,
+          DPGradAuxInfo(
+              dp_aux_info={'frac_clipped': frac_clipped},
+              aux_info=aux.aux_info,
+              loss_weight=aux.loss_weight,
+          ),
+          grads,
+      )
 
     def _loop_process_inner_batch(index: int, val: Any) -> Any:
       """Wrapper for _process_inner_batch suitable for fori_loop."""
