@@ -381,8 +381,7 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
   """Replicates the model states."""
   def _replicate(state):
     # Skip the copy if it's already replicated.
-    if (jax.config.jax_array and isinstance(state, jax.Array) and
-        len(state.devices()) != 1):
+    if isinstance(state, jax.Array) and len(state.devices()) != 1:
       return state
     else:
       return jax.device_put_replicated(state, jax.local_devices())
