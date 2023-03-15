@@ -378,45 +378,9 @@ def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
   """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
   if tensorstore_metadata_key is None:
     return
-  types_to_register = [
-      (
-          int,
-          orbax.checkpoint.type_handlers.ScalarHandler(
-              metadata_key=tensorstore_metadata_key
-          ),
-          lambda ty: issubclass(ty, int),
-      ),
-      (
-          float,
-          orbax.checkpoint.type_handlers.ScalarHandler(
-              metadata_key=tensorstore_metadata_key
-          ),
-          lambda ty: issubclass(ty, float),
-      ),
-      (
-          np.number,
-          orbax.checkpoint.type_handlers.ScalarHandler(
-              metadata_key=tensorstore_metadata_key
-          ),
-          lambda ty: issubclass(ty, np.number),
-      ),
-      (
-          np.ndarray,
-          orbax.checkpoint.type_handlers.NumpyHandler(
-              metadata_key=tensorstore_metadata_key
-          ),
-          lambda ty: issubclass(ty, np.ndarray),
-      ),
-      (
-          jax.Array,
-          orbax.checkpoint.type_handlers.ArrayHandler(
-              metadata_key=tensorstore_metadata_key
-          ),
-          lambda ty: issubclass(ty, jax.Array),
-      ),
-  ]
-  for tup in types_to_register:
-    orbax.checkpoint.type_handlers.register_type_handler(*tup, override=True)
+  orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
+      metadata_key=tensorstore_metadata_key
+  )
 
 
 def _extract_nested_prefix_names(
