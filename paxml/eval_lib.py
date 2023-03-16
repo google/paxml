@@ -750,37 +750,22 @@ class _PmapEvalRunner:
     self._eval_input_p = eval_input_p
     self._job_log_dir = job_log_dir
     self._jax_task = jax_task
-    eval_programs = [
+    self._eval_programs = [
         programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_p
     ]
     trainer_lib.check_unique_names(
-        [program.eval_input for program in eval_programs]
+        [program.eval_input for program in self._eval_programs]
     )
-    self._eval_programs = eval_programs
-    self._run_pmap(pmap_prng_key)
+
+    num_devices = jax.local_device_count()
+    _, eval_key = jax.random.split(pmap_prng_key)
+    self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
+    logging.info('eval prng_seed: %s', self._eval_prng_seed)
 
   @property
   def eval_programs(self):
     return self._eval_programs
-
-  def _run_pmap(self, prng_key: PRNGKey):
-    """Calls pmap on the eval one step function."""
-    if not self._eval_input_p:
-      return
-
-    num_devices = jax.local_device_count()
-    prng_key, eval_key = jax.random.split(prng_key)
-    self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
-    logging.info('eval prng_seed: %s', self._eval_prng_seed)
-
-    eval_step, is_eval = partitioning.get_step_fn(RunningMode.EVAL)
-    self._pmap_eval_step, _ = self._partitioner.partition(
-        # Note inputs_shape_dtype is not used by pmap.
-        eval_step,
-        self._partitioner.train_inputs_shape_dtype,
-        is_eval,
-    )
 
   def run_one_step(
       self,
