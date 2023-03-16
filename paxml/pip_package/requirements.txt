@@ -75,6 +75,8 @@ clu==0.0.8
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   seqio
+cmake==3.26.0
+    # via triton
 colorama==0.4.6
     # via sacrebleu
 comm==0.1.2
@@ -116,10 +118,12 @@ fastjsonschema==2.16.3
     # via nbformat
 fiddle @ git+https://github.com/google/fiddle
     # via -r praxis-requirements.in
-filelock==3.9.0
+filelock==3.10.0
     # via
     #   huggingface-hub
+    #   torch
     #   transformers
+    #   triton
 flatbuffers==1.12
     # via tensorflow
 flax==0.6.7
@@ -127,8 +131,7 @@ flax==0.6.7
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   clu
-    #   orbax
-fonttools==4.39.0
+fonttools==4.39.2
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
@@ -230,6 +233,7 @@ jinja2==3.1.2
     #   nbclassic
     #   nbconvert
     #   notebook
+    #   torch
 joblib==1.2.0
     # via
     #   nltk
@@ -253,7 +257,7 @@ jupyter-client==8.0.3
     #   qtconsole
 jupyter-console==6.6.3
     # via jupyter
-jupyter-core==5.2.0
+jupyter-core==5.3.0
     # via
     #   ipykernel
     #   jupyter-client
@@ -269,7 +273,7 @@ jupyter-events==0.6.3
     # via jupyter-server
 jupyter-http-over-ws==0.0.8
     # via lingvo
-jupyter-server==2.4.0
+jupyter-server==2.5.0
     # via
     #   nbclassic
     #   notebook-shim
@@ -293,6 +297,8 @@ lingvo==0.12.6
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
+lit==15.0.7
+    # via triton
 lxml==4.9.2
     # via sacrebleu
 markdown==3.4.1
@@ -323,14 +329,16 @@ model-pruning-google-research==0.0.5
 mpmath==1.3.0
     # via sympy
 msgpack==1.0.5
-    # via flax
+    # via
+    #   flax
+    #   orbax
 mypy-extensions==1.0.0
     # via typing-inspect
 nbclassic==0.5.3
     # via notebook
 nbclient==0.7.2
     # via nbconvert
-nbconvert==7.2.9
+nbconvert==7.2.10
     # via
     #   jupyter
     #   jupyter-server
@@ -348,6 +356,8 @@ nest-asyncio==1.5.6
     #   ipykernel
     #   nbclassic
     #   notebook
+networkx==3.0
+    # via torch
 nltk==3.8.1
     # via
     #   rouge-score
@@ -392,12 +402,27 @@ numpy==1.24.2
 nvidia-cublas-cu11==11.10.3.66
     # via
     #   nvidia-cudnn-cu11
+    #   nvidia-cusolver-cu11
     #   torch
+nvidia-cuda-cupti-cu11==11.7.101
+    # via torch
 nvidia-cuda-nvrtc-cu11==11.7.99
     # via torch
 nvidia-cuda-runtime-cu11==11.7.99
     # via torch
 nvidia-cudnn-cu11==8.5.0.96
+    # via torch
+nvidia-cufft-cu11==10.9.0.58
+    # via torch
+nvidia-curand-cu11==10.2.10.91
+    # via torch
+nvidia-cusolver-cu11==11.4.0.1
+    # via torch
+nvidia-cusparse-cu11==11.7.4.91
+    # via torch
+nvidia-nccl-cu11==2.14.3
+    # via torch
+nvidia-nvtx-cu11==11.7.91
     # via torch
 oauthlib==3.2.2
     # via requests-oauthlib
@@ -411,7 +436,7 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.1.3
+orbax==0.1.4
     # via
     #   -r paxml-requirements.in
     #   flax
@@ -461,10 +486,8 @@ prompt-toolkit==3.0.38
     # via
     #   ipython
     #   jupyter-console
-protobuf==3.19.5
+protobuf==3.19.6
     # via
-    #   -r paxml-requirements.in
-    #   -r praxis-requirements.in
     #   googleapis-common-protos
     #   lingvo
     #   tensorboard
@@ -620,7 +643,9 @@ soupsieve==2.4
 stack-data==0.6.2
     # via ipython
 sympy==1.11.1
-    # via lingvo
+    # via
+    #   lingvo
+    #   torch
 t5==0.9.3
     # via -r paxml-requirements.in
 t5x==0.0.0
@@ -645,7 +670,7 @@ tensorflow-datasets==4.8.3
     #   mesh-tensorflow
 tensorflow-estimator==2.9.0
     # via tensorflow
-tensorflow-hub==0.12.0
+tensorflow-hub==0.13.0
     # via
     #   lingvo
     #   tensorflow-text
@@ -678,7 +703,7 @@ terminado==0.17.1
     #   jupyter-server-terminals
     #   nbclassic
     #   notebook
-tfds-nightly==4.8.3.dev202303140044
+tfds-nightly==4.8.3.dev202303160045
     # via
     #   seqio
     #   t5
@@ -694,8 +719,10 @@ toml==0.10.2
     #   tfds-nightly
 toolz==0.12.0
     # via chex
-torch==1.13.1
-    # via t5
+torch==2.0.0
+    # via
+    #   t5
+    #   triton
 tornado==6.2
     # via
     #   ipykernel
@@ -730,8 +757,10 @@ traitlets==5.9.0
     #   nbformat
     #   notebook
     #   qtconsole
-transformers==4.26.1
+transformers==4.27.1
     # via t5
+triton==2.0.0
+    # via torch
 typing-extensions==4.5.0
     # via
     #   chex
@@ -742,6 +771,7 @@ typing-extensions==4.5.0
     #   huggingface-hub
     #   libcst
     #   optax
+    #   orbax
     #   rich
     #   tensorflow
     #   torch
@@ -764,11 +794,15 @@ websocket-client==1.5.1
     # via jupyter-server
 werkzeug==2.2.3
     # via tensorboard
-wheel==0.38.4
+wheel==0.40.0
     # via
     #   astunparse
     #   nvidia-cublas-cu11
+    #   nvidia-cuda-cupti-cu11
     #   nvidia-cuda-runtime-cu11
+    #   nvidia-curand-cu11
+    #   nvidia-cusparse-cu11
+    #   nvidia-nvtx-cu11
     #   tensorboard
 widgetsnbextension==4.0.5
     # via ipywidgets
