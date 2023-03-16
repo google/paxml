@@ -161,12 +161,12 @@ def main(argv) -> None:
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
     for dataset in datasets:
-      params_file.write(dataset.to_text())
+      params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
     params_file.write('============= Decoder datasets.\n\n')
     for dataset in dec_datasets:
-      params_file.write(dataset.to_text())
+      params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
     params_file.write(task_p.to_text())
