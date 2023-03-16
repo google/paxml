@@ -1181,6 +1181,7 @@ class SeqIOInput(base_input.BaseInput):
             example.get('targets_pretokenized', 'None'),
             example.get('is_correct', 'N/A'), target_post, score)
         verbose_entries_idx += 1
+      ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
       ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
 
     return scores_list, targets_list
