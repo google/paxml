@@ -268,16 +268,20 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self,
-               job_log_dir: epath.Path,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType,
-               enable_checkpoint_saving: bool = True):
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+      checkpoint_type: CheckpointType,
+      enable_checkpoint_saving: bool = True,
+      enforce_restore_shape_check: bool = False,
+  ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
+    self._enforce_restore_shape_check = enforce_restore_shape_check
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -289,7 +293,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     return tasks_lib.restore_pmap_from_tensorstore(
         train_state_global_shapes,
         self.checkpoint_dir,
-        checkpoint_type=self._checkpoint_type)
+        checkpoint_type=self._checkpoint_type,
+        enforce_restore_shape_check=self._enforce_restore_shape_check,
+    )
 
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
   def get_model_states(
@@ -384,6 +390,7 @@ def _create_checkpointer(
     todelete_subdir: Optional[str],
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
     enable_checkpoint_saving: bool = True,
+    enforce_restore_shape_check: bool = False,
 ) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
@@ -404,7 +411,10 @@ def _create_checkpointer(
   if checkpointer is None:
     if checkpoint_type == CheckpointType.GDA:
       checkpointer = Checkpointer(
-          PaxCheckpointHandler())
+          PaxCheckpointHandler(
+              enforce_restore_shape_check=enforce_restore_shape_check
+          )
+      )
     elif checkpoint_type == CheckpointType.PERSISTENCE:
       raise ValueError('Checkpointer must already be initialized.')
     else:
@@ -426,7 +436,9 @@ def _create_checkpointer(
         job_log_dir,
         checkpoint_manager,
         checkpoint_type,
-        enable_checkpoint_saving=enable_checkpoint_saving)
+        enable_checkpoint_saving=enable_checkpoint_saving,
+        enforce_restore_shape_check=enforce_restore_shape_check,
+    )
 
   return checkpointer
 
@@ -481,7 +493,9 @@ def train_and_evaluate(
     run_decode: bool = False,
     enable_auto_sharding: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
-    enable_checkpoint_saving: bool = True) -> None:
+    enable_checkpoint_saving: bool = True,
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """The shared path to run the training and evaluation loop.
 
   Args:
@@ -507,6 +521,8 @@ def train_and_evaluate(
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -566,7 +582,9 @@ def train_and_evaluate(
       checkpoint_type,
       checkpoint_todelete_subdir,
       async_checkpointer=async_checkpointer,
-      enable_checkpoint_saving=enable_checkpoint_saving)
+      enable_checkpoint_saving=enable_checkpoint_saving,
+      enforce_restore_shape_check=enforce_restore_shape_check,
+  )
   if not enable_checkpoint_saving:
     logging.info(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')

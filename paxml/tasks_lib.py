@@ -493,6 +493,7 @@ def restore_pmap_from_tensorstore(
     step=None,
     global_mesh=None,
     checkpoint_type=CheckpointType.GDA,
+    enforce_restore_shape_check: bool = False,
 ):
   """Restores pmap checkpoints from tensorstore.
 
@@ -510,6 +511,8 @@ def restore_pmap_from_tensorstore(
       return a regular `DeviceArray` or `ShardedDeviceArray` to be used with
       pmap.
     checkpoint_type: The type of checkpoint to use.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
 
   Returns:
     Restored model states of type `DeviceArray`, `GlobalDeviceArray` or
@@ -536,7 +539,9 @@ def restore_pmap_from_tensorstore(
         global_mesh=restore_global_mesh,
         checkpoint_type=checkpoint_type,
         state_specs=fully_replicated_state_specs,
-        step=step)
+        step=step,
+        enforce_restore_shape_check=enforce_restore_shape_check,
+    )
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.PERSISTENCE:

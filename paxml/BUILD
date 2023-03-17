@@ -140,6 +140,7 @@ pytype_strict_library(
         ":base_task",
         ":checkpoint_version",
         ":train_states",
+        # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit flax.core dependency.

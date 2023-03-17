@@ -130,6 +130,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       restore_checkpoint_dir: epath.Path,
       restore_checkpoint_step: int,
       partitioner: partitioning.Partitioner,
+      enforce_restore_shape_check: bool = False,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -138,6 +139,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.restore_checkpoint_dir: epath.Path = restore_checkpoint_dir
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
+    self._enforce_restore_shape_check = enforce_restore_shape_check
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -173,6 +175,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         checkpoint_type=self.checkpoint_type,
         state_specs=train_state_metadata.partition_specs,
         step=step,
+        enforce_restore_shape_check=self._enforce_restore_shape_check,
     )
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}')
@@ -284,6 +287,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       restore_checkpoint_step: int,
       partitioner: partitioning.Partitioner,
       mode: EvaluationMode,
+      enforce_restore_shape_check: bool = False,
   ):
     super().__init__(
         jax_task,
@@ -292,6 +296,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         restore_checkpoint_dir,
         restore_checkpoint_step,
         partitioner,
+        enforce_restore_shape_check=enforce_restore_shape_check,
     )
     self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
         jax_task.hparams.track_decoder_metric
@@ -305,13 +310,17 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           step=step,
-          checkpoint_type=self.checkpoint_type)
+          checkpoint_type=self.checkpoint_type,
+          enforce_restore_shape_check=self._enforce_restore_shape_check,
+      )
     else:
       model_states = checkpoints.restore_checkpoint(
           train_state_global_shapes,
           self.restore_checkpoint_dir,
           checkpoint_type=self.checkpoint_type,
-          step=step)
+          step=step,
+          enforce_restore_shape_check=self._enforce_restore_shape_check,
+      )
     if model_states:
       if self.use_ema:
         model_states = tasks_lib.extract_ema(model_states)
@@ -371,6 +380,7 @@ def _create_checkpointer(
     restore_checkpoint_dir: Optional[epath.PathLike],
     restore_checkpoint_step: Optional[int],
     partitioner: partitioning.Partitioner,
+    enforce_restore_shape_check: bool = False,
 ) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
@@ -398,6 +408,7 @@ def _create_checkpointer(
       restore_checkpoint_dir,
       restore_checkpoint_step,
       partitioner,
+      enforce_restore_shape_check=enforce_restore_shape_check,
       **extra_kwargs,
   )
 
@@ -445,13 +456,16 @@ def run_eval_loop_over_test_splits(
   return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 
 
-def evaluate(experiment_config: base_experiment.BaseExperiment,
-             job_log_dir: epath.Path,
-             maybe_use_persistence_checkpointing: bool,
-             restore_checkpoint_dir: Optional[epath.Path] = None,
-             restore_checkpoint_step: Optional[int] = None,
-             early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-             enable_auto_sharding: bool = False) -> None:
+def evaluate(
+    experiment_config: base_experiment.BaseExperiment,
+    job_log_dir: epath.Path,
+    maybe_use_persistence_checkpointing: bool,
+    restore_checkpoint_dir: Optional[epath.Path] = None,
+    restore_checkpoint_step: Optional[int] = None,
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    enable_auto_sharding: bool = False,
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """Runs the evaluation loop on the entire eval data set.
 
   Args:
@@ -469,6 +483,8 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       should_stop_early.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
   """
   jax.monitoring.record_event('/jax/pax/evaluate/beacon')
   eval_input_p = [v for v in experiment_config.datasets() if not v.is_training]
@@ -514,6 +530,7 @@ def evaluate(experiment_config: base_experiment.BaseExperiment,
       restore_checkpoint_dir=restore_checkpoint_dir,
       restore_checkpoint_step=restore_checkpoint_step,
       partitioner=partitioner,
+      enforce_restore_shape_check=enforce_restore_shape_check,
   )
 
   if task_p.model.mesh_shape is not None:
@@ -852,17 +869,20 @@ def evaluate_spmd_model(
   )
 
 
-def decode(experiment_config: base_experiment.BaseExperiment,
-           job_log_dir: epath.PathLike,
-           maybe_use_persistence_checkpointing: bool,
-           restore_checkpoint_dir: Optional[epath.PathLike],
-           restore_checkpoint_step: Optional[int],
-           continuous_decode: bool,
-           run_eval: Optional[bool] = False,
-           early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-           enable_auto_sharding: bool = False,
-           enable_checkpoint_saving: bool = True,
-           output_pickle: bool = True) -> None:
+def decode(
+    experiment_config: base_experiment.BaseExperiment,
+    job_log_dir: epath.PathLike,
+    maybe_use_persistence_checkpointing: bool,
+    restore_checkpoint_dir: Optional[epath.PathLike],
+    restore_checkpoint_step: Optional[int],
+    continuous_decode: bool,
+    run_eval: Optional[bool] = False,
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    enable_auto_sharding: bool = False,
+    enable_checkpoint_saving: bool = True,
+    output_pickle: bool = True,
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """Runs decoding on the decoder datasets.
 
   Args:
@@ -885,6 +905,8 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       shardings.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
   """
   jax.monitoring.record_event('/jax/pax/decode/beacon')
   job_log_dir = epath.Path(job_log_dir)
@@ -949,6 +971,7 @@ def decode(experiment_config: base_experiment.BaseExperiment,
       restore_checkpoint_dir,
       restore_checkpoint_step,
       partitioner=partitioner,
+      enforce_restore_shape_check=enforce_restore_shape_check,
   )
 
   if continuous_decode:
@@ -2006,14 +2029,19 @@ def _find_and_maybe_update_tracked_metric(
                  input_names[split])
 
 
-def infer_and_write(experiment_config: base_experiment.BaseExperiment,
-                    job_log_dir: epath.Path) -> None:
+def infer_and_write(
+    experiment_config: base_experiment.BaseExperiment,
+    job_log_dir: epath.Path,
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """Generates output from a model and writes it out.
 
   Args:
     experiment_config: an instance of BaseExperiment for the experiment with
       output generators configured.
     job_log_dir: The base directory for writing the outputs.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
   """
   jax.monitoring.record_event('/jax/pax/infer_and_write/beacon')
   task_p = experiment_config.task()
@@ -2051,6 +2079,7 @@ def infer_and_write(experiment_config: base_experiment.BaseExperiment,
       restore_checkpoint_dir=task_p.infer_writer.restore_checkpoint_dir,
       restore_checkpoint_step=task_p.infer_writer.restore_checkpoint_step,
       partitioner=partitioner,
+      enforce_restore_shape_check=enforce_restore_shape_check,
   )
   for inp in inputs_p:
     if inp.num_infeed_hosts == 0:
