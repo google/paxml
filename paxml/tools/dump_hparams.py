@@ -46,7 +46,9 @@ import tensorflow.compat.v2 as tf
 
 
 flags.DEFINE_string('exp', None, 'A registered experiment name.')
+flags.mark_flag_as_required('exp')
 flags.DEFINE_string('params_ofile', None, 'Dump pre-init params to this file.')
+flags.mark_flag_as_required('params_ofile')
 flags.DEFINE_string('post_init_params_ofile', None,
                     'If not None, Dump post-init params to this file.')
 
