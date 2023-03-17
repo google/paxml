@@ -549,7 +549,6 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
     task_p = super().task()
-    task_p.train.learner.repeat_prefix_sep = '_'
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
     model_p.decoder_tpl.eos_id = GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
     model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
@@ -919,12 +918,6 @@ class C4Spmd2BAdam4Replicas(C4SpmdAdam):
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 4, 1]
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
-    """Returns the task parameters."""
-    task_p = super().task()
-    task_p.train.learner.repeat_prefix_sep = '_'
-    return task_p
-
 
 @experiment_registry.register
 class C4Spmd16BAdam32Replicas(C4SpmdAdam):
@@ -947,12 +940,6 @@ class C4Spmd16BAdam32Replicas(C4SpmdAdam):
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 16, 2]
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
-    """Returns the task parameters."""
-    task_p = super().task()
-    task_p.train.learner.repeat_prefix_sep = '_'
-    return task_p
-
 
 @experiment_registry.register
 class C4Spmd32BAdam64Replicas(C4SpmdAdam):
@@ -974,12 +961,6 @@ class C4Spmd32BAdam64Replicas(C4SpmdAdam):
   SUMMARY_INTERVAL_STEPS = 10
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 16, 4]
-
-  def task(self) -> tasks_lib.SingleTask.HParams:
-    """Returns the task parameters."""
-    task_p = super().task()
-    task_p.train.learner.repeat_prefix_sep = '_'
-    return task_p
 
 
 @experiment_registry.register
