@@ -166,7 +166,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
-  ) -> train_states.TrainState:
+  ) -> TrainState:
     raise NotImplementedError
 
 
@@ -174,7 +174,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
   def _restore(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
-  ) -> Optional[train_states.TrainState]:
+  ) -> Optional[TrainState]:
     partitioned_train_state = checkpoints.restore_checkpoint(
         train_state_metadata.padded_global_shapes,
         self.restore_checkpoint_dir,
@@ -193,7 +193,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
-  ) -> train_states.TrainState:
+  ) -> TrainState:
     partitioned_train_state = self._restore(step, train_state_metadata)
     assert partitioned_train_state
     return partitioned_train_state
@@ -204,7 +204,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
       is_decode: bool = False,
       decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
   ) -> Tuple[
-      train_states.TrainState,
+      TrainState,
       trainer_lib.TrainStateMetadata,
       Optional[partitioning.Partitioner.PartitionedStepFn],
       Optional[NestedPartitionSpec],
@@ -311,8 +311,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     )
 
   def _restore(
-      self, step: int, train_state_global_shapes: train_states.TrainState
-  ) -> Optional[train_states.TrainState]:
+      self, step: int, train_state_global_shapes: TrainState
+  ) -> Optional[TrainState]:
     if py_utils.pmap_use_tensorstore():
       model_states = tasks_lib.restore_pmap_from_tensorstore(
           train_state_global_shapes,
@@ -338,7 +338,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
-  ) -> train_states.TrainState:
+  ) -> TrainState:
     model_states = self._restore(
         step, train_state_metadata.unpadded_global_shapes
     )
@@ -349,7 +349,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       prng_key: PRNGKey,
-  ) -> Tuple[train_states.TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
+  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
@@ -429,7 +429,7 @@ def _create_checkpointer(
 
 def run_eval_loop_over_test_splits(
     test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
-    eval_partitioned_train_state: train_states.TrainState,
+    eval_partitioned_train_state: TrainState,
     eval_prng_seed: jax.random.KeyArray,
     summary_writers: List[SummaryWriter],
     step: int,
@@ -609,7 +609,7 @@ class _PmapEvalRunner:
 
   def run_one_step(
       self,
-      replicated_model_states: train_states.TrainState,
+      replicated_model_states: TrainState,
       eval_summary_writers: List[SummaryWriter],
   ) -> Tuple[
       List[Optional[Dict[str, float]]],  # eval metrics list.
@@ -763,7 +763,7 @@ class _SpmdEvalRunner:
 
   def run_one_step(
       self,
-      partitioned_train_state: train_states.TrainState,
+      partitioned_train_state: TrainState,
       eval_summary_writers: List[SummaryWriter],
       eval_key: PRNGKey,
   ) -> Tuple[
@@ -1159,9 +1159,7 @@ def partition_decode_once_pmap_model(
     job_log_dir: epath.Path,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
-) -> Callable[
-    [train_states.TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics
-]:
+) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
   def decode_once_fn(partitioned_train_state, summary_writers):
     with py_utils.timeit() as decode_period:
       (
@@ -1204,7 +1202,7 @@ def decode_once_pmap_model(
     input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
     job_log_dir: epath.Path,
-    replicated_model_states: train_states.TrainState,
+    replicated_model_states: TrainState,
     summary_writers: List[SummaryWriter],
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
@@ -1633,9 +1631,7 @@ def partition_decode_once_spmd_model(
         Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
     inputs_partition_spec: NestedPartitionSpec,
-) -> Callable[
-    [train_states.TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics
-]:
+) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
   """Returns a function that runs decode over all decoder datasets."""
 
   def decode_once_fn(partitioned_train_state, summary_writers):
@@ -1682,7 +1678,7 @@ def decode_once_spmd_model(
     inputs: List[base_input.BaseInput],
     input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
-    train_state: train_states.TrainState,
+    train_state: TrainState,
     summary_writers: List[SummaryWriter],
     prng_key: JTensor,
     decode_step_fn: Callable[
@@ -1954,7 +1950,7 @@ def _common_eval_or_decode_loop(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
-    partitioned_train_state: train_states.TrainState,
+    partitioned_train_state: TrainState,
     train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
@@ -2049,7 +2045,7 @@ def _maybe_update_tracked_metric(
     tracked_metric: str,
     min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
     data_partition_name: str,
-    replicated_model_states: train_states.TrainState,
+    replicated_model_states: TrainState,
     enable_checkpoint_saving: bool = True,
 ) -> None:
   """Updates tracked metric if new value (m_value) is lower that the stored one.
@@ -2114,7 +2110,7 @@ def _find_and_maybe_update_tracked_metric(
     dirnames: Sequence[epath.Path],
     step_i: int,
     input_names: Sequence[str],
-    replicated_model_states: train_states.TrainState,
+    replicated_model_states: TrainState,
     task_p: tasks_lib.SingleTask.HParams,
     decode_metrics_list: List[Dict[str, float]],
     enable_checkpoint_saving: bool = True,
