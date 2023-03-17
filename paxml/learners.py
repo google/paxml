@@ -77,7 +77,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       otherwise it must be set. This loss_name must be in the metrics dict (the
       first return of compute_loss).
     stochastic_gradient: Params for the stochastic gradient function.
-    optimizer: Params for the optimizer.
+    optimizer: The optimizer.
     skip_zero_gradients: If set, skips aggregating zero gradients while
       computing gradients.This helps in case where some weights may not be used
       in forward computation, e.g., sparsely activated networks or switchable
@@ -117,7 +117,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   stochastic_gradient: Optional[
       pax_fiddle.Config[sgf.BaseStochasticGradient]
   ] = None
-  optimizer: Optional[pax_fiddle.Config[optimizers.BaseOptimizer]] = None
+  optimizer: Optional[optimizers.BaseOptimizer] = None
   skip_zero_gradients: Optional[bool] = None
   grad_norm_summary: bool = True
   grad_norm_individual_vars: bool = False
@@ -133,7 +133,6 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       pax_fiddle.instance_field(default_factory=list)
   )
   repeat_prefix_sep: str = '#'
-  _optimizer_inst: Any = dataclasses.field(init=False, repr=False)
   _stochastic_gradient_inst: Any = dataclasses.field(init=False, repr=False)
   _get_grad_tx: Any = dataclasses.field(init=False, repr=False)
 
@@ -146,18 +145,12 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     p = self._hparams
     asserts.not_none(p.optimizer)
-    self._optimizer_inst = instantiate(p.optimizer)
     self._stochastic_gradient_inst = (
         None
         if p.stochastic_gradient is None
         else instantiate(p.stochastic_gradient)
     )
-    self._get_grad_tx = self.optimizer_inst.get_grad_transformation
-
-  @property
-  def optimizer_inst(self) -> optimizers.BaseOptimizer:
-    """Returns the Optimizer object of this learner."""
-    return self._optimizer_inst
+    self._get_grad_tx = self.optimizer.get_grad_transformation
 
   @property
   def stochastic_gradient_inst(self) -> Optional[sgf.BaseStochasticGradient]:
@@ -165,7 +158,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     return self._stochastic_gradient_inst
 
   def plot_learning_rate(self, step: int) -> None:
-    learning_rate = self.optimizer_inst.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
     base_layer.add_global_summary(
         'lr', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
@@ -455,7 +448,6 @@ class MultiOptimizerLearner(Learner):
   auxiliary_regex: Sequence[str] = ()
   auxiliary_names: Sequence[str] = ()
   apply_separate_scaling: bool = False
-  _optimizer_inst: Any = dataclasses.field(init=False, repr=False)
   _auxiliary_optimizer_insts: Any = dataclasses.field(init=False, repr=False)
   _grad_tx_fn: Any = dataclasses.field(init=False, repr=False)
   _auxiliary_grad_tx_fn: Any = dataclasses.field(init=False, repr=False)
@@ -472,18 +464,17 @@ class MultiOptimizerLearner(Learner):
           f' of the {p.auxiliary_optimizers} and length of the '
           f'{p.auxiliary_names}.'
       )
-    self._optimizer_inst = instantiate(p.optimizer)
     self._auxiliary_optimizer_insts = [
         instantiate(opt) for opt in p.auxiliary_optimizers
     ]
-    self._grad_tx_fn = self._optimizer_inst.get_grad_transformation
+    self._grad_tx_fn = self.optimizer.get_grad_transformation
     self._auxiliary_grad_tx_fn = [
         opt.get_grad_transformation for opt in self._auxiliary_optimizer_insts
     ]
 
   def plot_learning_rate(self, step: int) -> None:
     p = self._hparams
-    learning_rate = self.optimizer_inst.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
     base_layer.add_global_summary(
         'learning/lr_main', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
@@ -566,7 +557,7 @@ class MultiOptimizerLearner(Learner):
     )
 
     # Include ema in the beginning before masking
-    op = self._optimizer_inst.hparams
+    op = self.optimizer.hparams
     if op.ema_decay > 0.0:
       optimizer_chain.insert(
           0, optimizers.apply_ema_weights(decay=op.ema_decay)
