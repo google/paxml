@@ -15,23 +15,33 @@
 
 """The basic program concept that encapsulates a per-step runnable."""
 import abc
+import collections
 import dataclasses
 import time
-from typing import Any, Callable, Dict, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import jax
+from jax.experimental import multihost_utils
 from jax import monitoring
+import numpy as np
 
+from etils import epath
+from absl import flags
 from absl import logging
+from paxml import io_utils
 from paxml import metric_utils
 from paxml import partitioning
 from paxml import tasks_lib
 from paxml import trainer_lib
 from paxml import train_states
+from paxml import seqio_input
+from paxml import summary_utils
 from praxis import base_hyperparams
 from praxis import base_input
+from praxis import base_layer
 from praxis import pytypes
 from praxis import py_utils
+import tensorflow.compat.v2 as tf
 
 from paxml import profiling  # mapped to internal
 
@@ -42,6 +52,7 @@ NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 PRNGKey = pytypes.PRNGKey
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
+EvaluationMode = io_utils.EvaluationMode
 
 NestedMap = py_utils.NestedMap
 TrainState = train_states.TrainState
@@ -76,21 +87,21 @@ class ProgramOutput:
   aux: NestedMap
 
 
-class Program(Protocol):
+class Program(metaclass=abc.ABCMeta):
   """The basic interface for a program."""
 
   # TODO(laigd): add a unified setup() method here.
 
+  @abc.abstractmethod
   def should_run(self, state: TrainState, train_step: int) -> bool:
-    """Whether the .run() should be called at `state` and `train_step`."""
-    ...
+    """Whether .run() should be called at `state` and `train_step`."""
 
+  @abc.abstractmethod
   def run(self, state: TrainState, train_step: int) -> ProgramOutput:
     """Returns the program on given state and train step."""
-    ...
 
 
-class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
+class BaseTrainProgram(Program):
   """A lean interface of a basic train program.
 
   Users should inherit from BaseTrainProgram and implement methods required to
@@ -449,8 +460,65 @@ class SingleTaskTrainProgram(BaseTrainProgram):
     return input_partition_spec
 
 
-class SingleTaskEvalProgram(Program):
-  """Eval program that assumes a single task on a single dataset."""
+def can_load_written_outputs(
+    basedir: epath.Path, pname: str, mode: EvaluationMode, step: int
+) -> bool:
+  """Returns whether we can load the eval/decoder outputs already."""
+  success = np.array([0], dtype=np.int32)
+  if jax.process_index() == 0:
+    try:
+      outputs = io_utils.load_outputs(basedir, pname, mode.value, step)
+      success[0] = len(outputs)
+    except Exception:  # pylint: disable=broad-except
+      pass
+  out = multihost_utils.broadcast_one_to_all(success)
+  return out[0] > 0
+
+
+def get_filename(
+    step: Union[base_layer.JTensorOrPartitionSpec, int], prefix: str
+) -> str:
+  """Returns a filename for the given step."""
+  step_num = py_utils.maybe_unreplicate_for_fully_replicated(step)
+  return f'{prefix}_out_{step_num}_shard_{jax.process_index()}'
+
+
+def safe_write_key_value_pairs(
+    filename: epath.PathLike,
+    key_value_pairs: Sequence[Tuple[Optional[str], Any]],
+    cast_to_ndarray: bool = True,
+    write_pickle: bool = True,
+) -> None:
+  try:
+    io_utils.write_key_value_pairs(
+        filename, key_value_pairs, cast_to_ndarray, write_pickle
+    )
+  except TypeError:
+    logging.warning('Not serializable.')
+
+
+def _maybe_write_scoring_outputs(
+    output_dir: epath.Path,
+    step: int,
+    scoring_outputs: Sequence[Tuple[str, Any]],
+) -> None:
+  """Writes model scoring outputs to disk from leader process."""
+  if jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries:
+    return
+
+  fq_fname = output_dir / get_filename(step, EvaluationMode.EVAL.value)
+  fq_fname.parent.mkdir(parents=True, exist_ok=True)
+
+  logging.info(
+      'Writing eval outputs to %s with %d entries',
+      fq_fname,
+      len(scoring_outputs),
+  )
+
+  safe_write_key_value_pairs(fq_fname, scoring_outputs)
+
+
+class BaseEvalProgram(Program):
 
   def __init__(
       self,
@@ -466,101 +534,250 @@ class SingleTaskEvalProgram(Program):
     self._eval_input_pipeline = instantiate(
         self._partitioner.preprocess_input_params(self._input_p)
     )
-
-    self._partitioned_step_fn, self._partitioned_input_spec = (
-        self.partition_step()
+    self._name = self.eval_input.name
+    self._eval_unpadded_global_batch_size = (
+        self._eval_input_pipeline.get_global_batch_size(
+            self._eval_input_pipeline.hparams
+        )
     )
-
-  @property
-  def eval_input(self) -> base_input.BaseInput:
-    return self._eval_input_pipeline
-
-  @property
-  def eval_num_steps(self) -> int:
-    return (
+    self._eval_num_steps = (
         -1
         if self._input_p.reset_for_eval
         else self._input_p.eval_loop_num_batches
     )
 
-  def partition_step(self) -> Tuple[Any, Optional[NestedPartitionSpec]]:
-    # A bit of unfortunate conditioning but we have to branch out pmap/pjit
-    # case here -- As Pmap can simply take the train_inputs_shape_dtype from
-    # the partitioner whearas Pjit need to actually look at current eval input
-    # and get shape from there.
-    input_shape_dtype = self._partitioner.train_inputs_shape_dtype
-    if isinstance(
-        self._partitioner,
-        (
-            partitioning.PjitPartitioner,
-            partitioning.AutoShardingPjitPartitioner,
-        ),
-    ):
-      # Instantiate a stanalone pipeline for one-time use to get sample inputs
-      # since the peek_padded() can return None if the pipeline is exhausted.
-      # This can happen when the input_pipeline is used before the partitioned
-      # step function is invoked as we do it lazily.
-      cloned_input_p = self.eval_input.hparams.clone()
-      # Note that the hparams from eval_input is already preprocessed by
-      # partitioner, so we don't need to do another adjustment here.
-      cloned_pipeline: base_input.BaseInput = instantiate(cloned_input_p)
-      input_shape_dtype = jax.tree_map(
-          py_utils.get_global_input_shape_dtype,
-          cloned_pipeline.get_next_padded(),
-      )
-      # delete one-time usages.
-      del cloned_pipeline, cloned_input_p
+    # States to initialize lazily by self.setup()
+    self._job_log_dir = None
+    self._eval_prng_seed = None
+    self._eval_summary_writer = None
 
-    # TODO(laigd): Get rid of inputs_shape_dtype here.
-    return self._partitioner.partition(
-        trainer_lib.eval_step_single_learner,
-        inputs_shape_dtype=input_shape_dtype,
-        is_eval=True,
-    )
+  @property
+  def eval_input(self) -> base_input.BaseInput:
+    return self._eval_input_pipeline
 
-  def run_step(
+  def setup(
       self,
-      state: TrainState,
-      prng_key: jax.random.KeyArray,
-      inputs: Any,
-      unpadded_global_batch_size: int,
-  ) -> ProgramOutput:
-    (
-        loss,
-        weighted_scalars,
-        per_example_out,
-        summary_tensors,
-    ) = self._partitioned_step_fn(
-        state, prng_key, inputs, unpadded_global_batch_size
-    )
-    return ProgramOutput(
-        state,
-        aux=NestedMap(
-            loss=loss,
-            weighted_scalars=weighted_scalars,
-            per_example_out=per_example_out,
-            summary_tensors=summary_tensors,
-        ),
-    )
-
-  @property
-  def partitioner(self):
-    return self._partitioner
-
-  @property
-  def partitioned_step_fn(
-      self,
-  ) -> Callable[[TrainState, PRNGKey, NestedJTensor, int], Any]:
-    return self._partitioned_step_fn
-
-  @property
-  def partitioned_input_spec(self) -> Optional[NestedPartitionSpec]:
-    return self._partitioned_input_spec
-
-  # TODO(laigd): implement these.
+      job_log_dir: epath.Path,
+      eval_prng_seed: pytypes.PRNGKey,
+      eval_summary_writer: Any,
+  ) -> None:
+    self._job_log_dir = job_log_dir
+    self._eval_prng_seed = eval_prng_seed
+    self._eval_summary_writer = eval_summary_writer
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
+    # TODO(laigd): implement and use this.
     raise NotImplementedError()
 
   def run(self, state: TrainState, train_step: int) -> ProgramOutput:
-    raise NotImplementedError()
+    if can_load_written_outputs(
+        self._job_log_dir, self._name, EvaluationMode.EVAL, train_step
+    ):
+      logging.info(
+          'Eval on %s at train step %d already done, skipping.',
+          self._name,
+          train_step,
+      )
+      return ProgramOutput(
+          state,
+          aux=NestedMap(
+              eval_metrics=None, eval_scoring_metrics=None, num_eval_steps=0
+          ),
+      )
+
+    logging.info(
+        'Starting eval %s with num_steps=%d', self._name, self._eval_num_steps
+    )
+    num_steps, loss, summary_tensors, metrics, per_example_scores = (
+        self._run_eval_loop(state)
+    )
+    logging.info('Finished eval on %s', self._name)
+
+    # Flatten scoring outputs to simplify input for metrics eval computation.
+    # Constructs a new flattened array of single example outputs from original
+    # array containing batches of outputs.
+    flat_scoring_outputs = []
+    for batch in per_example_scores:
+      for ex in py_utils.tree_unstack(batch, 0):
+        flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
+    eval_scoring_metrics = None
+    output_dir = (
+        self._job_log_dir / f'{EvaluationMode.EVAL.value}_out' / self._name
+    )
+
+    # TODO(laigd): consider adding a method for this for subclass to overwrite.
+    if seqio_input.should_process_outputs(self.eval_input):
+      eval_scoring_metrics = seqio_input.process_outputs(
+          self.eval_input,
+          flat_scoring_outputs,
+          self._eval_summary_writer,
+          seqio_input.MetricType.SCORE,
+          train_step,
+          output_dir,
+      )
+
+    loss = np.array(loss)
+    for k in summary_tensors:
+      summary_tensors[k] = np.array([np.asarray(t) for t in summary_tensors[k]])
+    loss = np.mean(loss, axis=0)
+    logging.info(
+        'train_step: %d, eval test %s loss: %s', train_step, self._name, loss
+    )
+
+    for key, values in metrics.items():
+      # `metric_utils.as_float` computes the average from a list of weighted
+      # scalars.
+      weighted_average = metric_utils.as_float(values)
+      sum_metric_weights = np.sum(np.stack([v[1] for v in values])).item()
+      logging.info(
+          '  %s=%f (weight=%f)', key, weighted_average, sum_metric_weights
+      )
+    summary_utils.write_summary_entry(
+        self._eval_summary_writer, train_step, loss, metrics, summary_tensors
+    )
+    _maybe_write_scoring_outputs(output_dir, train_step, flat_scoring_outputs)
+
+    return ProgramOutput(
+        state,
+        aux=NestedMap(
+            eval_metrics=metric_utils.as_float_dict(metrics),
+            eval_scoring_metrics=eval_scoring_metrics,
+            num_eval_steps=num_steps,
+        ),
+    )
+
+  def _run_eval_loop(self, state: TrainState):
+    losses = []
+    summary_tensor_dict = {}
+    metrics = collections.defaultdict(list)
+    per_example_scores = []
+
+    step_num = 0
+    # self._eval_num_steps < 0 indicates running until input out of range.
+    while self._eval_num_steps < 0 or step_num < self._eval_num_steps:
+      try:
+        eval_inputs = self.eval_input.get_next_padded()
+      except (tf.errors.OutOfRangeError, StopIteration):
+        if self._eval_num_steps > 0:
+          raise
+        logging.info('Data exhausted (%s) after %d steps', self._name, step_num)
+        self.eval_input.reset()
+        break
+
+      step_num += 1
+      eval_inputs = self._partitioner.preprocess_inputs(
+          self.eval_input, eval_inputs, self.eval_input_partition_spec
+      )
+      loss, weighted_scalars, per_example_out, summary_tensors = self.eval_step(
+          state,
+          self._eval_prng_seed,
+          eval_inputs,
+          self._eval_unpadded_global_batch_size,
+      )
+      logging.info('Finished eval step %d for %s', step_num, self._name)
+      loss, weighted_scalars, per_example_out, summary_tensors = (
+          py_utils.maybe_unreplicate_for_fully_replicated(out)
+          for out in (loss, weighted_scalars, per_example_out, summary_tensors)
+      )
+
+      losses += [loss]
+      for k, v in summary_utils.flatten_summary_dict(summary_tensors):
+        if k in summary_tensor_dict:
+          summary_tensor_dict[k] += [v]
+        else:
+          summary_tensor_dict[k] = [v]
+      for k in weighted_scalars:
+        metrics[k].append(weighted_scalars[k])
+      per_example_scores.append(jax.tree_map(np.asarray, per_example_out))
+
+    return step_num, losses, summary_tensor_dict, metrics, per_example_scores
+
+  @abc.abstractmethod
+  def eval_step(
+      self,
+      state: train_states.TrainState,
+      prng_key: PRNGKey,
+      inputs: NestedJTensor,
+      unpadded_global_batch_size: int,
+  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+    """The eval step function."""
+
+  @property
+  @abc.abstractmethod
+  def eval_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+    """The partition spec for the eval inputs."""
+
+
+class SingleTaskEvalProgram(BaseEvalProgram):
+  """Eval program that assumes a single task on a single dataset."""
+
+  def __init__(
+      self,
+      task: tasks_lib.SingleTask,
+      input_p: base_input.BaseInput.HParams,
+      partitioner: partitioning.Partitioner,
+  ):
+    super().__init__(task, input_p, partitioner)
+
+    # Eval step function information.
+    self._eval_step_created = False
+    self._eval_step_fn = None
+    self._eval_step_input_spec = None
+
+  def _get_eval_step(self) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+    """Creates the eval step info if not done before."""
+    if not self._eval_step_created:
+      # A bit of unfortunate conditioning but we have to branch out pmap/pjit
+      # case here -- As Pmap can simply take the train_inputs_shape_dtype from
+      # the partitioner whearas Pjit need to actually look at current eval input
+      # and get shape from there.
+      input_shape_dtype = self._partitioner.train_inputs_shape_dtype
+      if isinstance(
+          self._partitioner,
+          (
+              partitioning.PjitPartitioner,
+              partitioning.AutoShardingPjitPartitioner,
+          ),
+      ):
+        # Instantiate a stanalone pipeline for one-time use to get sample inputs
+        # since the peek_padded() can return None if the pipeline is exhausted.
+        # This can happen when the input_pipeline is used before the partitioned
+        # step function is invoked as we do it lazily.
+        cloned_input_p = self.eval_input.hparams.clone()
+        # Note that the hparams from eval_input is already preprocessed by
+        # partitioner, so we don't need to do another adjustment here.
+        cloned_pipeline: base_input.BaseInput = instantiate(cloned_input_p)
+        input_shape_dtype = jax.tree_map(
+            py_utils.get_global_input_shape_dtype,
+            cloned_pipeline.get_next_padded(),
+        )
+        # delete one-time usages.
+        del cloned_pipeline, cloned_input_p
+
+      # TODO(laigd): Get rid of inputs_shape_dtype here.
+      self._eval_step_fn, self._eval_step_input_spec = (
+          self._partitioner.partition(
+              trainer_lib.eval_step_single_learner,
+              inputs_shape_dtype=input_shape_dtype,
+              is_eval=True,
+          )
+      )
+      self._eval_step_created = True
+    return self._eval_step_fn, self._eval_step_input_spec
+
+  def eval_step(
+      self,
+      state: train_states.TrainState,
+      prng_key: PRNGKey,
+      inputs: NestedJTensor,
+      unpadded_global_batch_size: int,
+  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+    """The eval step function."""
+    eval_step, _ = self._get_eval_step()
+    return eval_step(state, prng_key, inputs, unpadded_global_batch_size)
+
+  @property
+  def eval_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+    """The partition spec for the eval inputs."""
+    _, input_partition_spec = self._get_eval_step()
+    return input_partition_spec

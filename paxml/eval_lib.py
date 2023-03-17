@@ -86,43 +86,6 @@ def _get_dir_names(
   return [epath.Path(p.name) for p in inputs]
 
 
-def _get_filename(step: Union[base_layer.JTensorOrPartitionSpec, int],
-                  prefix: str) -> str:
-  """Returns a filename for the given step."""
-  step_num = py_utils.maybe_unreplicate_for_fully_replicated(step)
-  return f'{prefix}_out_{step_num}_shard_{jax.process_index()}'
-
-
-def _can_load_written_outputs(basedir: epath.Path, pname: str,
-                              mode: EvaluationMode, step: int) -> bool:
-  """Returns whether we can load the eval/decoder outputs already."""
-  success = np.array([0], dtype=np.int32)
-  if jax.process_index() == 0:
-    try:
-      outputs = io_utils.load_outputs(basedir, pname, mode.value, step)
-      success[0] = len(outputs)
-    except Exception:  # pylint: disable=broad-except
-      pass
-  out = multihost_utils.broadcast_one_to_all(success)
-  return out[0] > 0
-
-
-def _maybe_write_scoring_outputs(
-    output_dir: epath.Path, step: int,
-    scoring_outputs: Sequence[Tuple[str, Any]]) -> None:
-  """Writes model scoring outputs to disk from leader process."""
-  if (jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries):
-    return
-
-  fq_fname = output_dir / _get_filename(step, EvaluationMode.EVAL.value)
-  fq_fname.parent.mkdir(parents=True, exist_ok=True)
-
-  logging.info('Writing eval outputs to %s with %d entries',
-               fq_fname, len(scoring_outputs))
-
-  _safe_write_key_value_pairs(fq_fname, scoring_outputs)
-
-
 def _wait_until_step(checkpointer, start_step):
   """Waits until start_step is reached."""
   if not start_step:
@@ -152,20 +115,6 @@ def _get_train_input_specs(task_p: tasks_lib.SingleTask.HParams,
         'No training input specs available, while enabling '
         '`task_p.train.always_use_train_for_model_init` requires it.')
   return train_input_specs
-
-
-def _safe_write_key_value_pairs(
-    filename: epath.PathLike,
-    key_value_pairs: Sequence[Tuple[Optional[str], Any]],
-    cast_to_ndarray: bool = True,
-    write_pickle: bool = True,
-) -> None:
-  try:
-    io_utils.write_key_value_pairs(
-        filename, key_value_pairs, cast_to_ndarray, write_pickle
-    )
-  except TypeError:
-    logging.warning('Not serializable.')
 
 
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
@@ -484,154 +433,14 @@ def run_eval_loop_over_test_splits(
   eval_metrics_list = []
   eval_scoring_metrics_list = []
   num_eval_steps = []
-  for split, eval_program in enumerate(test_eval_programs):
-    if _can_load_written_outputs(
-        job_log_dir,
-        eval_program.eval_input.name,
-        EvaluationMode.EVAL,
-        step,
-    ):
-      logging.info(
-          'Eval on input %s at step %d already done, skipping.',
-          eval_program.eval_input.hparams.name,
-          step,
-      )
-      eval_metrics_list.append(None)
-      eval_scoring_metrics_list.append(None)
-      num_eval_steps.append(0)
-      continue
-
-    logging.info(
-        'Starting eval data split=%d (%s) with num_steps=%d',
-        split,
-        eval_program.eval_input.hparams.name,
-        eval_program.eval_num_steps,
-    )
-    # Reset loss and summary tensors for each test split.
-    loss = []
-    summary_tensors = {}
-    metrics = collections.defaultdict(list)
-    step_num = 0
-    per_example_scores = []
-    # Use num_split_steps < 0 to indicate running all of the input until
-    # out of range.
-    while (
-        eval_program.eval_num_steps < 0
-        or step_num < eval_program.eval_num_steps
-    ):
-      step_num += 1
-      try:
-        eval_inputs = eval_program.eval_input.get_next_padded()
-      except (tf.errors.OutOfRangeError, StopIteration):
-        if eval_program.eval_num_steps > 0:
-          raise
-        logging.info(
-            'Exhausted eval data split=%d after %d steps', split, step_num - 1
-        )
-        eval_program.eval_input.reset()
-        break
-
-      eval_inputs = eval_program.partitioner.preprocess_inputs(
-          eval_program.eval_input,
-          eval_inputs,
-          # Pmap partitioner would have returned None as partitioned_input_spec.
-          eval_program.partitioned_input_spec,
-      )
-
-      eval_program_output = eval_program.run_step(
-          eval_partitioned_train_state,
-          eval_prng_seed,
-          eval_inputs,
-          eval_program.eval_input.get_global_batch_size(
-              eval_program.eval_input.hparams
-          ),
-      )
-      eval_loss = eval_program_output.aux['loss']
-      eval_weighted_scalars = eval_program_output.aux['weighted_scalars']
-      eval_per_example_output = eval_program_output.aux['per_example_out']
-      eval_summary_tensors = eval_program_output.aux['summary_tensors']
-
-      logging.info(
-          'Finished eval step on input batch %d for %s',
-          step_num,
-          eval_program.eval_input.hparams.name,
-      )
-
-      eval_loss = py_utils.maybe_unreplicate_for_fully_replicated(eval_loss)
-      eval_weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-          eval_weighted_scalars
-      )
-      eval_per_example_output = py_utils.maybe_unreplicate_for_fully_replicated(
-          eval_per_example_output
-      )
-      eval_summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-          eval_summary_tensors
-      )
-      per_example_scores.append(
-          jax.tree_map(np.asarray, eval_per_example_output)
-      )
-      loss += [eval_loss]
-      eval_summary_tensors = summary_utils.flatten_summary_dict(
-          eval_summary_tensors
-      )
-      for k, v in eval_summary_tensors:
-        if k in summary_tensors:
-          summary_tensors[k] += [v]
-        else:
-          summary_tensors[k] = [v]
-      for k in eval_weighted_scalars:
-        metrics[k].append(eval_weighted_scalars[k])
-
-    logging.info(
-        'Finished eval on input %s', eval_program.eval_input.hparams.name
-    )
-    # Flatten scoring outputs to simplify input for metrics eval computation.
-    # Constructs a new flattened array of single example outputs from original
-    # array containing batches of outputs.
-    flat_scoring_outputs = []
-    for batch in per_example_scores:
-      for ex in py_utils.tree_unstack(batch, 0):
-        flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
-    eval_scoring_metrics = None
-    output_dir = (
-        job_log_dir
-        / f'{EvaluationMode.EVAL.value}_out'
-        / eval_program.eval_input.hparams.name
-    )
-    if seqio_input.should_process_outputs(eval_program.eval_input):
-      eval_scoring_metrics = seqio_input.process_outputs(
-          eval_program.eval_input,
-          flat_scoring_outputs,
-          summary_writers[split],
-          seqio_input.MetricType.SCORE,
-          step,
-          output_dir,
-      )
-
-    loss = np.array(loss)
-    for k in summary_tensors:
-      summary_tensors[k] = np.array([np.asarray(t) for t in summary_tensors[k]])
-    loss = np.mean(loss, axis=0)
-    logging.info('step_i: %d, eval test split %s loss: %s', step, split, loss)
-    for key, values in metrics.items():
-      # `metric_utils.as_float` computes the average from a list of weighted
-      # scalars.
-      weighted_average = metric_utils.as_float(values)
-      sum_metric_weights = np.sum(np.stack([v[1] for v in values]))
-      logging.info(
-          '  %s=%f (weight=%f)',
-          key,
-          weighted_average,
-          sum_metric_weights.item(),
-      )
-    summary_utils.write_summary_entry(
-        summary_writers[split], step, loss, metrics, summary_tensors
-    )
-    eval_metrics_list.append(metric_utils.as_float_dict(metrics))
-    eval_scoring_metrics_list.append(eval_scoring_metrics)
-    num_eval_steps.append(step_num)
-
-    _maybe_write_scoring_outputs(output_dir, step, flat_scoring_outputs)
+  assert len(summary_writers) == len(test_eval_programs)
+  for writer, eval_program in zip(summary_writers, test_eval_programs):
+    # TODO(laigd): call setup in eval runner.
+    eval_program.setup(job_log_dir, eval_prng_seed, writer)
+    program_out = eval_program.run(eval_partitioned_train_state, step)
+    eval_metrics_list.append(program_out.aux.eval_metrics)
+    eval_scoring_metrics_list.append(program_out.aux.eval_scoring_metrics)
+    num_eval_steps.append(program_out.aux.num_eval_steps)
 
   return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
 
@@ -897,12 +706,13 @@ class _SpmdEvalRunner:
       job_log_dir: epath.Path,
   ):
     self._jax_task = jax_task
-    eval_programs = [
+    self._eval_programs = [
         programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
         for ep in eval_input_ps
     ]
-    trainer_lib.check_unique_names([ep.eval_input for ep in eval_programs])
-    self._eval_programs = eval_programs
+    trainer_lib.check_unique_names(
+        [ep.eval_input for ep in self._eval_programs]
+    )
     self._job_log_dir = job_log_dir
     self._partitioner = partitioner
 
@@ -1454,8 +1264,9 @@ def decode_once_pmap_model(
   ]
   basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
   dirnames = _get_dir_names(inputs)
-  filename = _get_filename(
-      replicated_model_states.step, EvaluationMode.DECODE.value)
+  filename = programs.get_filename(
+      replicated_model_states.step, EvaluationMode.DECODE.value
+  )
   filenames = [basedir / s / filename for s in dirnames]
 
   decode_metrics_list = []
@@ -1465,8 +1276,9 @@ def decode_once_pmap_model(
 
   for split, num_split_steps in enumerate(num_steps_per_input):
     input_name = inputs[split].name
-    if _can_load_written_outputs(job_log_dir, input_name,
-                                 EvaluationMode.DECODE, step_i):
+    if programs.can_load_written_outputs(
+        job_log_dir, input_name, EvaluationMode.DECODE, step_i
+    ):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_name, step_i)
       decode_metrics_list.append(None)
@@ -1576,7 +1388,7 @@ def decode_once_pmap_model(
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
-      _safe_write_key_value_pairs(
+      programs.safe_write_key_value_pairs(
           output_file, processed_decodes, write_pickle=output_pickle
       )
 
@@ -1818,7 +1630,7 @@ def decode_once_spmd_model(
   basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
   dirnames = _get_dir_names(inputs)
   filenames = [
-      basedir / s / _get_filename(step_i, EvaluationMode.DECODE.value)
+      basedir / s / programs.get_filename(step_i, EvaluationMode.DECODE.value)
       for s in dirnames
   ]
 
@@ -1842,8 +1654,9 @@ def decode_once_spmd_model(
 
   for split, num_split_steps in enumerate(num_steps_per_input):
     input_name = inputs[split].name
-    if _can_load_written_outputs(job_log_dir, input_name,
-                                 EvaluationMode.DECODE, step_i):
+    if programs.can_load_written_outputs(
+        job_log_dir, input_name, EvaluationMode.DECODE, step_i
+    ):
       logging.info('Decoding on input %s at step %d already done, skipping.',
                    input_name, step_i)
       decode_metrics_list.append(None)
@@ -1979,7 +1792,7 @@ def decode_once_spmd_model(
       output_file = filenames[split]
       logging.info('Writing decoder output to %s with %d entries', output_file,
                    len(processed_decodes))
-      _safe_write_key_value_pairs(output_file, processed_decodes)
+      programs.safe_write_key_value_pairs(output_file, processed_decodes)
 
     work_unit.set_task_status(f'Finished processing decoded input batch for '
                               f'{input_name}')

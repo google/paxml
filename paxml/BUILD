@@ -509,18 +509,26 @@ pytype_strict_library(
     srcs = ["programs.py"],
     srcs_version = "PY3",
     deps = [
+        ":io_utils",
         ":metric_utils",
         ":partitioning",
+        ":seqio_input",
+        ":summary_utils",
         ":tasks_lib",
         ":train_states",
         ":trainer_lib",
+        # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
+        # Implicit numpy dependency.
         "//paxml:profiling",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
+        "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
