@@ -488,6 +488,7 @@ prompt-toolkit==3.0.38
     #   jupyter-console
 protobuf==3.19.6
     # via
+    #   -r paxml-requirements.in
     #   googleapis-common-protos
     #   lingvo
     #   tensorboard
@@ -515,7 +516,7 @@ pyasn1-modules==0.2.8
     # via google-auth
 pycparser==2.21
     # via cffi
-pyglove==0.2.1
+pyglove==0.3.0
     # via
     #   -r paxml-requirements.in
     #   seqio
@@ -703,7 +704,7 @@ terminado==0.17.1
     #   jupyter-server-terminals
     #   nbclassic
     #   notebook
-tfds-nightly==4.8.3.dev202303160045
+tfds-nightly==4.8.3.dev202303170045
     # via
     #   seqio
     #   t5
