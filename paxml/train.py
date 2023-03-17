@@ -1107,7 +1107,7 @@ def _train_and_evaluate_common(
 
       # While the eval ones below are post-model weight updates, hence the step
       # counter is incremented in between.
-      step_i = program_output.aux.new_step_i
+      step_i = program_output.aux.new_train_step
 
       eval_metrics: Optional[tuning_lib.EvalMetrics] = None
       # Run eval at regular step interval.

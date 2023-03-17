@@ -81,12 +81,12 @@ class Program(Protocol):
 
   # TODO(laigd): add a unified setup() method here.
 
-  def should_run(self, state: TrainState, step_i: int) -> bool:
-    """Returns whether the .run() should be called at `state` and `step_i`."""
+  def should_run(self, state: TrainState, train_step: int) -> bool:
+    """Whether the .run() should be called at `state` and `train_step`."""
     ...
 
-  def run(self, state: TrainState, step_i: int) -> ProgramOutput:
-    """Returns the program on given state and step."""
+  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
+    """Returns the program on given state and train step."""
     ...
 
 
@@ -148,12 +148,12 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
     self._train_summary_handler = train_summary_handler
     self._eval_train_summary_handler = eval_summary_handler
 
-  def should_run(self, state: TrainState, step_i: int) -> bool:
-    return step_i < self._task.hparams.train.num_train_steps
+  def should_run(self, state: TrainState, train_step: int) -> bool:
+    return train_step < self._task.hparams.train.num_train_steps
 
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
-  def run(self, state: TrainState, step_i: int) -> ProgramOutput:
+  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
     train_p = self._task.hparams.train
     logging.debug('  Retrieving inputs.')
     model_inputs = self._train_input.get_next_padded()
@@ -166,11 +166,11 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
 
     profiler_capture_step = train_p.profiler_capture_step
     do_profile = profiler_capture_step is not None
-    if do_profile and step_i - self._initial_step == profiler_capture_step:
+    if do_profile and train_step - self._initial_step == profiler_capture_step:
       self._profiler.capture_async()
 
     logging.debug('  Performing train_step().')
-    with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
+    with jax.profiler.StepTraceAnnotation('train', step_num=train_step):
       with py_utils.timeit() as train_period:
         (
             new_state,
@@ -188,15 +188,15 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
-    if step_i == self._initial_step:
+    if train_step == self._initial_step:
       self._first_step_completion_time = time.time()
 
-    if do_profile and step_i - self._initial_step < profiler_capture_step:
+    if do_profile and train_step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
 
-    new_step_i, steps_per_sec = self._maybe_write_summaries(
+    new_train_step, steps_per_sec = self._maybe_write_summaries(
         new_state,
-        step_i,
+        train_step,
         loss,
         weighted_scalars,
         summary_tensors,
@@ -206,20 +206,20 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
 
     # Run eval at regular step interval.
     # While the eval ones below are post-model weight updates, hence we use the
-    # new step counter new_step_i.
+    # new step counter new_train_step.
     eval_train_metrics = None
     if (
         train_p.eval_interval_steps
-        and new_step_i % train_p.eval_interval_steps == 0
+        and new_train_step % train_p.eval_interval_steps == 0
     ):
-      eval_train_metrics = self._maybe_run_eval_train(new_state, new_step_i)
+      eval_train_metrics = self._maybe_run_eval_train(new_state, new_train_step)
 
     return ProgramOutput(
         new_state,
         aux=NestedMap(
             loss=loss,
             weighted_scalars=weighted_scalars,
-            new_step_i=new_step_i,
+            new_train_step=new_train_step,
             steps_per_sec=steps_per_sec,
             eval_train_metrics=eval_train_metrics,
         ),
@@ -253,30 +253,32 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
   def _maybe_write_summaries(
       self,
       new_state: TrainState,
-      step_i: int,
+      train_step: int,
       loss,
       weighted_scalars,
       summary_tensors,
       per_example_out,
   ):
-    new_step_i = step_i + 1
+    new_train_step = train_step + 1
     steps_per_sec = None
 
     train_p = self._task.hparams.train
     if train_p.device_sync_interval_steps:
       should_sync_device = (
-          new_step_i % train_p.device_sync_interval_steps
+          new_train_step % train_p.device_sync_interval_steps
       ) == 0
     else:
-      should_sync_device = self._train_summary_handler.should_write(new_step_i)
+      should_sync_device = self._train_summary_handler.should_write(
+          new_train_step
+      )
     if should_sync_device:
-      new_step_i, steps_per_sec = self._sync_device(new_state, step_i)
+      new_train_step, steps_per_sec = self._sync_device(new_state, train_step)
 
-    # Note: Train metrics are currently reported at step_i + 1, while these
+    # Note: Train metrics are currently reported at train_step + 1, while these
     # training metrics/summaries are pre-model weight updates.
-    # TODO(b/264635784): Update the logic to pass step_i instead.
+    # TODO(b/264635784): Update the logic to pass train_step instead.
     self._train_summary_handler.process(
-        new_step_i,
+        new_train_step,
         loss,
         weighted_scalars,
         summary_tensors,
@@ -285,20 +287,20 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
     )
     logging.debug('  Wrote summaries (attempted).')
 
-    return new_step_i, steps_per_sec
+    return new_train_step, steps_per_sec
 
-  def _sync_device(self, new_state: TrainState, step_i: int):
-    # Synchronize step_i. This is performed at a fixed interval to avoid
+  def _sync_device(self, new_state: TrainState, train_step: int):
+    # Synchronize train_step. This is performed at a fixed interval to avoid
     # a gap between steps.
-    new_step_i = int(
+    new_train_step = int(
         py_utils.maybe_unreplicate_for_fully_replicated(new_state.step)
     )
     steps_per_sec = self._compute_steps_per_sec(
-        step_i, self._train_summary_last_time, self._train_summary_last_step
+        train_step, self._train_summary_last_time, self._train_summary_last_step
     )
     logging.info('steps/sec: %f', steps_per_sec)
     self._train_summary_last_time = time.time()
-    self._train_summary_last_step = step_i
+    self._train_summary_last_step = train_step
 
     if not self._init_duration_set:
       # Find estimated timestamp before the first execution call.
@@ -313,21 +315,21 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
           '/jax/pax/init/time_before_first_step_secs', init_duration
       )
       self._init_duration_set = True
-    return new_step_i, steps_per_sec
+    return new_train_step, steps_per_sec
 
   def _compute_steps_per_sec(
-      self, step_i, summary_last_time, summary_last_step
+      self, train_step, summary_last_time, summary_last_step
   ):
     """Computes the number of training steps per second."""
     # Note: This function doesn't account for the time spent on running
     # interleaved evaluation (if any) and/or evaluation on the training batch.
     # It's, hence, merely a raw underestimate.
     duration_sec = time.time() - summary_last_time
-    num_steps = step_i - summary_last_step
+    num_steps = train_step - summary_last_step
     steps_per_sec = num_steps / duration_sec
     return steps_per_sec
 
-  def _maybe_run_eval_train(self, new_state: TrainState, new_step_i: int):
+  def _maybe_run_eval_train(self, new_state: TrainState, new_train_step: int):
     train_p = self._task.hparams.train
     eval_train_metrics = None
 
@@ -354,7 +356,7 @@ class BaseTrainProgram(Program, metaclass=abc.ABCMeta):
         )
         logging.debug('  Completed eval_step() runs on training split.')
         if self._eval_train_summary_handler.process(
-            new_step_i, loss, weighted_scalars, summary_tensors
+            new_train_step, loss, weighted_scalars, summary_tensors
         ):
           logging.debug('  Wrote eval summaries.')
         eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
@@ -557,8 +559,8 @@ class SingleTaskEvalProgram(Program):
 
   # TODO(laigd): implement these.
 
-  def should_run(self, state: TrainState, step_i: int) -> bool:
+  def should_run(self, state: TrainState, train_step: int) -> bool:
     raise NotImplementedError()
 
-  def run(self, state: TrainState, step_i: int) -> ProgramOutput:
+  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
     raise NotImplementedError()
