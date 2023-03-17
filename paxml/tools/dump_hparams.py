@@ -147,8 +147,6 @@ def main(argv) -> None:
   automl_context = pg.hyper.DynamicEvaluationContext(require_hyper_name=True)
   with automl_context.collect():
     task_p = experiment_config.task()
-    datasets = experiment_config.datasets()
-    dec_datasets = experiment_config.decoder_datasets()
 
   num_cores = _extract_num_cores(task_p.model)
 
@@ -159,6 +157,12 @@ def main(argv) -> None:
       'xla_force_host_platform_device_count' not in flags_str):
     os.environ['XLA_FLAGS'] = (
         flags_str + f'--xla_force_host_platform_device_count={num_cores}')
+
+  # Note datasets and decoder_datasets must be called after setting XLA_FLAGS
+  # because it may run JAX and initialized XLA backend without XLA_FLAGS.
+  with automl_context.collect():
+    datasets = experiment_config.datasets()
+    dec_datasets = experiment_config.decoder_datasets()
 
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
