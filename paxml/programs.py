@@ -141,6 +141,17 @@ class BaseTrainProgram(Program):
     self._train_summary_handler = None
     self._eval_train_summary_handler = None
 
+  # We need access to partitioner/train_input so that we can avoid building
+  # the train program twice in the training pipeline.
+  # TODO(laigd): reconcile this with base partitioner and BaseExecutor.
+  @property
+  def partitioner(self) -> partitioning.Partitioner:
+    return self._partitioner
+
+  @property
+  def train_input(self) -> base_input.BaseInput:
+    return self._train_input
+
   def setup(
       self,
       # TODO(laigd): it should take a root prng key and split it.

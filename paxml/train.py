@@ -722,6 +722,7 @@ def train_and_evaluate_pmap(
     experiment_train_program: An embedded train_program that's constructed in
       experiment. If specified, the program will be used for train steps.
   """
+
   logging.info('Using pmap for data parallelism.')
   (
       task,
@@ -965,18 +966,25 @@ def _create_program_and_states(
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
-  # The partitioner only needs shape/dtype information of the prng key.
-  # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
-  partitioner = partitioning.create_partitioner(
-      jax_task,
-      init_key,
-      reshard_inputs=reshard_inputs,
-      auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
-      job_log_dir=job_log_dir,
-  )
-  train_input_p = partitioner.preprocess_input_params(train_input_p)
-  train_input_pipeline = instantiate(train_input_p)
-  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
+  # Avoid creating the paritioner/input twice if the train program is defined.
+  # TODO(laigd): move this to the BaseExecutor class.
+  if experiment_train_program is not None:
+    partitioner = experiment_train_program.partitioner
+    train_input_pipeline = experiment_train_program.train_input
+  else:
+    # The partitioner only needs shape/dtype information of the prng key.
+    # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key
+    # instead.
+    partitioner = partitioning.create_partitioner(
+        jax_task,
+        init_key,
+        reshard_inputs=reshard_inputs,
+        auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
+        job_log_dir=job_log_dir,
+    )
+    train_input_p = partitioner.preprocess_input_params(train_input_p)
+    train_input_pipeline = instantiate(train_input_p)
+    partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
   train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
