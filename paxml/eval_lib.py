@@ -169,6 +169,13 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   ) -> TrainState:
     raise NotImplementedError
 
+  @abc.abstractmethod
+  def get_model_states(
+      self,
+      prng_key: PRNGKey,
+  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
+    """Restore the train state from checkpoint or initialize it."""
+
 
 class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
@@ -201,21 +208,10 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       init_key: PRNGKey,
-      is_decode: bool = False,
-      decode_input_ps: Optional[Sequence[base_input.BaseInput.HParams]] = None,
-  ) -> Tuple[
-      TrainState,
-      trainer_lib.TrainStateMetadata,
-      Optional[partitioning.Partitioner.PartitionedStepFn],
-      Optional[NestedPartitionSpec],
-  ]:
+  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Gets a partitioned model states and the step function."""
     global_mesh = self._partitioner.global_mesh
-    _, step_key = jax.random.split(init_key)
-    padded_decode_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
-        for input_p in (decode_input_ps or [])
-    ]
+    init_key, step_key = jax.random.split(init_key)
 
     train_state_metadata = self._partitioner.get_train_state_metadata(
         discard_opt_states=not self.use_ema
@@ -223,42 +219,16 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
 
-    step_fn = None
-    inputs_partition_spec = None
-    # Eval has been migrated to use EvalProgram, whereas each program
-    # encapsulates its own step function and input_partition_spec.
-    # TODO(hthu): Migrate decode to use the same concept.
-    if is_decode:
-      step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
-      assert is_eval
-
-      if padded_decode_input_ps:
-        _, inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-            padded_decode_input_ps[0]
-        )
-      else:
-        # This means there is no input to run, and currently this happens only
-        # when user runs decode() with eval input, i.e. `mode` is set to DECODE
-        # above. In that case, the partitioned step_fn won't get used since
-        # there is no decode input, and we simply use the training input shapes
-        # to partition.
-        # TODO(laigd): avoid cases like this.
-        inputs_shape_dtype = self._partitioner.train_inputs_shape_dtype
-      step_fn, inputs_partition_spec = self._partitioner.partition(
-          step_fn, inputs_shape_dtype, is_eval
+    if self.use_ema and not partition_specs.opt_states:
+      # Make sure the opt_states exists before restoring.
+      # This is combined with the decoding test.
+      raise ValueError(
+          "The partition spec doesn't include opt states but ema is enabled."
       )
-    if self.use_ema:
-      # Make sure the opt_states exists before restoring
-      # This is combined with the decoding test
-      if not partition_specs.opt_states:
-        raise ValueError(
-            "The partition spec doesn't include opt states but ema is enabled."
-        )
 
     partitioned_train_state = self._restore(
         self.restore_checkpoint_step, train_state_metadata
     )
-
     if partitioned_train_state is None:
       # If no checkpoint was restored, initialize with random weights.
       _, partitioned_train_state = (
@@ -275,13 +245,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
               discard_opt_states=True,
           )
       )
-
-    return (
-        partitioned_train_state,
-        train_state_metadata,
-        step_fn,
-        inputs_partition_spec,
-    )
+    return partitioned_train_state, train_state_metadata, init_key
 
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
@@ -549,10 +513,8 @@ def evaluate(
 
   if task_p.model.mesh_shape is not None:
     eval_method = evaluate_spmd_model
-    checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
   else:
     eval_method = evaluate_pmap_model
-    checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
   eval_method(
       jax_task,
       prng_key,
@@ -658,7 +620,7 @@ def evaluate_pmap_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
-    checkpointer: _PmapEvalCheckpointer,
+    checkpointer: _EvalCheckpointer,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
@@ -815,7 +777,7 @@ def evaluate_spmd_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
-    checkpointer: _SpmdEvalCheckpointer,
+    checkpointer: _EvalCheckpointer,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
@@ -847,17 +809,9 @@ def evaluate_spmd_model(
   _, eval_key = jax.random.split(prng_key)
   logging.info('eval prng_key: %s', eval_key)
 
-  (
-      partitioned_train_state,
-      train_state_metadata,
-      step_fn,
-      inputs_partition_spec,
-  ) = checkpointer.get_model_states(init_key, is_decode=False)
-  if step_fn or inputs_partition_spec:
-    raise AssertionError(
-        "Eval doesn't construct step_fns anymore during model state"
-        ' initialization time. This should not happen'
-    )
+  partitioned_train_state, train_state_metadata, _ = (
+      checkpointer.get_model_states(init_key)
+  )
   logging.info(
       'partitioned_train_state: %s',
       jax.tree_map(lambda x: x.shape, partitioned_train_state),
@@ -1008,11 +962,9 @@ def decode(
 
   if task_p.model.mesh_shape is not None:
     decode_method = decode_spmd_model
-    checkpointer = typing.cast(_SpmdEvalCheckpointer, checkpointer)
     extra_kwargs = {}
   else:
     decode_method = decode_pmap_model
-    checkpointer = typing.cast(_PmapEvalCheckpointer, checkpointer)
     extra_kwargs = dict(
         output_pickle=output_pickle,
         enable_checkpoint_saving=enable_checkpoint_saving,
@@ -1052,7 +1004,7 @@ def decode_pmap_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
-    checkpointer: _PmapEvalCheckpointer,
+    checkpointer: _EvalCheckpointer,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
@@ -1520,7 +1472,7 @@ def decode_spmd_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
-    checkpointer: _SpmdEvalCheckpointer,
+    checkpointer: _EvalCheckpointer,
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
@@ -1555,7 +1507,6 @@ def decode_spmd_model(
   trainer_lib.check_unique_names(inputs)
 
   # TODO(hthu): Remove eval_input_p as it basically isn't effective.
-  # get_model_states below would always use decode_input when is_decode = True.
   # Either decoder or eval inputs is not empty.
   assert list(input_p) + list(eval_input_p)
 
@@ -1566,15 +1517,29 @@ def decode_spmd_model(
     )
 
   prng_key, init_key = jax.random.split(prng_key, 2)
-  (
-      partitioned_train_state,
-      train_state_metadata,
-      decode_step_fn,
-      inputs_partition_spec,
-  ) = checkpointer.get_model_states(
-      init_key,
-      is_decode=True,
-      decode_input_ps=input_p,
+  partitioned_train_state, train_state_metadata, _ = (
+      checkpointer.get_model_states(init_key)
+  )
+
+  if inputs:
+    # Peek to avoid exhausting the input pipeline.
+    sample_inputs = inputs[0].peek_padded()
+    inputs_shape_dtype = jax.tree_map(
+        py_utils.get_global_input_shape_dtype, sample_inputs
+    )
+  else:
+    # This means there is no input to run, and currently this happens only
+    # when user runs decode() with eval input, i.e. `mode` is set to DECODE
+    # above. In that case, the partitioned decode_step_fn won't get used since
+    # there is no decode input, and we simply use the training input shapes
+    # to partition.
+    # TODO(laigd): avoid cases like this.
+    inputs_shape_dtype = partitioner.train_inputs_shape_dtype
+
+  decode_step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
+  assert is_eval
+  decode_step_fn, inputs_partition_spec = partitioner.partition(
+      decode_step_fn, inputs_shape_dtype, is_eval
   )
   decode_once_fn = partition_decode_once_spmd_model(
       jax_task,
