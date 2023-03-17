@@ -1627,7 +1627,7 @@ def partition_decode_once_spmd_model(
     job_log_dir: epath.Path,
     prng_key: JTensor,
     decode_step_fn: Callable[
-        [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
+        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
         Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
     inputs_partition_spec: NestedPartitionSpec,
@@ -1682,7 +1682,7 @@ def decode_once_spmd_model(
     summary_writers: List[SummaryWriter],
     prng_key: JTensor,
     decode_step_fn: Callable[
-        [NestedJTensor, JTensor, NestedJTensor, Optional[int]],
+        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
         Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
     inputs_partition_spec: NestedPartitionSpec,
