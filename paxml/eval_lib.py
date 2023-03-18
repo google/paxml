@@ -273,6 +273,10 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
         jax_task.hparams.track_decoder_metric
     )
+    if py_utils.pmap_use_tensorstore() and self.track_metric:
+      raise ValueError(
+          '`track_decoder_metric` is currently unsupported with TensorStore '
+          'checkpoints.')
 
   def _restore(
       self, step: int, train_state_global_shapes: TrainState
