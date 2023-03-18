@@ -45,7 +45,6 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
-from statistics import mean
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -1120,8 +1119,8 @@ def _train_and_evaluate_common(
             'num_train_step (`%d`).', step_i, train_p.num_train_steps)
         break
 
-      loss_tracker = []
-      for ga_step in range(num_sub_batches):
+      summed_loss = jnp.zeros((), dtype=jnp.float32)
+      for grad_accum_step in range(num_sub_batches):
 
         # Get new model inputs
         logging.debug('  Retrieving inputs.')
@@ -1151,7 +1150,7 @@ def _train_and_evaluate_common(
             # TODO(hthu): Pass program output around instead of unpacking.
             partitioned_train_state = program_output.state
             loss = program_output.aux['loss']
-            loss_tracker.append(loss.item())
+            summed_loss += loss
             weighted_scalars = program_output.aux['weighted_scalars']
             per_example_out = program_output.aux['per_example_out']
             summary_tensors = program_output.aux['summary_tensors']
@@ -1159,8 +1158,7 @@ def _train_and_evaluate_common(
           '  Completed train_step() in %f seconds.', train_period.elapsed
       )
 
-      loss = mean(loss_tracker)
-      loss_tracker.clear()
+      loss = summed_loss / num_sub_batches
 
       if step_i == initial_step:
         first_step_completion_time = time.time()
