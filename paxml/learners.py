@@ -205,19 +205,6 @@ class Learner(base_hyperparams.BaseParameterizable):
 
       jax.tree_map(add_grad_norm_summary, var_keys, grad_norms)
 
-  def keep_step(
-      self,
-      grad_norm):
-    p = self._hparams
-    keep_threshold = p.skip_step_gradient_norm_value
-    if keep_threshold:
-      return jnp.logical_and(
-          jnp.all(jnp.isfinite(grad_norm)),
-          jnp.all(jnp.less(grad_norm, keep_threshold)),
-          )
-    else:
-      return jnp.all(jnp.isfinite(grad_norm))
-
   def scale_gradients(
       self,
       raw_grads: NestedMap,
@@ -316,8 +303,14 @@ class Learner(base_hyperparams.BaseParameterizable):
       optimizer_name = ''
     else:
       optimizer_name = optimizer_name + '/'
-    self.get_individual_grad_norms(raw_grads,
-                              optimizer_name)
+    self.get_individual_grad_norms(raw_grads, optimizer_name)
+
+    if clip_gradient_norm_to_value is None:
+      clip_gradient_norm_to_value = p.optimizer.clip_gradient_norm_to_value
+    if clip_gradient_single_norm_to_value is None:
+      clip_gradient_single_norm_to_value = (
+          p.optimizer.clip_gradient_single_norm_to_value
+      )
 
     if (
         p.grad_norm_summary
@@ -335,10 +328,20 @@ class Learner(base_hyperparams.BaseParameterizable):
     else:
       raw_grad_norm = None
 
+    def keep_step(grad_norm):
+      keep_threshold = p.skip_step_gradient_norm_value
+      if keep_threshold:
+        return jnp.logical_and(
+            jnp.all(jnp.isfinite(grad_norm)),
+            jnp.all(jnp.less(grad_norm, keep_threshold)),
+        )
+      else:
+        return jnp.all(jnp.isfinite(grad_norm))
+
     if p.check_valid_step:
       # Mark the step as invalid if any gradient anomaly is detected (e.g. Nan
       # or Inf, or excessively big gradient norm).
-      valid_step = self.keep_step(raw_grad_norm)
+      valid_step = keep_step(raw_grad_norm)
       base_layer.add_global_summary(
           'learning/' + optimizer_name + 'is_valid_step',
           valid_step.astype(jnp.float32),
@@ -371,11 +374,11 @@ class Learner(base_hyperparams.BaseParameterizable):
 
     grad_norm, valid_step = self.get_grad_norm_valid_step(grads)
 
-    using_ga = hasattr(p.optimizer, 'num_sub_batches')
+    using_grad_accum = hasattr(p.optimizer, 'num_sub_batches')
 
     # When using gradient accumulation, gradient scaling happens within base
     # optimizer update
-    if not using_ga:
+    if not using_grad_accum:
       grads = self.scale_gradients(grads, grad_norm)
 
     transformed_grad, new_states = self.get_grad_tx(var_weight_hparams).update(
@@ -631,15 +634,15 @@ class MultiOptimizerLearner(Learner):
   ) -> Tuple[NestedMap, JTensor]:
     optimizer_mask, default_mask = self.get_masks(var_weight_hparams)
 
-    raw_grads = jax.tree_map(lambda x, y: x * y, raw_grads, default_mask)
+    grads_after_default_mask = jax.tree_map(lambda x, y: x * y, raw_grads, default_mask)
 
     grad_norm, all_valid_step = self.get_grad_norm_valid_step(
-        raw_grads,
+        grads_after_default_mask,
         optimizer_name='main',
     )
 
     all_grads = self.scale_gradients(
-        raw_grads,
+        grads_after_default_mask,
         grad_norm,
         optimizer_name='main',
     )
@@ -651,12 +654,14 @@ class MultiOptimizerLearner(Learner):
     ):
       assert optimizer.clip_gradient_norm_to_value is not None
       assert optimizer.clip_gradient_single_norm_to_value is not None
+
+      grads_after_mask = jax.tree_map(lambda x, y: x * y, raw_grads, mask)
       grad_norm, valid_step = self.get_grad_norm_valid_step(
-        raw_grads,
+        grads_after_mask,
         optimizer_name=name,
       )
       grads = self.scale_gradients(
-          jax.tree_map(lambda x, y: x * y, raw_grads, mask),
+          grads_after_mask,
           grad_norm,
           optimizer_name=name,
           clip_gradient_norm_to_value=optimizer.clip_gradient_norm_to_value,
