@@ -46,7 +46,9 @@ import tensorflow.compat.v2 as tf
 
 
 flags.DEFINE_string('exp', None, 'A registered experiment name.')
+flags.mark_flag_as_required('exp')
 flags.DEFINE_string('params_ofile', None, 'Dump pre-init params to this file.')
+flags.mark_flag_as_required('params_ofile')
 flags.DEFINE_string('post_init_params_ofile', None,
                     'If not None, Dump post-init params to this file.')
 
@@ -145,8 +147,6 @@ def main(argv) -> None:
   automl_context = pg.hyper.DynamicEvaluationContext(require_hyper_name=True)
   with automl_context.collect():
     task_p = experiment_config.task()
-    datasets = experiment_config.datasets()
-    dec_datasets = experiment_config.decoder_datasets()
 
   num_cores = _extract_num_cores(task_p.model)
 
@@ -158,15 +158,21 @@ def main(argv) -> None:
     os.environ['XLA_FLAGS'] = (
         flags_str + f'--xla_force_host_platform_device_count={num_cores}')
 
+  # Note datasets and decoder_datasets must be called after setting XLA_FLAGS
+  # because it may run JAX and initialized XLA backend without XLA_FLAGS.
+  with automl_context.collect():
+    datasets = experiment_config.datasets()
+    dec_datasets = experiment_config.decoder_datasets()
+
   with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
     for dataset in datasets:
-      params_file.write(dataset.to_text())
+      params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
     params_file.write('============= Decoder datasets.\n\n')
     for dataset in dec_datasets:
-      params_file.write(dataset.to_text())
+      params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
     params_file.write(task_p.to_text())

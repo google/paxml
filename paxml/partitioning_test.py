@@ -13,12 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for trainer_lib."""
-
+"""Tests for partitioning."""
 from absl.testing import absltest
 from absl.testing import parameterized
 import jax
-from paxml import trainer_lib
+from paxml import partitioning
 from praxis import py_utils
 from praxis import test_utils
 
@@ -26,7 +25,7 @@ NestedMap = py_utils.NestedMap
 PartitionSpec = jax.sharding.PartitionSpec
 
 
-class TrainLibTest(test_utils.TestCase):
+class PartitioningTest(test_utils.TestCase):
 
   @parameterized.parameters([(NestedMap, dict), (dict, NestedMap)])
   def test_filter_nested_map_basics(self, src_type, filter_type):
@@ -34,7 +33,7 @@ class TrainLibTest(test_utils.TestCase):
     partial_set = filter_type(a=0, b=filter_type(d=[0, filter_type(e=0)]))
 
     expected = src_type(a=1, b=src_type(d=[3, src_type(e=6)]))
-    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
+    actual = partitioning.filter_nestedmap(full_set, partial_set)
 
     self.assertIsInstance(actual, src_type)
     self.assertEqual(expected, actual)
@@ -44,7 +43,7 @@ class TrainLibTest(test_utils.TestCase):
     partial_set = dict(a=[0, dict(c=0)])
 
     expected = dict(a=[PartitionSpec(None), dict(c=PartitionSpec(None))])
-    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
+    actual = partitioning.filter_nestedmap(full_set, partial_set)
 
     self.assertIsInstance(actual, dict)
     self.assertEqual(expected, actual)

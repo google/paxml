@@ -32,6 +32,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
         "//praxis:base_input",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.

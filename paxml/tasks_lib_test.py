@@ -65,9 +65,7 @@ def get_model_inputs():
 
 class CustomInputSpecsProvider(base_input.BaseInputSpecsProvider):
   """Class to provide input specs for model initialization."""
-
-  class HParams(base_input.BaseInputSpecsProvider.HParams):
-    input_dims: int = 0
+  input_dims: int = 0
 
   def get_input_specs(self) -> pytypes.NestedShapeDtypeStruct:
     p = self.hparams

@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import ast
 import dataclasses
-import jax
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 
 from absl import logging
+import jax
 from lingvo.core import base_input_generator
 from lingvo.core import layers as lingvo_layers
 from lingvo.core import ops
 from praxis import base_input
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
@@ -34,57 +35,66 @@ import tensorflow.compat.v2 as tf
 NestedMap = py_utils.NestedMap
 
 
+def make_masked_ml_data_augmenter(**kwargs):
+  p = lingvo_layers.MaskedLmDataAugmenter.Params()
+  for k, v in kwargs.items():
+    setattr(p, k, v)
+  return p
+
+
 class TFRecordBertInput(base_input.BaseInput):
-  """Input generator reading TFRecords of ids for MLPerf eval."""
+  """Input generator reading TFRecords of ids for MLPerf eval.
 
-  class HParams(base_input.BaseInput.HParams):
-    """Hyper-parameters for this input class.
+  Attributes:
+    input_file: String, path of an input file.
+    max_sequence_length: Maximum number of tokens to be present in a single
+      example.
+    max_predictions_per_seq: Maximum number of tokens that can be masked per
+      example.
+    eos_token_id: id for EOS token.
+    eval_data_size: The number of examples in the eval data. Set to 0 for
+      unknown.
+    file_buffer_size: How many records are buffered for random shuffling.
+    enable_packing: Whether to pack multiple documents on the same row.
+    prepacking_batch_size: Only used when p.enable_packing is set. Batch size
+      before packing. Note that this does not affect post-packing batch size but
+      may have a minor effect on how tight the packed output is.
+    remask: Whether to re-apply the masking on-the-fly. Should only be used on
+      the training data.
+    mlm_augmenter: params for masking. Only used when p.remask=True.
+    num_samples: For accounting purposes only.
+  """
 
-    Attributes:
-      input_file: String, path of an input file.
-      max_sequence_length: Maximum number of tokens to be present in a single
-        example.
-      max_predictions_per_seq: Maximum number of tokens that can be masked per
-        example.
-      eos_token_id: id for EOS token.
-      eval_data_size: The number of examples in the eval data. Set to 0 for
-        unknown.
-      file_buffer_size: How many records are buffered for random shuffling.
-      enable_packing: Whether to pack multiple documents on the same row.
-      prepacking_batch_size: Only used when p.enable_packing is set. Batch size
-        before packing. Note that this does not affect post-packing batch size
-        but may have a minor effect on how tight the packed output is.
-      remask: Whether to re-apply the masking on-the-fly. Should only be used on
-        the training data.
-      mlm_augmenter: params for masking. Only used when p.remask=True.
-      num_samples: For accounting purposes only.
-    """
-    # https://github.com/mlcommons/training/tree/master/language_model/tensorflow/bert#tfrecord-features
-    input_file: Optional[str] = None
-    max_sequence_length: int = 512
-    max_predictions_per_seq: int = 76
-    eos_token_id: int = 102
-    eval_data_size: int = 10000
-    file_buffer_size: int = 10000
-    enable_packing: bool = False
-    prepacking_batch_size: int = 1 << 14
-    remask: bool = False
-    # Note that this is a TF class with lingvo-style params.
-    mlm_augmenter: py_utils.InstantiableParams = dataclasses.field(
-        default_factory=lingvo_layers.MaskedLmDataAugmenter.Params)
-    num_samples: int = -1
+  # https://github.com/mlcommons/training/tree/master/language_model/tensorflow/bert#tfrecord-features
+  input_file: Optional[Union[str, List[str]]] = None
+  max_sequence_length: int = 512
+  max_predictions_per_seq: int = 76
+  eos_token_id: int = 102
+  eval_data_size: int = 10000
+  file_buffer_size: int = 10000
+  enable_packing: bool = False
+  prepacking_batch_size: int = 1 << 14
+  remask: bool = False
+  # Note that this is a TF class with lingvo-style params.
+  mlm_augmenter: py_utils.InstantiableParams = pax_fiddle.instance_field(
+      lambda **kwargs: make_masked_ml_data_augmenter(**kwargs)  # pylint: disable=unnecessary-lambda
+  )
+  num_samples: int = -1
+  mlm: Any = dataclasses.field(init=False, repr=False)
+  _dataset: Any = dataclasses.field(init=False, repr=False)
+  _iterator: Any = dataclasses.field(init=False, repr=False)
 
-  def __init__(self, hparams: TFRecordBertInput.HParams) -> None:
-    if not hparams.is_training:
-      hparams.reset_for_eval = True
-      hparams.enable_packing = False
-      hparams.remask = False
-    if isinstance(hparams.input_file, str):
-      hparams.input_file = [hparams.input_file]
-    super().__init__(hparams)
+  def __post_init__(self):
+    if not self.is_training:
+      self.reset_for_eval = True
+      self.enable_packing = False
+      self.remask = False
+    if isinstance(self.input_file, str):
+      self.input_file = [self.input_file]
+    super().__post_init__()
 
-    if hparams.remask:
-      mlm_p = hparams.mlm_augmenter.Copy()
+    if self.remask:
+      mlm_p = self.mlm_augmenter.Copy()
       mlm_p.name = 'mlm_augmenter'
       mlm_p.dtype = tf.float32
       mlm_p.fprop_dtype = tf.float32
@@ -328,30 +338,30 @@ class TextInput(base_input.BaseInput):
   raises out of range after all input data are returned at least once. Depends
   on the number of infeed hosts and batch size, duplicate input is returned
   to pad to full, synchronized batches on all infeed hosts.
+
+  Attributes:
+    input_file: String, path of a (small) input file.
+    tokenizer: Lingvo tokenizer param.
+    max_sequence_length: Maximum number of tokens to be present in a single
+      example.
+    num_samples: Number of items contained in the input. 0 for dynamically
+      determined (slower).
+    bytes_repr: Whether the texts are written as bytes representation, e.g. b'Q:
+      Who directed?\n\nA:'
   """
+  input_file: Optional[str] = None
+  tokenizer: Optional[py_utils.InstantiableParams] = None
+  max_sequence_length: int = 512
+  num_samples: int = 0
+  bytes_repr: bool = True
+  tokenizer_inst: Any = dataclasses.field(init=False, repr=False)
+  _actual_num_samples: Any = dataclasses.field(init=False, repr=False)
+  _dataset: Any = dataclasses.field(init=False, repr=False)
+  _iterator: Any = dataclasses.field(init=False, repr=False)
 
-  class HParams(base_input.BaseInput.HParams):
-    r"""Hyper-parameters for this input class.
-
-    Attributes:
-      input_file: String, path of a (small) input file.
-      tokenizer: Lingvo tokenizer param.
-      max_sequence_length: Maximum number of tokens to be present in a single
-        example.
-      num_samples: Number of items contained in the input. 0 for dynamically
-        determined (slower).
-      bytes_repr: Whether the texts are written as bytes representation, e.g.
-        b'Q: Who directed?\n\nA:'
-    """
-    input_file: Optional[str] = None
-    tokenizer: Optional[py_utils.InstantiableParams] = None
-    max_sequence_length: int = 512
-    num_samples: int = 0
-    bytes_repr: bool = True
-
-  def __init__(self, hparams: TextInput.HParams) -> None:
-    super().__init__(hparams)
-    self.tokenizer_inst = hparams.tokenizer.Instantiate()
+  def __post_init__(self):
+    super().__post_init__()
+    self.tokenizer_inst = self.tokenizer.Instantiate()
     self._actual_num_samples = None
     self._dataset = self._gen_dataset()
     self._iterator = iter(self._dataset)

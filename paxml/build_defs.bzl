@@ -71,6 +71,7 @@ def pax_targets(
         name = "",
         add_main_gpu_target = True,
         add_main_mpm_target = True,
+        main_kwargs = None,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
         smoke_test_args = None,
@@ -101,6 +102,7 @@ def pax_targets(
       name: unused.
       add_main_gpu_target: Build with jax GPU dependency.
       add_main_mpm_target: Add a ':main_mpm' target.
+      main_kwargs: dict of args to provide when building main binary.
       smoke_test_args: The list of command line arguments that can be passed to the
        :all_experiments_smoke_test target.
       smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
@@ -125,6 +127,8 @@ def pax_targets(
     )
     extra_deps = experiments + (extra_deps or [])
 
+    if not main_kwargs:
+        main_kwargs = {}
     main_name = "main"
     main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
     export_binary(
@@ -137,6 +141,7 @@ def pax_targets(
         ] + extra_deps,
         exp_sources = exp_sources,
         # Implicit py_binary flag
+        **main_kwargs
     )
     if add_main_mpm_target and hasattr(native, "genmpm"):
         main_name = "main_mpm"

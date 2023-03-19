@@ -26,16 +26,12 @@ import abc
 from praxis import base_hyperparams
 
 
-class BaseTask(base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta):
+class BaseTask(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Abstract base class for all tasks."""
 
-  def __init__(self, hparams: BaseTask.HParams) -> None:
-    """Constructor.
-
-    Args:
-      hparams: The dataclasses-like instance used to configure this class
-        instance.
-    """
-    assert hparams.name, ('Task params for %s must have a "name"' %
-                          self.__class__.__name__)
-    super().__init__(hparams)
+  def __post_init__(self):
+    assert self.name, (
+        'Task params for %s must have a "name"' % self.__class__.__name__
+    )

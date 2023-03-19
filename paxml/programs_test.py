@@ -22,6 +22,7 @@ from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 import numpy as np
+from paxml import partitioning
 from paxml import programs
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -52,9 +53,7 @@ instantiate = base_layer.instantiate
 
 class TestInput(base_input.BaseInput):
   """Input for testing purpose."""
-
-  class HParams(base_input.BaseInput.HParams):
-    seq_length: int = 2
+  seq_length: int = 2
 
   def get_next(self):
     p = self.hparams
@@ -123,12 +122,12 @@ class ProgramTestBase(test_utils.TestCase):
 
 class SingleTaskPjitTrainProgramTest(ProgramTestBase):
 
-  def test_train_program_partitioned_step(self):
+  def test_train_program(self):
     inputs_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )
-    partitioner = trainer_lib.PjitPartitioner(
+    partitioner = partitioning.PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
         reshard_inputs=True,
@@ -138,10 +137,7 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
     train_pg = programs.SingleTaskTrainProgram(
         self.task, self.train_input, partitioner
     )
-    step_fn, _ = train_pg.partition_step()
-
-    self.assertIsNotNone(train_pg.task)
-    self.assertEqual(step_fn, train_pg.partitioned_step_fn)
+    self.assertEqual(2, train_pg.train_unpadded_global_batch_size)
 
 
 if __name__ == '__main__':
