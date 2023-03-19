@@ -169,6 +169,7 @@ class BaseTrainProgram(Program):
     self._train_summary_last_step = init_step - 1
     self._train_summary_handler = train_summary_handler
     self._eval_train_summary_handler = eval_summary_handler
+    self._num_sub_batches = getattr(self.train_p.learner.optimizer, "num_sub_batches", 1)
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     return train_step < self._task.hparams.train.num_train_steps
@@ -176,40 +177,45 @@ class BaseTrainProgram(Program):
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
   def run(self, state: TrainState, train_step: int) -> ProgramOutput:
-    train_p = self._task.hparams.train
-    logging.debug('  Retrieving inputs.')
-    model_inputs = self._train_input.get_next_padded()
-    model_inputs = self._partitioner.preprocess_inputs(
-        self._train_input,
-        model_inputs,
-        self.train_input_partition_spec,
-    )
-    logging.debug('  Retrieved inputs.')
+    summed_loss = jnp.zeros((), dtype=jnp.float32)
+    for grad_accum_step in range(self._num_sub_batches):
+      train_p = self._task.hparams.train
+      logging.debug('  Retrieving inputs.')
+      model_inputs = self._train_input.get_next_padded()
+      model_inputs = self._partitioner.preprocess_inputs(
+          self._train_input,
+          model_inputs,
+          self.train_input_partition_spec,
+      )
+      logging.debug('  Retrieved inputs.')
 
-    profiler_capture_step = train_p.profiler_capture_step
-    do_profile = profiler_capture_step is not None
-    if do_profile and train_step - self._initial_step == profiler_capture_step:
-      self._profiler.capture_async()
+      profiler_capture_step = train_p.profiler_capture_step
+      do_profile = profiler_capture_step is not None
+      if do_profile and train_step - self._initial_step == profiler_capture_step:
+        self._profiler.capture_async()
 
-    logging.debug('  Performing train_step().')
-    with jax.profiler.StepTraceAnnotation('train', step_num=train_step):
-      with py_utils.timeit() as train_period:
-        (
-            new_state,
-            loss,
-            weighted_scalars,
-            per_example_out,
-            summary_tensors,
-        ) = self.train_step(
-            state,
-            self._train_prng_seed,
-            model_inputs,
-            self._train_unpadded_global_batch_size,
-        )
-      del state  # Unused anymore.
+      logging.debug('  Performing train_step().')
+      with jax.profiler.StepTraceAnnotation('train', step_num=train_step):
+        with py_utils.timeit() as train_period:
+          (
+              new_state,
+              loss,
+              weighted_scalars,
+              per_example_out,
+              summary_tensors,
+          ) = self.train_step(
+              state,
+              self._train_prng_seed,
+              model_inputs,
+              self._train_unpadded_global_batch_size,
+          )
+        del state  # Unused anymore.
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
+
+    loss = summed_loss / self._num_sub_batches
+
     if train_step == self._initial_step:
       self._first_step_completion_time = time.time()
 
@@ -316,6 +322,7 @@ class BaseTrainProgram(Program):
     # a gap between steps.
     new_train_step = int(
         py_utils.maybe_unreplicate_for_fully_replicated(new_state.step)
+        /self._num_sub_batches
     )
     steps_per_sec = self._compute_steps_per_sec(
         train_step, self._train_summary_last_time, self._train_summary_last_step
