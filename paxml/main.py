@@ -50,7 +50,6 @@ from paxml import tuning_lib
 from praxis import pax_fiddle
 from praxis import py_utils
 import pyglove as pg
-import seqio
 
 # internal experiment module import
 AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
@@ -409,6 +408,8 @@ def main(argv: Sequence[str]) -> None:
     raise app.UsageError('Too many command-line arguments.')
 
   if FLAGS.tfds_data_dir is not None:
+    # seqio import is slow so avoid module-level import
+    import seqio
     seqio.set_tfds_data_dir_override(FLAGS.tfds_data_dir)
 
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
