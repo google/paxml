@@ -174,6 +174,7 @@ class Lambada126M(GPT126M, LambadaDataset):
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = super().task()
     task_p.train.always_use_train_for_model_init=False
+    task_p.model.report_strict_acc=True
     return task_p
 
 ## 32 node
