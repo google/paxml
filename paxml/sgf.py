@@ -39,8 +39,13 @@ class GradAuxInfo:
   loss_weight: JTensor = 1.0  # pytype: disable=annotation-type-mismatch  # jax-ndarray
 
 
+@struct.dataclass
+class DPGradAuxInfo(GradAuxInfo):
+  dp_aux_info: Any = None
+
+
 class BaseStochasticGradient(
-    base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
 ):
   """Stochastic gradient function."""
 
@@ -133,25 +138,22 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
   accounting should be carried out with the original (unscaled) noise
   multiplier.
   """
+  # Standard DP-SGD hyperparameters.
+  l2_norm_clip: Optional[float] = None
+  noise_multiplier: float = 0.0
 
-  class HParams(BaseStochasticGradient.HParams):
-    """Returns the PrivateGradient params."""
-    # Standard DP-SGD hyperparameters.
-    l2_norm_clip: Optional[float] = None
-    noise_multiplier: float = 0.0
-
-    # Number of examples to process at one time. If set to `None`,
-    # this will be set to batch size as determined by the 0th element of
-    # the shape of the input.
-    #
-    # This may be useful if a large batch size is desired (for example, for
-    # better privacy-utility tradeoffs), but we cannot fit all of the
-    # per-example gradients in memory. When set, the code computes
-    # `inner_batch_size` per-example gradients at a time, accumulating
-    # the total clipped gradient as it goes. Note that the setting of
-    # `inner_batch_size` has no effect on the value of the final gradients--
-    # it affects only the feasibility and speed of the computation.
-    inner_batch_size: Optional[int] = None
+  # Number of examples to process at one time. If set to `None`,
+  # this will be set to batch size as determined by the 0th element of
+  # the shape of the input.
+  #
+  # This may be useful if a large batch size is desired (for example, for
+  # better privacy-utility tradeoffs), but we cannot fit all of the
+  # per-example gradients in memory. When set, the code computes
+  # `inner_batch_size` per-example gradients at a time, accumulating
+  # the total clipped gradient as it goes. Note that the setting of
+  # `inner_batch_size` has no effect on the value of the final gradients--
+  # it affects only the feasibility and speed of the computation.
+  inner_batch_size: Optional[int] = None
 
   def _clip_and_mean_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
@@ -166,7 +168,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     clipped_grads_mean = jax.tree_map(lambda x: x / batch_size, sum_grads)
     frac_clipped = num_clipped / batch_size
 
-    return clipped_grads_mean, frac_clipped, batch_size
+    return clipped_grads_mean, frac_clipped, batch_size  # pytype: disable=bad-return-type  # jax-types
 
   def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
       self,
@@ -229,13 +231,21 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       )
 
       # Clip and aggregate gradients.
-      grads, _, _ = self._clip_and_mean_gradients(
+      grads, frac_clipped, _ = self._clip_and_mean_gradients(
           grads, aux.loss_weight * p.l2_norm_clip
       )
       # Aggregate values and aux.
       values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
       aux = self.process_aux_info(aux)
-      return (values, aux, grads)
+      return (
+          values,
+          DPGradAuxInfo(
+              dp_aux_info={'frac_clipped': frac_clipped},
+              aux_info=aux.aux_info,
+              loss_weight=aux.loss_weight,
+          ),
+          grads,
+      )
 
     def _loop_process_inner_batch(index: int, val: Any) -> Any:
       """Wrapper for _process_inner_batch suitable for fori_loop."""
@@ -276,10 +286,7 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
   the `noise_multiplier` parameter should be divided by `sqrt(num_devices)`.
   See the docstring of `DpSgdStochasticGradient` for more details.
   """
-
-  class HParams(DpSgdStochasticGradient.HParams):
-    """Returns the PrivateGradient params."""
-    microbatch_size: int = 1
+  microbatch_size: int = 1
 
   def _prepare_inputs(self, inputs):
     return jax.tree_map(self._prepare_for_microbatching, inputs)

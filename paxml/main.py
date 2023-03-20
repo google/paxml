@@ -111,23 +111,32 @@ epath.DEFINE_path(
     'restore_checkpoint_dir', None,
     'If set, the directory from which to restore checkpoint. Only supported '
     'for --mode=decode_once and --mode=decode.')
-flags.DEFINE_integer(
+flags.DEFINE_multi_integer(
     'restore_checkpoint_step', None,
-    'If set, the checkpoint step to restore. Only supported when '
-    '--mode=decode_once.')
+    ('If set, the checkpoint step to restore. Only supported when '
+     '--mode=decode_once.'))
 flags.DEFINE_bool(
     'globally_use_hardware_rng', True,
     'Whether to globally use fast hardware RNG. Deterministic only at the '
     'same compiler version and with the same sharding')
 flags.DEFINE_integer(
     'jax_profiler_port', None,
-    'If set, the jax.profiler port to use. Only needed for profiling in open source.'
+    ('If set, the jax.profiler port to use. Only needed for profiling in open'
+     ' source.')
 )
 flags.DEFINE_bool('enable_auto_sharding', False,
                   'Enable the XLA Auto SPMD partitioner.')
 flags.DEFINE_bool(
     'enable_checkpoint_saving', True,
     'Enable checkpoint saving. Useful to disable for test- or debug-like runs.')
+flags.DEFINE_bool(
+    'enforce_restore_shape_check',
+    False,
+    (
+        'If True, raise an error when the requested restore shape of an array'
+        ' does not match the shape in the checkpoint.'
+    ),
+)
 # Flags for automatic tuning.
 flags.DEFINE_string(
     'study', None,
@@ -224,21 +233,25 @@ def run_experiment(
         async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
       else:
         async_checkpointer = checkpoints.AsyncCheckpointer(
-            checkpoints.PaxCheckpointHandler(),
-            timeout_secs=600)
+            checkpoints.PaxCheckpointHandler(
+                enforce_restore_shape_check=FLAGS.enforce_restore_shape_check
+            ),
+            timeout_secs=600,
+        )
 
     train.train_and_evaluate(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
-        maybe_use_persistence_checkpointing=FLAGS
-        .maybe_use_persistence_checkpointing,
+        maybe_use_persistence_checkpointing=FLAGS.maybe_use_persistence_checkpointing,
         eval_on_test=FLAGS.eval_on_test,
         checkpoint_todelete_subdir=FLAGS.checkpoint_todelete_subdir,
         early_stopping_fn=early_stopping_fn,
         run_decode=FLAGS.decode_during_train,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         async_checkpointer=async_checkpointer,
-        enable_checkpoint_saving=enable_checkpoint_saving)
+        enable_checkpoint_saving=enable_checkpoint_saving,
+        enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+    )
 
     if async_checkpointer is not None:
       async_checkpointer.wait_until_finished()
@@ -249,45 +262,56 @@ def run_experiment(
     eval_lib.evaluate(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
-        maybe_use_persistence_checkpointing=FLAGS
-        .maybe_use_persistence_checkpointing,
+        maybe_use_persistence_checkpointing=FLAGS.maybe_use_persistence_checkpointing,
         early_stopping_fn=early_stopping_fn,
-        enable_auto_sharding=FLAGS.enable_auto_sharding)
+        enable_auto_sharding=FLAGS.enable_auto_sharding,
+        enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+    )
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
     eval_lib.decode(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
-        maybe_use_persistence_checkpointing=FLAGS
-        .maybe_use_persistence_checkpointing,
+        maybe_use_persistence_checkpointing=FLAGS.maybe_use_persistence_checkpointing,
         restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
         restore_checkpoint_step=None,
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
         enable_checkpoint_saving=enable_checkpoint_saving,
-        enable_auto_sharding=FLAGS.enable_auto_sharding)
-  elif FLAGS.mode == 'decode_once':
-    work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
-                              f' {job_log_dir}')
-    eval_lib.decode(
-        experiment_config=experiment_config,
-        job_log_dir=job_log_dir,
-        maybe_use_persistence_checkpointing=FLAGS
-        .maybe_use_persistence_checkpointing,
-        restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
-        restore_checkpoint_step=FLAGS.restore_checkpoint_step,
-        continuous_decode=False,
-        run_eval=FLAGS.eval_during_decode,
-        early_stopping_fn=early_stopping_fn,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
-        output_pickle=FLAGS.decode_output_pickle,
-        )
+        enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+    )
+  elif FLAGS.mode == 'decode_once':
+    if (restore_checkpoint_steps := FLAGS.restore_checkpoint_step) is None:
+      restore_checkpoint_steps = [None]
+
+    for restore_step in restore_checkpoint_steps:
+      work_unit.set_task_status(f'Decode-once experiment {FLAGS.exp} at'
+                                f' {job_log_dir} for step={restore_step}')
+      restore_step = int(restore_step) if restore_step is not None else None
+      logging.info('Decode-once on step: %s', restore_step)
+      eval_lib.decode(
+          experiment_config=experiment_config,
+          job_log_dir=job_log_dir,
+          maybe_use_persistence_checkpointing=FLAGS.maybe_use_persistence_checkpointing,
+          restore_checkpoint_dir=FLAGS.restore_checkpoint_dir,
+          restore_checkpoint_step=restore_step,
+          continuous_decode=False,
+          run_eval=FLAGS.eval_during_decode,
+          early_stopping_fn=early_stopping_fn,
+          enable_auto_sharding=FLAGS.enable_auto_sharding,
+          output_pickle=FLAGS.decode_output_pickle,
+          enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+      )
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
     eval_lib.infer_and_write(
-        experiment_config=experiment_config, job_log_dir=job_log_dir)
+        experiment_config=experiment_config,
+        job_log_dir=job_log_dir,
+        enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+    )
 
   # Wait for all processes to exit at the same time because if some tasks
   # finish early and exited, when a preemption event comes, only a

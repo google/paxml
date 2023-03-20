@@ -10,7 +10,7 @@ lingvo
 numpy
 orbax
 praxis
-protobuf==3.19.5
+protobuf==3.19.6
 pyglove
 seqio @ git+https://github.com/google/seqio
 t5

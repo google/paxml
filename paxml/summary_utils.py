@@ -305,8 +305,8 @@ def write_summary_tensor(
 ) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
-    if summary_type in {
-        SummaryType.SCALAR, SummaryType.IMAGE, SummaryType.AUDIO
+    if summary_type not in {
+        SummaryType.AGGREGATE_SCALAR, SummaryType.AGGREGATE_IMAGE
     }:
       return
   if isinstance(tensor, (list, tuple)):

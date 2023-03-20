@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for trainer_lib."""
+"""Tests for programs."""
 import os
 from typing import Any, Dict, Tuple, Union
 
@@ -22,6 +22,8 @@ from absl.testing import parameterized
 import jax
 from jax import numpy as jnp
 import numpy as np
+from paxml import partitioning
+from paxml import programs
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_input
@@ -49,40 +51,15 @@ WeightedScalars = pytypes.WeightedScalars
 instantiate = base_layer.instantiate
 
 
-class TrainLibTest(test_utils.TestCase):
-
-  @parameterized.parameters([(NestedMap, dict), (dict, NestedMap)])
-  def test_filter_nested_map_basics(self, src_type, filter_type):
-    full_set = src_type(a=1, b=src_type(c=2, d=[3, src_type(e=6, f=7)]))
-    partial_set = filter_type(a=0, b=filter_type(d=[0, filter_type(e=0)]))
-
-    expected = src_type(a=1, b=src_type(d=[3, src_type(e=6)]))
-    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
-
-    self.assertIsInstance(actual, src_type)
-    self.assertEqual(expected, actual)
-
-  def test_filter_nested_map_with_partition_spec(self):
-    full_set = dict(a=[PartitionSpec(None), dict(b=2, c=PartitionSpec(None))])
-    partial_set = dict(a=[0, dict(c=0)])
-
-    expected = dict(a=[PartitionSpec(None), dict(c=PartitionSpec(None))])
-    actual = trainer_lib.filter_nestedmap(full_set, partial_set)
-
-    self.assertIsInstance(actual, dict)
-    self.assertEqual(expected, actual)
-
-
 class TestInput(base_input.BaseInput):
   """Input for testing purpose."""
-
-  class HParams(base_input.BaseInput.HParams):
-    seq_length: int = 2
+  seq_length: int = 2
 
   def get_next(self):
     p = self.hparams
-    return py_utils.NestedMap(
-        image=jnp.zeros((p.batch_size, p.seq_length), dtype=jnp.float32))
+    return NestedMap(
+        image=jnp.zeros((p.batch_size, p.seq_length), dtype=jnp.float32)
+    )
 
 
 @pax_fiddle.auto_config
@@ -145,25 +122,22 @@ class ProgramTestBase(test_utils.TestCase):
 
 class SingleTaskPjitTrainProgramTest(ProgramTestBase):
 
-  def test_train_program_partitioned_step(self):
+  def test_train_program(self):
     inputs_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )
-    partitioner = trainer_lib.PjitPartitioner(
+    partitioner = partitioning.PjitPartitioner(
         self.task,
         jax.random.PRNGKey(0),
         reshard_inputs=True,
         train_inputs_shape_dtype=inputs_shape_dtype,
         init_is_eval=False,
     )
-    train_pg = trainer_lib.SingleTaskTrainProgram(
+    train_pg = programs.SingleTaskTrainProgram(
         self.task, self.train_input, partitioner
     )
-    step_fn, _ = train_pg.partition_step()
-
-    self.assertIsNotNone(train_pg.task)
-    self.assertEqual(step_fn, train_pg.partitioned_step_fn)
+    self.assertEqual(2, train_pg.train_unpadded_global_batch_size)
 
 
 if __name__ == '__main__':

@@ -41,19 +41,13 @@ TrainState = train_states.TrainState
 
 
 class DummyInference(base_inference_runner.BaseInferenceRunner):
-
-  class HParams(base_inference_runner.BaseInferenceRunner.HParams):
-    output: Any = None
-    output_schema: Any = None
+  output: Any = None
+  output_schema: Any = None
 
   def infer(self, train_state: TrainState, prng_key: PRNGKey,
             var_weight_hparams: NestedWeightHParams,
             input_batch: NestedMap) -> NestedMap:
     return self.hparams.output
-
-  @property
-  def output_schema(self) -> NestedMap:
-    return self.hparams.output_schema
 
 
 class BaseInferenceRunnerTest(test_utils.TestCase):

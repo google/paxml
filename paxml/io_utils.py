@@ -174,7 +174,7 @@ class JnpEncoder(json.JSONEncoder):
   """jax.numpy compatible encoder: https://github.com/mpld3/mpld3/issues/434."""
 
   def default(self, o: Any) -> Any:
-    if isinstance(o, jax.numpy.DeviceArray):
+    if isinstance(o, jax.Array):
       return _to_ndarray(o)
     elif isinstance(o, np.integer):
       return int(o)

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import collections
+import dataclasses
 import enum
 import io
 import os
@@ -33,6 +34,7 @@ import numpy as np
 from paxml import metric_utils
 from praxis import base_hyperparams
 from praxis import base_input
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 import seqio
@@ -87,8 +89,10 @@ def _get_targets_str(example: Mapping[str, Any], task: seqio.Task) -> str:
   if pretokenized_target_field_name in example:
     target = example[pretokenized_target_field_name]
   else:
-    target = task.output_features[target_field_name].vocabulary.decode(
-        [int(x) for x in example[target_field_name]])
+    target = example[target_field_name]
+    if np.issubdtype(target[0], np.integer):
+      target = [int(x) for x in target]
+    target = task.output_features[target_field_name].vocabulary.decode(target)
   if isinstance(target, bytes):
     target = target.decode('utf-8')
   return target
@@ -118,7 +122,7 @@ def _convert_bytes_to_str(tree: Any) -> Any:
   return jax.tree_map(_convert_fn, tree)
 
 
-def _select_split(
+def select_split(
     task: str,
     split_name: Union[str, Callable[[str], str]],
 ) -> str:
@@ -307,9 +311,72 @@ def process_outputs(
 
 
 class SeqIOInput(base_input.BaseInput):
-  """An adaptor for getting SeqIO data."""
+  """An adaptor for getting SeqIO data.
 
-  class DeterministicInputParams(base_hyperparams.BaseHyperParams):
+  Attributes:
+    mixture_name: Optional string. The name for a SeqIO task or mixture. User
+      must import the module that defines this task/mixture in order to register
+      the task/mixture.
+    mixture_or_task: Optional SeqIO task object. The user must specify either
+      mixture_name or mixture_or_task params.
+    split_name: Required string. The name for the split of data to get. Usually
+      "train" or "validation" or "test".
+    deterministic_input: If deterministic input is intended, users should set
+      this to enable internal validations to ensure that deterministic input is
+      indeed used.
+    task_feature_lengths: Required. Of type Mapping[str, int]. The keys are the
+      features on the original SeqIO task/mixture, typically "inputs" and
+      "targets". The values are corresponding sequence lengths. Examples
+      exceeding the sequence lengths are truncated.
+    feature_converter: An instance of a seqio.FeatureConverter subclass. This is
+      used to convert the data from its original format to the format expected
+      by the model, e.g. instead of "targets" we have "ids" or "labels" or
+      "paddings". This also implements any necessary padding or packing on the
+      data.
+    shuffle: Whether to shuffle the data. Note that None means this feature is
+      decided automatically: True for and only for non-deterministic training
+      data, otherwise False. Users can override this by setting this explicitly.
+    repeat: Whether to repeat the data. Note that None means this feature is
+      decided automatically: True only for non-deterministic training data,
+      otherwise False. Users can override this by setting this field explicitly.
+    use_cached: Whether to read from the cached directory, if supported by the
+      underlying SeqIO task/mixture. Users can set to False to test out data
+      changes before the cache is applied.
+    trim_output_features: If True, it trims output features to be less than the
+      length given by `sequence_length`.
+    eval_auto_pad: Only used when p.is_training=False. Automatically pad the
+      data to multiples of global batch size, using the first example in the
+      data. Padded entries will have batch_input.eval_sample_weight == 0.0.
+    drop_remainder: Whether to drop remaining examples from the last partial
+      batch.
+    num_batches_to_skip: If not None, skip given number of batches in the
+      dataset, to avoid reusing data after restaring the training process. Only
+      affects training.
+    deterministic_input_start_index: Params to compute the starting example
+      index. Used only if the data is a deterministic input, otherwise ignored.
+    eval_metrics_targets_length: typically when used in eval, the data returned
+      by get_next() would not contain any targets. eval_metrics_targets_length
+      overrides the task feature lengths for targets when processing the targets
+      as ground truths to compute eval metrics. It has no effect on get_next(),
+      but only affects compute_metrics(). If set to None, won't truncate.
+    use_enumeration: whether to use enumeration in both batch generation
+      (get_next()) and metrics computation. When this param is set to True,
+      we'll return a NestedMap including enumeration related provenance fields,
+      which will assign each example a globally-unique ID within a given
+      dataset. In `__call__` of the model, the user is then expected to return a
+      NestedMap including '.enumerated_index' and for `process_decode_out` the
+      key in the sequence of tuples should be the enumerated index. At metrics
+      computation time, we'll join the enumerated index.
+    annotate_padding_fields: whether to manually update the `.weights` and
+      `.padding` fields for examples. It is preferable that users use
+      `.eval_sample_weights` field that gets set to `=0` for padded eval
+      examples.
+    overridden_vocab: the vocab overridden. If not set, it would be derived from
+      `output_features` of underlining task_or_mixture.
+  """
+
+  @dataclasses.dataclass(frozen=True)
+  class DeterministicInput:
     """Parameters to adjust the starting example index of deterministic input.
 
     Attributes:
@@ -328,117 +395,72 @@ class SeqIOInput(base_input.BaseInput):
     # Internal params set by Pax internally.
     _latest_model_step: int = 0
 
-  class HParams(base_input.BaseInput.HParams):
-    """Hyperparameters for this input class.
+  DeterministicInputParams = base_hyperparams.FiddleHParamsClassStub(  # pylint: disable=invalid-name
+      DeterministicInput
+  )
+  # Required params.
+  mixture_name: Optional[str] = None
+  mixture_or_task: Optional[Union[seqio.Task, seqio.Mixture]] = None
+  split_name: Optional[str] = None
+  deterministic_input: bool = False
+  task_feature_lengths: Optional[Mapping[str, int]] = None
+  feature_converter: Optional[seqio.FeatureConverter] = None
+  # Optional params.
+  shuffle: Optional[bool] = None
+  repeat: Optional[bool] = None
+  use_cached: bool = False
+  eval_auto_pad: bool = True
+  drop_remainder: bool = True
+  num_batches_to_skip: Optional[int] = None
+  # trim_output_features flag allow passing this arg to seqio.get_dataset
+  # the default value is True so this change will not affect any current
+  # behaviour. the main purpose is for prefixlm to not problematically
+  # pack on the inputs.
+  trim_output_features: bool = True
+  # Params to adjust the starting example index for deterministic input.
+  # Implementation note: `SingleTask` is not defined in the interpreter
+  # context here, so we need to wrap it in a lambda which will look it up from
+  # the global scope later.
+  deterministic_input_start_index: pax_fiddle.Config[
+      SeqIOInput.DeterministicInput
+  ] = pax_fiddle.template_field(DeterministicInput)
+  eval_metrics_targets_length: Optional[int] = None
+  use_enumeration: bool = True
+  annotate_padding_fields: bool = False
+  overridden_vocab: Optional[seqio.Vocabulary] = None
+  _dataset: Any = dataclasses.field(init=False, repr=False)
+  _iter: Any = dataclasses.field(init=False, repr=False)
+  _cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = (
+      dataclasses.field(init=False, repr=False)
+  )
+  is_targets_init: Any = dataclasses.field(init=False, repr=False)
+  _mixture_or_task_inst: Any = dataclasses.field(init=False, repr=False)
+  _shard_info: Any = dataclasses.field(init=False, repr=False)
+  _len_full_ds: Any = dataclasses.field(init=False, repr=False)
+  targets_ds: Any = dataclasses.field(init=False, repr=False)
+  targets_ds_converted: Any = dataclasses.field(init=False, repr=False)
+  targets_ds_ori: Any = dataclasses.field(init=False, repr=False)
+  ds_non_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
+  ds_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
+  targets_iter: Any = dataclasses.field(init=False, repr=False)
+  targets_iter_converted: Any = dataclasses.field(init=False, repr=False)
+  targets_iter_ori: Any = dataclasses.field(init=False, repr=False)
+  _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
 
-    Attributes:
-      mixture_name: Optional string. The name for a SeqIO task or mixture. User
-        must import the module that defines this task/mixture in order to
-        register the task/mixture.
-      mixture_or_task: Optional SeqIO task object. The user must specify either
-        mixture_name or mixture_or_task params.
-      split_name: Required string. The name for the split of data to get.
-        Usually "train" or "validation" or "test".
-      deterministic_input: If deterministic input is intended, users should set
-        this to enable internal validations to ensure that deterministic input
-        is indeed used.
-      task_feature_lengths: Required. Of type Mapping[str, int]. The keys are
-        the features on the original SeqIO task/mixture, typically "inputs" and
-        "targets". The values are corresponding sequence lengths. Examples
-        exceeding the sequence lengths are truncated.
-      feature_converter: An instance of a seqio.FeatureConverter subclass. This
-        is used to convert the data from its original format to the format
-        expected by the model, e.g. instead of "targets" we have "ids" or
-        "labels" or "paddings". This also implements any necessary padding or
-        packing on the data.
-      shuffle: Whether to shuffle the data. Note that None means this feature is
-        decided automatically: True for and only for non-deterministic training
-        data, otherwise False. Users can override this by setting this
-        explicitly.
-      repeat: Whether to repeat the data. Note that None means this feature is
-        decided automatically: True only for non-deterministic training data,
-        otherwise False. Users can override this by setting this field
-        explicitly.
-      use_cached: Whether to read from the cached directory, if supported by the
-        underlying SeqIO task/mixture. Users can set to False to test out data
-        changes before the cache is applied.
-      trim_output_features: If True, it trims output features to be less than
-        the length given by `sequence_length`.
-      eval_auto_pad: Only used when p.is_training=False. Automatically pad the
-        data to multiples of global batch size, using the first example in the
-        data. Padded entries will have batch_input.eval_sample_weight == 0.0.
-      drop_remainder: Whether to drop remaining examples from the last partial
-        batch.
-      num_batches_to_skip: If not None, skip given number of batches in the
-        dataset, to avoid reusing data after restaring the training process.
-        Only affects training.
-      deterministic_input_start_index: Params to compute the starting example
-        index. Used only if the data is a deterministic input, otherwise
-        ignored.
-      eval_metrics_targets_length: typically when used in eval, the data
-        returned by get_next() would not contain any targets.
-        eval_metrics_targets_length overrides the task feature lengths for
-        targets when processing the targets as ground truths to compute eval
-        metrics. It has no effect on get_next(), but only affects
-        compute_metrics(). If set to None, won't truncate.
-      use_enumeration: whether to use enumeration in both batch generation
-        (get_next()) and metrics computation. When this param is set to True,
-        we'll return a NestedMap including enumeration related provenance
-        fields, which will assign each example a globally-unique ID within a
-        given dataset. In `__call__` of the model, the user is then expected to
-        return a NestedMap including '.enumerated_index' and for
-        `process_decode_out` the key in the sequence of tuples should be the
-        enumerated index. At metrics computation time, we'll join the enumerated
-        index.
-      annotate_padding_fields: whether to manually update the `.weights` and
-        `.padding` fields for examples. It is preferable that users use
-        `.eval_sample_weights` field that gets set to `=0` for padded eval
-        examples.
-      overridden_vocab: the vocab overridden. If not set, it would be derived
-        from `output_features` of underlining task_or_mixture.
-    """
-    # Required params.
-    mixture_name: Optional[str] = None
-    mixture_or_task: Optional[Union[seqio.Task, seqio.Mixture]] = None
-    split_name: Optional[str] = None
-    deterministic_input: bool = False
-    task_feature_lengths: Optional[Mapping[str, int]] = None
-    feature_converter: Optional[seqio.FeatureConverter] = None
-    # Optional params.
-    shuffle: Optional[bool] = None
-    repeat: Optional[bool] = None
-    use_cached: bool = False
-    eval_auto_pad: bool = True
-    drop_remainder: bool = True
-    num_batches_to_skip: Optional[int] = None
-    # trim_output_features flag allow passing this arg to seqio.get_dataset
-    # the default value is True so this change will not affect any current
-    # behaviour. the main purpose is for prefixlm to not problematically
-    # pack on the inputs.
-    trim_output_features: bool = True
-    # Params to adjust the starting example index for deterministic input.
-    # Implementation note: `SingleTask` is not defined in the interpreter
-    # context here, so we need to wrap it in a lambda which will look it up from
-    # the global scope later.
-    deterministic_input_start_index: SeqIOInput.DeterministicInputParams = (
-        sub_config_field(lazy_ref=lambda: SeqIOInput.DeterministicInputParams))
-    eval_metrics_targets_length: Optional[int] = None
-    use_enumeration: bool = True
-    annotate_padding_fields: bool = False
-    overridden_vocab: Optional[seqio.Vocabulary] = None
-
-  def __init__(self, hparams: ParamsT) -> None:
+  def __post_init__(self):
     # Modify hparams in-place before freezing hparams
-    if not hparams.name:
-      mixture_name = hparams.mixture_name or hparams.mixture_or_task.name
-      hparams.name = f'{mixture_name}_{hparams.split_name}'
-    if (not hparams.is_training and hparams.input_random_seed is None
-        and hparams.use_enumeration):
+    if not self.name:
+      mixture_name = self.mixture_name or self.mixture_or_task.name
+      self.name = f'{mixture_name}_{self.split_name}'
+    if (
+        not self.is_training
+        and self.input_random_seed is None
+        and self.use_enumeration
+    ):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
-      hparams.input_random_seed = 42
-
-    super().__init__(hparams)
+      self.input_random_seed = 42
+    super().__post_init__()
     self._validate_hparams()
     self._dataset = self._get_dataset()
     self._iter = self._dataset.as_numpy_iterator()
@@ -662,6 +684,14 @@ class SeqIOInput(base_input.BaseInput):
     self._gen_filtered_artifacts()
     self._gen_targets_iter()
     self.is_targets_init = True
+
+  def save(self, checkpoint_path: epath.PathLike):
+    self._ckpt = tf.train.Checkpoint(it=self._iter)
+    self._ckpt.write(checkpoint_path)
+
+  def restore(self, checkpoint_path: epath.PathLike):
+    self._ckpt = tf.train.Checkpoint(it=self._iter)
+    self._ckpt.read(checkpoint_path).assert_consumed()
 
   def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     return next(self._iter)
@@ -1140,7 +1170,7 @@ class SeqIOInput(base_input.BaseInput):
       score = ans[_LM_SCORE_KEY]
       example = targets[k]
       target_post = self.task_inst.postprocess_fn(
-          score, example=example, is_target=True)
+          targets[k]['targets'], example=example, is_target=True)
       targets_list.append(target_post)
       scores_list.append(score)
       if verbose_entries_idx < verbose_entries:
@@ -1151,6 +1181,7 @@ class SeqIOInput(base_input.BaseInput):
             example.get('targets_pretokenized', 'None'),
             example.get('is_correct', 'N/A'), target_post, score)
         verbose_entries_idx += 1
+      ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
       ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
 
     return scores_list, targets_list
@@ -1795,7 +1826,7 @@ def get_eval_hparams_for_seqio(
                        use_cached=use_cached)
     # Allow selecting split based on `Callable` `split_name` if mixture contains
     # tasks with varying splits.
-    hp.split_name = _select_split(task.name, split_name)
+    hp.split_name = select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
     if require_metric_fns:
       if not task.metric_fns:
@@ -1803,10 +1834,20 @@ def get_eval_hparams_for_seqio(
             ('task %s is not being added to hparam list as it has no metric_fns'
              'defined. If you want the task evaluated regardless, set '
              'require_metric_fns=False'), task.name)
-      if task.predict_metric_fns and metric_type is MetricType.PREDICT:
-        hparams.append(hp)
-      if task.score_metric_fns and metric_type is MetricType.SCORE:
-        hparams.append(hp)
+      if metric_type is MetricType.PREDICT:
+        if task.predict_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no predict_metric_fns'
+             'defined although metric_type=MetricType.Predict. '), task.name)
+      elif metric_type is MetricType.SCORE:
+        if task.score_metric_fns:
+          hparams.append(hp)
+        else:
+          logging.warning(
+            ('task %s is not being added to hparam list as it has no score_metric_fns'
+             'defined although metric_type=MetricType.Score. '), task.name)
     else:
       if not task.score_metric_fns and not task.predict_metric_fns:
         # Show PPLX

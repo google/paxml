@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import abc
 import collections
+import dataclasses
 import logging
-from typing import Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union
 
 import jax
 import jax.numpy as jnp
@@ -28,6 +29,7 @@ import numpy as np
 from paxml import summary_utils
 from praxis import base_hyperparams
 from praxis import base_layer
+from praxis import pax_fiddle
 
 instantiate = base_hyperparams.instantiate
 InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
@@ -108,7 +110,9 @@ def _vmap_aggregate_metrics(f, metrics_dict):
   return metrics
 
 
-class BaseMetrics(base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta):
+class BaseMetrics(
+    base_hyperparams.FiddleBaseParameterizable, metaclass=abc.ABCMeta
+):
   """Abstract base class for all metrics.
 
   There are two different usage patterns for BaseMetrics:
@@ -143,15 +147,9 @@ class BaseMetrics(base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta):
         batch_metric = metrics_helper.aggregate(batch_metrics, reshard=False)
 
   """
+  _metrics: Any = dataclasses.field(init=False, repr=False)
 
-  def __init__(self, hparams: BaseMetrics.HParams) -> None:
-    """Constructor.
-
-    Args:
-      hparams: The dataclasses-like instance used to configure this class
-        instance.
-    """
-    super().__init__(hparams)
+  def __post_init__(self):
     self._metrics = collections.defaultdict(list)
 
   @abc.abstractmethod
@@ -196,15 +194,13 @@ class BaseMetrics(base_hyperparams.BaseParameterizable, metaclass=abc.ABCMeta):
 
 
 class MeanMetrics(BaseMetrics):
-  """Computes the mean of the metrics over devices."""
+  """Computes the mean of the metrics over devices.
 
-  class HParams(BaseMetrics.HParams):
-    """Hyper-parameters associated with this metrics class.
-
-    Attributes:
-      metric_keys: List of metrics that will be aggregated and logged.
-    """
-    metric_keys: Optional[Sequence[str]] = None
+  Attributes:
+    metric_keys: List of metrics that will be aggregated and logged.
+  """
+  metric_keys: Optional[Sequence[str]] = None
+  _metrics: Any = dataclasses.field(init=False, repr=False)
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
     p = self.hparams
@@ -233,15 +229,13 @@ class MeanMetrics(BaseMetrics):
 
 
 class MaxMetrics(BaseMetrics):
-  """Computes the max over sharded metrics."""
+  """Computes the max over sharded metrics.
 
-  class HParams(BaseMetrics.HParams):
-    """Hyper-parameters associated with this metrics class.
-
-    Attributes:
-      metric_keys: List of metrics that will be aggregated and logged.
-    """
-    metric_keys: Optional[Sequence[str]] = None
+  Attributes:
+    metric_keys: List of metrics that will be aggregated and logged.
+  """
+  metric_keys: Optional[Sequence[str]] = None
+  _metrics: Any = dataclasses.field(init=False, repr=False)
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
     p = self.hparams
@@ -269,15 +263,12 @@ class MaxMetrics(BaseMetrics):
 
 
 class HistogramMetrics(BaseMetrics):
-  """Compute aggregate single scalar statistics over sharded batches."""
+  """Compute aggregate single scalar statistics over sharded batches.
 
-  class HParams(BaseMetrics.HParams):
-    """Hyper-parameters associated with this metrics class.
-
-    Attributes:
-      histogram_key: Key which contains the histogram data.
-    """
-    histogram_key: Optional[str] = None
+  Attributes:
+    histogram_key: Key which contains the histogram data.
+  """
+  histogram_key: Optional[str] = None
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
     p = self.hparams
@@ -322,18 +313,16 @@ class HistogramMetrics(BaseMetrics):
 
 
 class CompositeMetrics(BaseMetrics):
-  """Compute aggregate single scalar statistics over sharded batches."""
+  """Compute aggregate single scalar statistics over sharded batches.
 
-  class HParams(BaseMetrics.HParams):
-    """Hyper-parameters associated with this metrics class.
+  Attributes:
+    metrics_p: List of metrics that will be aggregated and logged.
+  """
+  metrics_p: Optional[Sequence[pax_fiddle.Config[BaseMetrics]]] = None
+  metrics_calcs: Any = dataclasses.field(init=False, repr=False)
 
-    Attributes:
-      metrics_p: List of metrics that will be aggregated and logged.
-    """
-    metrics_p: Optional[Sequence[BaseMetrics.HParams]] = None
-
-  def __init__(self, hparams: CompositeMetrics.HParams) -> None:
-    super().__init__(hparams)
+  def __post_init__(self):
+    super().__post_init__()
     p = self.hparams
     self.metrics_calcs = [instantiate(m) for m in p.metrics_p]
 
@@ -359,7 +348,7 @@ class CompositeMetrics(BaseMetrics):
     return metrics
 
 
-class LossAggregator(base_hyperparams.BaseParameterizable):
+class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
   """Base class for aggregating loss metrics.
 
   LossAggregator is a helper class that is used to aggregate loss metrics across
@@ -373,17 +362,14 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
   Finally we compute the mean_loss across all shards for tracking purposes:
 
     mean_loss = average_loss_across_shards
+
+  Attributes:
+    loss_key: A string specifying which loss key should be aggregated and
+      trained on. This key must be in the metrics dict (the first return of
+      compute_loss).
   """
 
-  class HParams(base_hyperparams.BaseParameterizable.HParams):
-    """Hyper-parameters associated with the loss metrics class.
-
-    Attributes:
-      loss_key: A string specifying which loss key should be aggregated and
-        trained on. This key must be in the metrics dict (the first return of
-        compute_loss).
-    """
-    loss_key: Optional[str] = None
+  loss_key: Optional[str] = None
 
   def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
     """Computes the aggregated loss over shards.
@@ -421,18 +407,15 @@ class LossAggregator(base_hyperparams.BaseParameterizable):
 
 
 class MultiLossAggregator(LossAggregator):
-  """Computes the mean of multiple losses."""
+  """Computes the mean of multiple losses.
 
-  class HParams(BaseMetrics.HParams):
-    """Hyper-parameters associated with this metrics class.
-
-    Attributes:
-      loss_keys: A list of string keys specifying which loss keys should be
-        aggregated and trained on. These keys must be in the metrics dict
-        (the first return of compute_loss). Weights are renormalized across
-        shards before computing the per key weighted_loss.
-    """
-    loss_keys: Optional[Sequence[str]] = None
+  Attributes:
+    loss_keys: A list of string keys specifying which loss keys should be
+      aggregated and trained on. These keys must be in the metrics dict (the
+      first return of compute_loss). Weights are renormalized across shards
+      before computing the per key weighted_loss.
+  """
+  loss_keys: Optional[Sequence[str]] = None
 
   def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
 

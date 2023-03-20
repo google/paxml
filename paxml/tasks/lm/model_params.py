@@ -535,6 +535,11 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   CHECKPOINT_MAX_TO_KEEP = 10
   EVAL_INTERVAL_STEPS = 100
 
+  # Profiler related
+  PROFILER_NUM_STEPS = 2
+  PROFILER_MIN_DURATION_SEC = 1
+  PROFILER_CAPTURE_STEP = None
+
   # Sub-class has to specify a mesh.
   ICI_MESH_SHAPE = None
   # Default to a single slice
@@ -641,6 +646,9 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.train.summary_interval_steps = self.SUMMARY_INTERVAL_STEPS
     task_p.train.save_max_to_keep = self.CHECKPOINT_MAX_TO_KEEP
     task_p.train.eval_interval_steps = self.EVAL_INTERVAL_STEPS
+    task_p.train.profiler_num_steps = self.PROFILER_NUM_STEPS
+    task_p.train.profiler_min_duration_sec = self.PROFILER_MIN_DURATION_SEC
+    task_p.train.profiler_capture_step = self.PROFILER_CAPTURE_STEP
 
     if self.ICI_MESH_SHAPE is not None:
       set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,

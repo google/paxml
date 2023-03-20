@@ -15,7 +15,9 @@
 
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
+import concurrent
 import dataclasses
+import functools
 import typing
 from typing import Any, Mapping, Optional, Sequence, Union
 
@@ -39,7 +41,7 @@ _SUPPORTED_ITEMS = frozenset({STATE_ITEM_NAME, METADATA_ITEM_NAME})
 
 
 def _get_checkpoint_version(
-    step: int, checkpoint_type: CheckpointType, directory: epath.Path
+    checkpoint_type: CheckpointType, directory: epath.Path, step: int
 ) -> float:
   """Gets checkpoint version from saved metadata."""
   checkpoint_step_dir = checkpoints.make_checkpoint_step_dir(
@@ -122,10 +124,15 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     if self._directory.exists():
       steps = self.all_steps(read=True)
       if steps:
-        versions = [
-            _get_checkpoint_version(s, self._checkpoint_type, self._directory)
-            for s in steps
-        ]
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(steps)) as pool:
+          versions = list(
+              pool.map(
+                  functools.partial(
+                      _get_checkpoint_version,
+                      self._checkpoint_type,
+                      self._directory),
+                  steps))
         if not all(v == versions[0] for v in versions):
           raise ValueError('Expected all checkpoints to have the same version.')
         self._version = versions[0]

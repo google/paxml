@@ -16,10 +16,10 @@
 """Checkpointing-related utilities to handle TrainState instances."""
 
 import enum
-import os
 import re
 from typing import Any, Mapping, Optional, Sequence, Tuple, cast
 
+from absl import flags
 from absl import logging
 from etils import epath
 import flax.serialization
@@ -319,6 +319,7 @@ def restore_checkpoint(
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: Optional[train_states.TrainState] = None,
     step: Optional[int] = None,
+    enforce_restore_shape_check: bool = False,
 ) -> Optional[train_states.TrainState]:
   """Restores a checkpoint from the provided base directory.
 
@@ -334,6 +335,8 @@ def restore_checkpoint(
     state_specs: If using a GDA-based checkpoint, the partition specs
       corresponding to this TrainState instance to restore.
     step: Step number to load a checkpoint from or None to load the latest.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
 
   Returns:
     A restored `TrainState` instance. If no step specified and no checkpoint
@@ -357,7 +360,10 @@ def restore_checkpoint(
   )
   if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     checkpointer = orbax.checkpoint.Checkpointer(
-        PaxCheckpointHandler())
+        PaxCheckpointHandler(
+            enforce_restore_shape_check=enforce_restore_shape_check
+        )
+    )
     restored_train_state = checkpointer.restore(
         checkpoint_restore_dir,
         item=state_global_shapes,
@@ -373,6 +379,15 @@ def restore_checkpoint(
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
+
+
+def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
+  """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
+  if tensorstore_metadata_key is None:
+    return
+  orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
+      metadata_key=tensorstore_metadata_key
+  )
 
 
 def _extract_nested_prefix_names(
@@ -492,6 +507,20 @@ def _tensorstore_reconstruct(
   return jax.tree_util.tree_unflatten(treedef, restored_flattened_train_state)
 
 
+def _check_restored_shapes(
+    restored: Sequence[JTensorOrPartitionSpec],
+    expected: Sequence[JTensorOrPartitionSpec],
+):
+  def _check(a, b):
+    if a.shape != b.shape:
+      raise ValueError(
+          f'Restored parameter shape mismatch: {a.shape} (checkpoint) vs.'
+          f' {b.shape} (expected).'
+      )
+
+  jax.tree_util.tree_map(_check, restored, expected)
+
+
 class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   """PaxCheckpointHandler override for Pax GDA checkpointing.
 
@@ -502,6 +531,12 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   TODO(cpgaffney) Rework _extract_nested_prefix_names to allow extracting names
   from a state dict.
   """
+
+  def __init__(
+      self, *args, enforce_restore_shape_check: bool = False, **kwargs
+  ):
+    self._enforce_restore_shape_check = enforce_restore_shape_check
+    super().__init__(*args, **kwargs)
 
   _param_names: PyTree = None
 
@@ -552,11 +587,16 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     self._set_param_names(flattened_nested_names)
 
     def create_restore_args(pspec, shape_struct):
+      # Providing `None` indicates that the shape should be restored exactly as
+      # saved.
+      restore_shape = (
+          None if self._enforce_restore_shape_check else shape_struct.shape
+      )
       return orbax.checkpoint.ArrayRestoreArgs(
           restore_type=jax.Array,
           mesh=mesh,
           mesh_axes=pspec,
-          global_shape=shape_struct.shape,
+          global_shape=restore_shape,
           dtype=shape_struct.dtype,
       )
 
@@ -567,6 +607,8 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     # reference to MaskedNode's.
     restored_train_state = super().restore(
         directory, item=flattened_train_state, restore_args=restore_args)
+    if self._enforce_restore_shape_check:
+      _check_restored_shapes(restored_train_state, flattened_train_state)
 
     # We add back the MaskedNode entries into the pytree.
     restored_train_state = _tensorstore_reconstruct(item, restored_train_state)

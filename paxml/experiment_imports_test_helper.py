@@ -54,7 +54,9 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     # Registered experiment configurations must have at least a dataset split.
     self.assertNotEmpty(dataset_splits)
     for s in dataset_splits:
-      self.assertIsInstance(s, base_input.BaseInput.HParams)
+      self.assertIsInstance(
+          s, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
+      )
 
     # Note: Creating the input generator may require data access. Only do it
     # for explicitly allowed experiments for now.

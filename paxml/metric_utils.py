@@ -268,7 +268,7 @@ def as_float(
     weights = np.stack([x[1] for x in metric_value])
     return np.sum(values * weights) / np.sum(weights)
   if isinstance(metric_value, (clu_values.Scalar, seqio.metrics.Scalar)):
-    return metric_value.value
+    return metric_value.value  # pytype: disable=bad-return-type  # numpy-scalars
   assert isinstance(metric_value, numbers.Number), metric_value
   return float(typing.cast(Any, metric_value))
 

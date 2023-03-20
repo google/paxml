@@ -29,7 +29,6 @@ from paxml import base_experiment
 from paxml import metric_utils
 from paxml import trainer_lib
 from praxis import base_hyperparams
-from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
 
@@ -567,7 +566,7 @@ def _write_file_once(file_path: epath.Path, content: Text):
   if not file_path.exists():
     try:
       file_path.write_text(content)
-    except tf.errors.NotFoundError:
+    except (tf.errors.NotFoundError, IOError):
       logging.warn(
           'Cannot write file %r as another process is writing to the same '
           'file. This is not an issue as the file is only created for '
@@ -576,18 +575,18 @@ def _write_file_once(file_path: epath.Path, content: Text):
 
 
 class EvalMetrics(NamedTuple):
-  input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None
   metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
   scoring_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
   steps_per_sec: Optional[float] = None
+  input_names: Optional[Sequence[str]] = None
 
 
 class DecodeMetrics(NamedTuple):
-  input_p: Optional[Sequence[base_input.BaseInput.HParams]] = None
   metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
   processed_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
   seqio_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
   steps_per_sec: Optional[float] = None
+  input_names: Optional[Sequence[str]] = None
 
 
 def should_early_stop(early_stop_fn: trainer_lib.EarlyStoppingFn,
@@ -649,17 +648,17 @@ def _aggregate_metrics(
         metrics, eval_train_metrics, 'eval_train/metrics')
 
   def _add_input_based_metrics(
-      input_p: Optional[List[base_input.BaseInput.HParams]],
+      input_names: Optional[List[str]],
       metrics_list: Optional[List[Optional[Dict[str, float]]]],
       dataset_type: Optional[str] = None,
       category: Optional[str] = None):
-    if input_p is None or metrics_list is None:
+    if input_names is None or metrics_list is None:
       return
-    assert len(input_p) == len(metrics_list), (input_p, metrics_list)
+    assert len(input_names) == len(metrics_list), (input_names, metrics_list)
     merged = {}
-    for p, m in zip(input_p, metrics_list):
+    for input_name, m in zip(input_names, metrics_list):
       if m is not None:
-        prefix = p.name
+        prefix = input_name
         if dataset_type is not None:
           prefix = f'{dataset_type}_{prefix}'
         if category is not None:
@@ -668,19 +667,21 @@ def _aggregate_metrics(
     metric_utils.update_float_dict(metrics, merged)
 
   if eval_metrics:
-    eval_input_p = eval_metrics.input_p
-    _add_input_based_metrics(eval_input_p, eval_metrics.metrics_list,
+    eval_input_names = eval_metrics.input_names
+    _add_input_based_metrics(eval_input_names, eval_metrics.metrics_list,
                              'eval_test', 'metrics')
-    _add_input_based_metrics(eval_input_p, eval_metrics.scoring_metrics_list,
+    _add_input_based_metrics(eval_input_names,
+                             eval_metrics.scoring_metrics_list,
                              'eval_test', 'scoring_eval')
   if decode_metrics:
-    decode_input_p = decode_metrics.input_p
-    _add_input_based_metrics(decode_input_p, decode_metrics.metrics_list,
+    decode_input_names = decode_metrics.input_names
+    _add_input_based_metrics(decode_input_names, decode_metrics.metrics_list,
                              'decode_test')
-    _add_input_based_metrics(decode_input_p,
+    _add_input_based_metrics(decode_input_names,
                              decode_metrics.processed_metrics_list,
                              'decode_test')
-    _add_input_based_metrics(decode_input_p, decode_metrics.seqio_metrics_list,
+    _add_input_based_metrics(decode_input_names,
+                             decode_metrics.seqio_metrics_list,
                              'decode_test')
 
   # Add training metrics.

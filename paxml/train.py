@@ -17,26 +17,24 @@
 
 import abc
 import contextlib
-import dataclasses
 import datetime
-import functools
 import gc
 import re
 import time
 import typing
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
+from typing import Callable, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from etils import epath
 import jax
 from jax import monitoring
-from jax.experimental import pjit
 import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import eval_lib
 from paxml import experiment_utils
 from paxml import metric_utils
+from paxml import partitioning
 from paxml import programs
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -68,7 +66,6 @@ TrainState = train_states.TrainState
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
 
-_INIT_TIME = time.time()
 _READ_CHECKPOINT_EVENT: str = '/jax/checkpoint/read/durations_sec'
 _WRITE_CHECKPOINT_EVENT: str = '/jax/checkpoint/write/durations_sec'
 
@@ -271,16 +268,20 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self,
-               job_log_dir: epath.Path,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType,
-               enable_checkpoint_saving: bool = True):
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+      checkpoint_type: CheckpointType,
+      enable_checkpoint_saving: bool = True,
+      enforce_restore_shape_check: bool = False,
+  ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
+    self._enforce_restore_shape_check = enforce_restore_shape_check
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -292,7 +293,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     return tasks_lib.restore_pmap_from_tensorstore(
         train_state_global_shapes,
         self.checkpoint_dir,
-        checkpoint_type=self._checkpoint_type)
+        checkpoint_type=self._checkpoint_type,
+        enforce_restore_shape_check=self._enforce_restore_shape_check,
+    )
 
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
   def get_model_states(
@@ -387,6 +390,7 @@ def _create_checkpointer(
     todelete_subdir: Optional[str],
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
     enable_checkpoint_saving: bool = True,
+    enforce_restore_shape_check: bool = False,
 ) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
@@ -395,6 +399,7 @@ def _create_checkpointer(
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
 
+  checkpoints.reregister_type_handlers(train_p.tensorstore_metadata_key)
   options = checkpoint_managers.CheckpointManagerOptions(
       max_to_keep=max_to_keep,
       save_interval_steps=save_interval_steps,
@@ -406,7 +411,10 @@ def _create_checkpointer(
   if checkpointer is None:
     if checkpoint_type == CheckpointType.GDA:
       checkpointer = Checkpointer(
-          PaxCheckpointHandler())
+          PaxCheckpointHandler(
+              enforce_restore_shape_check=enforce_restore_shape_check
+          )
+      )
     elif checkpoint_type == CheckpointType.PERSISTENCE:
       raise ValueError('Checkpointer must already be initialized.')
     else:
@@ -428,20 +436,11 @@ def _create_checkpointer(
         job_log_dir,
         checkpoint_manager,
         checkpoint_type,
-        enable_checkpoint_saving=enable_checkpoint_saving)
+        enable_checkpoint_saving=enable_checkpoint_saving,
+        enforce_restore_shape_check=enforce_restore_shape_check,
+    )
 
   return checkpointer
-
-
-def _compute_steps_per_sec(step_i, summary_last_time, summary_last_step):
-  """Computes the number of training steps per second."""
-  # Note: This function doesn't account for the time spent on running
-  # interleaved evaluation (if any) and/or evaluation on the training batch.
-  # It's, hence, merely a raw underestimate.
-  duration_sec = time.time() - summary_last_time
-  num_steps = step_i - summary_last_step
-  steps_per_sec = num_steps / duration_sec
-  return steps_per_sec
 
 
 def _train_log_interval_steps(
@@ -494,7 +493,9 @@ def train_and_evaluate(
     run_decode: bool = False,
     enable_auto_sharding: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
-    enable_checkpoint_saving: bool = True) -> None:
+    enable_checkpoint_saving: bool = True,
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """The shared path to run the training and evaluation loop.
 
   Args:
@@ -520,6 +521,8 @@ def train_and_evaluate(
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    enforce_restore_shape_check: Raises an error if restore shapes do not match
+      checkpoint shapes.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -533,7 +536,9 @@ def train_and_evaluate(
   # experiment_config.datasets() should not be called again as it won't have the
   # correct runtime information populated.
   for inp in input_p:
-    if not isinstance(inp, base_input.BaseInput.HParams):
+    if not isinstance(
+        inp, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
+    ):
       raise ValueError('Expecting BaseInput.HParams from datasets(), got: '
                        f'{inp.ToText()}')
     if inp.num_infeed_hosts == 0:
@@ -577,7 +582,9 @@ def train_and_evaluate(
       checkpoint_type,
       checkpoint_todelete_subdir,
       async_checkpointer=async_checkpointer,
-      enable_checkpoint_saving=enable_checkpoint_saving)
+      enable_checkpoint_saving=enable_checkpoint_saving,
+      enforce_restore_shape_check=enforce_restore_shape_check,
+  )
   if not enable_checkpoint_saving:
     logging.info(
         'Checkpointing is disabled and no checkpoint will be saved to disk.')
@@ -628,17 +635,19 @@ class _SummaryContextManager(contextlib.ExitStack):
 
   _exit_callbacks = []
 
-  def __init__(self,
-               job_log_dir: epath.Path,
-               eval_input_p: Sequence[base_input.BaseInput.HParams],
-               decode_input_p: Sequence[base_input.BaseInput.HParams],
-               eval_skip_train: bool = False):
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      eval_input_names: Sequence[str],
+      decode_input_names: Sequence[str],
+      eval_skip_train: bool = False,
+  ):
     """Initialize context manager.
 
     Args:
       job_log_dir: Directory for the job logs.
-      eval_input_p: Optional list of params for the eval input pipelines.
-      decode_input_p: Optional list of hparams for the decode input pipelines.
+      eval_input_names: list of names for the eval input pipelines.
+      decode_input_names: list of names for the decode input pipelines.
       eval_skip_train: By default, we also run eval on the training data input
         (`eval_train`), specifically on a batch not yet used for training. When
         set to True, this is skipped.
@@ -648,16 +657,17 @@ class _SummaryContextManager(contextlib.ExitStack):
     self.summary_train_dir = self.summary_base_dir / 'train'
     self.summary_eval_dir = self.summary_base_dir / 'eval_train'
     self.summary_writer = summary_utils.get_summary_writer
-    if eval_input_p:
+    if eval_input_names:
       self.summary_eval_test_dirs = [
-          self.summary_base_dir / f'eval_test_{p.name}' for p in eval_input_p
+          self.summary_base_dir / f'eval_test_{name}'
+          for name in eval_input_names
       ]
     else:
       self.summary_eval_test_dirs = []
-    if decode_input_p:
+    if decode_input_names:
       self.summary_decode_dirs = [
-          self.summary_base_dir / f'decode_test_{p.name}'
-          for p in decode_input_p
+          self.summary_base_dir / f'decode_test_{name}'
+          for name in decode_input_names
       ]
     else:
       self.summary_decode_dirs = []
@@ -712,23 +722,24 @@ def train_and_evaluate_pmap(
     experiment_train_program: An embedded train_program that's constructed in
       experiment. If specified, the program will be used for train steps.
   """
+
   logging.info('Using pmap for data parallelism.')
-  train_program, partitioned_train_state, total_num_params, prng_key = (
-      _create_program_and_states(
-          task_p,
-          train_input_p,
-          job_log_dir,
-          checkpointer,
-          checkpoint_type,
-      )
+  (
+      task,
+      partitioner,
+      train_program,
+      partitioned_train_state,
+      total_num_params,
+      prng_key,
+  ) = _create_program_and_states(
+      task_p,
+      train_input_p,
+      job_log_dir,
+      checkpointer,
+      checkpoint_type,
+      experiment_train_program=experiment_train_program,
   )
-  # TODO(hthu): We should always take a train_program from main.
-  if experiment_train_program is not None:
-    logging.info('Using customized train program.')
-    train_program = experiment_train_program
-  partitioner = train_program.partitioner
   assert not partitioner.global_mesh
-  global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
 
   # From now on, different replicas should use different random seeds.
   # Here, each process will have its unique prng_key.
@@ -742,26 +753,18 @@ def train_and_evaluate_pmap(
   eval_prng_seed = jax.random.split(eval_key, num=num_devices)
   logging.info('train prng_seed: %s', train_prng_seed)
   logging.info('eval prng_seed: %s', eval_prng_seed)
-  if train_program.task.early_stopping_fn_inst is not None:
+  if task.early_stopping_fn_inst is not None:
     if early_stopping_fn is None:
-      early_stopping_fn = train_program.task.early_stopping_fn_inst
+      early_stopping_fn = task.early_stopping_fn_inst
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '
           'train_and_evel function parameter.'
       )
 
-  # TODO(hthu): Construct a TrainEval instead.
-  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
-  assert is_eval
-  p_eval_step, _ = partitioner.partition(
-      eval_step_fn, global_inputs_shape_dtype, is_eval
-  )
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
   trainer_lib.check_unique_names(
@@ -777,18 +780,21 @@ def train_and_evaluate_pmap(
     decode_prng_seed = jax.random.split(decode_key, num=num_devices)
     logging.info('decode prng_seed: %s', decode_prng_seed)
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        train_program.task,
+        task,
         partitioner,
         task_p,
-        train_program.train_state_metadata.var_weight_hparams,
+        partitioner.get_train_state_metadata().var_weight_hparams,
         decode_input_pipelines,
         decode_input_p,
         decode_prng_seed,
         job_log_dir,
     )
-    return decode_once_fn, prng_key
+    decode_input_names = [inp.name for inp in decode_input_pipelines]
+    return decode_once_fn, prng_key, decode_input_names
 
   _train_and_evaluate_common(
+      task,
+      partitioner,
       train_program,
       partitioned_train_state,
       prng_key,
@@ -801,7 +807,6 @@ def train_and_evaluate_pmap(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated=True,
-      p_eval_step=p_eval_step,
       train_prng_seed=train_prng_seed,
   )
 
@@ -838,6 +843,8 @@ def train_and_evaluate_spmd_model(
   """
   logging.info('Using SPMD sharding for model parallelism.')
   (
+      task,
+      partitioner,
       train_program,
       partitioned_train_state,
       total_num_params,
@@ -849,13 +856,8 @@ def train_and_evaluate_spmd_model(
       checkpointer,
       checkpoint_type,
       enable_auto_sharding,
+      experiment_train_program,
   )
-  # TODO(hthu): We should always take a train_program from main.
-  if experiment_train_program is not None:
-    logging.info('Using customized train program.')
-    train_program = experiment_train_program
-
-  global_inputs_shape_dtype = train_program.train_inputs_shape_dtype
 
   # We do not fold in jax.process_index in contrast to the pmap version and
   # use a single global key instead to rely on pjit to split for different
@@ -864,45 +866,34 @@ def train_and_evaluate_spmd_model(
   prng_key, train_prng_seed, eval_prng_seed = jax.random.split(prng_key, 3)
   logging.info('train prng_key: %s', train_prng_seed)
   logging.info('eval prng_key: %s', eval_prng_seed)
-  partitioner = train_program.partitioner
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
-  if train_program.task.early_stopping_fn_inst is not None:
+  if task.early_stopping_fn_inst is not None:
     if early_stopping_fn is None:
-      early_stopping_fn = train_program.task.early_stopping_fn_inst
+      early_stopping_fn = task.early_stopping_fn_inst
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '
           'train_and_evel function parameter.'
       )
 
-  # TODO(pax): Support auto-sharding for eval step. In this case, we would
-  # have to fix the sharding of the input to be the same as what's derived
-  # from the train_step.
-
-  eval_step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.EVAL)
-  assert is_eval
-  p_eval_step, _ = partitioner.partition(
-      eval_step_fn,
-      global_inputs_shape_dtype,
-      is_eval,
-  )
-
   global_mesh = partitioner.global_mesh
   is_vars_replicated = False
 
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
-      trainer_lib.SingleTaskEvalProgram(
-          train_program.task, e_input_p, partitioner
-      )
+      programs.SingleTaskEvalProgram(task, e_input_p, partitioner)
       for e_input_p in eval_input_p
   ]
 
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
       decode_input_ps: Sequence[base_input.BaseInput.HParams],
-  ) -> Tuple[Callable[..., tuning_lib.DecodeMetrics], jax.random.KeyArray]:
+  ) -> Tuple[
+      Callable[..., tuning_lib.DecodeMetrics],
+      jax.random.KeyArray,
+      Sequence[str],
+  ]:
     assert decode_input_ps, 'decode_input_p must not be empty'
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_key: %s', decode_key)
@@ -921,14 +912,14 @@ def train_and_evaluate_spmd_model(
     )
 
     # TODO(pax-dev): Support auto-sharding for decoder step.
-    step_fn, is_eval = trainer_lib.get_step_fn(RunningMode.DECODE)
+    step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
     assert is_eval
     decode_step_fn, decode_input_partition_spec = partitioner.partition(
         step_fn, decode_inputs_shape_dtype, is_eval
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
-        train_program.task,
+        task,
         partitioner,
         task_p,
         padded_decode_input_pipelines,
@@ -939,9 +930,12 @@ def train_and_evaluate_spmd_model(
         decode_input_partition_spec,
     )
 
-    return decode_once_fn, prng_key
+    decode_input_names = [inp.name for inp in padded_decode_input_pipelines]
+    return decode_once_fn, prng_key, decode_input_names
 
   _train_and_evaluate_common(
+      task,
+      partitioner,
       train_program,
       partitioned_train_state,
       prng_key,
@@ -954,7 +948,6 @@ def train_and_evaluate_spmd_model(
       job_log_dir,
       eval_prng_seed,
       is_vars_replicated,
-      p_eval_step,
       train_prng_seed,
   )
 
@@ -966,28 +959,33 @@ def _create_program_and_states(
     checkpointer: _TrainingCheckpointer,
     checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
+    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ):
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   jax_task = instantiate(task_p)
   prng_key = jax.random.PRNGKey(task_p.train.random_seed)
   prng_key, init_key = jax.random.split(prng_key)
 
-  # The partitioner only needs shape/dtype information of the prng key.
-  # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
-  partitioner = trainer_lib.create_partitioner(
-      jax_task,
-      init_key,
-      reshard_inputs=reshard_inputs,
-      auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
-      job_log_dir=job_log_dir,
-  )
-  train_input_p = partitioner.preprocess_input_params(train_input_p)
-  train_input_pipeline = instantiate(train_input_p)
-  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
-  train_program = trainer_lib.SingleTaskTrainProgram(
-      jax_task, train_input_pipeline, partitioner
-  )
-  train_state_metadata = train_program.train_state_metadata
+  # Avoid creating the paritioner/input twice if the train program is defined.
+  # TODO(laigd): move this to the BaseExecutor class.
+  if experiment_train_program is not None:
+    partitioner = experiment_train_program.partitioner
+    train_input_pipeline = experiment_train_program.train_input
+  else:
+    # The partitioner only needs shape/dtype information of the prng key.
+    # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key
+    # instead.
+    partitioner = partitioning.create_partitioner(
+        jax_task,
+        init_key,
+        reshard_inputs=reshard_inputs,
+        auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
+        job_log_dir=job_log_dir,
+    )
+    train_input_p = partitioner.preprocess_input_params(train_input_p)
+    train_input_pipeline = instantiate(train_input_p)
+    partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
+  train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
   with base_layer.JaxContext.new_context():
@@ -1010,7 +1008,16 @@ def _create_program_and_states(
   train_input_pipeline = _maybe_update_latest_model_step(
       train_input_pipeline, train_input_p, initial_global_step
   )
+  if experiment_train_program:
+    logging.info('Using customized train program.')
+    train_program = experiment_train_program
+  else:
+    train_program = programs.SingleTaskTrainProgram(
+        jax_task, train_input_pipeline, partitioner
+    )
   return (
+      jax_task,
+      partitioner,
       train_program,
       partitioned_train_state,
       total_num_params,
@@ -1019,11 +1026,13 @@ def _create_program_and_states(
 
 
 def _train_and_evaluate_common(
+    task: tasks_lib.SingleTask,
+    partitioner: partitioning.Partitioner,
     train_program: programs.BaseTrainProgram,
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
-    test_eval_programs: Sequence[trainer_lib.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,
@@ -1032,26 +1041,28 @@ def _train_and_evaluate_common(
     job_log_dir,
     eval_prng_seed,
     is_vars_replicated,
-    p_eval_step,
     train_prng_seed,
 ):
   """Training loop code common to both pmap and spmd."""
-  task_p = train_program.task.hparams
+  task_p = task.hparams
   train_p = task_p.train
-  partitioner = train_program.partitioner
   train_state_metadata = partitioner.get_train_state_metadata()
 
   if decode_input_p:
-    decode_once_fn, prng_key = partition_decode_once_fns(
+    decode_once_fn, prng_key, decode_input_names = partition_decode_once_fns(
         prng_key, decode_input_p
     )
+  else:
+    decode_input_names = []
+
+  eval_input_names = [prg.eval_input.name for prg in test_eval_programs]
 
   logging.info('Training loop starting...')
 
   with _SummaryContextManager(
       job_log_dir,
-      [eval_progarm.eval_input.hparams for eval_progarm in test_eval_programs],
-      decode_input_p,
+      eval_input_names,
+      decode_input_names,
       train_p.eval_skip_train,
   ) as (
       train_summary_writer,
@@ -1070,6 +1081,7 @@ def _train_and_evaluate_common(
         train_summary_writer, train_program.train_unpadded_global_batch_size
     )
 
+    # TODO(laigd): consider moving this into train program.
     train_summary_handler = summary_utils.SummaryHandler(
         train_summary_writer,
         train_p.summary_interval_steps,
@@ -1083,19 +1095,16 @@ def _train_and_evaluate_common(
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
         name='eval')
 
-    summary_last_time = time.time()
-    summary_last_step = None
-
-    profiler = profiling.Profiler(
-        num_steps=train_p.profiler_num_steps,
-        min_duration_sec=train_p.profiler_min_duration_sec,
-        max_num_hosts=train_p.profiler_max_num_hosts)
-
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step))
-    initial_step = step_i
-    init_duration_set = False
+    train_program.setup(
+        train_prng_seed,
+        eval_prng_seed,
+        step_i,
+        train_summary_handler,
+        eval_summary_handler,
+    )
 
     # Start the train loop. Make sure all at the same step.
     py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
@@ -1106,131 +1115,34 @@ def _train_and_evaluate_common(
     gc.freeze()
     while True:
       logging.debug('step=`%d`: Beginning', step_i)
-
-      if summary_last_step is None:
-        summary_last_step = step_i - 1
-
       checkpointer.save_if_needed(
           step_i, partitioned_train_state, train_state_metadata.partition_specs
       )
 
-      if step_i >= train_p.num_train_steps:
+      if not train_program.should_run(partitioned_train_state, step_i):
         logging.info(
             'Training loop completed (step (`%d`) greater than '
             'num_train_step (`%d`).', step_i, train_p.num_train_steps)
         break
 
-      # Get new model inputs
-      logging.debug('  Retrieving inputs.')
-      # TODO(hthu): Probably we should just internalize directly into step().
-      model_inputs = train_program.train_input.get_next_padded()
-      model_inputs = partitioner.preprocess_inputs(
-          train_program.train_input,
-          model_inputs,
-          train_program.partitioned_input_spec,
-      )
-      logging.debug('  Retrieved inputs.')
-
-      do_profile = train_p.profiler_capture_step is not None
-      if (do_profile and
-          step_i - initial_step == train_p.profiler_capture_step):
-        profiler.capture_async()
-
-      logging.debug('  Performing train_step().')
-      with jax.profiler.StepTraceAnnotation('train', step_num=step_i):
-        with py_utils.timeit() as train_period:
-          program_output = train_program.run_step(
-              partitioned_train_state,
-              train_prng_seed,
-              model_inputs,
-              train_program.train_unpadded_global_batch_size,
-          )
-          # TODO(hthu): Pass program output around instead of unpacking.
-          partitioned_train_state = program_output.state
-          loss = program_output.aux['loss']
-          weighted_scalars = program_output.aux['weighted_scalars']
-          per_example_out = program_output.aux['per_example_out']
-          summary_tensors = program_output.aux['summary_tensors']
-      logging.debug(
-          '  Completed train_step() in %f seconds.', train_period.elapsed
-      )
-      if step_i == initial_step:
-        first_step_completion_time = time.time()
-
-      if do_profile and step_i - initial_step < train_p.profiler_capture_step:
-        profiler.update_step_moving_mean(train_period.elapsed)
-
-      logging.debug('  Writing summaries (attempt).')
-      new_step_i = step_i + 1
-
-      # Train metrics.
-      train_weighted_scalars = weighted_scalars
-      if train_p.device_sync_interval_steps:
-        should_sync_device = (
-            new_step_i % train_p.device_sync_interval_steps
-        ) == 0
-      else:
-        should_sync_device = train_summary_handler.should_write(new_step_i)
-      steps_per_sec = None
-      if should_sync_device:
-        # Synchronize step_i. This is performed at a fixed interval to avoid
-        # a gap between steps.
-        new_step_i = int(
-            py_utils.maybe_unreplicate_for_fully_replicated(
-                partitioned_train_state.step))
-        steps_per_sec = _compute_steps_per_sec(step_i, summary_last_time,
-                                               summary_last_step)
-        logging.info('steps/sec: %f', steps_per_sec)
-        summary_last_time = time.time()
-        summary_last_step = step_i
-        if not init_duration_set:
-          # Find estimated timestamp before the first execution call.
-          # This enables us to include the first step's compile time but exclude
-          # its execution time from the init duration.
-          estimated_execute_duration = 1 / steps_per_sec
-          first_step_execute_time = (
-              first_step_completion_time - estimated_execute_duration)
-          init_duration = first_step_execute_time - _INIT_TIME
-          monitoring.record_event_duration_secs(
-              '/jax/pax/init/time_before_first_step_secs', init_duration)
-          init_duration_set = True
-
-      # Note: Train metrics are currently reported at step_i + 1, while these
-      # training metrics/summaries are pre-model weight updates.
-      # TODO(b/264635784): Update the logic to pass step_i instead.
-      train_summary_handler.process(
-          new_step_i,
-          loss,
-          weighted_scalars,
-          summary_tensors,
-          per_example_out=per_example_out,
-          steps_per_sec=steps_per_sec)
-      logging.debug('  Wrote summaries (attempted).')
+      program_output = train_program.run(partitioned_train_state, step_i)
+      partitioned_train_state = program_output.state
+      train_weighted_scalars = program_output.aux.weighted_scalars
+      steps_per_sec = program_output.aux.steps_per_sec
+      eval_train_metrics = program_output.aux.eval_train_metrics
 
       # While the eval ones below are post-model weight updates, hence the step
       # counter is incremented in between.
-      step_i = new_step_i
+      step_i = program_output.aux.new_train_step
 
-      eval_train_metrics = None
       eval_metrics: Optional[tuning_lib.EvalMetrics] = None
       # Run eval at regular step interval.
       if (train_p.eval_interval_steps and
           step_i % train_p.eval_interval_steps == 0):
-
         logging.debug('  Starting eval_step().')
-
-        if train_p.eval_use_ema_states:
-          if not tasks_lib.has_ema(task_p):
-            raise ValueError(
-                'eval_use_ema_states is requested but the '
-                'learner does not seem to have ema enabled'
-            )
-          eval_partitioned_train_state = tasks_lib.extract_ema(
-              partitioned_train_state
-          ).to_eval_state()
-          logging.debug('  Performing eval_step() with ema states.')
-        else:
-          eval_partitioned_train_state = partitioned_train_state.to_eval_state()
+        eval_partitioned_train_state = programs.get_eval_train_state(
+            task, partitioned_train_state
+        )
         # If we have eval test then also evaluate on test.
         if test_eval_programs:
           logging.debug('  Performing eval_step() runs on test splits.')
@@ -1247,45 +1159,17 @@ def _train_and_evaluate_common(
             )
           eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
-              input_p=[
-                  eval_program.eval_input.hparams
-                  for eval_program in test_eval_programs
-              ],
               metrics_list=eval_metrics_list,
               scoring_metrics_list=eval_scoring_metrics_list,
               steps_per_sec=eval_steps_per_sec,
+              input_names=[
+                  eval_program.eval_input.name
+                  for eval_program in test_eval_programs
+              ],
           )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
               eval_period.elapsed)
-        if train_p.eval_skip_train:
-          logging.debug('  train_p.eval_skip_train is True. '
-                        'Skipping eval_train.')
-        else:
-          logging.debug('  Retrieving eval model_inputs.')
-          eval_inputs = train_program.train_input.peek_padded()
-          if eval_inputs is None:
-            logging.debug('  eval_inputs is None. Skipping eval_train.')
-          else:
-            logging.debug('  Retrieved eval model_inputs.')
-            logging.debug('  Performing eval_step() runs on training split.')
-            eval_inputs = train_program.partitioner.preprocess_inputs(
-                train_program.train_input,
-                eval_inputs,
-                train_program.partitioned_input_spec,
-            )
-
-            loss, weighted_scalars, _, summary_tensors = p_eval_step(
-                eval_partitioned_train_state,
-                eval_prng_seed,
-                eval_inputs,
-                train_program.train_unpadded_global_batch_size,
-            )
-            logging.debug('  Completed eval_step() runs on training split.')
-            if eval_summary_handler.process(step_i, loss, weighted_scalars,
-                                            summary_tensors):
-              logging.debug('  Wrote eval summaries.')
-            eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
 
       decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
       if (decode_input_p and train_p.decode_interval_steps and
