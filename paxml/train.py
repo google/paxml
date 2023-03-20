@@ -1089,14 +1089,14 @@ def _train_and_evaluate_common(
         log_interval_steps=_train_log_interval_steps(train_p),
         is_async=bool(train_p.device_sync_interval_steps),
         name='training',
-        global_bs=train_unpadded_global_batch_size,
-        num_sub_batches=num_sub_batches)
+        global_bs=train_program.train_unpadded_global_batch_size,
+        num_sub_batches=getattr(train_p.learner.optimizer, "num_sub_batches", 1))
     eval_summary_handler = summary_utils.SummaryHandler(
         eval_summary_writer,
         train_p.summary_interval_steps,
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
         name='eval',
-        global_bs=train_unpadded_global_batch_size)
+        global_bs=train_program.train_unpadded_global_batch_size)
 
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(

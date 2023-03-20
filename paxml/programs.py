@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 import jax
 from jax.experimental import multihost_utils
 from jax import monitoring
+import jax.numpy as jnp
 import numpy as np
 
 from etils import epath
@@ -169,7 +170,7 @@ class BaseTrainProgram(Program):
     self._train_summary_last_step = init_step - 1
     self._train_summary_handler = train_summary_handler
     self._eval_train_summary_handler = eval_summary_handler
-    self._num_sub_batches = getattr(self.train_p.learner.optimizer, "num_sub_batches", 1)
+    self._num_sub_batches = getattr(self._task.hparams.train.learner.optimizer, "num_sub_batches", 1)
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     return train_step < self._task.hparams.train.num_train_steps
@@ -209,7 +210,9 @@ class BaseTrainProgram(Program):
               model_inputs,
               self._train_unpadded_global_batch_size,
           )
-        del state  # Unused anymore.
+          summed_loss += loss
+          state = new_state
+    del state  # Unused anymore.
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
