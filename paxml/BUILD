@@ -628,6 +628,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        "//paxml:checkpoints",
         "//praxis:asserts",
         "//praxis:base_input",
         "//praxis:base_layer",

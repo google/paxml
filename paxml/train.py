@@ -149,23 +149,22 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def get_model_states(
       self,
-      jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[jax.sharding.Mesh],
+      partitioner: partitioning.Partitioner,
       metadata: trainer_lib.TrainStateMetadata,
-      init_key: PRNGKey,
+      root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int]:
+  ) -> Tuple[TrainState, int, PRNGKey]:
     """Restores TrainState from checkpoint or initializes it.
 
     Args:
-      jax_task: A SingleTask instance.
-      global_mesh: Use this mesh to restore the checkpoint.
+      partitioner: The partitioner used to initialized the model states and root
+        prng key.
       metadata: A TrainStateMetadata instance.
-      init_key: PRNGKey for initializing the model variables.
+      root_prng_key: PRNGKey for initializing the model variables.
       train_input_pipeline: Training input pipeline instance
 
     Returns:
-      (train_state, total_num_params).
+      (train_state, total_num_params, initialized_root_prng_key).
     """
     raise NotImplementedError
 
@@ -278,12 +277,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   # TODO(laigd): merge this with _SpmdEvalCheckpointer.get_model_states().
   def get_model_states(
       self,
-      jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[jax.sharding.Mesh],
+      partitioner: partitioning.Partitioner,
       metadata: trainer_lib.TrainStateMetadata,
-      init_key: PRNGKey,
+      root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int]:
+  ) -> Tuple[TrainState, int, PRNGKey]:
     step = self.checkpoint_manager.latest_step()
     if step is None:
       partitioned_train_state = None
@@ -292,35 +290,23 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
         partitioned_train_state = self._restore_with_args(
             step,
             metadata.padded_global_shapes,
-            global_mesh,
+            partitioner.global_mesh,
             metadata.partition_specs,
             train_input_pipeline,
         )
       monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                             restore_period.elapsed)
 
-    # Randomly initialized variables if no files in checkpoint dir.
-    if partitioned_train_state is None:
-      _, partitioned_train_state = (
-          trainer_lib.initialize_partitioned_model_states(
-              jax_task,
-              init_key,
-              metadata.input_shape_dtype,
-              global_mesh=global_mesh,
-              # Note: We currently enforce that the checkpoint to reload via
-              # init_checkpoint_rules are in the same format as the checkpoint
-              # solution used by the experiment.
-              checkpoint_type=self.checkpoint_type,
-              state_specs=metadata.partition_specs,
-          )
-      )
-
-    logging.info(
-        'partitioned_train_state shapes (global shape for Jax array): %s',
-        jax.tree_map(lambda x: x.shape, partitioned_train_state))
+    root_prng_key, partitioned_train_state = (
+        partitioner.initialize_prng_key_and_train_state(
+            root_prng_key,
+            partitioned_train_state,
+            self.checkpoint_type,
+        )
+    )
 
     total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
-    return partitioned_train_state, total_num_params
+    return partitioned_train_state, total_num_params, root_prng_key
 
   @property
   def checkpoint_type(self) -> CheckpointType:
@@ -359,12 +345,11 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
   def get_model_states(
       self,
-      jax_task: tasks_lib.SingleTask,
-      global_mesh: Optional[jax.sharding.Mesh],
+      partitioner: partitioning.Partitioner,
       metadata: trainer_lib.TrainStateMetadata,
-      init_key: PRNGKey,
+      root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int]:
+  ) -> Tuple[TrainState, int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       if py_utils.pmap_use_tensorstore():
@@ -391,28 +376,18 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
-    # Randomly initialized variables if no files in checkpoint dir.
-    if train_state is None:
-      train_state = trainer_lib.initialize_model_state(
-          jax_task,
-          init_key,
-          metadata.input_shape_dtype,
-          checkpoint_type=self.checkpoint_type,
-      )
-    logging.info('train_state=%s', jax.tree_map(lambda x: x.shape, train_state))
 
-    partitioned_train_state = trainer_lib.replicate_model_state(train_state)
-    logging.info(
-        'partitioned_train_state shapes: %s',
-        jax.tree_map(lambda x: x.shape, partitioned_train_state),
+    # TODO(laigd): move the logic below outside of get_model_states.
+    root_prng_key, replicated_train_state = (
+        partitioner.initialize_prng_key_and_train_state(
+            root_prng_key, train_state, self.checkpoint_type
+        )
     )
-    # Unreplicated model states are not needed anymore at that point.
-    del train_state
 
-    total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
+    total_num_params = py_utils.total_num_vars(replicated_train_state.mdl_vars)
     assert total_num_params % jax.local_device_count() == 0
     total_num_params = total_num_params // jax.local_device_count()
-    return partitioned_train_state, total_num_params
+    return replicated_train_state, total_num_params, root_prng_key
 
   def _save_with_args(
       self,
@@ -872,12 +847,7 @@ def train_and_evaluate_pmap(
   )
   assert not partitioner.global_mesh
 
-  # From now on, different replicas should use different random seeds.
-  # Here, each process will have its unique prng_key.
-  # prng_key will be further split so that each core on a host will get
-  # different prng_key.
-  prng_key = jax.random.fold_in(prng_key, jax.process_index())
-  logging.info('root prng_key: %s', prng_key)
+  # TODO(laigd): move this logic to _create_program_and_states.
   num_devices = jax.local_device_count()
   prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
   train_prng_seed = jax.random.split(train_key, num=num_devices)
@@ -990,10 +960,7 @@ def train_and_evaluate_spmd_model(
       experiment_train_program,
   )
 
-  # We do not fold in jax.process_index in contrast to the pmap version and
-  # use a single global key instead to rely on pjit to split for different
-  # replicas.
-  logging.info('root prng_key: %s', prng_key)
+  # TODO(laigd): move this logic to _create_program_and_states.
   prng_key, train_prng_seed, eval_prng_seed = jax.random.split(prng_key, 3)
   logging.info('train prng_key: %s', train_prng_seed)
   logging.info('eval prng_key: %s', eval_prng_seed)
@@ -1094,8 +1061,7 @@ def _create_program_and_states(
 ):
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   jax_task = instantiate(task_p)
-  prng_key = jax.random.PRNGKey(task_p.train.random_seed)
-  prng_key, init_key = jax.random.split(prng_key)
+  root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
 
   # Avoid creating the paritioner/input twice if the train program is defined.
   # TODO(laigd): move this to the BaseExecutor class.
@@ -1108,7 +1074,7 @@ def _create_program_and_states(
     # instead.
     partitioner = partitioning.create_partitioner(
         jax_task,
-        init_key,
+        root_prng_key,
         reshard_inputs=reshard_inputs,
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
         job_log_dir=job_log_dir,
@@ -1129,12 +1095,10 @@ def _create_program_and_states(
   train_input = (
       train_input_pipeline if task_p.train.enable_input_checkpointing else None
   )
-  partitioned_train_state, total_num_params = checkpointer.get_model_states(
-      jax_task,
-      partitioner.global_mesh,
-      train_state_metadata,
-      init_key,
-      train_input,
+  partitioned_train_state, total_num_params, root_prng_key = (
+      checkpointer.get_model_states(
+          partitioner, train_state_metadata, root_prng_key, train_input
+      )
   )
 
   initial_global_step = int(
@@ -1159,7 +1123,7 @@ def _create_program_and_states(
       train_program,
       partitioned_train_state,
       total_num_params,
-      prng_key,
+      root_prng_key,
   )
 
 def _train_and_evaluate_common(

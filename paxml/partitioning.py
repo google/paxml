@@ -37,8 +37,11 @@ from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
 
+from paxml import checkpoints  # mapped to internal
+
 PartitionSpec = jax.sharding.PartitionSpec
 
+CheckpointType = checkpoints.CheckpointType
 PRNGKey = pytypes.PRNGKey
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
@@ -259,6 +262,31 @@ class Partitioner(metaclass=abc.ABCMeta):
     """
 
   @abc.abstractmethod
+  def initialize_prng_key_and_train_state(
+      self,
+      root_prng_key: PRNGKey,
+      train_state: Optional[TrainState],
+      checkpoint_type: Optional[CheckpointType],
+      discard_opt_states: Optional[bool] = False,
+  ) -> Tuple[PRNGKey, TrainState]:
+    """Initialize the root prng key and train state.
+
+    Depending on the partitioner, this may involve actions like splitting the
+    root_prng_key, replicating the train_state, etc.
+
+    Args:
+      proot_rng_key: The root prng key.
+      train_state: The train state restored from checkpoint. If None, will
+        initialize it from scratch.
+      checkpoint_type: The checkpoint type.
+      discard_opt_states: Whether to discard the part corresponding to the
+        optimizer states or not, from train_state.
+
+    Returns:
+      The properly initialized root prng key and train state.
+    """
+
+  @abc.abstractmethod
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function.
 
@@ -306,6 +334,13 @@ class Partitioner(metaclass=abc.ABCMeta):
       The TrainStateMetadata.
     """
 
+  @property
+  def _init_do_eval(self):
+    """Whether to set do_eval=True when running abstract_init_with_metadata."""
+    if self._jax_task.hparams.train.always_use_train_for_model_init:
+      return False
+    return self._init_is_eval
+
   def _get_train_state_metadata_default(self) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
     if not self._train_inputs_shape_dtype:
@@ -317,9 +352,7 @@ class Partitioner(metaclass=abc.ABCMeta):
         self._jax_task,
         self._train_inputs_shape_dtype,
         discard_opt_states=False,
-        do_eval=False
-        if self._jax_task.hparams.train.always_use_train_for_model_init
-        else self._init_is_eval,
+        do_eval=self._init_do_eval,
     )
 
   def _maybe_discard_opt_states(
@@ -443,6 +476,46 @@ class PmapPartitioner(Partitioner):
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary."""
     return input_ps
+
+  def initialize_prng_key_and_train_state(
+      self,
+      root_prng_key: PRNGKey,
+      train_state: Optional[TrainState],
+      checkpoint_type: Optional[CheckpointType],
+      discard_opt_states: Optional[bool] = False,
+  ) -> Tuple[PRNGKey, TrainState]:
+    """Initialize the root prng key and train state."""
+    root_prng_key, init_key = jax.random.split(root_prng_key)
+    if train_state is None:
+      # If no checkpoint was restored, initialize with random weights.
+      metadata = self.get_train_state_metadata(discard_opt_states)
+      train_state = trainer_lib.initialize_model_state(
+          self._jax_task,
+          init_key,
+          metadata.input_shape_dtype,
+          discard_opt_states=discard_opt_states,
+          is_eval=self._init_do_eval,
+          checkpoint_type=checkpoint_type,
+      )
+
+    logging.info(
+        'train state shapes: %s', jax.tree_map(lambda x: x.shape, train_state)
+    )
+    replicated_train_state = trainer_lib.replicate_model_state(train_state)
+    # Unreplicated model states are not needed anymore at that point.
+    del train_state
+    logging.info(
+        'replicated train state shapes: %s',
+        jax.tree_map(lambda x: x.shape, replicated_train_state),
+    )
+
+    # From now on, different replicas should use different random seeds.
+    # Here, each process will have its unique prng key.
+    # root_prng_key will be further split so that each core on a host will get
+    # different key.
+    root_prng_key = jax.random.fold_in(root_prng_key, jax.process_index())
+    logging.info('root prng key: %s', root_prng_key)
+    return root_prng_key, replicated_train_state
 
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""
@@ -584,6 +657,50 @@ class PjitPartitioner(Partitioner):
     return trainer_lib.adjust_input_params_for_small_batch(
         input_ps, self.global_mesh
     )
+
+  def initialize_prng_key_and_train_state(
+      self,
+      root_prng_key: PRNGKey,
+      train_state: Optional[TrainState],
+      checkpoint_type: Optional[CheckpointType],
+      discard_opt_states: Optional[bool] = False,
+  ) -> Tuple[PRNGKey, TrainState]:
+    """Initialize the root prng key and train state."""
+    root_prng_key, init_key = jax.random.split(root_prng_key)
+    # train_state should already be partitioned.
+    partitioned_train_state = train_state
+    if partitioned_train_state is None:
+      # If no checkpoint was restored, initialize with random weights.
+      metadata = self.get_train_state_metadata(discard_opt_states)
+      # TODO(laigd): there is a potential bug here: when this is called in the
+      # eval/decode pipeline, do_eval is not properly set (see the pmap
+      # version). But since we're enabling always_use_train_for_model_init this
+      # is probably fine.
+      unused_pspec, partitioned_train_state = (
+          trainer_lib.initialize_partitioned_model_states(
+              self._jax_task,
+              init_key,
+              metadata.input_shape_dtype,
+              global_mesh=self.global_mesh,
+              # Note: We currently enforce that the checkpoint to reload via
+              # init_checkpoint_rules are in the same format as the checkpoint
+              # solution used by the experiment.
+              checkpoint_type=checkpoint_type,
+              state_specs=metadata.partition_specs,
+              discard_opt_states=discard_opt_states,
+          )
+      )
+
+    logging.info(
+        'partitioned train state shapes (global shape): %s',
+        jax.tree_map(lambda x: x.shape, partitioned_train_state),
+    )
+
+    # We do not fold in jax.process_index in contrast to the pmap version and
+    # use a single global key instead to rely on pjit to split for different
+    # replicas.
+    logging.info('root prng key: %s', root_prng_key)
+    return root_prng_key, partitioned_train_state
 
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""

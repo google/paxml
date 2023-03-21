@@ -172,9 +172,16 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def get_model_states(
       self,
-      prng_key: PRNGKey,
+      root_prng_key: PRNGKey,
   ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
-    """Restore the train state from checkpoint or initialize it."""
+    """Restore the train state from checkpoint or initialize it.
+
+    Args:
+      root_prng_key: The root prng key.
+
+    Returns:
+      (train_state, train_state_metadata, initialized_root_prng_key).
+    """
 
 
 class _SpmdEvalCheckpointer(_EvalCheckpointer):
@@ -207,18 +214,14 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
   def get_model_states(
       self,
-      init_key: PRNGKey,
+      root_prng_key: PRNGKey,
   ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Gets a partitioned model states and the step function."""
-    global_mesh = self._partitioner.global_mesh
-    init_key, step_key = jax.random.split(init_key)
-
     train_state_metadata = self._partitioner.get_train_state_metadata(
         discard_opt_states=not self.use_ema
     )
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
-
     if self.use_ema and not partition_specs.opt_states:
       # Make sure the opt_states exists before restoring.
       # This is combined with the decoding test.
@@ -229,23 +232,15 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partitioned_train_state = self._restore(
         self.restore_checkpoint_step, train_state_metadata
     )
-    if partitioned_train_state is None:
-      # If no checkpoint was restored, initialize with random weights.
-      _, partitioned_train_state = (
-          trainer_lib.initialize_partitioned_model_states(
-              self._jax_task,
-              step_key,
-              train_state_metadata.input_shape_dtype,
-              global_mesh=self._partitioner.global_mesh,
-              # Note: We currently enforce that the checkpoint to reload via
-              # init_checkpoint_rules are in the same format as the checkpoint
-              # solution used by the experiment.
-              checkpoint_type=self.checkpoint_type,
-              state_specs=partition_specs,
-              discard_opt_states=True,
-          )
-      )
-    return partitioned_train_state, train_state_metadata, init_key
+    root_prng_key, partitioned_train_state = (
+        self._partitioner.initialize_prng_key_and_train_state(
+            root_prng_key,
+            partitioned_train_state,
+            self.checkpoint_type,
+            discard_opt_states=True,
+        )
+    )
+    return partitioned_train_state, train_state_metadata, root_prng_key
 
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
@@ -316,7 +311,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
   def get_model_states(
       self,
-      prng_key: PRNGKey,
+      root_prng_key: PRNGKey,
   ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
@@ -328,29 +323,15 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         self.restore_checkpoint_step,
         train_state_metadata.unpadded_global_shapes,
     )
-    if model_states is None:
-      prng_key, init_key = jax.random.split(prng_key)
-      model_states = trainer_lib.initialize_model_state(
-          self._jax_task,
-          init_key,
-          train_state_metadata.input_shape_dtype,
-          discard_opt_states=not self.use_ema,
-          is_eval=not self._jax_task.hparams.train.always_use_train_for_model_init,
-          checkpoint_type=self.checkpoint_type,
-      )
-
-    replicated_model_states = trainer_lib.replicate_model_state(model_states)
-    logging.info(
-        'replicated_model_states: %s',
-        jax.tree_map(lambda x: x.shape, replicated_model_states),
+    root_prng_key, replicated_model_states = (
+        self._partitioner.initialize_prng_key_and_train_state(
+            root_prng_key,
+            model_states,
+            self.checkpoint_type,
+            discard_opt_states=not self.use_ema,
+        )
     )
-    # From now on, different replicas should use different random seeds.
-    # Here, each process will have its unique prng_key.
-    # prng_key will be further split so that each core on a host will get
-    # different prng_key.
-    prng_key = jax.random.fold_in(prng_key, jax.process_index())
-    logging.info('root prng_key: %s', prng_key)
-    return replicated_model_states, train_state_metadata, prng_key
+    return replicated_model_states, train_state_metadata, root_prng_key
 
 
 def _create_checkpointer(
@@ -535,8 +516,9 @@ class _PmapEvalRunner:
 
   Example usage:
 
-    (replicated_model_states, train_state_metadata,
-     prng_key) = checkpointer.get_model_states(prng_key, inputs_shape_dtype)
+    replicated_model_states, train_state_metadata, prng_key = (
+        checkpointer.get_model_states(prng_key)
+    )
 
     runner = _PmapEvalRunner(eval_input_params, jax_task, prng_key)
     metrics_list, eval_scoring_metrics_list, num_eval_steps = (
@@ -655,6 +637,7 @@ def evaluate_pmap_model(
   )
   eval_one_step_fn = eval_runner.get_partition_run_one_step_fn()
   eval_programs = eval_runner.eval_programs
+
   decode_once_fn = None
   decode_input_p = None
   decode_inputs = None
@@ -683,10 +666,8 @@ class _SpmdEvalRunner:
   Example usage:
 
     checkpointer: _SpmdEvalCheckpointer = ...
-    (partitioned_train_state, train_state_metadata, step_fn,
-     inputs_partition_spec, inputs_shape_dtypes) = (
-         checkpointer.get_model_states(
-         init_key, train_input_specs, eval_input_ps=eval_input_ps))
+    partitioned_train_state, train_state_metadata, prng_key = (
+        checkpointer.get_model_states(prng_key))
 
     runner = _SpmdEvalRunner(
         eval_input_ps, jax_task, partitioner, job_log_dir)
@@ -804,26 +785,14 @@ def evaluate_spmd_model(
   if not eval_input_p:
     return
 
-  task_p = jax_task.hparams
-  prng_key, init_key = jax.random.split(prng_key)
-  # We do not fold in jax.process_index in contrast to the pmap version and
-  # use a single global key instead to rely on pjit to split for different
-  # replicas.
-  logging.info('root prng_key: %s', prng_key)
-  _, eval_key = jax.random.split(prng_key)
-  logging.info('eval prng_key: %s', eval_key)
-
-  partitioned_train_state, train_state_metadata, _ = (
-      checkpointer.get_model_states(init_key)
+  partitioned_train_state, train_state_metadata, prng_key = (
+      checkpointer.get_model_states(prng_key)
   )
-  logging.info(
-      'partitioned_train_state: %s',
-      jax.tree_map(lambda x: x.shape, partitioned_train_state),
-  )
-
   eval_runner = _SpmdEvalRunner(
       eval_input_p, jax_task, partitioner, job_log_dir
   )
+  _, eval_key = jax.random.split(prng_key)
+  logging.info('eval prng_key: %s', eval_key)
   eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
 
@@ -834,7 +803,7 @@ def evaluate_spmd_model(
   _common_eval_or_decode_loop(
       EvaluationMode.EVAL,
       checkpointer,
-      task_p,
+      jax_task.hparams,
       job_log_dir,
       input_p,
       eval_input_p,
@@ -1036,7 +1005,6 @@ def decode_pmap_model(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   task_p = jax_task.hparams
-  prng_key, eval_key = jax.random.split(prng_key)
   # Either decoder or eval inputs is not empty.
   assert list(input_p) + list(eval_input_p)
 
@@ -1050,6 +1018,7 @@ def decode_pmap_model(
       checkpointer.get_model_states(prng_key)
   )
 
+  prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _PmapEvalRunner(
       partitioner, eval_input_p, jax_task, eval_key, job_log_dir
   )
@@ -1499,7 +1468,6 @@ def decode_spmd_model(
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
   """
-  prng_key, init_key, eval_key = jax.random.split(prng_key, 3)
   task_p = jax_task.hparams
   padded_input_p = [
       trainer_lib.adjust_input_params_for_small_batch(
@@ -1520,10 +1488,10 @@ def decode_spmd_model(
         checkpointer, jax_task.hparams.train.decode_start_after_n_steps
     )
 
-  prng_key, init_key = jax.random.split(prng_key, 2)
-  partitioned_train_state, train_state_metadata, _ = (
-      checkpointer.get_model_states(init_key)
+  partitioned_train_state, train_state_metadata, prng_key = (
+      checkpointer.get_model_states(prng_key)
   )
+  prng_key, eval_key = jax.random.split(prng_key, 2)
 
   if inputs:
     # Peek to avoid exhausting the input pipeline.
