@@ -168,6 +168,25 @@ flags.DEFINE_integer(
     'pythia_port', None,
     'Port for hosting Pythia service when non-Vizier built-in algorithms '
     'is used')
+flags.DEFINE_string(
+    'should_log_compiles', None,
+    'Whether to log compile time')
+flags.DEFINE_string(
+    'tfds_data_dir', None,
+    'If set, directory used to store datasets prepared by '
+    'TensorFlow Datasets that are not available in the public TFDS GCS '
+    'bucket.')
+
+## multiprocessing GPU flags
+flags.DEFINE_bool(
+    'multiprocess_gpu', False, 
+    'Whether to initialize JAX distributed for multi-host GPU')
+flags.DEFINE_string(
+    'server_addr', None, help='server ip addr')
+flags.DEFINE_integer(
+    'num_hosts', None, help='num of hosts' )
+flags.DEFINE_integer(
+    'host_idx', None, help='index of current host' )
 
 # Flags --jax_backend_target, --jax_xla_backend, --jax_enable_checks are
 # available through JAX.
@@ -386,13 +405,24 @@ def run(experiment_config: base_experiment.BaseExperiment,
 
 
 def main(argv: Sequence[str]) -> None:
+  start = time.time()
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
+
+  if FLAGS.tfds_data_dir is not None:
+    # seqio import is slow so avoid module-level import
+    import seqio
+    seqio.set_tfds_data_dir_override(FLAGS.tfds_data_dir)
 
   setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
                       FLAGS.jax_traceback_filtering_option,
-                      FLAGS.jax_fully_async_checkpoint)
+                      FLAGS.jax_fully_async_checkpoint or FLAGS.multiprocess_gpu,
+                      FLAGS.should_log_compiles,
+                      setup_jax.JaxDistributedOptions(FLAGS.server_addr,
+                                                      FLAGS.num_hosts,
+                                                      FLAGS.host_idx)
+                     )
 
   if FLAGS.exp is not None:
     experiment_config = get_experiment(FLAGS.exp)()
@@ -404,6 +434,9 @@ def main(argv: Sequence[str]) -> None:
   experiment_config.validate()
   run(experiment_config=experiment_config,
       enable_checkpoint_saving=FLAGS.enable_checkpoint_saving)
+
+  e2e_time = time.time() - start
+  logging.info(f'E2E time: {e2e_time}')
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
