@@ -79,6 +79,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit orbax.checkpoint dependency.
         "//paxml:preemption",
+        "//praxis:base_input",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -709,9 +710,12 @@ py_strict_test(
         # Implicit absl.flags dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit orbax.checkpoint dependency.
+        "//praxis:base_input",
+        "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

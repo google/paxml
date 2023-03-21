@@ -25,6 +25,7 @@ from etils import epath
 import jax
 import orbax.checkpoint
 from paxml import checkpoints
+from praxis import base_input
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
@@ -36,6 +37,7 @@ CheckpointType = checkpoints.CheckpointType
 CHECKPOINT_PREFIX = 'checkpoint_'
 STATE_ITEM_NAME = checkpoints.STATE_ITEM_NAME
 METADATA_ITEM_NAME = checkpoints.METADATA_ITEM_NAME
+INPUT_ITEM_NAME = checkpoints.INPUT_ITEM_NAME
 
 _SUPPORTED_ITEMS = frozenset({STATE_ITEM_NAME, METADATA_ITEM_NAME})
 
@@ -228,6 +230,7 @@ class OrbaxCheckpointManager:
       self,
       directory: epath.Path,
       checkpointer: orbax.checkpoint.AbstractCheckpointer,
+      train_input_checkpointer: Optional[orbax.checkpoint.Checkpointer] = None,
       options: Optional[CheckpointManagerOptions] = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
   ):
@@ -237,6 +240,8 @@ class OrbaxCheckpointManager:
             orbax.checkpoint.JsonCheckpointHandler()
         ),
     }
+    if train_input_checkpointer:
+      checkpointers[INPUT_ITEM_NAME] = train_input_checkpointer
     self._manager = _CheckpointManagerImpl(
         directory,
         checkpointers,
@@ -267,26 +272,41 @@ class OrbaxCheckpointManager:
   def should_save(self, step: int) -> bool:
     return self._manager.should_save(step)
 
+  def _train_checkpoint_exists(self, step: int) -> bool:
+    path = self._manager._get_save_directory(  # pylint: disable=protected-access
+        step, self.directory, INPUT_ITEM_NAME
+    )
+    return path.exists()
+
   def save(
       self,
       step: int,
       train_state: Any,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
       force: Optional[bool] = False,
   ) -> bool:
     save_kwargs = _update_args_with_version(None, self.version)
     items = _create_items_dict_with_metadata(train_state, self.version)
+    if train_input_pipeline:
+      items[INPUT_ITEM_NAME] = train_input_pipeline
     return self._manager.save(step, items, save_kwargs=save_kwargs, force=force)
 
   def restore(
       self,
       step: int,
       train_state: Any,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
       restore_kwargs: Optional[Any] = None,
   ) -> Union[Any, Mapping[str, Any]]:
     """See superclass documentation."""
     # Propagate version to CheckpointHandler.
     restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
     items = _create_items_dict_with_metadata(train_state, self.version)
+    # Train input checkpoint may not exist if input checkpointing wasn't
+    # previously enabled
+    if train_input_pipeline and self._train_checkpoint_exists(step):
+      items[INPUT_ITEM_NAME] = train_input_pipeline
+
     return self._manager.restore(
         step, items=items, restore_kwargs=restore_kwargs
     )[STATE_ITEM_NAME]

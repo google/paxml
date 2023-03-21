@@ -37,6 +37,7 @@ from praxis import pytypes
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 STATE_ITEM_NAME = 'state'
+INPUT_ITEM_NAME = 'train_input'
 METADATA_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METADATA_ITEM_NAME
 TMP_PREFIX = 'tmp_'
 CHECKPOINT_PATTERN_RE = re.compile(rf'{CHECKPOINT_PREFIX}[\d]+$')
@@ -725,3 +726,48 @@ class FlaxCheckpointer(orbax.checkpoint.Checkpointer):
         original_aggregate_filename
     )
     return result
+
+
+class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
+  """A CheckpointHandler implementation that handles a tf.data BaseInput (sub)class.
+
+  Useful for distributed input where the data iterator on the server cannot be
+  accessed from the client, and thus we cannot call .save() and .restore() with
+  input._iter like other implementations of DatasetCheckpointHandler.
+  """
+
+  def save(self, directory: epath.Path, item: Any):
+    """Saves the given item.
+
+    Args:
+      directory: save location directory.
+      item: a BaseInput to be saved, which must have save() implemented.
+    """
+    checkpoint_path = (
+        directory / f'process_{jax.process_index()}-of-{jax.process_count()}'
+    )
+    item.save(checkpoint_path)
+
+  def restore(
+      self, directory: epath.Path, item: Any = None
+  ) -> None:
+    """Restores the given item.
+
+    Args:
+      directory: restore location directory.
+      item: a BaseInput to be restored, which must have restore() implemented.
+        Not Optional (declared as optional to conform to
+        orbax.checkpoint.CheckpointHandler superclass)
+    """
+    if item is None:
+      raise ValueError('Must provide item to restore')
+    if not directory.exists():
+      raise ValueError(f'Checkpoint dir {directory} does not exist.')
+    checkpoint_path = (
+        directory / f'process_{jax.process_index()}-of-{jax.process_count()}'
+    )
+    item.restore(checkpoint_path)
+
+  def structure(self, directory: epath.Path) -> Any:
+    """Unimplemented. See parent class."""
+    return NotImplementedError

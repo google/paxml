@@ -994,6 +994,8 @@ class SingleTask(base_task.BaseTask):
         train apply.
       tensorstore_metadata_key: The name applied to metadata files created by
         Tensorstore. Uses Tensorstore default if not specified.
+      enable_input_checkpointing: Whether to checkpoint training input. Must 
+        be supported by the BaseInput implementation.
     """
 
     learner: learners_lib.Learner.HParams = sub_config_field(
@@ -1029,7 +1031,7 @@ class SingleTask(base_task.BaseTask):
         default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST[:]
     )
     tensorstore_metadata_key: Optional[str] = None
-
+    enable_input_checkpointing: Optional[bool] = False
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
   @dataclasses.dataclass(frozen=True)

@@ -24,6 +24,7 @@ from unittest import mock
 from absl import flags
 from absl.testing import absltest
 from absl.testing import parameterized
+from etils import epath
 import jax
 from jax.experimental import multihost_utils
 from jax.sharding import Mesh
@@ -32,6 +33,8 @@ import orbax.checkpoint
 from paxml import checkpoint_managers
 from paxml import checkpoints
 from paxml import train_states
+from praxis import base_input
+from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
 
@@ -92,6 +95,42 @@ def create_train_state(step: int = 0):
   return global_mesh, state_specs, train_state
 
 
+class TestInput(base_input.BaseInput):
+
+  def __post_init__(self):
+    super().__post_init__()
+    self._dataset = self._get_dataset()
+    self._iter = iter(self._dataset)
+
+  def get_next(self) -> py_utils.NestedMap:
+    assert tf.compat.v1.executing_eagerly()
+    ret = self._iter.get_next()
+    return tf.nest.map_structure(lambda x: x.numpy(), ret)
+
+  def reset(self):
+    self._iter = iter(self._dataset)
+
+  def save(self, filename: epath.Path):
+    ckpt = tf.train.Checkpoint(ds=self._iter)
+    ckpt.write(os.fspath(filename))
+
+  def restore(self, filename: epath.Path) -> None:
+    ckpt = tf.train.Checkpoint(ds=self._iter)
+    ckpt.read(os.fspath(filename)).assert_consumed()
+
+  def _to_nested_map(self, x) -> py_utils.NestedMap:
+    t = tf.ones(shape=[4], dtype=tf.int32) * tf.cast(x, dtype=tf.int32)
+    return py_utils.NestedMap(data=t)
+
+  def _get_dataset(self):
+    p = self.hparams
+    d = tf.data.Dataset.range(10)
+    d = d.shard(p.num_infeed_hosts, p.infeed_host_index)
+    d = d.map(self._to_nested_map)
+    d = d.batch(p.batch_size)
+    return d
+
+
 class CheckpointManagerTest(parameterized.TestCase):
 
   def setUp(self):
@@ -116,11 +155,18 @@ class CheckpointManagerTest(parameterized.TestCase):
       self,
       options: checkpoint_managers.CheckpointManagerOptions,
       checkpoint_type: CheckpointType = CheckpointType.GDA,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> checkpoint_managers.OrbaxCheckpointManager:
     checkpointer = self.create_checkpointer(checkpoint_type)
+    train_input_checkpointer = (
+        checkpoints.Checkpointer(checkpoints.BaseInputCheckpointHandler())
+        if train_input_pipeline
+        else None
+    )
     return checkpoint_managers.OrbaxCheckpointManager(
         self.directory,
         checkpointer,
+        train_input_checkpointer,
         checkpoint_type=checkpoint_type,
         options=options,
     )
@@ -130,6 +176,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       step: int,
       train_state: Any,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> bool:
     train_state = train_state.replace(
         step=orbax.checkpoint.test_utils.create_sharded_array(
@@ -140,7 +187,7 @@ class CheckpointManagerTest(parameterized.TestCase):
             ),
         )
     )
-    return checkpoint_manager.save(step, train_state)
+    return checkpoint_manager.save(step, train_state, train_input_pipeline)
 
   def restore(
       self,
@@ -150,6 +197,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       state_specs: Any,
       checkpoint_type: CheckpointType,
       global_mesh: Optional[Mesh] = None,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
@@ -158,17 +206,34 @@ class CheckpointManagerTest(parameterized.TestCase):
     elif checkpoint_type == CheckpointType.FLAX:
       restore_kwargs = None
     return checkpoint_manager.restore(
-        step, train_state, restore_kwargs=restore_kwargs
+        step, train_state, train_input_pipeline, restore_kwargs=restore_kwargs
     )
 
-  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
-  def test_save_restore(self, checkpoint_type):
+  @parameterized.parameters(
+      (CheckpointType.GDA, False),
+      (CheckpointType.FLAX, False),
+      (CheckpointType.GDA, True),
+      (CheckpointType.FLAX, True),
+  )
+  def test_save_restore(self, checkpoint_type, use_train_input):
+    train_input_pipeline = None
+    if use_train_input:
+      train_input_pipeline = TestInput(
+          batch_size=2,
+      )
+      _ = train_input_pipeline.get_next()
+      expected_inputs = train_input_pipeline.get_next()
+      train_input_pipeline.reset()
+      _ = train_input_pipeline.get_next()
+
     checkpoint_manager = self.create_checkpoint_manager(
         checkpoint_managers.CheckpointManagerOptions(),
         checkpoint_type=checkpoint_type,
+        train_input_pipeline=train_input_pipeline,
     )
-    self.save(checkpoint_manager, 0, self.train_state)
-
+    self.save(checkpoint_manager, 0, self.train_state, train_input_pipeline)
+    if use_train_input:
+      train_input_pipeline.reset()
     expected = self.train_state
     if checkpoint_type == CheckpointType.FLAX:
       expected = jax.tree_util.tree_map(
@@ -183,8 +248,47 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.state_specs,
         checkpoint_type,
         global_mesh=self.global_mesh,
+        train_input_pipeline=train_input_pipeline,
     )
+    if train_input_pipeline:
+      # restored inputs should start from the second batch
+      restored_inputs = train_input_pipeline.get_next()
+      orbax.checkpoint.test_utils.assert_tree_equal(
+          self, expected_inputs, restored_inputs
+      )
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+
+  @parameterized.parameters(
+      (CheckpointType.GDA),
+      (CheckpointType.FLAX),
+  )
+  def test_restore_no_inputs(self, checkpoint_type):
+    train_input_pipeline = TestInput(
+        batch_size=2,
+    )
+    expected_inputs = train_input_pipeline.get_next()
+    train_input_pipeline.reset()
+
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+        train_input_pipeline=train_input_pipeline,
+    )
+    self.save(checkpoint_manager, 0, self.train_state, None)
+    train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+    _ = self.restore(
+        checkpoint_manager,
+        0,
+        train_state_global_shapes,
+        self.state_specs,
+        checkpoint_type,
+        global_mesh=self.global_mesh,
+        train_input_pipeline=train_input_pipeline,
+    )
+    restored_inputs = train_input_pipeline.get_next()
+    orbax.checkpoint.test_utils.assert_tree_equal(
+        self, expected_inputs, restored_inputs
+    )
 
   @parameterized.parameters(
       (None, CheckpointType.GDA),

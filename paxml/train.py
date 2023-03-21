@@ -22,7 +22,7 @@ import gc
 import re
 import time
 import typing
-from typing import Callable, Optional, Sequence, Tuple, Type
+from typing import Any, Callable, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from etils import epath
@@ -58,6 +58,7 @@ NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 FlaxCheckpointer = checkpoints.FlaxCheckpointer
 FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
+BaseInputCheckpointHandler = checkpoints.BaseInputCheckpointHandler
 PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
@@ -125,11 +126,24 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   """Adapts particular implementations of checkpointing into a common API."""
 
   @abc.abstractmethod
-  def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_if_needed(
+      self,
+      step_i,
+      partitioned_train_state,
+      train_state_pspecs,
+      train_input_pipeline,
+  ):
     raise NotImplementedError
 
   @abc.abstractmethod
-  def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_final(
+      self,
+      step_i,
+      *,
+      partitioned_train_state,
+      train_state_pspecs,
+      train_input_pipeline,
+  ):
     raise NotImplementedError
 
   @abc.abstractmethod
@@ -139,6 +153,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
       global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, int]:
     """Restores TrainState from checkpoint or initializes it.
 
@@ -147,6 +162,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
       global_mesh: Use this mesh to restore the checkpoint.
       metadata: A TrainStateMetadata instance.
       init_key: PRNGKey for initializing the model variables.
+      train_input_pipeline: Training input pipeline instance
 
     Returns:
       (train_state, total_num_params).
@@ -165,10 +181,12 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
 
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType,
-               enable_checkpoint_saving: bool = True):
+  def __init__(
+      self,
+      checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+      checkpoint_type: CheckpointType,
+      enable_checkpoint_saving: bool = True,
+  ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     if checkpoint_type == CheckpointType.FLAX:
@@ -178,16 +196,34 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
 
-  def _save_with_args(self, step_i, partitioned_train_state, force=False):
+  def _save_with_args(
+      self,
+      step_i: int,
+      *,
+      partitioned_train_state: Any,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      force: Optional[bool] = False,
+  ):
     if not self._enable_checkpoint_saving:
       return
     with py_utils.timeit() as save_period:
-      self.checkpoint_manager.save(step_i, partitioned_train_state, force=force)
+      self.checkpoint_manager.save(
+          step_i,
+          partitioned_train_state,
+          train_input_pipeline,
+          force=force,
+      )
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
-  def _restore_with_args(self, step_i, train_state_global_shapes, global_mesh,
-                         train_state_pspecs):
+  def _restore_with_args(
+      self,
+      step_i,
+      train_state_global_shapes,
+      global_mesh,
+      train_state_pspecs,
+      train_input_pipeline,
+  ):
     restore_args = {}
     if self._checkpoint_type == CheckpointType.GDA:
       restore_args = {'specs': train_state_pspecs, 'mesh': global_mesh}
@@ -197,23 +233,46 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           'global_mesh': global_mesh
       }
     return self.checkpoint_manager.restore(
-        step_i, train_state_global_shapes, restore_kwargs=restore_args
+        step_i,
+        train_state_global_shapes,
+        train_input_pipeline,
+        restore_kwargs=restore_args,
     )
 
-  def save_final(self, step_i, partitioned_train_state,
-                 train_state_pspecs=None):
+  def save_final(
+      self,
+      step_i,
+      *,
+      partitioned_train_state,
+      train_state_pspecs=None,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+  ):
     del train_state_pspecs
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
       logging.info('Saving a ckpt at final step: %d', step_i)
-      self._save_with_args(step_i, partitioned_train_state, force=True)
+      self._save_with_args(
+          step_i,
+          partitioned_train_state=partitioned_train_state,
+          train_input_pipeline=train_input_pipeline,
+          force=True,
+      )
 
-  def save_if_needed(self, step_i, partitioned_train_state,
-                     train_state_pspecs=None):
+  def save_if_needed(
+      self,
+      step_i,
+      partitioned_train_state,
+      train_state_pspecs=None,
+      train_input_pipeline=None,
+  ):
     del train_state_pspecs
     if not self.checkpoint_manager.should_save(step_i):
       return
-    self._save_with_args(step_i, partitioned_train_state)
+    self._save_with_args(
+        step_i,
+        partitioned_train_state=partitioned_train_state,
+        train_input_pipeline=train_input_pipeline,
+    )
     self.checkpoint_manager.check_for_errors()
 
   # TODO(laigd): merge this with _SpmdEvalCheckpointer.get_model_states().
@@ -223,6 +282,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, int]:
     step = self.checkpoint_manager.latest_step()
     if step is None:
@@ -234,6 +294,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
             metadata.padded_global_shapes,
             global_mesh,
             metadata.partition_specs,
+            train_input_pipeline,
         )
       monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                             restore_period.elapsed)
@@ -268,14 +329,12 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(
-      self,
-      job_log_dir: epath.Path,
-      checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-      checkpoint_type: CheckpointType,
-      enable_checkpoint_saving: bool = True,
-      enforce_restore_shape_check: bool = False,
-  ):
+  def __init__(self,
+               job_log_dir: epath.Path,
+               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+               checkpoint_type: CheckpointType,
+               enable_checkpoint_saving: bool = True,
+               enforce_restore_shape_check: bool = False,):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
@@ -304,19 +363,32 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       global_mesh: Optional[jax.sharding.Mesh],
       metadata: trainer_lib.TrainStateMetadata,
       init_key: PRNGKey,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, int]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       if py_utils.pmap_use_tensorstore():
-        train_state = self._restore_from_tensorstore(train_state_global_shapes)
+        # TODO(gaoi) add support for input checkpointing using tensorstore
+        if train_input_pipeline:
+          raise ValueError(
+              'Input checkpointing is not supported when using'
+              ' pmap_use_tensorstore=True. Please set'
+              ' Task.Train.enable_input_checkpoint=False'
+          )
+        train_state = self._restore_from_tensorstore(
+            train_state_global_shapes
+        )
       else:
         step = self.checkpoint_manager.latest_step()
         if step is None:
           train_state = None
         else:
           train_state = self.checkpoint_manager.restore(
-              step, train_state_global_shapes
+              step,
+              train_state_global_shapes,
+              train_input_pipeline,
           )
+
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
     # Randomly initialized variables if no files in checkpoint dir.
@@ -342,10 +414,28 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     total_num_params = total_num_params // jax.local_device_count()
     return partitioned_train_state, total_num_params
 
-  def _save_with_args(self, step_i, train_state, force=False):
-    self.checkpoint_manager.save(step_i, train_state, force=force)
+  def _save_with_args(
+      self,
+      step_i: int,
+      *,
+      train_state: Any,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      force: Optional[bool] = False,
+  ):
+    self.checkpoint_manager.save(
+        step_i,
+        train_state,
+        train_input_pipeline,
+        force=force,
+    )
 
-  def _save(self, step_i, partitioned_train_state, is_final=False):
+  def _save(
+      self,
+      step_i,
+      partitioned_train_state,
+      train_input_pipeline,
+      is_final=False,
+  ):
     if not self._enable_checkpoint_saving:
       return
 
@@ -358,25 +448,52 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
             partitioned_train_state,
         )
         self._save_with_args(
-            step_i, fully_replicated_gda_train_state, force=is_final
+            step_i,
+            train_state=fully_replicated_gda_train_state,
+            train_input_pipeline=train_input_pipeline,
+            force=is_final,
         )
       else:
         unreplicated_train_state = jax.tree_map(lambda x: x[0],
                                                 partitioned_train_state)
-        self._save_with_args(step_i, unreplicated_train_state, force=is_final)
+        self._save_with_args(
+            step_i,
+            train_state=unreplicated_train_state,
+            train_input_pipeline=train_input_pipeline,
+            force=is_final,
+        )
     monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
                                           save_period.elapsed)
 
-  def save_if_needed(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_if_needed(
+      self,
+      step_i,
+      partitioned_train_state,
+      train_state_pspecs,
+      train_input_pipeline=None,
+  ):
     if not self.checkpoint_manager.should_save(step_i):
       return
-    self._save(step_i, partitioned_train_state)
+    self._save(
+        step_i,
+        partitioned_train_state,
+        train_input_pipeline,
+    )
     self.checkpoint_manager.check_for_errors()
 
-  def save_final(self, step_i, partitioned_train_state, train_state_pspecs):
+  def save_final(
+      self,
+      step_i,
+      *,
+      partitioned_train_state,
+      train_state_pspecs,
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+  ):
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
-      self._save(step_i, partitioned_train_state, is_final=True)
+      self._save(
+          step_i, partitioned_train_state, train_input_pipeline, is_final=True
+      )
 
   @property
   def checkpoint_type(self) -> CheckpointType:
@@ -388,6 +505,7 @@ def _create_checkpointer(
     job_log_dir: epath.Path,
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str],
+    train_input_p: Optional[base_input.BaseInput.HParams] = None,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
@@ -404,7 +522,8 @@ def _create_checkpointer(
       max_to_keep=max_to_keep,
       save_interval_steps=save_interval_steps,
       keep_time_interval=keep_interval_timedelta,
-      todelete_subdir=todelete_subdir)
+      todelete_subdir=todelete_subdir,
+  )
   checkpointer = async_checkpointer
   if checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
@@ -419,9 +538,21 @@ def _create_checkpointer(
       raise ValueError('Checkpointer must already be initialized.')
     else:
       raise ValueError(f'Unsupported Orbax checkpoint type: {checkpoint_type}')
+  train_input_checkpointer = None
+  if train_p.enable_input_checkpointing:
+    # TODO(gaoi): add more accurate check for deterministic SeqIO input
+    # by instantiating train_input_p (pending cl/515397058)
+    if hasattr(train_input_p, 'deterministic_input_start_index'):
+      raise ValueError(
+          'Checkpointing deterministic Seqio inputs is not supported via Orbax'
+          ' (will be checkpointed independently). Please set'
+          ' enable_input_checkpointing=False.'
+      )
+    train_input_checkpointer = checkpoints.BaseInputCheckpointHandler()
   checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
       checkpoint_dir,
       checkpointer,
+      train_input_checkpointer=train_input_checkpointer,
       options=options,
       checkpoint_type=checkpoint_type,
   )
@@ -494,8 +625,7 @@ def train_and_evaluate(
     enable_auto_sharding: bool = False,
     async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
     enable_checkpoint_saving: bool = True,
-    enforce_restore_shape_check: bool = False,
-) -> None:
+    enforce_restore_shape_check: bool = False,) -> None:
   """The shared path to run the training and evaluation loop.
 
   Args:
@@ -581,6 +711,7 @@ def train_and_evaluate(
       job_log_dir,
       checkpoint_type,
       checkpoint_todelete_subdir,
+      train_input_p=train_input_p,
       async_checkpointer=async_checkpointer,
       enable_checkpoint_saving=enable_checkpoint_saving,
       enforce_restore_shape_check=enforce_restore_shape_check,
@@ -995,8 +1126,15 @@ def _create_program_and_states(
     )
 
   # Restore TrainState from checkpoint or initialize it.
+  train_input = (
+      train_input_pipeline if task_p.train.enable_input_checkpointing else None
+  )
   partitioned_train_state, total_num_params = checkpointer.get_model_states(
-      jax_task, partitioner.global_mesh, train_state_metadata, init_key
+      jax_task,
+      partitioner.global_mesh,
+      train_state_metadata,
+      init_key,
+      train_input,
   )
 
   initial_global_step = int(
@@ -1024,7 +1162,6 @@ def _create_program_and_states(
       prng_key,
   )
 
-
 def _train_and_evaluate_common(
     task: tasks_lib.SingleTask,
     partitioner: partitioning.Partitioner,
@@ -1047,6 +1184,11 @@ def _train_and_evaluate_common(
   task_p = task.hparams
   train_p = task_p.train
   train_state_metadata = partitioner.get_train_state_metadata()
+  train_input = (
+      train_program.train_input
+      if train_p.enable_input_checkpointing
+      else None
+  )
 
   if decode_input_p:
     decode_once_fn, prng_key, decode_input_names = partition_decode_once_fns(
@@ -1116,7 +1258,10 @@ def _train_and_evaluate_common(
     while True:
       logging.debug('step=`%d`: Beginning', step_i)
       checkpointer.save_if_needed(
-          step_i, partitioned_train_state, train_state_metadata.partition_specs
+          step_i,
+          partitioned_train_state,
+          train_state_metadata.partition_specs,
+          train_input,
       )
 
       if not train_program.should_run(partitioned_train_state, step_i):
@@ -1199,25 +1344,37 @@ def _train_and_evaluate_common(
                 RunningMode.detect(
                     has_train_metrics=True,
                     has_eval_metrics=bool(eval_metrics),
-                    has_decode_metrics=bool(decode_metrics)), step_i,
-                task_p.train.num_train_steps, task_p.train.eval_interval_steps,
+                    has_decode_metrics=bool(decode_metrics),
+                ),
+                step_i,
+                task_p.train.num_train_steps,
+                task_p.train.eval_interval_steps,
                 task_p.train.decode_interval_steps,
-                task_p.train.save_interval_steps),
+                task_p.train.save_interval_steps,
+            ),
             train_weighted_scalars=train_weighted_scalars,
             eval_train_metrics=eval_train_metrics,
             eval_metrics=eval_metrics,
             decode_metrics=decode_metrics,
             train_steps_per_sec=steps_per_sec,
-            num_params=total_num_params):
+            num_params=total_num_params,
+        ):
           logging.info(
-              'Training loop is early stopped at step `%d` by the '
-              'tuner, while num_train_step is `%d`.', step_i,
-              train_p.num_train_steps)
+              (
+                  'Training loop is early stopped at step `%d` by the '
+                  'tuner, while num_train_step is `%d`.'
+              ),
+              step_i,
+              train_p.num_train_steps,
+          )
           break
     gc.unfreeze()
     # Save checkpoint for the last step.
     checkpointer.save_final(
-        step_i, partitioned_train_state, train_state_metadata.partition_specs
+        step_i,
+        partitioned_train_state=partitioned_train_state,
+        train_state_pspecs=train_state_metadata.partition_specs,
+        train_input_pipeline=train_input
     )
 
     checkpointer.wait_until_finished()
