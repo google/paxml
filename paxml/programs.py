@@ -272,10 +272,6 @@ class BaseTrainProgram(Program):
   def train_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
     """The partition spec for the model training inputs."""
 
-  @property
-  def train_input(self) -> base_input.BaseInput:
-    return self._train_input
-
   def _maybe_write_summaries(
       self,
       new_state: TrainState,
