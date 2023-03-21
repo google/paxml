@@ -25,7 +25,7 @@ import tensorflow.compat.v2 as tf
 
 @dataclasses.dataclass
 class JaxDistributedOptions:
-  coordinator_address: int
+  coordinator_address: str
   num_processes: int
   process_id: int
 
