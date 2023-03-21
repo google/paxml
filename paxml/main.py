@@ -230,7 +230,9 @@ def run_experiment(
     async_checkpointer = None
     if FLAGS.jax_fully_async_checkpoint:
       if FLAGS.maybe_use_persistence_checkpointing:
-        async_checkpointer = AsyncPersistenceCheckpointer(timeout_secs=600)
+        async_checkpointer = AsyncPersistenceCheckpointer(
+            timeout_secs=600,
+            enforce_restore_shape_check=FLAGS.enforce_restore_shape_check)
       else:
         async_checkpointer = checkpoints.AsyncCheckpointer(
             checkpoints.PaxCheckpointHandler(
