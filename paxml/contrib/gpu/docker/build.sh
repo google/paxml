@@ -28,4 +28,4 @@ else
 fi
 
 # building container here 
-docker build -t $CONTAINER . -f contrib/gpu/Dockerfile
+docker build -t $CONTAINER . -f paxml/contrib/gpu/Dockerfile
