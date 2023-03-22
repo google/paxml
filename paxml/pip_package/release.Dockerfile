@@ -57,8 +57,8 @@ RUN mkdir $WHEEL_FOLDER
 RUN git clone -b r${praxis_version} https://github.com/google/praxis.git
 
 RUN cp -r praxis/praxis /paxml/
-
-RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
+RUN sed -i 's/ @ git.*//g' paxml/paxml/pip_package/requirements.in
+RUN pip3 install -r paxml/paxml/pip_package/requirements.in
 
 RUN git clone https://github.com/google/flaxformer.git
 RUN cd flaxformer && pip3 install .
