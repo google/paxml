@@ -114,9 +114,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   # create a LossAggregator on the task. Consider moving loss_name to the
   # task or having everyone set it through the loss_aggregator.
   loss_name: Optional[str] = None
-  stochastic_gradient: Optional[
-      pax_fiddle.Config[sgf.BaseStochasticGradient]
-  ] = None
+  stochastic_gradient: Optional[sgf.BaseStochasticGradient] = None
   optimizer: Optional[optimizers.BaseOptimizer] = None
   skip_zero_gradients: Optional[bool] = None
   grad_norm_summary: bool = True
@@ -133,7 +131,6 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       pax_fiddle.instance_field(default_factory=list)
   )
   repeat_prefix_sep: str = '#'
-  _stochastic_gradient_inst: Any = dataclasses.field(init=False, repr=False)
   _get_grad_tx: Any = dataclasses.field(init=False, repr=False)
 
   def __post_init__(self):
@@ -145,17 +142,8 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     p = self._hparams
     asserts.not_none(p.optimizer)
-    self._stochastic_gradient_inst = (
-        None
-        if p.stochastic_gradient is None
-        else instantiate(p.stochastic_gradient)
-    )
     self._get_grad_tx = self.optimizer.get_grad_transformation
 
-  @property
-  def stochastic_gradient_inst(self) -> Optional[sgf.BaseStochasticGradient]:
-    """Returns the stochastic gradient function object of this learner."""
-    return self._stochastic_gradient_inst
 
   def plot_learning_rate(self, step: int) -> None:
     learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray

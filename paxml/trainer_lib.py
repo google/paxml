@@ -722,11 +722,11 @@ def train_step_single_learner(
   # _zero_gradient_for_non_learnable_vars needs to handle jax.dtypes.float0
   # specially.
 
-  if learner.stochastic_gradient_inst is None:
+  if learner.stochastic_gradient is None:
     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
   else:
     grad_fn = functools.partial(
-        learner.stochastic_gradient_inst.grad_fn, _loss_fn
+        learner.stochastic_gradient.grad_fn, _loss_fn
     )
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
@@ -804,7 +804,7 @@ def train_step_single_learner(
       for name, norm in var_summary_tensors.items():
         base_layer.add_global_summary(name, norm)
     if isinstance(
-        learner.stochastic_gradient_inst, sgf.DpSgdStochasticGradient
+        learner.stochastic_gradient, sgf.DpSgdStochasticGradient
     ):
       base_layer.add_global_summary('frac_clipped',
                                     aux_info.dp_aux_info['frac_clipped'])
