@@ -79,7 +79,7 @@ cmake==3.26.0
     # via triton
 colorama==0.4.6
     # via sacrebleu
-comm==0.1.2
+comm==0.1.3
     # via ipykernel
 contextlib2==21.6.0
     # via ml-collections
@@ -300,7 +300,7 @@ lit==16.0.0
     # via triton
 lxml==4.9.2
     # via sacrebleu
-markdown==3.4.1
+markdown==3.4.2
     # via tensorboard
 markdown-it-py==2.2.0
     # via rich
@@ -436,7 +436,7 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.1.5
+orbax==0.1.6
     # via
     #   -r paxml-requirements.in
     #   flax
