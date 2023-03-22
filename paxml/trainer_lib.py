@@ -997,12 +997,12 @@ def initialize_partitioned_model_states(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     global_input_shapes: NestedShapeDtypeLike,
+    state_specs: TrainState,
     discard_opt_states: bool = False,
     global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.GDA,
-    state_specs: Optional[TrainState] = None,
     do_init_checkpoint_rules: bool = True,
-) -> Tuple[TrainState, TrainState]:
+) -> TrainState:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first.
@@ -1015,31 +1015,24 @@ def initialize_partitioned_model_states(
     jax_task: The task which is an instance of tasks.SingleTask.
     prng_key: A PRNGKey.
     global_input_shapes: Global shapes of sample inputs for shape inference.
+    state_specs: The TrainState specs when restoring weights based on the
+      init_checkpoint_rules.
     discard_opt_states: bool, When true, optimizer slot variables are skipped.
     global_mesh: The global mesh to use when restoring weights based on the
       init_checkpoint_rules. Required for GDA-based checkpoints.
     checkpoint_type: The checkpoint type to use when restoring weights based on
       the init_checkpoint_rules.
-    state_specs: The TrainState specs when restoring weights based on the
-      init_checkpoint_rules. Required for GDA-based checkpoints.
     do_init_checkpoint_rules: If apply init_checkpoint_rules.
 
   Returns:
-    The partitioned specs and the partitioned vars themselves.
+    The partitioned vars themselves.
   """
   model = jax_task.model
   var_weight_hparams = model.abstract_init_with_metadata(global_input_shapes)
 
-  if state_specs is None:
-    train_state_partition_specs = jax_task.create_train_state_partition_specs(
-        var_weight_hparams, discard_opt_states)
-  else:
-    if discard_opt_states:
-      train_state_partition_specs = TrainState(
-          step=state_specs.step, mdl_vars=state_specs.mdl_vars, opt_states={})
-    else:
-      train_state_partition_specs = state_specs
-
+  train_state_partition_specs = (
+      state_specs.to_eval_state() if discard_opt_states else state_specs
+  )
   train_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
       jax_task.create_train_state_unpadded_shapes(var_weight_hparams,
@@ -1086,7 +1079,7 @@ def initialize_partitioned_model_states(
         global_mesh=global_mesh,
         checkpoint_type=checkpoint_type)
 
-  return (train_state_partition_specs, partitioned_vars)
+  return partitioned_vars
 
 
 def shard_on_batch_dim_partition_spec(

@@ -676,19 +676,17 @@ class PjitPartitioner(Partitioner):
       # eval/decode pipeline, do_eval is not properly set (see the pmap
       # version). But since we're enabling always_use_train_for_model_init this
       # is probably fine.
-      unused_pspec, partitioned_train_state = (
-          trainer_lib.initialize_partitioned_model_states(
-              self._jax_task,
-              init_key,
-              metadata.input_shape_dtype,
-              global_mesh=self.global_mesh,
-              # Note: We currently enforce that the checkpoint to reload via
-              # init_checkpoint_rules are in the same format as the checkpoint
-              # solution used by the experiment.
-              checkpoint_type=checkpoint_type,
-              state_specs=metadata.partition_specs,
-              discard_opt_states=discard_opt_states,
-          )
+      partitioned_train_state = trainer_lib.initialize_partitioned_model_states(
+          self._jax_task,
+          init_key,
+          metadata.input_shape_dtype,
+          metadata.partition_specs,
+          global_mesh=self.global_mesh,
+          # Note: We currently enforce that the checkpoint to reload via
+          # init_checkpoint_rules are in the same format as the checkpoint
+          # solution used by the experiment.
+          checkpoint_type=checkpoint_type,
+          discard_opt_states=discard_opt_states,
       )
 
     logging.info(
