@@ -84,14 +84,7 @@ def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   # Very old format Flax checkpoint.
   if x.is_file():
     return False
-
-  # TODO(b/267498552) Remove hasattr when possible.
-  if hasattr(orbax.checkpoint.utils, 'is_tmp_checkpoint'):
-    return orbax.checkpoint.utils.is_tmp_checkpoint(x)
-  else:
-    return any(
-        [(orbax.checkpoint.utils.TMP_DIR_SUFFIX in p.name) for p in x.iterdir()]
-    )
+  return orbax.checkpoint.utils.is_tmp_checkpoint(x)
 
 
 def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
