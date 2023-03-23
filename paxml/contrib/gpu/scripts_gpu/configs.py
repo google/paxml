@@ -138,6 +138,7 @@ class GPT126M(TransformerLmSpmdAdam):
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
+    task_p.train.num_train_steps = self.MAX_STEPS
     
     model_p = task_p.model
     
