@@ -834,42 +834,22 @@ def train_and_evaluate_pmap(
       task,
       partitioner,
       train_program,
+      test_eval_programs,
       partitioned_train_state,
       total_num_params,
       prng_key,
+      train_prng_seed,
+      eval_prng_seed,
+      early_stopping_fn,
   ) = _create_program_and_states(
       task_p,
       train_input_p,
+      eval_input_p,
       job_log_dir,
       checkpointer,
       checkpoint_type,
+      early_stopping_fn=early_stopping_fn,
       experiment_train_program=experiment_train_program,
-  )
-  assert not partitioner.global_mesh
-
-  # TODO(laigd): move this logic to _create_program_and_states.
-  num_devices = jax.local_device_count()
-  prng_key, train_key, eval_key = jax.random.split(prng_key, 3)
-  train_prng_seed = jax.random.split(train_key, num=num_devices)
-  eval_prng_seed = jax.random.split(eval_key, num=num_devices)
-  logging.info('train prng_seed: %s', train_prng_seed)
-  logging.info('eval prng_seed: %s', eval_prng_seed)
-  if task.early_stopping_fn_inst is not None:
-    if early_stopping_fn is None:
-      early_stopping_fn = task.early_stopping_fn_inst
-    else:
-      raise ValueError(
-          'early_stopping_fn is set in both task and '
-          'train_and_evel function parameter.'
-      )
-
-  # Construct a list of Eval programs on test data.
-  test_eval_programs = [
-      programs.SingleTaskEvalProgram(task, e_input_p, partitioner)
-      for e_input_p in eval_input_p
-  ]
-  trainer_lib.check_unique_names(
-      [eval_program.eval_input for eval_program in test_eval_programs]
   )
 
   def partition_decode_once_fns(prng_key, decode_input_p):
@@ -878,8 +858,8 @@ def train_and_evaluate_pmap(
     ]
     trainer_lib.check_unique_names(decode_input_pipelines)
     prng_key, decode_key = jax.random.split(prng_key, 2)
-    decode_prng_seed = jax.random.split(decode_key, num=num_devices)
-    logging.info('decode prng_seed: %s', decode_prng_seed)
+    logging.info('decode prng_seed: %s', decode_key)
+    decode_key = partitioner.preprocess_prng_key(decode_key)
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
         task,
         partitioner,
@@ -887,7 +867,7 @@ def train_and_evaluate_pmap(
         partitioner.get_train_state_metadata().var_weight_hparams,
         decode_input_pipelines,
         decode_input_p,
-        decode_prng_seed,
+        decode_key,
         job_log_dir,
     )
     decode_input_names = [inp.name for inp in decode_input_pipelines]
@@ -947,42 +927,24 @@ def train_and_evaluate_spmd_model(
       task,
       partitioner,
       train_program,
+      test_eval_programs,
       partitioned_train_state,
       total_num_params,
       prng_key,
+      train_prng_seed,
+      eval_prng_seed,
+      early_stopping_fn,
   ) = _create_program_and_states(
       task_p,
       train_input_p,
+      eval_input_p,
       job_log_dir,
       checkpointer,
       checkpoint_type,
       enable_auto_sharding,
+      early_stopping_fn,
       experiment_train_program,
   )
-
-  # TODO(laigd): move this logic to _create_program_and_states.
-  prng_key, train_prng_seed, eval_prng_seed = jax.random.split(prng_key, 3)
-  logging.info('train prng_key: %s', train_prng_seed)
-  logging.info('eval prng_key: %s', eval_prng_seed)
-  train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
-  eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
-  if task.early_stopping_fn_inst is not None:
-    if early_stopping_fn is None:
-      early_stopping_fn = task.early_stopping_fn_inst
-    else:
-      raise ValueError(
-          'early_stopping_fn is set in both task and '
-          'train_and_evel function parameter.'
-      )
-
-  global_mesh = partitioner.global_mesh
-  is_vars_replicated = False
-
-  # Construct a list of Eval programs on test data.
-  test_eval_programs = [
-      programs.SingleTaskEvalProgram(task, e_input_p, partitioner)
-      for e_input_p in eval_input_p
-  ]
 
   def partition_decode_once_fns(
       prng_key: jax.random.KeyArray,
@@ -998,7 +960,9 @@ def train_and_evaluate_spmd_model(
     decode_key = partitioner.preprocess_prng_key(decode_key)
 
     padded_decode_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(input_p, global_mesh)
+        trainer_lib.adjust_input_params_for_small_batch(
+            input_p, partitioner.global_mesh
+        )
         for input_p in decode_input_ps
     ]
     padded_decode_input_pipelines = [
@@ -1045,18 +1009,20 @@ def train_and_evaluate_spmd_model(
       partition_decode_once_fns,
       job_log_dir,
       eval_prng_seed,
-      is_vars_replicated,
-      train_prng_seed,
+      is_vars_replicated=False,
+      train_prng_seed=train_prng_seed,
   )
 
 
 def _create_program_and_states(
     task_p: tasks_lib.SingleTask.HParams,
     train_input_p: base_input.BaseInput.HParams,
+    eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
+    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ):
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
@@ -1117,14 +1083,44 @@ def _create_program_and_states(
     train_program = programs.SingleTaskTrainProgram(
         jax_task, train_input_pipeline, partitioner
     )
+
+  prng_key, train_prng_seed, eval_prng_seed = jax.random.split(root_prng_key, 3)
+  logging.info('train prng seed: %s', train_prng_seed)
+  logging.info('eval prng seed: %s', eval_prng_seed)
+  train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
+  eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
+
+  if jax_task.early_stopping_fn_inst is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = jax_task.early_stopping_fn_inst
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
+
+  # Construct a list of Eval programs on test data.
+  test_eval_programs = [
+      programs.SingleTaskEvalProgram(jax_task, e_input_p, partitioner)
+      for e_input_p in eval_input_p
+  ]
+  trainer_lib.check_unique_names(
+      [eval_program.eval_input for eval_program in test_eval_programs]
+  )
+
   return (
       jax_task,
       partitioner,
       train_program,
+      test_eval_programs,
       partitioned_train_state,
       total_num_params,
-      root_prng_key,
+      prng_key,
+      train_prng_seed,
+      eval_prng_seed,
+      early_stopping_fn,
   )
+
 
 def _train_and_evaluate_common(
     task: tasks_lib.SingleTask,

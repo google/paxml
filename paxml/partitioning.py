@@ -177,19 +177,28 @@ class Partitioner(metaclass=abc.ABCMeta):
   metadata = partitioner.get_train_state_metadata()
   train_state = restore(metadata, ...)
 
+  # Create the PRNG key.
+  root_prng_key = ...
+
+  # Initialize the root prng key and train state. It'll initialize the train
+  # state from scratch if no checkpoint is found (i.e. when train_state==None).
+  root_prng_key, train_state = partitioner.initialize_prng_key_and_train_state(
+      root_prng_key, train_state, checkpoint_type)
+
   # Partition the step function.
   partitioned_step_fn, input_pspec = partitioner.partition(
       step_fn, inputs_shape_dtype, is_eval)
 
-  # Create and preprocess the prng key.
-  prng_key = ...  # Create the PRNG key.
-  prng_key = partitioner.preprocess_prng_key(prng_key)
+  # Split and preprocess the prng key.
+  prng_key, train_key = jax.random.split(root_prng_key)
+  train_key = partitioner.preprocess_prng_key(train_key)
 
   # Get the inputs, preprocess and use it to run the partitioned function.
   inputs = train_input_pipeline.get_next_padded()
   inputs = partitioner.preprocess_inputs(
       train_input_pipeline, inputs, input_pspec)
-  partitioned_step_fn(train_state, prng_key, inputs, unpadded_global_batch_size)
+  partitioned_step_fn(
+      train_state, train_key, inputs, unpadded_global_batch_size)
   ```
   """
 
@@ -519,9 +528,7 @@ class PmapPartitioner(Partitioner):
 
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""
-    # TODO(laigd): follow train_and_evaluate_pmap() and split the key into
-    # jax.local_device_count() pieces.
-    return prng_key
+    return jax.random.split(prng_key, num=jax.local_device_count())
 
   def preprocess_inputs(
       self,
