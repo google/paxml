@@ -497,145 +497,18 @@ def evaluate(
   )
 
   if task_p.model.mesh_shape is not None:
-    eval_method = evaluate_spmd_model
+    logging.info('Using SPMD sharding for model parallelism.')
+    runner_cls = _SpmdEvalRunner
   else:
-    eval_method = evaluate_pmap_model
-  eval_method(
-      jax_task,
-      prng_key,
-      partitioner,
-      checkpointer,
-      eval_input_p,
-      job_log_dir,
-      early_stopping_fn,
-  )
-
-
-class _PmapEvalRunner:
-  """A runner class that runs evaluate with pmap.
-
-  Example usage:
-
-    replicated_model_states, train_state_metadata, prng_key = (
-        checkpointer.get_model_states(prng_key)
-    )
-
-    runner = _PmapEvalRunner(eval_input_params, jax_task, prng_key)
-    metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-        runner.run_one_step(
-            replicated_model_states, sample_inputs, eval_summary_writers))
-  """
-
-  def __init__(
-      self,
-      partitioner: partitioning.Partitioner,
-      eval_input_p: Sequence[base_input.BaseInput.HParams],
-      jax_task: tasks_lib.SingleTask,
-      pmap_prng_key: PRNGKey,
-      job_log_dir: epath.Path,
-  ):
-    self._partitioner = partitioner
-    self._eval_input_p = eval_input_p
-    self._job_log_dir = job_log_dir
-    self._jax_task = jax_task
-    self._eval_programs = [
-        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
-        for ep in eval_input_p
-    ]
-    trainer_lib.check_unique_names(
-        [program.eval_input for program in self._eval_programs]
-    )
-
-    num_devices = jax.local_device_count()
-    _, eval_key = jax.random.split(pmap_prng_key)
-    self._eval_prng_seed = jax.random.split(eval_key, num=num_devices)
-    logging.info('eval prng_seed: %s', self._eval_prng_seed)
-
-  @property
-  def eval_programs(self):
-    return self._eval_programs
-
-  def run_one_step(
-      self,
-      replicated_model_states: TrainState,
-      eval_summary_writers: List[SummaryWriter],
-  ) -> Tuple[
-      List[Optional[Dict[str, float]]],  # eval metrics list.
-      List[Optional[Dict[str, float]]],  # seqio metrics list.
-      List[int],  # actual eval steps.
-  ]:
-    """Runs evaluate for one step for all test splits."""
-    if not self._eval_input_p:
-      return [], [], []
-    step_i = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(
-            replicated_model_states.step
-        )
-    )
-
-    # Run the eval loop.
-    return run_eval_loop_over_test_splits(
-        self._eval_programs,
-        replicated_model_states,
-        self._eval_prng_seed,
-        eval_summary_writers,
-        step_i,
-        self._job_log_dir,
-    )
-
-  def get_partition_run_one_step_fn(self):
-    def eval_one_step_fn(replicated_model_states, eval_summary_writers):
-      with py_utils.timeit() as eval_period:
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            self.run_one_step(replicated_model_states, eval_summary_writers)
-        )
-
-      return tuning_lib.EvalMetrics(
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-          input_names=[
-              program.eval_input.name for program in self._eval_programs
-          ],
-      )
-
-    return eval_one_step_fn
-
-
-def evaluate_pmap_model(
-    jax_task: tasks_lib.SingleTask,
-    prng_key: PRNGKey,
-    partitioner: partitioning.Partitioner,
-    checkpointer: _EvalCheckpointer,
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: epath.Path,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-) -> None:
-  """Runs the evaluation loop on the entire test dataset for PMAP model.
-
-  Args:
-    jax_task: The task encapsulating the data parallel model.
-    prng_key: Root PRNGKey for the evaluation.
-    partitioner: The partitioner used to partition the step function.
-    checkpointer: The model checkpointing method to use.
-    eval_input_p: List of params for the eval data input pipelines.
-    job_log_dir: Directory for the job logs.
-    early_stopping_fn: An optional callable object for reporting metrics and
-      determining whether to early stop current training. The callable object
-      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-  """
-  logging.info('Using pmap for data parallelism.')
-  if not eval_input_p:
-    return
+    logging.info('Using pmap for data parallelism.')
+    runner_cls = _PmapEvalRunner
 
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  eval_runner = _PmapEvalRunner(
-      partitioner, eval_input_p, jax_task, prng_key, job_log_dir
-  )
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn()
+  eval_runner = runner_cls(jax_task, partitioner, eval_input_p, job_log_dir)
+  prng_key, eval_key = jax.random.split(prng_key)
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
 
   decode_once_fn = None
@@ -660,162 +533,136 @@ def evaluate_pmap_model(
   )
 
 
-class _SpmdEvalRunner:
-  """A runner class that runs evaluate with spmd.
-
-  Example usage:
-
-    checkpointer: _SpmdEvalCheckpointer = ...
-    partitioned_train_state, train_state_metadata, prng_key = (
-        checkpointer.get_model_states(prng_key))
-
-    runner = _SpmdEvalRunner(
-        eval_input_ps, jax_task, partitioner, job_log_dir)
-    eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-        runner.run_one_step(
-            partitioned_train_state, eval_summary_writers, eval_key))
-  """
+class _PmapEvalRunner:
+  """A runner class that runs evaluate with pmap."""
 
   def __init__(
       self,
-      eval_input_ps: Sequence[base_input.BaseInput.HParams],
       jax_task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
+      eval_input_ps: Sequence[base_input.BaseInput.HParams],
       job_log_dir: epath.Path,
   ):
     self._jax_task = jax_task
+    self._partitioner = partitioner
+    self._job_log_dir = job_log_dir
     self._eval_programs = [
-        programs.SingleTaskEvalProgram(jax_task, ep, partitioner)
-        for ep in eval_input_ps
+        programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
+        for input_p in eval_input_ps
     ]
     trainer_lib.check_unique_names(
-        [ep.eval_input for ep in self._eval_programs]
+        [program.eval_input for program in self._eval_programs]
     )
-    self._job_log_dir = job_log_dir
-    self._partitioner = partitioner
 
   @property
   def eval_programs(self):
     return self._eval_programs
 
-  @classmethod
-  def get_inputs_shape_dtype_for_init(
-      cls, inputs_p: Sequence[base_input.BaseInput.HParams]
-  ) -> pytypes.NestedShapeDtypeStruct:
-    """Returns ShapesDtype NestedMap used to initialize a model."""
-    assert inputs_p
-    # We use first input_p to get sample for initializing the model as bsz
-    # differences don't make a difference for initialized vars.
-    return trainer_lib.get_inputs_shape_dtype(inputs_p[0])[1]
-
-  def run_one_step(
-      self,
-      partitioned_train_state: TrainState,
-      eval_summary_writers: List[SummaryWriter],
-      eval_key: PRNGKey,
-  ) -> Tuple[
-      List[Optional[Dict[str, float]]],  # eval metrics list.
-      List[Optional[Dict[str, float]]],  # eval scoring metrics list.
-      List[int],  # performed eval steps.
-  ]:
-    """Runs evaluate for one step. Requires calling self._run_pjit() prior."""
-    if not self._eval_programs:
-      return [], [], []
-
-    step_i = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(
-            partitioned_train_state.step
-        )
-    )
-
-    # Run the eval loop.
-    with self._partitioner.global_mesh:
-      return run_eval_loop_over_test_splits(
-          self._eval_programs,
-          partitioned_train_state.to_eval_state(),
-          eval_key,
-          eval_summary_writers,
-          step_i,
-          self._job_log_dir,
-      )
-
   def get_partition_run_one_step_fn(self, eval_key):
-    def eval_one_step_fn(partitioned_train_state, eval_summary_writers):
+    # TODO(laigd): use partitioner.preprocess_prng_key() to replace the split
+    # below and unify the two runners.
+    # eval_key = self._partitioner.preprocess_prng_key(eval_key)
+    num_devices = jax.local_device_count()
+    eval_key = jax.random.split(eval_key, num=num_devices)
+    logging.info('eval prng_seed: %s', eval_key)
+
+    def eval_one_step_fn(train_state, eval_summary_writers):
+      if not self._eval_programs:
+        return tuning_lib.EvalMetrics(
+            metrics_list=[],
+            scoring_metrics_list=[],
+            steps_per_sec=0,
+            input_names=[],
+        )
+
       with py_utils.timeit() as eval_period:
-        (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps) = (
-            self.run_one_step(
-                partitioned_train_state, eval_summary_writers, eval_key
+        step_i = int(
+            py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+        )
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            run_eval_loop_over_test_splits(
+                self._eval_programs,
+                train_state.to_eval_state(),
+                eval_key,
+                eval_summary_writers,
+                step_i,
+                self._job_log_dir,
             )
         )
-
       return tuning_lib.EvalMetrics(
           metrics_list=eval_metrics_list,
           scoring_metrics_list=eval_scoring_metrics_list,
           steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-          input_names=[ep.eval_input.name for ep in self._eval_programs],
+          input_names=[
+              program.eval_input.name for program in self._eval_programs
+          ],
       )
 
     return eval_one_step_fn
 
 
-def evaluate_spmd_model(
-    jax_task: tasks_lib.SingleTask,
-    prng_key: PRNGKey,
-    partitioner: partitioning.Partitioner,
-    checkpointer: _EvalCheckpointer,
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: epath.Path,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-) -> None:
-  """Runs the evaluation loop on the entire test dataset for SPMD model.
+class _SpmdEvalRunner:
+  """A runner class that runs evaluate with spmd."""
 
-  Args:
-    jax_task: The task encapsulating an SPMD model.
-    prng_key: Root PRNGKey for the evaluation.
-    partitioner: The partitioner used to partition the step function.
-    checkpointer: The model checkpointing method to use.
-    eval_input_p: List of Params for the eval data pipelines.
-    job_log_dir: Directory for the job logs.
-    early_stopping_fn: An optional callable object for reporting metrics and
-      determining whether to early stop current training. The callable object
-      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-  """
-  logging.info('Using SPMD sharding for model parallelism.')
-  if not eval_input_p:
-    return
+  def __init__(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      partitioner: partitioning.Partitioner,
+      eval_input_ps: Sequence[base_input.BaseInput.HParams],
+      job_log_dir: epath.Path,
+  ):
+    self._jax_task = jax_task
+    self._partitioner = partitioner
+    self._job_log_dir = job_log_dir
+    self._eval_programs = [
+        programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
+        for input_p in eval_input_ps
+    ]
+    trainer_lib.check_unique_names(
+        [program.eval_input for program in self._eval_programs]
+    )
 
-  partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key)
-  )
-  eval_runner = _SpmdEvalRunner(
-      eval_input_p, jax_task, partitioner, job_log_dir
-  )
-  _, eval_key = jax.random.split(prng_key)
-  logging.info('eval prng_key: %s', eval_key)
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
-  eval_programs = eval_runner.eval_programs
+  @property
+  def eval_programs(self):
+    return self._eval_programs
 
-  decode_once_fn = None
-  input_p = None
-  decode_inputs = None
-  continuous_decode = True
-  _common_eval_or_decode_loop(
-      EvaluationMode.EVAL,
-      checkpointer,
-      jax_task.hparams,
-      job_log_dir,
-      input_p,
-      eval_input_p,
-      eval_one_step_fn,
-      decode_once_fn,
-      partitioned_train_state,
-      train_state_metadata,
-      early_stopping_fn,
-      continuous_decode,
-      eval_programs,
-      decode_inputs,
-  )
+  def get_partition_run_one_step_fn(self, eval_key):
+    logging.info('eval prng_key: %s', eval_key)
+    eval_key = self._partitioner.preprocess_prng_key(eval_key)
+
+    def eval_one_step_fn(train_state, eval_summary_writers):
+      if not self._eval_programs:
+        return tuning_lib.EvalMetrics(
+            metrics_list=[],
+            scoring_metrics_list=[],
+            steps_per_sec=0,
+            input_names=[],
+        )
+
+      with py_utils.timeit() as eval_period:
+        step_i = int(
+            py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+        )
+        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+            run_eval_loop_over_test_splits(
+                self._eval_programs,
+                train_state.to_eval_state(),
+                eval_key,
+                eval_summary_writers,
+                step_i,
+                self._job_log_dir,
+            )
+        )
+      return tuning_lib.EvalMetrics(
+          metrics_list=eval_metrics_list,
+          scoring_metrics_list=eval_scoring_metrics_list,
+          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+          input_names=[
+              program.eval_input.name for program in self._eval_programs
+          ],
+      )
+
+    return eval_one_step_fn
 
 
 def decode(
@@ -1018,11 +865,11 @@ def decode_pmap_model(
       checkpointer.get_model_states(prng_key)
   )
 
-  prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _PmapEvalRunner(
-      partitioner, eval_input_p, jax_task, eval_key, job_log_dir
+      jax_task, partitioner, eval_input_p, job_log_dir
   )
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn()
+  prng_key, eval_key = jax.random.split(prng_key)
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
 
   # JaxContext needed for parameter sharing.
@@ -1491,7 +1338,13 @@ def decode_spmd_model(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
+
+  eval_runner = _SpmdEvalRunner(
+      jax_task, partitioner, eval_input_p, job_log_dir
+  )
   prng_key, eval_key = jax.random.split(prng_key, 2)
+  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
+  eval_programs = eval_runner.eval_programs
 
   if inputs:
     # Peek to avoid exhausting the input pipeline.
@@ -1524,11 +1377,6 @@ def decode_spmd_model(
       decode_step_fn,
       inputs_partition_spec,
   )
-  eval_runner = _SpmdEvalRunner(
-      eval_input_p, jax_task, partitioner, job_log_dir
-  )
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
-  eval_programs = eval_runner.eval_programs
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
       train_state_metadata.var_weight_hparams,
