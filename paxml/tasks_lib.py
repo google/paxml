@@ -722,7 +722,7 @@ def _create_opt_states(
   """
   grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
   asserts.assert_same_structure(mdl_vars, var_weight_hparams)
-  return [x.init(mdl_vars) for x in grad_txs]
+  return [x.init(mdl_vars) for x in grad_txs]  # pytype: disable=bad-return-type  # numpy-scalars
 
 
 def create_state(
