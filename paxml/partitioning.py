@@ -463,6 +463,32 @@ class Partitioner(metaclass=abc.ABCMeta):
 
 class PmapPartitioner(Partitioner):
 
+  def __init__(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      init_key: PRNGKey,
+      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
+      init_is_eval: bool = False,
+      job_log_dir: Optional[epath.Path] = None,
+  ):
+    """Constructor.
+
+    Args:
+      jax_task: The task which is an instance of tasks.SingleTask.
+      init_key: PRNGKey for initializing the model variables.
+      train_inputs_shape_dtype: Per-device shape/dtype attributes of the
+        training inputs to model.init, for use in getting params of model
+        variables. Can also be set using self.set_train_inputs_shape_dtype() if
+        not provided during construction.
+      init_is_eval: Whether it should set is_eval=True when running
+        abstract_init_with_metadata.
+      job_log_dir: Directory for the job logs.
+    """
+    logging.info('Using pmap for data parallelism.')
+    super().__init__(
+        jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
+    )
+
   def set_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
   ) -> None:
@@ -612,18 +638,19 @@ class PjitPartitioner(Partitioner):
       init_key: PRNGKey for initializing the model variables.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
-      train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
+      train_inputs_shape_dtype: Global shape/dtype attributes of the inputs to
         model.init, for use in getting params of model variables. This is needed
         when always_use_train_for_model_init is True.
       init_is_eval: Whether it should set is_eval=True when running
         abstract_init_with_metadata.
       job_log_dir: Directory for the job logs.
     """
-    model_p = jax_task.hparams.model
+    logging.info('Using SPMD sharding for model parallelism.')
     super().__init__(
         jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
     )
     self._reshard_inputs = reshard_inputs
+    model_p = jax_task.hparams.model
     self._mesh_names = model_p.mesh_axis_names
 
     # Create global mesh.

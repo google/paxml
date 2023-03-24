@@ -496,17 +496,10 @@ def evaluate(
       enforce_restore_shape_check=enforce_restore_shape_check,
   )
 
-  if task_p.model.mesh_shape is not None:
-    logging.info('Using SPMD sharding for model parallelism.')
-    runner_cls = _SpmdEvalRunner
-  else:
-    logging.info('Using pmap for data parallelism.')
-    runner_cls = _PmapEvalRunner
-
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  eval_runner = runner_cls(jax_task, partitioner, eval_input_p, job_log_dir)
+  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
   prng_key, eval_key = jax.random.split(prng_key)
   eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
@@ -533,75 +526,7 @@ def evaluate(
   )
 
 
-class _PmapEvalRunner:
-  """A runner class that runs evaluate with pmap."""
-
-  def __init__(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      partitioner: partitioning.Partitioner,
-      eval_input_ps: Sequence[base_input.BaseInput.HParams],
-      job_log_dir: epath.Path,
-  ):
-    self._jax_task = jax_task
-    self._partitioner = partitioner
-    self._job_log_dir = job_log_dir
-    self._eval_programs = [
-        programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
-        for input_p in eval_input_ps
-    ]
-    trainer_lib.check_unique_names(
-        [program.eval_input for program in self._eval_programs]
-    )
-
-  @property
-  def eval_programs(self):
-    return self._eval_programs
-
-  def get_partition_run_one_step_fn(self, eval_key):
-    # TODO(laigd): use partitioner.preprocess_prng_key() to replace the split
-    # below and unify the two runners.
-    # eval_key = self._partitioner.preprocess_prng_key(eval_key)
-    num_devices = jax.local_device_count()
-    eval_key = jax.random.split(eval_key, num=num_devices)
-    logging.info('eval prng_seed: %s', eval_key)
-
-    def eval_one_step_fn(train_state, eval_summary_writers):
-      if not self._eval_programs:
-        return tuning_lib.EvalMetrics(
-            metrics_list=[],
-            scoring_metrics_list=[],
-            steps_per_sec=0,
-            input_names=[],
-        )
-
-      with py_utils.timeit() as eval_period:
-        step_i = int(
-            py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-        )
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            run_eval_loop_over_test_splits(
-                self._eval_programs,
-                train_state.to_eval_state(),
-                eval_key,
-                eval_summary_writers,
-                step_i,
-                self._job_log_dir,
-            )
-        )
-      return tuning_lib.EvalMetrics(
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-          input_names=[
-              program.eval_input.name for program in self._eval_programs
-          ],
-      )
-
-    return eval_one_step_fn
-
-
-class _SpmdEvalRunner:
+class _EvalRunner:
   """A runner class that runs evaluate with spmd."""
 
   def __init__(
@@ -865,9 +790,7 @@ def decode_pmap_model(
       checkpointer.get_model_states(prng_key)
   )
 
-  eval_runner = _PmapEvalRunner(
-      jax_task, partitioner, eval_input_p, job_log_dir
-  )
+  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
   prng_key, eval_key = jax.random.split(prng_key)
   eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
@@ -1339,9 +1262,7 @@ def decode_spmd_model(
       checkpointer.get_model_states(prng_key)
   )
 
-  eval_runner = _SpmdEvalRunner(
-      jax_task, partitioner, eval_input_p, job_log_dir
-  )
+  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
   prng_key, eval_key = jax.random.split(prng_key, 2)
   eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
   eval_programs = eval_runner.eval_programs
