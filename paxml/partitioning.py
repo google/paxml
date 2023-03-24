@@ -129,10 +129,10 @@ def _remove_input_padding(
 
 
 def _write_input_specs(
-    input_specs: NestedShapeDtypeLike, job_log_dir: epath.Path
+    input_specs: NestedShapeDtypeLike, job_log_dir: Optional[epath.Path]
 ) -> None:
   """Writes input specs as JSON to a file."""
-  if jax.process_index() != 0:
+  if job_log_dir is None or jax.process_index() != 0:
     return
 
   def _to_dict(array_like: Any) -> Dict[str, Any]:
