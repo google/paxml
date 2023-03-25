@@ -73,9 +73,6 @@ RUN cd /paxml/paxml/pip_package && \
 
 RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
 
-RUN git clone https://github.com/google/flaxformer.git
-RUN cd flaxformer && pip3 install .
-
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
 #TODO:enable -praxis/layers:normalizations_test once the new Lingvo pip package is released
@@ -89,7 +86,6 @@ RUN cd praxis && \
   -praxis/layers:convolutions_test \
   -praxis/layers:ctc_objectives_test \
   -praxis/layers:embedding_softmax_test \
-  -praxis/layers:flaxformer_models_test \
   -praxis/layers:models_test \
   -praxis/layers:ngrammer_test \
   -praxis/layers:normalizations_test \

@@ -60,9 +60,6 @@ RUN cp -r praxis/praxis /paxml/
 RUN sed -i 's/ @ git.*//g' paxml/paxml/pip_package/requirements.in
 RUN pip3 install -r paxml/paxml/pip_package/requirements.in
 
-RUN git clone https://github.com/google/flaxformer.git
-RUN cd flaxformer && pip3 install .
-
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
 
