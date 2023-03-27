@@ -296,7 +296,6 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_experiment",
-        ":checkpoints",
         ":eval_lib",
         ":experiment_registry",
         ":setup_jax",

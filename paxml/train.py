@@ -58,6 +58,7 @@ NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 FlaxCheckpointer = checkpoints.FlaxCheckpointer
 FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
+AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
 BaseInputCheckpointHandler = checkpoints.BaseInputCheckpointHandler
 PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
@@ -481,9 +482,10 @@ def _create_checkpointer(
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str],
     train_input_p: Optional[base_input.BaseInput.HParams] = None,
-    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
+    enable_async_checkpointing: bool = True,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
+    maybe_use_persistence_checkpointing: bool = False,
 ) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
@@ -499,10 +501,22 @@ def _create_checkpointer(
       keep_time_interval=keep_interval_timedelta,
       todelete_subdir=todelete_subdir,
   )
-  checkpointer = async_checkpointer
+
   if checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
-  if checkpointer is None:
+  elif enable_async_checkpointing:
+    if maybe_use_persistence_checkpointing:
+      checkpointer = AsyncPersistenceCheckpointer(
+          timeout_secs=600,
+          enforce_restore_shape_check=enforce_restore_shape_check)
+    else:
+      checkpointer = checkpoints.AsyncCheckpointer(
+          checkpoints.PaxCheckpointHandler(
+              enforce_restore_shape_check=enforce_restore_shape_check
+          ),
+          timeout_secs=600,
+      )
+  else:
     if checkpoint_type == CheckpointType.GDA:
       checkpointer = Checkpointer(
           PaxCheckpointHandler(
@@ -513,6 +527,7 @@ def _create_checkpointer(
       raise ValueError('Checkpointer must already be initialized.')
     else:
       raise ValueError(f'Unsupported Orbax checkpoint type: {checkpoint_type}')
+
   train_input_checkpointer = None
   if train_p.enable_input_checkpointing:
     # TODO(gaoi): add more accurate check for deterministic SeqIO input
@@ -576,13 +591,16 @@ def write_hparams_file(model_config: base_experiment.BaseExperiment,
       hparams_file.write(model_config.task().to_text())
 
 
-def write_experiment_class_vars_file(exp_cls: Type[
-    base_experiment.BaseExperiment],
-                                     job_log_dir: epath.Path,
-                                     filename_prefix: str = '') -> None:
+def write_experiment_class_vars_file(
+    exp_cls: Type[base_experiment.BaseExperiment],
+    job_log_dir: epath.Path,
+    filename_prefix: str = '',
+) -> None:
   """Writes a params file into the root `job_log_dir`."""
   if jax.process_index() == 0:
-    exp_summary_fpath = job_log_dir / f'{filename_prefix}experiment_cls_vars.txt'
+    exp_summary_fpath = (
+        job_log_dir / f'{filename_prefix}experiment_cls_vars.txt'
+    )
     job_log_dir.mkdir(parents=True, exist_ok=True)
 
     cls_vars_summary = experiment_utils.get_cls_vars_summary(exp_cls)
@@ -598,7 +616,7 @@ def train_and_evaluate(
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     run_decode: bool = False,
     enable_auto_sharding: bool = False,
-    async_checkpointer: Optional[checkpoints.AsyncCheckpointer] = None,
+    enable_async_checkpointing: bool = False,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,) -> None:
   """The shared path to run the training and evaluation loop.
@@ -622,7 +640,7 @@ def train_and_evaluate(
       If and only if this is True, every `task_p.train.decode_interval_steps` of
       training, model runs decode.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
-    async_checkpointer: When async checkpointing and Orbax are enabled, allows
+    enable_async_checkpointing: Allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
@@ -687,9 +705,10 @@ def train_and_evaluate(
       checkpoint_type,
       checkpoint_todelete_subdir,
       train_input_p=train_input_p,
-      async_checkpointer=async_checkpointer,
+      enable_async_checkpointing=enable_async_checkpointing,
       enable_checkpoint_saving=enable_checkpoint_saving,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      maybe_use_persistence_checkpointing=maybe_use_persistence_checkpointing,
   )
   if not enable_checkpoint_saving:
     logging.info(
@@ -720,6 +739,7 @@ def train_and_evaluate(
         early_stopping_fn,
         experiment_train_program=experiment_config.train_program(),
     )
+  checkpointer.wait_until_finished()  # No-op if not async.
 
 
 def _maybe_update_latest_model_step(

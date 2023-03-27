@@ -39,7 +39,6 @@ import fiddle as fdl
 from fiddle import absl_flags
 import jax
 from paxml import base_experiment
-from paxml import checkpoints
 from paxml import eval_lib
 from paxml import experiment_registry
 from paxml import setup_jax
@@ -52,7 +51,6 @@ from praxis import py_utils
 import pyglove as pg
 
 # internal experiment module import
-AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
 
 FLAGS = flags.FLAGS
 
@@ -246,20 +244,6 @@ def run_experiment(
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
-    async_checkpointer = None
-    if FLAGS.jax_fully_async_checkpoint:
-      if FLAGS.maybe_use_persistence_checkpointing:
-        async_checkpointer = AsyncPersistenceCheckpointer(
-            timeout_secs=600,
-            enforce_restore_shape_check=FLAGS.enforce_restore_shape_check)
-      else:
-        async_checkpointer = checkpoints.AsyncCheckpointer(
-            checkpoints.PaxCheckpointHandler(
-                enforce_restore_shape_check=FLAGS.enforce_restore_shape_check
-            ),
-            timeout_secs=600,
-        )
-
     train.train_and_evaluate(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
@@ -269,13 +253,10 @@ def run_experiment(
         early_stopping_fn=early_stopping_fn,
         run_decode=FLAGS.decode_during_train,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
-        async_checkpointer=async_checkpointer,
+        enable_async_checkpointing=FLAGS.jax_fully_async_checkpoint,
         enable_checkpoint_saving=enable_checkpoint_saving,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
     )
-
-    if async_checkpointer is not None:
-      async_checkpointer.wait_until_finished()
 
   elif FLAGS.mode == 'eval':
     work_unit.set_task_status(f'Eval experiment {FLAGS.exp} at'
