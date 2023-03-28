@@ -886,7 +886,6 @@ def train_and_evaluate_pmap(
         task_p,
         partitioner.get_train_state_metadata().var_weight_hparams,
         decode_input_pipelines,
-        decode_input_p,
         decode_key,
         job_log_dir,
     )
@@ -1005,7 +1004,6 @@ def train_and_evaluate_spmd_model(
         partitioner,
         task_p,
         padded_decode_input_pipelines,
-        padded_decode_input_ps,
         job_log_dir,
         decode_key,
         decode_step_fn,

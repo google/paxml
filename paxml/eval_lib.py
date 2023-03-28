@@ -817,7 +817,6 @@ def decode_pmap_model(
       task_p,
       train_state_metadata.var_weight_hparams,
       inputs,
-      input_p,
       prng_seed,
       job_log_dir,
       output_pickle,
@@ -849,7 +848,6 @@ def partition_decode_once_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
     var_weight_hparams: NestedWeightHParams,
     inputs: List[base_input.BaseInput],
-    input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
     job_log_dir: epath.Path,
     output_pickle: bool = True,
@@ -868,7 +866,6 @@ def partition_decode_once_pmap_model(
           task_p,
           var_weight_hparams,
           inputs,
-          input_p,
           prng_seed,
           job_log_dir,
           partitioned_train_state,
@@ -894,7 +891,6 @@ def decode_once_pmap_model(
     task_p: tasks_lib.SingleTask.HParams,
     var_weight_hparams: NestedWeightHParams,
     inputs: List[base_input.BaseInput],
-    input_p: Sequence[base_input.BaseInput.HParams],
     prng_seed: JTensor,
     job_log_dir: epath.Path,
     replicated_model_states: TrainState,
@@ -915,7 +911,6 @@ def decode_once_pmap_model(
     task_p: Params for the task encapsulating a data parallel model.
     var_weight_hparams: Nested structure of HParams for the model weights.
     inputs: instantiated inputs.
-    input_p: List of input params to be decoded.
     prng_seed: The prng seed used for decoding.
     job_log_dir: Directory for the job logs.
     replicated_model_states: A TrainState object.
@@ -927,9 +922,9 @@ def decode_once_pmap_model(
                 a list of processed decode metrics,
                 a list of optional decoder (seqio) metrics.
                  list of integers as performed decode steps for each input).
-      Items from each list are aligned with each input from input_p.
+      Items from each list are aligned with each input from inputs.
   """
-  if not input_p:
+  if not inputs:
     return [], [], [], []
   work_unit = platform.work_unit()
   model = jax_task.model
@@ -1024,7 +1019,8 @@ def decode_once_pmap_model(
     )
 
   num_steps_per_input = [
-      -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
+      -1 if input.reset_for_eval else input.eval_loop_num_batches
+      for input in inputs
   ]
   basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
   dirnames = _get_dir_names(inputs)
@@ -1292,7 +1288,6 @@ def decode_spmd_model(
       partitioner,
       task_p,
       inputs,
-      input_p,
       job_log_dir,
       prng_key,
       decode_step_fn,
@@ -1329,7 +1324,6 @@ def partition_decode_once_spmd_model(
     partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
-    input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     prng_key: JTensor,
     decode_step_fn: Callable[
@@ -1352,7 +1346,6 @@ def partition_decode_once_spmd_model(
           partitioner,
           task_p,
           inputs,
-          input_p,
           job_log_dir,
           partitioned_train_state,
           summary_writers,
@@ -1382,7 +1375,6 @@ def decode_once_spmd_model(
     partitioner: partitioning.Partitioner,
     task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
-    input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     train_state: TrainState,
     summary_writers: List[SummaryWriter],
@@ -1404,7 +1396,6 @@ def decode_once_spmd_model(
     jax_task: instantiated model from task_p.
     task_p: Params for the task that encapsulates an SPMD model.
     inputs: instantiated inputs.
-    input_p: List of input params to be decoded.
     job_log_dir: Directory for the job logs.
     train_state: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
@@ -1417,7 +1408,7 @@ def decode_once_spmd_model(
                 a list of processed decode metrics,
                 a list of optional decoder (seqio) metrics.
                  list of integers as performed decode steps for each input).
-      Items from each list are aligned with each input from input_p.
+      Items from each list are aligned with each input from inputs.
   """
   work_unit = platform.work_unit()
   metrics_p = task_p.metrics
@@ -1447,7 +1438,8 @@ def decode_once_spmd_model(
   )
 
   num_steps_per_input = [
-      -1 if p.reset_for_eval else p.eval_loop_num_batches for p in input_p
+      -1 if input.reset_for_eval else input.eval_loop_num_batches
+      for input in inputs
   ]
   decode_metrics_list = []
   processed_decode_metrics_list = []
