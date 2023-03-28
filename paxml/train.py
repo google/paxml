@@ -29,6 +29,7 @@ from etils import epath
 import jax
 from jax import monitoring
 import jax.numpy as jnp
+import numpy as np
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import eval_lib
@@ -316,31 +317,57 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
 class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
-  def __init__(self,
-               job_log_dir: epath.Path,
-               checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
-               checkpoint_type: CheckpointType,
-               enable_checkpoint_saving: bool = True,
-               enforce_restore_shape_check: bool = False,):
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
+      checkpoint_type: CheckpointType,
+      enable_checkpoint_saving: bool = True,
+  ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
-    self._enforce_restore_shape_check = enforce_restore_shape_check
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
 
-  def _restore_from_tensorstore(self, train_state_global_shapes):
-    _make_checkpoint_dir(self.job_log_dir)
-    logging.info('Pmap restore from TensorStore checkpoint...')
-    # Restored from GDA checkpoint dir.
-    return tasks_lib.restore_pmap_from_tensorstore(
-        train_state_global_shapes,
-        self.checkpoint_dir,
-        checkpoint_type=self._checkpoint_type,
-        enforce_restore_shape_check=self._enforce_restore_shape_check,
+  def _restore_with_args(
+      self,
+      step_i: int,
+      train_state_global_shapes: Optional[TrainState],
+      train_input_pipeline: Optional[base_input.BaseInput],
+  ):
+    """Restore using CheckpointManager, setting up additional args."""
+    restore_args = None
+    if py_utils.pmap_use_tensorstore():
+      # TODO(gaoi) add support for input checkpointing using tensorstore
+      if train_input_pipeline:
+        raise ValueError(
+            'Input checkpointing is not supported when using'
+            ' pmap_use_tensorstore=True. Please set'
+            ' Task.Train.enable_input_checkpoint=False'
+        )
+
+      def _get_spec(shape):
+        if shape.shape:
+          return jax.sharding.PartitionSpec(None)
+        else:
+          return jax.sharding.PartitionSpec()
+
+      global_mesh = jax.sharding.Mesh(
+          np.array(jax.devices()), axis_names=('x',)
+      )
+      fully_replicated_state_specs = jax.tree_map(
+          _get_spec, train_state_global_shapes
+      )
+      restore_args = {
+          'specs': fully_replicated_state_specs,
+          'mesh': global_mesh,
+      }
+    return self.checkpoint_manager.restore(
+        step_i, train_state_global_shapes, restore_kwargs=restore_args
     )
 
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
@@ -353,28 +380,13 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
   ) -> Tuple[TrainState, int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
-      if py_utils.pmap_use_tensorstore():
-        # TODO(gaoi) add support for input checkpointing using tensorstore
-        if train_input_pipeline:
-          raise ValueError(
-              'Input checkpointing is not supported when using'
-              ' pmap_use_tensorstore=True. Please set'
-              ' Task.Train.enable_input_checkpoint=False'
-          )
-        train_state = self._restore_from_tensorstore(
-            train_state_global_shapes
-        )
+      step = self.checkpoint_manager.latest_step()
+      if step is None:
+        train_state = None
       else:
-        step = self.checkpoint_manager.latest_step()
-        if step is None:
-          train_state = None
-        else:
-          train_state = self.checkpoint_manager.restore(
-              step,
-              train_state_global_shapes,
-              train_input_pipeline,
-          )
-
+        train_state = self._restore_with_args(
+            step, train_state_global_shapes, train_input_pipeline
+        )
     monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
                                           restore_period.elapsed)
 
@@ -558,7 +570,6 @@ def _create_checkpointer(
         checkpoint_manager,
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
-        enforce_restore_shape_check=enforce_restore_shape_check,
     )
 
   return checkpointer
