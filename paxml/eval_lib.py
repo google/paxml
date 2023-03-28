@@ -505,7 +505,6 @@ def evaluate(
   eval_programs = eval_runner.eval_programs
 
   decode_once_fn = None
-  decode_input_p = None
   decode_inputs = None
   continuous_decode = True
   _common_eval_or_decode_loop(
@@ -513,8 +512,6 @@ def evaluate(
       checkpointer,
       jax_task.hparams,
       job_log_dir,
-      decode_input_p,
-      eval_input_p,
       eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
@@ -829,8 +826,6 @@ def decode_pmap_model(
       checkpointer,
       task_p,
       job_log_dir,
-      input_p,
-      eval_input_p,
       eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
@@ -1306,8 +1301,6 @@ def decode_spmd_model(
       checkpointer,
       task_p,
       job_log_dir,
-      input_p,
-      eval_input_p,
       eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
@@ -1644,8 +1637,6 @@ def _common_eval_or_decode_loop(
     checkpointer: _EvalCheckpointer,
     task_p: tasks_lib.SingleTask.HParams,
     job_log_dir: epath.Path,
-    decode_input_p: Optional[Sequence[base_input.BaseInput.HParams]],
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
     eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: TrainState,
@@ -1658,7 +1649,7 @@ def _common_eval_or_decode_loop(
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
   summary_base_dir = job_log_dir / 'summaries'
-  if decode_input_p:
+  if decode_inputs:
     summary_decode_dirs = [
         summary_base_dir / f'decode_test_{inp.name}' for inp in decode_inputs
     ]
@@ -1667,7 +1658,7 @@ def _common_eval_or_decode_loop(
       for prg in eval_programs
   ]
   with contextlib.ExitStack() as exit_stack:
-    if decode_input_p:
+    if decode_inputs:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
@@ -1687,7 +1678,7 @@ def _common_eval_or_decode_loop(
           job_log_dir, last_checkpoint_step, mode
       ):
         decode_metrics = None
-        if decode_input_p:
+        if decode_inputs:
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
           decode_metrics = decode_once_fn(
               partitioned_train_state, summary_writers
