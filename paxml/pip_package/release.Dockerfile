@@ -57,8 +57,8 @@ RUN mkdir $WHEEL_FOLDER
 RUN git clone -b r${praxis_version} https://github.com/google/praxis.git
 
 RUN cp -r praxis/praxis /paxml/
-RUN sed -i 's/ @ git.*//g' paxml/paxml/pip_package/requirements.in
-RUN pip3 install -r paxml/paxml/pip_package/requirements.in
+RUN sed -i 's/ @ git.*//g' paxml/requirements.in
+RUN pip3 install -r paxml/requirements.in
 
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh
