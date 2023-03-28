@@ -34,6 +34,7 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import transformers
 import seqio
@@ -518,7 +519,7 @@ def configure_gpt3_task(
     atten_wp.proj = ['data', 'mdl', None]
 
   if task_p.early_stopping_fn is None:
-    task_p.early_stopping_fn = EarlyStoppingFn.HParams()
+    task_p.early_stopping_fn = pax_fiddle.Config(EarlyStoppingFn)
     task_p.early_stopping_fn.target_log_pplx = cls.TARGET_LOG_PPLX
 
   return task_p

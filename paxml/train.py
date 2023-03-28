@@ -1110,9 +1110,9 @@ def _create_program_and_states(
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
 
-  if jax_task.early_stopping_fn_inst is not None:
+  if jax_task.early_stopping_fn is not None:
     if early_stopping_fn is None:
-      early_stopping_fn = jax_task.early_stopping_fn_inst
+      early_stopping_fn = jax_task.early_stopping_fn
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '

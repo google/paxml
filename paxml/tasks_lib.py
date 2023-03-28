@@ -874,7 +874,7 @@ class SingleTask(base_task.BaseTask):
     track_decoder_metric: which decoding metric to track, e.g. 'wer'.
     track_decoder_metric_min_or_max: track min or max metric value.
     infer_writer: specifies how to generate and write some output with a model
-    early_stopping_fn: HParams to control whether to stop the training loop
+    early_stopping_fn: Function to control whether to stop the training loop
       early; the instantiated class should be callable with signature matching
       trainer_lib.EarlyStoppingFn.
   """
@@ -1112,11 +1112,10 @@ class SingleTask(base_task.BaseTask):
       SingleTask.TrackDecoderMetricMode
   ] = None
   infer_writer: Optional[pax_fiddle.Config[SingleTask.InferWriter]] = None
-  early_stopping_fn: Optional[pax_fiddle.Config] = None
+  early_stopping_fn: Optional[EarlyStoppingFn] = None
   _learners: Any = dataclasses.field(init=False, repr=False)
   _metrics_aggregator: Any = dataclasses.field(init=False, repr=False)
   _loss_aggregator_inst: Any = dataclasses.field(init=False, repr=False)
-  _early_stopping_fn_inst: Any = dataclasses.field(init=False, repr=False)
   _inference_runner: Any = dataclasses.field(init=False, repr=False)
 
   def __post_init__(self):
@@ -1165,11 +1164,6 @@ class SingleTask(base_task.BaseTask):
           loss_key=self._learners[0].loss_name)
       self._loss_aggregator_inst = instantiate(loss_p)
 
-    if p.early_stopping_fn is not None:
-      self._early_stopping_fn_inst = instantiate(p.early_stopping_fn)
-    else:
-      self._early_stopping_fn_inst = None
-
     if p.infer_writer:
       self._inference_runner = p.infer_writer.inference_runner.Instantiate(
           model=self.model
@@ -1186,10 +1180,6 @@ class SingleTask(base_task.BaseTask):
   @property
   def loss_aggregator_inst(self) -> base_metrics.LossAggregator:
     return self._loss_aggregator_inst
-
-  @property
-  def early_stopping_fn_inst(self) -> Optional[EarlyStoppingFn]:
-    return self._early_stopping_fn_inst
 
   @property
   def has_ema_decay(self):
