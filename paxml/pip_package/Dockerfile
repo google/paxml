@@ -68,7 +68,7 @@ RUN cd /praxis && \
 RUN cd /paxml && \
     sed -i 's/praxis/#praxis/' requirements.in && \
     pip-compile --quiet requirements.in \
-    /paxml/praxis/pip_package/requirements.in \
+    /praxis/requirements.in \
     --output-file $WHEEL_FOLDER/paxml_requirements.txt
 
 RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
