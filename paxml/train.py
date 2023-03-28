@@ -720,7 +720,6 @@ def train_and_evaluate(
         train_input_p,
         job_log_dir,
         checkpointer,
-        checkpoint_type,
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
@@ -733,7 +732,6 @@ def train_and_evaluate(
         train_input_p,
         job_log_dir,
         checkpointer,
-        checkpoint_type,
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
@@ -825,7 +823,6 @@ def train_and_evaluate_pmap(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
-    checkpoint_type: CheckpointType,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -838,7 +835,6 @@ def train_and_evaluate_pmap(
     train_input_p: HParams for the train data input pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
-    checkpoint_type: The type of checkpoint to use.
     eval_input_p: list of hparams for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -867,7 +863,6 @@ def train_and_evaluate_pmap(
       eval_input_p,
       job_log_dir,
       checkpointer,
-      checkpoint_type,
       early_stopping_fn=early_stopping_fn,
       experiment_train_program=experiment_train_program,
   )
@@ -916,7 +911,6 @@ def train_and_evaluate_spmd_model(
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
-    checkpoint_type: CheckpointType,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -930,7 +924,6 @@ def train_and_evaluate_spmd_model(
     train_input_p: Params for the train data pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
-    checkpoint_type: The type of checkpoint to use.
     eval_input_p: list of params for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -959,7 +952,6 @@ def train_and_evaluate_spmd_model(
       eval_input_p,
       job_log_dir,
       checkpointer,
-      checkpoint_type,
       enable_auto_sharding,
       early_stopping_fn,
       experiment_train_program,
@@ -1038,12 +1030,11 @@ def _create_program_and_states(
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
-    checkpoint_type: CheckpointType,
     enable_auto_sharding: bool = False,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ):
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
+  reshard_inputs = checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
   jax_task = instantiate(task_p)
   root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
 
