@@ -63,7 +63,7 @@ cffi==1.15.1
     # via argon2-cffi-bindings
 charset-normalizer==3.1.0
     # via requests
-chex==0.1.6
+chex==0.1.7
     # via optax
 click==8.1.3
     # via
@@ -118,7 +118,7 @@ fastjsonschema==2.16.3
     # via nbformat
 fiddle @ git+https://github.com/google/fiddle
     # via -r praxis-requirements.in
-filelock==3.10.4
+filelock==3.10.7
     # via
     #   huggingface-hub
     #   torch
@@ -126,12 +126,12 @@ filelock==3.10.4
     #   triton
 flatbuffers==1.12
     # via tensorflow
-flax==0.6.7
+flax==0.6.8
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   clu
-fonttools==4.39.2
+fonttools==4.39.3
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
@@ -143,7 +143,7 @@ gin-config==0.5.0
     # via
     #   mesh-tensorflow
     #   t5
-google-auth==2.16.3
+google-auth==2.17.0
     # via
     #   google-auth-oauthlib
     #   tensorboard
@@ -157,7 +157,7 @@ graph-compression-google-research==0.0.4
     # via lingvo
 graphviz==0.20.1
     # via fiddle
-grpcio==1.51.3
+grpcio==1.53.0
     # via
     #   tensorboard
     #   tensorflow
@@ -185,6 +185,7 @@ importlib-resources==5.12.0
     #   tfds-nightly
 ipykernel==6.22.0
     # via
+    #   ipywidgets
     #   jupyter
     #   jupyter-console
     #   lingvo
@@ -201,7 +202,7 @@ ipython-genutils==0.2.0
     #   nbclassic
     #   notebook
     #   qtconsole
-ipywidgets==8.0.5
+ipywidgets==8.0.6
     # via jupyter
 isoduration==20.11.0
     # via jsonschema
@@ -217,7 +218,7 @@ jax @ git+https://github.com/google/jax
     #   seqio
 jax-bitempered-loss==0.0.2
     # via -r praxis-requirements.in
-jaxlib==0.4.6
+jaxlib==0.4.7
     # via
     #   chex
     #   clu
@@ -280,7 +281,7 @@ jupyter-server-terminals==0.4.4
     # via jupyter-server
 jupyterlab-pygments==0.2.2
     # via nbconvert
-jupyterlab-widgets==3.0.6
+jupyterlab-widgets==3.0.7
     # via ipywidgets
 keras==2.9.0
     # via tensorflow
@@ -323,8 +324,10 @@ mistune==2.0.5
     # via nbconvert
 ml-collections==0.1.1
     # via clu
-ml-dtypes==0.0.3
-    # via jax
+ml-dtypes==0.0.4
+    # via
+    #   jax
+    #   jaxlib
 model-pruning-google-research==0.0.5
     # via lingvo
 mpmath==1.3.0
@@ -472,7 +475,7 @@ pillow==9.4.0
     #   matplotlib
 pkgutil-resolve-name==1.3.10
     # via jsonschema
-platformdirs==3.1.1
+platformdirs==3.2.0
     # via jupyter-core
 portalocker==2.7.0
     # via sacrebleu
@@ -541,7 +544,7 @@ python-dateutil==2.8.2
     #   pandas
 python-json-logger==2.0.7
     # via jupyter-events
-pytz==2022.7.1
+pytz==2023.2
     # via
     #   babel
     #   pandas
@@ -590,7 +593,7 @@ rfc3986-validator==0.1.1
     # via
     #   jsonschema
     #   jupyter-events
-rich==13.3.2
+rich==13.3.3
     # via flax
 rouge-score==0.1.2
     # via t5
@@ -689,7 +692,7 @@ tensorflow-text==2.9.0
     #   lingvo
     #   seqio
     #   t5
-tensorstore==0.1.33
+tensorstore==0.1.35
     # via
     #   -r paxml-requirements.in
     #   flax
@@ -705,7 +708,7 @@ terminado==0.17.1
     #   jupyter-server-terminals
     #   nbclassic
     #   notebook
-tfds-nightly==4.8.3.dev202303240044
+tfds-nightly==4.8.3.dev202303280045
     # via
     #   seqio
     #   t5
@@ -786,7 +789,7 @@ urllib3==1.26.15
     # via requests
 wcwidth==0.2.6
     # via prompt-toolkit
-webcolors==1.12
+webcolors==1.13
     # via jsonschema
 webencodings==0.5.1
     # via
@@ -806,7 +809,7 @@ wheel==0.40.0
     #   nvidia-cusparse-cu11
     #   nvidia-nvtx-cu11
     #   tensorboard
-widgetsnbextension==4.0.6
+widgetsnbextension==4.0.7
     # via ipywidgets
 wrapt==1.15.0
     # via
