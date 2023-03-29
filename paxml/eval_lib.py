@@ -471,19 +471,20 @@ def evaluate(
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = partitioning.create_partitioner(
       jax_task,
-      prng_key,
-      train_input_specs,
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
-      job_log_dir=job_log_dir,
   )
+  input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
     input_p = partitioner.preprocess_input_params(eval_input_p[0])
-    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+    input_for_shape = instantiate(input_p)
+  partitioner.setup(
+      jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
+  )
 
   checkpointer = _create_checkpointer(
       jax_task,
@@ -658,13 +659,11 @@ def decode(
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = partitioning.create_partitioner(
       jax_task,
-      prng_key,
-      train_input_specs,
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
-      job_log_dir=job_log_dir,
   )
+  input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # We assume that either eval_input or decoder_input can be used to retrieve
@@ -679,7 +678,10 @@ def decode(
     input_p = partitioner.preprocess_input_params(
         (decoder_inputs + eval_inputs)[0]
     )
-    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+    input_for_shape = instantiate(input_p)
+  partitioner.setup(
+      jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
+  )
 
   checkpointer = _create_checkpointer(
       jax_task,
@@ -1872,18 +1874,18 @@ def infer_and_write(
   )
   reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
   partitioner = partitioning.create_partitioner(
-      task,
-      prng_key,
-      train_input_specs,
-      reshard_inputs=reshard_inputs,
-      job_log_dir=job_log_dir,
+      task, reshard_inputs=reshard_inputs
   )
+  input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
     input_p = partitioner.preprocess_input_params(inputs_p[0])
-    partitioner.set_train_inputs_shape_dtype(instantiate(input_p))
+    input_for_shape = instantiate(input_p)
+  partitioner.setup(
+      task, prng_key, train_input_specs, input_for_shape, job_log_dir
+  )
 
   checkpointer = _create_checkpointer(
       task,

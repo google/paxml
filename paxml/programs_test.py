@@ -127,13 +127,8 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )
-    partitioner = partitioning.PjitPartitioner(
-        self.task,
-        jax.random.PRNGKey(0),
-        reshard_inputs=True,
-        train_inputs_shape_dtype=inputs_shape_dtype,
-        init_is_eval=False,
-    )
+    partitioner = partitioning.PjitPartitioner(init_is_eval=False, reshard_inputs=True)
+    partitioner.setup(self.task, jax.random.PRNGKey(0), inputs_shape_dtype)
     train_pg = programs.SingleTaskTrainProgram(
         self.task, self.train_input, partitioner
     )

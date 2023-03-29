@@ -163,15 +163,21 @@ class Partitioner(metaclass=abc.ABCMeta):
 
   ```
   # Create the partitioner.
-  partitioner = create_partitioner(
-      jax_task, init_key, train_inputs_shape_dtype, job_log_dir=job_log_dir)
+  partitioner = create_partitioner()
 
-  # [Optional] Set the training input shape/dtype information. Needed only if
-  # train_inputs_shape_dtype is not set when creating the partitioner above.
+  # Sets up the partitioner.
+  train_input_pipeline = None
+
+  # [Optional] Use the train input pipeline to get the shape/dtype information
+  # for model.init. Needed only if train_inputs_shape_dtype is not available
+  # (==None) when we call setup below.
   train_input_p = ...  # The config for training input pipeline.
   train_input_p = partitioner.preprocess_input_params(train_input_p)
   train_input_pipeline = instantiate(train_input_p)
-  partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
+
+  partitioner.setup(
+      jax_task, init_key, train_inputs_shape_dtype, train_input_pipeline,
+      job_log_dir)
 
   # Restore the train state.
   metadata = partitioner.get_train_state_metadata()
@@ -202,52 +208,72 @@ class Partitioner(metaclass=abc.ABCMeta):
   ```
   """
 
-  def __init__(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      init_key: PRNGKey,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
-      init_is_eval: bool = False,
-      job_log_dir: Optional[epath.Path] = None,
-  ):
+  def __init__(self, init_is_eval: bool):
     """Constructor.
 
     Args:
-      jax_task: The task which is an instance of tasks.SingleTask.
-      init_key: PRNGKey for initializing the model variables.
-      train_inputs_shape_dtype: Shape/dtype attributes of the training inputs to
-        model.init, for use in getting params of model variables. Can also be
-        set using self.set_train_inputs_shape_dtype() if not provided during
-        construction.
       init_is_eval: Whether it should set is_eval=True when running
         abstract_init_with_metadata.
-      job_log_dir: Directory for the job logs.
     """
-    self._jax_task = jax_task
-    self._init_key = init_key
-    self._train_inputs_shape_dtype = train_inputs_shape_dtype
     # TODO(laigd): remove this option (it should always be False) once
     # always_use_train_for_model_init is enabled by default.
     self._init_is_eval = init_is_eval
-    self._job_log_dir = job_log_dir
+
+    # States to set in .setup().
+    self._jax_task = None
+    self._job_log_dir = None
+    self._init_key = None
+    self._train_inputs_shape_dtype = None
+
+    # The train state metadata, set in .get_train_state_metadata().
     self._train_state_metadata = None
 
-  @property
-  def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
-    """Shape/dtype attributes of the training inputs to model.init."""
-    return self._train_inputs_shape_dtype
-
-  # TODO(pax-dev): remove this method and switch to train_inputs_shape_dtype
-  # provided during construction once all experiments provide input specs.
-  @abc.abstractmethod
-  def set_train_inputs_shape_dtype(
-      self, train_input_pipeline: base_input.BaseInput
+  def setup(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      init_key: PRNGKey,
+      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike],
+      # TODO(pax-dev): remove this arg and always use train_inputs_shape_dtype
+      # once all experiments provide input specs.
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      job_log_dir: Optional[epath.Path] = None,
   ) -> None:
     """Sets training shape/dtype using sample inputs from the input pipeline.
 
     Args:
-      train_input_pipeline: The training input pipeline.
+      jax_task: The task which is an instance of tasks.SingleTask.
+      init_key: PRNGKey for initializing the model variables.
+      train_inputs_shape_dtype: Shape/dtype information of the training inputs
+        to model.init, for use in getting params of model variables. If None,
+        train_input_pipeline must be set.
+      train_input_pipeline: The training input pipeline, used to get the
+        shape/dtype information for model.init. If None,
+        train_inputs_shape_dtype must be set.
+      job_log_dir: Directory for the job logs.
     """
+    self._jax_task = jax_task
+    self._init_key = init_key
+    self._job_log_dir = job_log_dir
+    if train_inputs_shape_dtype is not None:
+      assert train_input_pipeline is None
+      self._train_inputs_shape_dtype = train_inputs_shape_dtype
+    else:
+      assert train_input_pipeline
+      self._train_inputs_shape_dtype = self._get_train_inputs_shape_dtype(
+          train_input_pipeline
+      )
+
+  @abc.abstractmethod
+  def _get_train_inputs_shape_dtype(
+      self, train_input_pipeline: base_input.BaseInput
+  ) -> NestedShapeDtypeLike:
+    """Get the shape/dtype information for model.init."""
+
+  @property
+  def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
+    """Shape/dtype attributes of the training inputs to model.init."""
+    assert self._train_inputs_shape_dtype
+    return self._train_inputs_shape_dtype
 
   @property
   def global_mesh(self) -> Optional[jax.sharding.Mesh]:
@@ -353,10 +379,7 @@ class Partitioner(metaclass=abc.ABCMeta):
   def _get_train_state_metadata_default(self) -> TrainStateMetadata:
     """Helper method to get the TrainStateMetadata."""
     if not self._train_inputs_shape_dtype:
-      raise ValueError(
-          'Training input spec is not set. It can be set either when creating '
-          'the partitioner, or by calling set_train_inputs_shape_dtype().'
-      )
+      raise ValueError('Train input spec is not set. It can be set in setup().')
     return trainer_lib.create_train_state_metadata(
         self._jax_task,
         self._train_inputs_shape_dtype,
@@ -463,48 +486,24 @@ class Partitioner(metaclass=abc.ABCMeta):
 
 class PmapPartitioner(Partitioner):
 
-  def __init__(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      init_key: PRNGKey,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
-      init_is_eval: bool = False,
-      job_log_dir: Optional[epath.Path] = None,
-  ):
-    """Constructor.
-
-    Args:
-      jax_task: The task which is an instance of tasks.SingleTask.
-      init_key: PRNGKey for initializing the model variables.
-      train_inputs_shape_dtype: Per-device shape/dtype attributes of the
-        training inputs to model.init, for use in getting params of model
-        variables. Can also be set using self.set_train_inputs_shape_dtype() if
-        not provided during construction.
-      init_is_eval: Whether it should set is_eval=True when running
-        abstract_init_with_metadata.
-      job_log_dir: Directory for the job logs.
-    """
+  def __init__(self, init_is_eval: bool):
+    super().__init__(init_is_eval)
     logging.info('Using pmap for data parallelism.')
-    super().__init__(
-        jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
-    )
 
-  def set_train_inputs_shape_dtype(
+  def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
-  ) -> None:
-    assert (
-        not self._train_inputs_shape_dtype
-    ), 'train_inputs_shape_dtype has been set before.'
+  ) -> NestedShapeDtypeLike:
     sample_inputs = train_input_pipeline.peek_padded()
     # Reshard inputs and only keep the inputs corresponding to a given device.
     sample_inputs = self.preprocess_inputs(
         train_input_pipeline, sample_inputs, partition_specs=None
     )
-    self._train_inputs_shape_dtype = jax.tree_map(
+    per_device_shape_dtype = jax.tree_map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype),
         sample_inputs,
     )
-    _write_input_specs(self._train_inputs_shape_dtype, self._job_log_dir)
+    _write_input_specs(per_device_shape_dtype, self._job_log_dir)
+    return per_device_shape_dtype
 
   def preprocess_input_params(
       self, input_ps: base_input.BaseInput.HParams
@@ -622,34 +621,40 @@ class PmapPartitioner(Partitioner):
 class PjitPartitioner(Partitioner):
   """Used for partitioning a step function of a SPMD model."""
 
-  def __init__(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      init_key: PRNGKey,
-      reshard_inputs: bool,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
-      init_is_eval: bool = False,
-      job_log_dir: Optional[epath.Path] = None,
-  ):
+  def __init__(self, init_is_eval: bool, reshard_inputs: bool):
     """Constructor.
 
     Args:
-      jax_task: The task which is an instance of tasks.SingleTask.
-      init_key: PRNGKey for initializing the model variables.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
-      train_inputs_shape_dtype: Global shape/dtype attributes of the inputs to
-        model.init, for use in getting params of model variables. This is needed
-        when always_use_train_for_model_init is True.
       init_is_eval: Whether it should set is_eval=True when running
         abstract_init_with_metadata.
-      job_log_dir: Directory for the job logs.
     """
-    logging.info('Using SPMD sharding for model parallelism.')
-    super().__init__(
-        jax_task, init_key, train_inputs_shape_dtype, init_is_eval, job_log_dir
-    )
+    super().__init__(init_is_eval)
     self._reshard_inputs = reshard_inputs
+    logging.info('Using SPMD sharding for model parallelism.')
+
+    # Additional states to set in .setup().
+    self._mesh_names = None
+    self._global_mesh = None
+    self._broadcast_key_fn = None
+
+  def setup(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      init_key: PRNGKey,
+      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike],
+      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      job_log_dir: Optional[epath.Path] = None,
+  ) -> None:
+    super().setup(
+        jax_task,
+        init_key,
+        train_inputs_shape_dtype,
+        train_input_pipeline,
+        job_log_dir,
+    )
+
     model_p = jax_task.hparams.model
     self._mesh_names = model_p.mesh_axis_names
 
@@ -662,16 +667,11 @@ class PjitPartitioner(Partitioner):
     logging.info('device_mesh: %s', device_mesh)
     self._global_mesh = jax.sharding.Mesh(device_mesh, model_p.mesh_axis_names)
 
-    self._broadcast_key_fn = None
-
-  def set_train_inputs_shape_dtype(
+  def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
-  ) -> None:
-    assert (
-        not self._train_inputs_shape_dtype
-    ), 'train_inputs_shape_dtype has been set before.'
+  ) -> NestedShapeDtypeLike:
     sample_inputs = train_input_pipeline.peek_padded()
-    self._train_inputs_shape_dtype = jax.tree_map(
+    global_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
     perhost_inputs_shape_dtype = jax.tree_map(
@@ -679,6 +679,7 @@ class PjitPartitioner(Partitioner):
         sample_inputs,
     )
     _write_input_specs(perhost_inputs_shape_dtype, self._job_log_dir)
+    return global_shape_dtype
 
   @property
   def global_mesh(self) -> jax.sharding.Mesh:
@@ -1069,43 +1070,30 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
 
   def __init__(
       self,
-      jax_task: tasks_lib.SingleTask,
-      init_key: PRNGKey,
+      init_is_eval: bool,
       reshard_inputs: bool,
       auto_sharding_info: AutoShardingInfo,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
-      init_is_eval: bool = False,
-      job_log_dir: Optional[epath.Path] = None,
   ):
     """Constructor.
 
     Args:
-      jax_task: The task which is an instance of tasks.SingleTask.
-      init_key: PRNGKey for initializing the model variables.
+      init_is_eval: Whether it should set is_eval=True when running
+        abstract_init_with_metadata.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
-      train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
-        model.init, for use in getting params of model variables. This is needed
-        when always_use_train_for_model_init is True.
-      init_is_eval: Whether it should set is_eval=True when running
-        abstract_init_with_metadata.
-      job_log_dir: Directory for the job logs.
     """
-    super().__init__(
-        jax_task,
-        init_key,
-        reshard_inputs,
-        train_inputs_shape_dtype,
-        init_is_eval,
-        job_log_dir,
-    )
+    super().__init__(init_is_eval, reshard_inputs)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
 
-  def set_train_inputs_shape_dtype(self, train_input_pipeline: Any):
-    super().set_train_inputs_shape_dtype(train_input_pipeline)
+  def _get_train_inputs_shape_dtype(
+      self, train_input_pipeline: base_input.BaseInput
+  ) -> NestedShapeDtypeLike:
+    global_shape_dtype = super()._get_train_inputs_shape_dtype(
+        train_input_pipeline
+    )
     # Extra checking in auto sharding case.
     train_input_p = train_input_pipeline.hparams
     if train_input_p.num_infeed_hosts < jax.process_count() or (
@@ -1116,6 +1104,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
           'Per-device batch size < 1 not supported for auto sharding.'
       )
     logging.info('Auto sharding is enabled in PAX.')
+    return global_shape_dtype
 
   def _partition_auto_shard(
       self,
@@ -1286,20 +1275,14 @@ def get_step_fn(mode: RunningMode) -> Tuple[Partitioner.StepFn, bool]:
 
 def create_partitioner(
     jax_task: tasks_lib.SingleTask,
-    init_key: PRNGKey,
-    train_inputs_shape_dtype: Optional[NestedShapeDtypeLike] = None,
     init_is_eval: bool = False,
     reshard_inputs: bool = False,
     auto_sharding_mode: Optional[RunningMode] = None,
-    job_log_dir: Optional[epath.Path] = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
   Args:
     jax_task: The task which is an instance of tasks.SingleTask.
-    init_key: PRNGKey for initializing the model variables.
-    train_inputs_shape_dtype: Shape/dtype attributes of the inputs to
-      model.init, for use in getting params of model variables.
     init_is_eval: Whether it should set is_eval=True when running
       abstract_init_with_metadata.
     reshard_inputs: Whether to reshard model inputs before running the
@@ -1307,19 +1290,12 @@ def create_partitioner(
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
       function to use for auto-sharding (when pjit is used). If None, it means
       to disable auto-sharding.
-    job_log_dir: Directory for the job logs.
 
   Returns:
     A Partitioner instance.
   """
   if jax_task.hparams.model.ici_mesh_shape is None:
-    partitioner = PmapPartitioner(
-        jax_task,
-        init_key,
-        train_inputs_shape_dtype,
-        init_is_eval,
-        job_log_dir,
-    )
+    partitioner = PmapPartitioner(init_is_eval)
   else:
     auto_sharding_info = None
     if auto_sharding_mode:
@@ -1329,21 +1305,8 @@ def create_partitioner(
           step_fn, step_fn_is_eval, replicate_output
       )
       partitioner = AutoShardingPjitPartitioner(
-          jax_task,
-          init_key,
-          reshard_inputs,
-          auto_sharding_info,
-          train_inputs_shape_dtype,
-          init_is_eval,
-          job_log_dir,
+          init_is_eval, reshard_inputs, auto_sharding_info
       )
     else:
-      partitioner = PjitPartitioner(
-          jax_task,
-          init_key,
-          reshard_inputs,
-          train_inputs_shape_dtype,
-          init_is_eval,
-          job_log_dir,
-      )
+      partitioner = PjitPartitioner(init_is_eval, reshard_inputs)
   return partitioner

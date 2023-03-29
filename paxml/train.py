@@ -1060,14 +1060,18 @@ def _create_program_and_states(
     # instead.
     partitioner = partitioning.create_partitioner(
         jax_task,
-        root_prng_key,
         reshard_inputs=reshard_inputs,
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
-        job_log_dir=job_log_dir,
     )
     train_input_p = partitioner.preprocess_input_params(train_input_p)
     train_input_pipeline = instantiate(train_input_p)
-    partitioner.set_train_inputs_shape_dtype(train_input_pipeline)
+    partitioner.setup(
+        jax_task,
+        root_prng_key,
+        train_inputs_shape_dtype=None,
+        train_input_pipeline=train_input_pipeline,
+        job_log_dir=job_log_dir,
+    )
   train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
