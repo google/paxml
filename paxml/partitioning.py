@@ -622,7 +622,12 @@ class PmapPartitioner(Partitioner):
 class PjitPartitioner(Partitioner):
   """Used for partitioning a step function of a SPMD model."""
 
-  def __init__(self, init_is_eval: bool, reshard_inputs: bool):
+  def __init__(
+      self,
+      init_is_eval: bool,
+      reshard_inputs: bool,
+      task_p: tasks_lib.SingleTask.HParams,
+  ):
     """Constructor.
 
     Args:
@@ -630,36 +635,15 @@ class PjitPartitioner(Partitioner):
         partitioned function. Only applicable for pjit.
       init_is_eval: Whether it should set is_eval=True when running
         abstract_init_with_metadata.
+      task_p: The params for the task, needed to create global mesh.
     """
     super().__init__(init_is_eval)
     self._reshard_inputs = reshard_inputs
     logging.info('Using SPMD sharding for model parallelism.')
 
-    # Additional states to set in .setup().
-    self._mesh_names = None
-    self._global_mesh = None
-    self._broadcast_key_fn = None
-
-  def setup(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      init_key: PRNGKey,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike],
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      job_log_dir: Optional[epath.Path] = None,
-  ) -> None:
-    super().setup(
-        jax_task,
-        init_key,
-        train_inputs_shape_dtype,
-        train_input_pipeline,
-        job_log_dir,
-    )
-
-    model_p = jax_task.hparams.model
+    # Creates global mesh.
+    model_p = task_p.model
     self._mesh_names = model_p.mesh_axis_names
-
-    # Create global mesh.
     device_mesh = py_utils.create_device_mesh(
         model_p.ici_mesh_shape,
         model_p.dcn_mesh_shape,
@@ -667,6 +651,9 @@ class PjitPartitioner(Partitioner):
     )
     logging.info('device_mesh: %s', device_mesh)
     self._global_mesh = jax.sharding.Mesh(device_mesh, model_p.mesh_axis_names)
+
+    # Pjit'ed function to preprocess the prng key.
+    self._broadcast_key_fn = None
 
   def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
@@ -690,6 +677,7 @@ class PjitPartitioner(Partitioner):
       self, input_ps: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary."""
+    assert self.global_mesh
     return trainer_lib.adjust_input_params_for_small_batch(
         input_ps, self.global_mesh
     )
@@ -1073,6 +1061,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
+      task_p: tasks_lib.SingleTask.HParams,
       auto_sharding_info: AutoShardingInfo,
   ):
     """Constructor.
@@ -1082,10 +1071,11 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         abstract_init_with_metadata.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
+      task_p: The params for the task, needed to create global mesh.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
     """
-    super().__init__(init_is_eval, reshard_inputs)
+    super().__init__(init_is_eval, reshard_inputs, task_p)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result = None  # Used to cache auto-sharding results.
 
@@ -1299,6 +1289,7 @@ def create_partitioner(
     partitioner = PmapPartitioner(init_is_eval)
   else:
     auto_sharding_info = None
+    task_p = jax_task.hparams
     if auto_sharding_mode:
       step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
@@ -1306,8 +1297,8 @@ def create_partitioner(
           step_fn, step_fn_is_eval, replicate_output
       )
       partitioner = AutoShardingPjitPartitioner(
-          init_is_eval, reshard_inputs, auto_sharding_info
+          init_is_eval, reshard_inputs, task_p, auto_sharding_info
       )
     else:
-      partitioner = PjitPartitioner(init_is_eval, reshard_inputs)
+      partitioner = PjitPartitioner(init_is_eval, reshard_inputs, task_p)
   return partitioner
