@@ -60,8 +60,10 @@ def _expected_checkpoint_filenames(
 
 def _actual_checkpoint_filenames(directory: str) -> List[str]:
   return [
-      os.path.basename(v) for v in tf.io.gfile.glob(
-          os.path.join(directory, f'{CHECKPOINT_PREFIX}*'))
+      os.path.basename(v)
+      for v in tf.io.gfile.glob(
+          os.path.join(directory, f'{CHECKPOINT_PREFIX}*')
+      )
   ]
 
 
@@ -298,9 +300,11 @@ class CheckpointManagerTest(parameterized.TestCase):
   )
   def test_save_max_to_keep(self, max_to_keep, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=1000, max_to_keep=max_to_keep)
+        save_interval_steps=1000, max_to_keep=max_to_keep
+    )
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
     steps = list(range(0, 10000, 1000))
     for step in steps:
       self.save(checkpoint_manager, step, self.train_state)
@@ -312,8 +316,10 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            expected_steps, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            expected_steps, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(expected_steps, checkpoint_manager.all_steps())
 
   @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
@@ -327,7 +333,8 @@ class CheckpointManagerTest(parameterized.TestCase):
       options = checkpoint_managers.CheckpointManagerOptions(
           save_interval_steps=1000,
           max_to_keep=2,
-          keep_time_interval=datetime.timedelta(hours=2))
+          keep_time_interval=datetime.timedelta(hours=2),
+      )
       checkpoint_manager = self.create_checkpoint_manager(
           options, checkpoint_type=checkpoint_type
       )
@@ -346,8 +353,10 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
   @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
@@ -357,9 +366,11 @@ class CheckpointManagerTest(parameterized.TestCase):
     zero_datetime = datetime.datetime.fromtimestamp(0, tz=tz)
 
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=2000, max_to_keep=4)
+        save_interval_steps=2000, max_to_keep=4
+    )
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
@@ -369,8 +380,10 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
     del checkpoint_manager
@@ -380,7 +393,8 @@ class CheckpointManagerTest(parameterized.TestCase):
       options = checkpoint_managers.CheckpointManagerOptions(
           save_interval_steps=3000,
           max_to_keep=6,
-          keep_time_interval=datetime.timedelta(hours=3))
+          keep_time_interval=datetime.timedelta(hours=3),
+      )
       checkpoint_manager = self.create_checkpoint_manager(
           options, checkpoint_type=checkpoint_type
       )
@@ -389,8 +403,10 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps_2_init, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps_2_init, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps_2_init, checkpoint_manager.all_steps())
 
     steps_2 = list(range(10000, 20000, 1000))
@@ -406,16 +422,20 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps_2, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps_2, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps_2, checkpoint_manager.all_steps())
 
   @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_save_restore_manager_case_2_mutant(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=100, max_to_keep=None)
+        save_interval_steps=100, max_to_keep=None
+    )
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
@@ -425,16 +445,20 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
     del checkpoint_manager
     max_to_keep = 5
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=1000, max_to_keep=max_to_keep)
+        save_interval_steps=1000, max_to_keep=max_to_keep
+    )
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
 
     step = 10000
     steps.append(step)
@@ -444,19 +468,23 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(
-            saved_steps_2, checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(self.directory))
+            saved_steps_2, checkpoint_type=checkpoint_type
+        ),
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps_2, checkpoint_manager.all_steps())
 
   def test_save_on_preemption(self):
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=1000, max_to_keep=None)
+        save_interval_steps=1000, max_to_keep=None
+    )
     checkpoint_manager = self.create_checkpoint_manager(options)
 
     save_step = 3
     jax.config.update('jax_coordination_service', True)
     multihost_utils.reached_preemption_sync_point = (
-        lambda step_id: step_id == save_step)
+        lambda step_id: step_id == save_step
+    )
 
     for step in range(save_step + 1):
       self.save(checkpoint_manager, step, self.train_state)
@@ -465,7 +493,8 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames(saved_steps),
-        _actual_checkpoint_filenames(self.directory))
+        _actual_checkpoint_filenames(self.directory),
+    )
     self.assertSameElements(saved_steps, checkpoint_manager.all_steps())
 
   def test_cleanup(self):
@@ -503,19 +532,23 @@ class CheckpointManagerTest(parameterized.TestCase):
   @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
   def test_todelete_subdir(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(
-        max_to_keep=2, todelete_subdir='archive')
+        max_to_keep=2, todelete_subdir='archive'
+    )
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
 
     for step in range(4):
       self.save(checkpoint_manager, step, self.train_state)
 
     self.assertSameElements(
         _expected_checkpoint_filenames([0, 1], checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(os.path.join(self.directory, 'archive')))
+        _actual_checkpoint_filenames(os.path.join(self.directory, 'archive')),
+    )
     self.assertSameElements(
         _expected_checkpoint_filenames([2, 3], checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(os.path.join(self.directory)))
+        _actual_checkpoint_filenames(os.path.join(self.directory)),
+    )
     self.assertIn('archive', tf.io.gfile.listdir(self.directory))
     self.assertSameElements([2, 3], checkpoint_manager.all_steps())
 
@@ -523,14 +556,16 @@ class CheckpointManagerTest(parameterized.TestCase):
   def test_reinitialize(self, checkpoint_type):
     options = checkpoint_managers.CheckpointManagerOptions(max_to_keep=2)
     checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
 
     for step in range(3):
       self.save(checkpoint_manager, step, self.train_state)
     self.assertSameElements([1, 2], checkpoint_manager.all_steps())
 
     new_checkpoint_manager = self.create_checkpoint_manager(
-        options, checkpoint_type=checkpoint_type)
+        options, checkpoint_type=checkpoint_type
+    )
     self.assertSameElements([1, 2], new_checkpoint_manager.all_steps())
     self.save(new_checkpoint_manager, 3, self.train_state)
     self.assertSameElements([2, 3], new_checkpoint_manager.all_steps())
