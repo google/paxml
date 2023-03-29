@@ -297,7 +297,7 @@ class OrbaxCheckpointManager:
       train_state: Any,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       restore_kwargs: Optional[Any] = None,
-  ) -> Union[Any, Mapping[str, Any]]:
+  ) -> Any:
     """See superclass documentation."""
     # Propagate version to CheckpointHandler.
     restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
