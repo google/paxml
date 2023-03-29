@@ -46,6 +46,7 @@ SummaryValueTypes = Union[
     clu_values.Text,
     clu_values.Summary,
     clu_values.Histogram,
+    clu_values.Audio,
 ]
 
 
@@ -56,6 +57,7 @@ _VALUES_TO_SUMMARY_TYPE = {
     # Videos (GIFs) are written to tensorboard as clu.values.summary.
     clu_values.Summary: summary_utils.SummaryType.VIDEO,
     clu_values.Histogram: summary_utils.SummaryType.HISTOGRAM,
+    clu_values.Audio: summary_utils.SummaryType.AUDIO,
 }
 
 
@@ -107,6 +109,7 @@ def compute_metric_values(metrics: Metrics) -> Dict[str, SummaryValueTypes]:
             clu_values.Image,
             clu_values.Text,
             clu_values.Histogram,
+            clu_values.Audio,
         ),
     ):
       metric_values[f'{metric_name}'] = metric_value
@@ -145,6 +148,14 @@ def write_clu_metric_summaries(
           metric_value.value,
           summary_type,
           metric_value.metadata,
+      )
+    elif isinstance(metric_value, clu_values.Audio):
+      summary_utils.write_summary_tensor(
+          step_i,
+          metric_name,
+          metric_value.value,
+          summary_type,
+          sample_rate=metric_value.sample_rate,
       )
     else:
       summary_utils.write_summary_tensor(

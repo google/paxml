@@ -59,6 +59,13 @@ def _mock_image(batch_size=None) -> clu_values.Image:
   return clu_values.Image(np.ones(base_shape))
 
 
+def _mock_audio(batch_size=None) -> clu_values.Audio:
+  base_shape = [12, 1]  # [time, channel]
+  if batch_size:
+    base_shape = [batch_size] + base_shape
+  return clu_values.Audio(np.ones(base_shape), sample_rate=44_100)
+
+
 def _mock_video(batch_size=None) -> clu_values.Summary:
   class Metadata(object):
     message: str = 'dummy metadata'
@@ -109,6 +116,8 @@ class MetricUtilsTest(absltest.TestCase):
             _mock_image(batch_size=2),
             _mock_video(batch_size=None),
             _mock_video(batch_size=2),
+            _mock_audio(batch_size=None),
+            _mock_audio(batch_size=2),
         ]
     metrics = {'test': ScalarListMetric()}
 
@@ -120,6 +129,10 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertLen(metric_values['test/test_4'], 1)
     self.assertEqual(metric_values['test/test_4'][0].value.shape, (3,))
     self.assertLen(metric_values['test/test_5'], 2)
+    self.assertEqual(metric_values['test/test_6'].value.shape, (12, 1))
+    self.assertEqual(metric_values['test/test_6'].sample_rate, 44_100)
+    self.assertEqual(metric_values['test/test_7'].value.shape, (2, 12, 1))
+    self.assertEqual(metric_values['test/test_7'].sample_rate, 44_100)
 
   def test_tuple_compute_metric_values(self):
     @flax.struct.dataclass
@@ -146,6 +159,8 @@ class MetricUtilsTest(absltest.TestCase):
             'image_1': _mock_image(5),
             'video_0': _mock_video(None),
             'video_1': _mock_video(2),
+            'audio_0': _mock_audio(None),
+            'audio_1': _mock_audio(2),
         }
 
     metrics = {'test': ScalarDictMetric()}
@@ -159,6 +174,10 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test/video_0_0'].value.shape, (3,))
     self.assertEqual(metric_values['test/video_1_0'].value.shape, (3,))
     self.assertEqual(metric_values['test/video_1_1'].value.shape, (3,))
+    self.assertEqual(metric_values['test/audio_0'].value.shape, (12, 1))
+    self.assertEqual(metric_values['test/audio_0'].sample_rate, 44_100)
+    self.assertEqual(metric_values['test/audio_1'].value.shape, (2, 12, 1))
+    self.assertEqual(metric_values['test/audio_1'].sample_rate, 44_100)
 
   def test_mixed_dict_compute_metric_values(self):
     @flax.struct.dataclass
@@ -207,6 +226,8 @@ class MetricUtilsTest(absltest.TestCase):
             'image_0': _mock_image(5),
             'video_0': _mock_video(None),
             'video_1': _mock_video(2),
+            'audio_0': _mock_audio(None),
+            'audio_1': _mock_audio(2),
             'histogram_0': clu_values.Histogram(
                 np.array([1, 2, 3]), num_buckets=2
             ),

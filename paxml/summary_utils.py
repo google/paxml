@@ -302,6 +302,7 @@ def write_summary_tensor(
     tensor: Union[float, JTensor, str, Sequence[JTensor]],
     summary_type: SummaryType,
     metadata: Optional[Any] = None,
+    sample_rate: int = AUDIO_SUMMARY_SAMPLE_RATE,
 ) -> bool:
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
@@ -343,8 +344,7 @@ def write_summary_tensor(
       tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))
       # TODO(nanxinchen): Make the sampling rate configurable
       for i in range(min(tensor.shape[0], remaining_max_audios)):
-        tf_summary.audio(f'{key}/{i}', tensor[i:i + 1],
-                         AUDIO_SUMMARY_SAMPLE_RATE, step_i)
+        tf_summary.audio(f'{key}/{i}', tensor[i : i + 1], sample_rate, step_i)
       remaining_max_audios -= tensor.shape[0]
   elif base_summary_type == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
