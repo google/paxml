@@ -58,7 +58,7 @@ NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 FlaxCheckpointer = checkpoints.FlaxCheckpointer
 FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
-AsyncPersistenceCheckpointer = checkpoints.AsyncCheckpointer  # mapped to internal
+# alias to internal checkpointer
 BaseInputCheckpointHandler = checkpoints.BaseInputCheckpointHandler
 PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
@@ -506,9 +506,7 @@ def _create_checkpointer(
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
   elif enable_async_checkpointing:
     if maybe_use_persistence_checkpointing:
-      checkpointer = AsyncPersistenceCheckpointer(
-          timeout_secs=600,
-          enforce_restore_shape_check=enforce_restore_shape_check)
+      raise NotImplementedError('Persistence checkpointer not supported.')
     else:
       checkpointer = checkpoints.AsyncCheckpointer(
           checkpoints.PaxCheckpointHandler(
