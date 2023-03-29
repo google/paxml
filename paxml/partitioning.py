@@ -26,6 +26,7 @@ from clu import platform
 from etils import epath
 from flax.core import frozen_dict
 import jax
+from jax import core
 from jax import numpy as jnp
 from jax.experimental import pjit
 from paxml import tasks_lib
@@ -103,7 +104,7 @@ def compile_for_auto_sharding(step_fn: Any,
     # canonicalize_dtype is necessary to avoid errors like
     # data types are different when compiling and when being called.
     dtype = jax.dtypes.canonicalize_dtype(x.dtype)
-    return jax.ShapedArray(x.shape, dtype)
+    return core.ShapedArray(x.shape, dtype)
 
   inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
   compiled = step_fn.lower(train_state, step_key, inputs_shape_dtype).compile()
