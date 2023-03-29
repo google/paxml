@@ -528,9 +528,10 @@ def _create_checkpointer(
 
   train_input_checkpointer = None
   if train_p.enable_input_checkpointing:
-    # TODO(gaoi): add more accurate check for deterministic SeqIO input
-    # by instantiating train_input_p (pending cl/515397058)
-    if hasattr(train_input_p, 'deterministic_input_start_index'):
+    if (
+        hasattr(train_input_p, 'deterministic_input')
+        and train_input_p.deterministic_input
+    ):
       raise ValueError(
           'Checkpointing deterministic Seqio inputs is not supported via Orbax'
           ' (will be checkpointed independently). Please set'
@@ -1084,9 +1085,10 @@ def _create_program_and_states(
       )
   )
   logging.info('Model initial global_step=%d', initial_global_step)
-  train_input_pipeline = _maybe_update_latest_model_step(
-      train_input_pipeline, train_input_p, initial_global_step
-  )
+  if not task_p.train.enable_input_checkpointing:
+    train_input_pipeline = _maybe_update_latest_model_step(
+        train_input_pipeline, train_input_p, initial_global_step
+    )
   if experiment_train_program:
     logging.info('Using customized train program.')
     train_program = experiment_train_program

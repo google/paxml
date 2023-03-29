@@ -693,6 +693,7 @@ class SeqIOInput(base_input.BaseInput):
     self._ckpt.write(checkpoint_path)
 
   def restore(self, checkpoint_path: epath.PathLike):
+    self._peek = None
     self._ckpt = tf.train.Checkpoint(it=self._iter)
     self._ckpt.read(checkpoint_path).assert_consumed()
 
