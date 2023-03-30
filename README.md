@@ -166,22 +166,8 @@ we exhaust all of its data (by raising `StopIteration` or
 
 |                          | `N`: static                  | `N`: dynamic       |
 | ------------------------ | ---------------------------- | ------------------ |
-| `p.reset_for_eval=True`  | Each eval run uses the first | One epoch per eval |
-:                          : `N` batches consistently.    : run. `input` must  :
-:                          : `p.eval_loop_num_batches=N`. : be finite and      :
-:                          : Not supported yet.           : raise after its    :
-:                          :                              : data is exhausted. :
-:                          :                              : All shards must    :
-:                          :                              : raise after the    :
-:                          :                              : same number of     :
-:                          :                              : batches.           :
-| `p.reset_for_eval=False` | Each eval run uses           | Not supported.     |
-:                          : non-overlapping `N` batches  :                    :
-:                          : on a rolling basis.          :                    :
-:                          : `p.eval_loop_num_batches=N`. :                    :
-:                          : `input` must repeat          :                    :
-:                          : indefinitely and never       :                    :
-:                          : raise.                       :                    :
+| `p.reset_for_eval=True`  | Each eval run uses the first `N` batches consistently. `p.eval_loop_num_batches=N`. Not supported yet. | One epoch per eval run. `input` must be finite and raise after its data is exhausted. All shards must raise after the same number of batches. |
+| `p.reset_for_eval=False` | Each eval run uses non-overlapping `N` batches on a rolling basis. `p.eval_loop_num_batches=N`. `input` must repeat indefinitely and never raise. | Not supported.     |
 
 For the "eval on exactly one epoch" use case with `p.reset_for_eval=True,
 p.eval_loop_num_batches=None`, input must handle sharding correctly such that
@@ -270,7 +256,7 @@ class MyInput(base_input.LingvoInputAdaptor):
     return batch
 ```
 
-#Key Pax components:
+# Key Pax components
 
 ## Hyperparameters
 
