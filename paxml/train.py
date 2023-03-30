@@ -88,7 +88,8 @@ def _make_checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
 
 
 def _parse_duration(
-    duration_str: Optional[str]) -> Optional[datetime.timedelta]:
+    duration_str: Optional[str],
+) -> Optional[datetime.timedelta]:
   """Parses a duration string and returns the datetime.timedelta instance.
 
   Args:
@@ -107,8 +108,11 @@ def _parse_duration(
     return None
   pattern = re.compile(r'(\d+)(\w)*')
   match = pattern.match(duration_str)
-  if (not match or len(match.groups()) != 2 or
-      match.group(2) not in {None, 's', 'm', 'h', 'd'}):
+  if (
+      not match
+      or len(match.groups()) != 2
+      or match.group(2) not in {None, 's', 'm', 'h', 'd'}
+  ):
     raise ValueError(f'Unable to parse string duration `{duration_str}`.')
   int_value = int(match.group(1))
   if match.group(2) is None or match.group(2) == 's':
@@ -214,8 +218,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           train_input_pipeline,
           force=force,
       )
-    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
-                                          save_period.elapsed)
+    monitoring.record_event_duration_secs(
+        _WRITE_CHECKPOINT_EVENT, save_period.elapsed
+    )
 
   def _restore_with_args(
       self,
@@ -231,7 +236,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     elif self._checkpoint_type == CheckpointType.PERSISTENCE:
       restore_args = {
           'state_specs': train_state_pspecs,
-          'global_mesh': global_mesh
+          'global_mesh': global_mesh,
       }
     return self.checkpoint_manager.restore(
         step_i,
@@ -296,8 +301,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
             metadata.partition_specs,
             train_input_pipeline,
         )
-      monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
-                                            restore_period.elapsed)
+      monitoring.record_event_duration_secs(
+          _READ_CHECKPOINT_EVENT, restore_period.elapsed
+      )
 
     root_prng_key, partitioned_train_state = (
         partitioner.initialize_prng_key_and_train_state(
@@ -397,8 +403,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         train_state = self._restore_with_args(
             step, train_state_global_shapes, train_input_pipeline
         )
-    monitoring.record_event_duration_secs(_READ_CHECKPOINT_EVENT,
-                                          restore_period.elapsed)
+    monitoring.record_event_duration_secs(
+        _READ_CHECKPOINT_EVENT, restore_period.elapsed
+    )
 
     # TODO(laigd): move the logic below outside of get_model_states.
     root_prng_key, replicated_train_state = (
@@ -439,8 +446,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
     with py_utils.timeit() as save_period:
       if py_utils.pmap_use_tensorstore():
-        logging.info('Saving a ckpt at %sstep: %d',
-                     'final ' if is_final else '', step_i)
+        logging.info(
+            'Saving a ckpt at %sstep: %d', 'final ' if is_final else '', step_i
+        )
         fully_replicated_gda_train_state = jax.tree_map(
             py_utils.convert_host_local_array_to_global_array,
             partitioned_train_state,
@@ -452,16 +460,18 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
             force=is_final,
         )
       else:
-        unreplicated_train_state = jax.tree_map(lambda x: x[0],
-                                                partitioned_train_state)
+        unreplicated_train_state = jax.tree_map(
+            lambda x: x[0], partitioned_train_state
+        )
         self._save_with_args(
             step_i,
             train_state=unreplicated_train_state,
             train_input_pipeline=train_input_pipeline,
             force=is_final,
         )
-    monitoring.record_event_duration_secs(_WRITE_CHECKPOINT_EVENT,
-                                          save_period.elapsed)
+    monitoring.record_event_duration_secs(
+        _WRITE_CHECKPOINT_EVENT, save_period.elapsed
+    )
 
   def save_if_needed(
       self,
@@ -572,7 +582,8 @@ def _create_checkpointer(
     checkpointer = _OrbaxPjitTrainingCheckpointer(
         checkpoint_manager,
         checkpoint_type,
-        enable_checkpoint_saving=enable_checkpoint_saving)
+        enable_checkpoint_saving=enable_checkpoint_saving,
+    )
   else:
     checkpointer = _OrbaxPmapTrainingCheckpointer(
         job_log_dir,
@@ -585,7 +596,8 @@ def _create_checkpointer(
 
 
 def _train_log_interval_steps(
-    train_p: tasks_lib.SingleTask.TrainHParams) -> int:
+    train_p: tasks_lib.SingleTask.TrainHParams,
+) -> int:
   """Returns the interval to log train outputs."""
   if train_p.log_train_output_interval_steps is not None:
     return train_p.log_train_output_interval_steps
@@ -593,9 +605,11 @@ def _train_log_interval_steps(
     return train_p.summary_interval_steps
 
 
-def write_hparams_file(model_config: base_experiment.BaseExperiment,
-                       job_log_dir: epath.Path,
-                       filename_prefix: str = '') -> None:
+def write_hparams_file(
+    model_config: base_experiment.BaseExperiment,
+    job_log_dir: epath.Path,
+    filename_prefix: str = '',
+) -> None:
   """Writes a params file into the root `job_log_dir`."""
   if jax.process_index() == 0:
     job_log_dir.mkdir(parents=True, exist_ok=True)
@@ -638,7 +652,8 @@ def train_and_evaluate(
     enable_auto_sharding: bool = False,
     enable_async_checkpointing: bool = False,
     enable_checkpoint_saving: bool = True,
-    enforce_restore_shape_check: bool = False,) -> None:
+    enforce_restore_shape_check: bool = False,
+) -> None:
   """The shared path to run the training and evaluation loop.
 
   Args:
@@ -660,9 +675,8 @@ def train_and_evaluate(
       If and only if this is True, every `task_p.train.decode_interval_steps` of
       training, model runs decode.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
-    enable_async_checkpointing: Allows
-      training to continue when checkpointing is going on as checkpointing
-      happens in a different thread.
+    enable_async_checkpointing: Allows training to continue when checkpointing
+      is going on as checkpointing happens in a different thread.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
@@ -682,15 +696,17 @@ def train_and_evaluate(
     if not isinstance(
         inp, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
     ):
-      raise ValueError('Expecting BaseInput.HParams from datasets(), got: '
-                       f'{inp.ToText()}')
+      raise ValueError(
+          f'Expecting BaseInput.HParams from datasets(), got: {inp.ToText()}'
+      )
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
   train_input_p = [v for v in input_p if v.is_training]
   if len(train_input_p) != 1:
     raise ValueError(
-        f'Expecting exactly one training split. Got `{len(train_input_p)}`.')
+        f'Expecting exactly one training split. Got `{len(train_input_p)}`.'
+    )
   train_input_p = train_input_p[0]
 
   logging.info('train_input_p:')
@@ -701,12 +717,18 @@ def train_and_evaluate(
     logging.info('  %s', line)
 
   eval_input_p = []
-  if (eval_on_test and task_p.train.eval_interval_steps is not None and
-      task_p.train.eval_interval_steps > 0):
+  if (
+      eval_on_test
+      and task_p.train.eval_interval_steps is not None
+      and task_p.train.eval_interval_steps > 0
+  ):
     eval_input_p = [v for v in input_p if not v.is_training]
 
-  if (run_decode and task_p.train.decode_interval_steps is not None and
-      task_p.train.decode_interval_steps > 0):
+  if (
+      run_decode
+      and task_p.train.decode_interval_steps is not None
+      and task_p.train.decode_interval_steps > 0
+  ):
     decode_input_p = experiment_config.decoder_datasets()
   else:
     decode_input_p = []
@@ -716,7 +738,8 @@ def train_and_evaluate(
     inp.infeed_host_index = jax.process_index()
 
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
-      maybe_use_persistence_checkpointing, task_p)
+      maybe_use_persistence_checkpointing, task_p
+  )
 
   job_log_dir = epath.Path(job_log_dir)
   checkpointer = _create_checkpointer(
@@ -732,7 +755,8 @@ def train_and_evaluate(
   )
   if not enable_checkpoint_saving:
     logging.info(
-        'Checkpointing is disabled and no checkpoint will be saved to disk.')
+        'Checkpointing is disabled and no checkpoint will be saved to disk.'
+    )
 
   if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(
@@ -769,7 +793,9 @@ def _maybe_update_latest_model_step(
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     return train_input
   dp = train_input_p.deterministic_input_start_index
-  dp._latest_model_step = initial_global_step  # pylint: disable=protected-access
+  dp._latest_model_step = (
+      initial_global_step  # pylint: disable=protected-access
+  )
   logging.info('Reinstanting input because _latest_model_step is updated.')
   return instantiate(train_input_p)
 
@@ -818,14 +844,16 @@ class _SummaryContextManager(contextlib.ExitStack):
     self.eval_skip_train = eval_skip_train
 
   def __enter__(
-      self
+      self,
   ) -> Tuple[SummaryWriter, SummaryWriter, SummaryWriter, SummaryWriter]:
     self.train_summary_writer = self.enter_context(
-        self.summary_writer(self.summary_train_dir))
+        self.summary_writer(self.summary_train_dir)
+    )
     self.eval_summary_writer = None
     if not self.eval_skip_train:
       self.eval_summary_writer = self.enter_context(
-          self.summary_writer(self.summary_eval_dir))
+          self.summary_writer(self.summary_eval_dir)
+      )
     self.eval_test_summary_writers = [
         self.enter_context(self.summary_writer(d))
         for d in self.summary_eval_test_dirs
@@ -834,8 +862,12 @@ class _SummaryContextManager(contextlib.ExitStack):
         self.enter_context(self.summary_writer(d))
         for d in self.summary_decode_dirs
     ]
-    return (self.train_summary_writer, self.eval_summary_writer,
-            self.eval_test_summary_writers, self.decode_summary_writers)
+    return (
+        self.train_summary_writer,
+        self.eval_summary_writer,
+        self.eval_test_summary_writers,
+        self.decode_summary_writers,
+    )
 
 
 def train_and_evaluate_pmap(
@@ -1179,9 +1211,7 @@ def _train_and_evaluate_common(
   train_p = task_p.train
   train_state_metadata = partitioner.get_train_state_metadata()
   train_input = (
-      train_program.train_input
-      if train_p.enable_input_checkpointing
-      else None
+      train_program.train_input if train_p.enable_input_checkpointing else None
   )
 
   if decode_input_p:
@@ -1224,16 +1254,20 @@ def _train_and_evaluate_common(
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
         log_interval_steps=_train_log_interval_steps(train_p),
         is_async=bool(train_p.device_sync_interval_steps),
-        name='training')
+        name='training',
+    )
     eval_summary_handler = summary_utils.SummaryHandler(
         eval_summary_writer,
         train_p.summary_interval_steps,
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
-        name='eval')
+        name='eval',
+    )
 
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
-            partitioned_train_state.step))
+            partitioned_train_state.step
+        )
+    )
     train_program.setup(
         train_prng_seed,
         eval_prng_seed,
@@ -1260,8 +1294,13 @@ def _train_and_evaluate_common(
 
       if not train_program.should_run(partitioned_train_state, step_i):
         logging.info(
-            'Training loop completed (step (`%d`) greater than '
-            'num_train_step (`%d`).', step_i, train_p.num_train_steps)
+            (
+                'Training loop completed (step (`%d`) greater than '
+                'num_train_step (`%d`).'
+            ),
+            step_i,
+            train_p.num_train_steps,
+        )
         break
 
       program_output = train_program.run(partitioned_train_state, step_i)
@@ -1276,8 +1315,10 @@ def _train_and_evaluate_common(
 
       eval_metrics: Optional[tuning_lib.EvalMetrics] = None
       # Run eval at regular step interval.
-      if (train_p.eval_interval_steps and
-          step_i % train_p.eval_interval_steps == 0):
+      if (
+          train_p.eval_interval_steps
+          and step_i % train_p.eval_interval_steps == 0
+      ):
         logging.debug('  Starting eval_step().')
         eval_partitioned_train_state = programs.get_eval_train_state(
             task, partitioned_train_state
@@ -1308,11 +1349,15 @@ def _train_and_evaluate_common(
           )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
-              eval_period.elapsed)
+              eval_period.elapsed,
+          )
 
       decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
-      if (decode_input_p and train_p.decode_interval_steps and
-          step_i % train_p.decode_interval_steps == 0):
+      if (
+          decode_input_p
+          and train_p.decode_interval_steps
+          and step_i % train_p.decode_interval_steps == 0
+      ):
         if train_p.decode_use_ema_states:
           if not tasks_lib.has_ema(task_p):
             raise ValueError(
@@ -1325,8 +1370,9 @@ def _train_and_evaluate_common(
           logging.debug('  Performing decode_once_fn() with ema states.')
         else:
           decode_partitioned_train_state = partitioned_train_state
-        decode_metrics = decode_once_fn(decode_partitioned_train_state,
-                                        decode_summary_writers)
+        decode_metrics = decode_once_fn(
+            decode_partitioned_train_state, decode_summary_writers
+        )
 
       logging.debug('step=`%d`: End', step_i - 1)
 
@@ -1368,7 +1414,7 @@ def _train_and_evaluate_common(
         step_i,
         partitioned_train_state=partitioned_train_state,
         train_state_pspecs=train_state_metadata.partition_specs,
-        train_input_pipeline=train_input
+        train_input_pipeline=train_input,
     )
 
     checkpointer.wait_until_finished()
