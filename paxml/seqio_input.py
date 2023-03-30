@@ -697,6 +697,13 @@ class SeqIOInput(base_input.BaseInput):
     self._ckpt = tf.train.Checkpoint(it=self._iter)
     self._ckpt.read(checkpoint_path).assert_consumed()
 
+  def get_state(self) -> bytes:
+    return self._iter._save().numpy()  # pylint: disable=protected-access
+
+  def set_state(self, state: bytes) -> None:
+    self._peek = None
+    self._iter._restore(state)  # pylint: disable=protected-access
+
   def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     return next(self._iter)
 

@@ -312,11 +312,11 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       inp.get_next()
 
   # TODO(b/272314337): enable after the next TF OSS release.
-  def disable_test_checkpointing(self):
+  def disable_test_file_based_checkpointing(self):
     ckpt_dir = self.create_tempdir(name='checkpointing_test').full_path
     ckpt_path = ckpt_dir + '/checkpoint'
 
-    name = 'checkpointing'
+    name = 'checkpointing_files'
     x = [{
         'targets': [7, 8, 5, 6, 9],
     }, {
@@ -348,6 +348,45 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         batch.ids,
         np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
     inp.restore(ckpt_path)
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.ids,
+        np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
+
+  # TODO(b/272314337): enable after the next TF OSS release.
+  def disable_test_byte_array_based_checkpointing(self):
+    name = 'checkpointing_bytes'
+    x = [{
+        'targets': [7, 8, 5, 6, 9],
+    }, {
+        'targets': [18, 14]
+    }, {
+        'targets': [21, 22, 23]
+    }]
+    ds = seqio.test_utils.create_default_dataset(x, ['targets'])
+    _register_task(name, ds, output_feature_names=['targets'])
+
+    p = seqio_input.SeqIOInput.HParams()
+    p.mixture_name = name
+    p.split_name = 'train'
+    p.task_feature_lengths = {'targets': 6}
+    p.feature_converter = seqio_input.LanguageModelFeatures(pack=False)
+    p.batch_size = 1
+    inp = instantiate(p)
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.ids,
+        np.array([[0, 7, 8, 5, 6, 9]], dtype=np.int32))
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.ids,
+        np.array([[0, 18, 14, 1, 0, 0]], dtype=np.int32))
+    state = inp.get_state()
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.ids,
+        np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
+    inp.set_state(state)
     batch = inp.get_next()
     self.assertArraysEqual(
         batch.ids,
