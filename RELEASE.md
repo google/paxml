@@ -1,3 +1,13 @@
+# Version: 0.4.0
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 0.4.0
+*   Build Date: 20230329
+*   Paxml commit: 033eb2421a6fc3e24f76bb19dd260c6776c5933b
+*   Praxis version: 0.4.0
+*   Praxis commit: 621c2ca7bfcd0e21ea118a3d8e40e29b48313c0c
 # Version: 0.3.0
 ## Major Features and Improvements
 * Partitioning API refactoring
