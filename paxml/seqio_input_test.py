@@ -312,7 +312,12 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       inp.get_next()
 
   # TODO(b/272314337): enable after the next TF OSS release.
-  def disable_test_file_based_checkpointing(self):
+  def test_file_based_checkpointing(self):
+    it = tf.data.Dataset.range(1).as_numpy_iterator()
+    if not isinstance(it, tf.__internal__.tracking.Trackable):
+      # TODO(b/272314337): enable after the next TF OSS release.
+      self.skipTest('file-based iterator checkpointing is not supported')
+
     ckpt_dir = self.create_tempdir(name='checkpointing_test').full_path
     ckpt_path = ckpt_dir + '/checkpoint'
 
@@ -353,8 +358,11 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         batch.ids,
         np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
 
-  # TODO(b/272314337): enable after the next TF OSS release.
-  def disable_test_byte_array_based_checkpointing(self):
+  def test_byte_array_based_checkpointing(self):
+    it = tf.data.Dataset.range(1).as_numpy_iterator()
+    if not hasattr(it, '_save'):
+      # TODO(b/272314337): enable after the next TF OSS release.
+      self.skipTest('byte-based iterator checkpointing is not supported')
     name = 'checkpointing_bytes'
     x = [{
         'targets': [7, 8, 5, 6, 9],
@@ -751,7 +759,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     m = inp.compute_metrics_eval(eval_output)
     self.assertLen(m, 1)
     self.assertEqual(m[0]['total_score'], 3.5)
-
 
   def _setup_seqio_test_registry(self,
                                  num_examples=10,
