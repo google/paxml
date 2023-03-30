@@ -116,7 +116,7 @@ executing==1.2.0
     # via stack-data
 fastjsonschema==2.16.3
     # via nbformat
-fiddle @ git+https://github.com/google/fiddle
+fiddle==0.2.6
     # via -r praxis-requirements.in
 filelock==3.10.7
     # via
@@ -206,7 +206,7 @@ ipywidgets==8.0.6
     # via jupyter
 isoduration==20.11.0
     # via jsonschema
-jax @ git+https://github.com/google/jax
+jax==0.4.7 
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -622,7 +622,7 @@ sentencepiece==0.1.97
     #   lingvo
     #   seqio
     #   t5
-seqio @ git+https://github.com/google/seqio
+seqio==0.0.15
     # via
     #   -r paxml-requirements.in
     #   t5
