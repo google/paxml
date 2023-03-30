@@ -373,7 +373,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
           'mesh': global_mesh,
       }
     restored_state = self.checkpoint_manager.restore(
-        step_i, train_state_global_shapes, restore_kwargs=restore_args
+        step_i,
+        train_state_global_shapes,
+        train_input_pipeline=train_input_pipeline,
+        restore_kwargs=restore_args,
     )
     if not py_utils.pmap_use_tensorstore():
       return restored_state
