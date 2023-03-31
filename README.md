@@ -18,10 +18,20 @@ export ACCELERATOR=v4-8
 export TPU_NAME=paxml
 
 #create a TPU VM
-gcloud compute tpus tpu-vm create $TPU_NAME --zone=$ZONE --version=$VERSION --project=$PROJECT --accelerator-type=$ACCELERATOR
+gcloud compute tpus tpu-vm create $TPU_NAME \
+--zone=$ZONE --version=$VERSION \
+--project=$PROJECT \
+--accelerator-type=$ACCELERATOR
 ```
 
-The corresponding VM instance can then be accessed via ssh.
+If you are using TPU Pod slices, please refer to [this guide](https://cloud.google.com/tpu/docs/jax-pods). Run all the commands from a local machine using [gcloud](https://cloud.google.com/sdk/docs/install) with the `--worker=all` option:
+
+```bash
+gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE \
+--worker=all --command="<commmands>"
+``` 
+
+The following quickstart sections assume you run on a single-host TPU, so you can ssh to the VM and run the commands there.
 
 ```bash
 gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE
@@ -29,17 +39,27 @@ gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE
 
 ### Installing Pax
 
-After ssh-ing the VM, paxml can be installed using
-[pip](https://pypi.org/project/pip/).
+After ssh-ing the VM, you can install the paxml stable release from PyPI, or the dev version from github.
+
+For installing the stable release using
+[pip](https://pypi.org/project/pip/):
 
 ```bash
 $ python3 -m pip install -U pip
-# Temporary requirement to fix the version mismatch caused by the new orbax 0.1.2 release
-$ python3 -m pip install orbax==0.1.1
 $ python3 -m pip install paxml jax[tpu] \
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
-For the exact version of dependencies used to build/test each release, go to the corresponding release branch rX.Y.Z and check out `paxml/pip_package/requirements.txt`
+
+For installing the dev version from github:
+
+```bash
+# install the dev version of praxis first 
+$ pip install git+https://github.com/google/praxis
+$ pip install git+https://github.com/google/paxml
+$ pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+```
+
+If you encounter issues with transitive dependencies, please refer to `paxml/pip_package/requirements.txt` of the corresponding release branch rX.Y.Z for the exact version of dependencies used to build/test each release.
 
 ### Run a test model
 ```bash
