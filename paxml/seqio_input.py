@@ -689,15 +689,16 @@ class SeqIOInput(base_input.BaseInput):
     self.is_targets_init = True
 
   def save(self, checkpoint_path: epath.PathLike):
-    self._ckpt = tf.train.Checkpoint(it=self._iter)
-    self._ckpt.write(checkpoint_path)
+    tf.io.write_file(str(checkpoint_path), self.get_state())
 
   def restore(self, checkpoint_path: epath.PathLike):
-    self._peek = None
-    self._ckpt = tf.train.Checkpoint(it=self._iter)
-    self._ckpt.read(checkpoint_path).assert_consumed()
+    self._reset_peek()
+    state = tf.io.read_file(str(checkpoint_path)).numpy()
+    self.set_state(state)
 
   def get_state(self) -> bytes:
+    if self._state_before_peek:
+      return self._state_before_peek
     return self._iter._save().numpy()  # pylint: disable=protected-access
 
   def set_state(self, state: bytes) -> None:
