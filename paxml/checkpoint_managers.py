@@ -49,7 +49,7 @@ def _get_checkpoint_version(
   checkpoint_step_dir = checkpoints.make_checkpoint_step_dir(
       directory, step, checkpoint_type=checkpoint_type
   )
-  version = 0.
+  version = 0.0
   # Necessary because some checkpoints do not conform to Orbax directory
   # structure. Could rely exclusively on actual version if all checkpoints
   # conformed.
@@ -90,6 +90,7 @@ class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
       deleted from the file system. Useful if checkpoint deletion is time
       consuming. By default, delete the checkpoint assets.
   """
+
   todelete_subdir: Optional[str] = None
 
 
@@ -127,14 +128,18 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       steps = self.all_steps(read=True)
       if steps:
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(steps)) as pool:
+            max_workers=len(steps)
+        ) as pool:
           versions = list(
               pool.map(
                   functools.partial(
                       _get_checkpoint_version,
                       self._checkpoint_type,
-                      self._directory),
-                  steps))
+                      self._directory,
+                  ),
+                  steps,
+              )
+          )
         if not all(v == versions[0] for v in versions):
           raise ValueError('Expected all checkpoints to have the same version.')
         self._version = versions[0]
@@ -158,7 +163,8 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     if preemption.reached_preemption_sync_point(step):
       return True
     last_checkpoint_step = (
-        self._last_checkpoint.step if self._last_checkpoint else None)
+        self._last_checkpoint.step if self._last_checkpoint else None
+    )
     # Ensure current step is between the last step and next step (accounting for
     # save interval). The `last_checkpoint_step` may not be initialized, in
     # which case we should save. Otherwise, step must fall on the specified
@@ -166,8 +172,9 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     # on preemption, in which case we want to maintain the same save period as
     # if preemption had not happened.
     return last_checkpoint_step is None or (
-        last_checkpoint_step < step and
-        step % self._options.save_interval_steps == 0)
+        last_checkpoint_step < step
+        and step % self._options.save_interval_steps == 0
+    )
 
   def _get_save_directory(
       self,

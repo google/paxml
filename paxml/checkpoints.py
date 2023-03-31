@@ -42,7 +42,8 @@ METADATA_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METADATA_ITEM_NAME
 TMP_PREFIX = 'tmp_'
 CHECKPOINT_PATTERN_RE = re.compile(rf'{CHECKPOINT_PREFIX}[\d]+$')
 TMP_CHECKPOINT_PATTERN_RE = re.compile(
-    rf'{TMP_PREFIX}[\d]+.{CHECKPOINT_PREFIX}[\d]+$')
+    rf'{TMP_PREFIX}[\d]+.{CHECKPOINT_PREFIX}[\d]+$'
+)
 # Large value to disable flax-specific checkpoint management.
 _MAX_CHECKPOINT_FLAX = 1000000
 get_version_key = checkpoint_version.get_version_key
@@ -119,7 +120,7 @@ def get_version_and_save_dir(
 def get_version_and_restore_dir(
     checkpoint_step_dir: epath.Path,
 ) -> Tuple[float, epath.Path]:
-  version = 0.
+  version = 0.0
   if metadata_exists(checkpoint_step_dir):
     version = restore_metadata(checkpoint_step_dir)[get_version_key()]
   if version > 0:
@@ -154,8 +155,8 @@ def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   if _is_gda_version_subdir(checkpoint_dir):
     return int(checkpoint_dir.name)
   if is_tmp_checkpoint_asset(checkpoint_dir):
-    return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX):])
-  return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX):])
+    return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX) :])
+  return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX) :])
 
 
 def maybe_update_checkpoint_type(
@@ -180,8 +181,8 @@ def maybe_update_checkpoint_type(
 
 
 def retrieve_checkpoint_type(
-    maybe_use_persistence_checkpointing,
-    task_p: base_task.BaseTask.HParams) -> CheckpointType:
+    maybe_use_persistence_checkpointing, task_p: base_task.BaseTask.HParams
+) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
   using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
   if using_pjit or py_utils.pmap_use_tensorstore():
@@ -236,8 +237,7 @@ def save_checkpoint(
     if async_checkpointer is not None:
       async_checkpointer.save(checkpoint_save_dir, train_state, version=version)
     else:
-      checkpointer = orbax.checkpoint.Checkpointer(
-          PaxCheckpointHandler())
+      checkpointer = orbax.checkpoint.Checkpointer(PaxCheckpointHandler())
       checkpointer.save(checkpoint_save_dir, train_state, version=version)
   elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
@@ -271,12 +271,14 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
   if not checkpoint_assets:
     return None
   checkpoint_assets = sorted(
-      checkpoint_assets, key=get_step_from_checkpoint_asset)
+      checkpoint_assets, key=get_step_from_checkpoint_asset
+  )
   return checkpoint_dir / checkpoint_assets[-1]
 
 
 def retrieve_latest_checkpoint_step(
-    checkpoint_dir: epath.Path) -> Optional[int]:
+    checkpoint_dir: epath.Path,
+) -> Optional[int]:
   """Retrieves the latest checkpoint step if any.
 
   Note that this broadcasts the checkpoint step from host 0 to ensure that all
@@ -297,9 +299,11 @@ def retrieve_latest_checkpoint_step(
     else:
       checkpoint_step = get_step_from_checkpoint_asset(latest_checkpoint_path)
   np_checkpoint_step = multihost_utils.broadcast_one_to_all(
-      np.array(checkpoint_step))
-  multihost_utils.assert_equal(np_checkpoint_step,
-                               "checkpoint_steps across hosts don't match.")
+      np.array(checkpoint_step)
+  )
+  multihost_utils.assert_equal(
+      np_checkpoint_step, "checkpoint_steps across hosts don't match."
+  )
   step = int(np_checkpoint_step.item())
   if step == -1:
     return None
@@ -385,7 +389,8 @@ def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
 
 
 def _extract_nested_prefix_names(
-    state: train_states.TrainState) -> train_states.TrainState:
+    state: train_states.TrainState,
+) -> train_states.TrainState:
   """Extracts prefix names from a TrainState data structure."""
   # CNS doesn't support square bracket in filenames.
   key_separator = '.'
@@ -397,20 +402,24 @@ def _extract_nested_prefix_names(
           'step',
           key_separator=key_separator,
           left_separator=left_separator,
-          right_separator=right_separator),
+          right_separator=right_separator,
+      ),
       mdl_vars=py_utils.extract_prefixed_keys_from_nested_map(
           state.mdl_vars,
           'mdl_vars',
           key_separator=key_separator,
           left_separator=left_separator,
-          right_separator=right_separator),
+          right_separator=right_separator,
+      ),
       opt_states=py_utils.extract_prefixed_keys_from_nested_map(
           state.opt_states,
           'opt_states',
           key_separator=key_separator,
           left_separator=left_separator,
           right_separator=right_separator,
-          is_leaf=py_utils.is_optax_masked_node))
+          is_leaf=py_utils.is_optax_masked_node,
+      ),
+  )
 
 
 def _masked_node_to_none(mask: Any, value: Any) -> Any:
@@ -422,9 +431,12 @@ def _masked_node_to_none(mask: Any, value: Any) -> Any:
 
 def _tensorstore_prepare(
     train_state: train_states.TrainState,
-    state_specs: Optional[train_states.TrainState] = None
-) -> Tuple[Sequence[JTensorOrPartitionSpec], Sequence[str],
-           Optional[Sequence[JTensorOrPartitionSpec]]]:
+    state_specs: Optional[train_states.TrainState] = None,
+) -> Tuple[
+    Sequence[JTensorOrPartitionSpec],
+    Sequence[str],
+    Optional[Sequence[JTensorOrPartitionSpec]],
+]:
   """Prepares data prior to saving/restoring it from/to TensorStore.
 
   Args:
@@ -455,7 +467,8 @@ def _tensorstore_prepare(
         _masked_node_to_none,
         train_state,
         state_specs,
-        is_leaf=py_utils.is_optax_masked_node)
+        is_leaf=py_utils.is_optax_masked_node,
+    )
   # ... that are filtered out when calling jax.tree_util.tree_flatten() here.
   flattened_train_state, _ = jax.tree_util.tree_flatten(train_state_none)
   if state_specs is not None:
@@ -473,7 +486,7 @@ def _tensorstore_prepare(
 
 def _tensorstore_reconstruct(
     state_global_shapes: train_states.TrainState,
-    restored_train_state: Sequence[JTensorOrPartitionSpec]
+    restored_train_state: Sequence[JTensorOrPartitionSpec],
 ) -> train_states.TrainState:
   """Reconstructs a nested train state including MaskedNode.
 
@@ -490,7 +503,8 @@ def _tensorstore_reconstruct(
   c = 0
   restored_flattened_train_state = []
   flattened_state_global_shapes, treedef = jax.tree_util.tree_flatten(
-      state_global_shapes)
+      state_global_shapes
+  )
   for l in flattened_state_global_shapes:
     if py_utils.is_optax_masked_node(l):
       restored_flattened_train_state.append(optax.MaskedNode())
@@ -540,8 +554,13 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def _get_param_names(self, item: PyTree) -> PyTree:
     return self._param_names
 
-  async def _write_aggregate_file(self, directory: epath.Path, item: PyTree,
-                                  param_infos: PyTree, save_args: PyTree):
+  async def _write_aggregate_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      param_infos: PyTree,
+      save_args: PyTree,
+  ):
     """Skip writing msgpack file for Pax since this file would be unused."""
     pass
 
@@ -556,12 +575,14 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     if version is None:
       raise ValueError('Expected version for saving.')
     flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
-        item)
+        item
+    )
     # At that point, the flattened entries do not contain any reference to
     # MaskedNode's.
     self._set_param_names(flattened_nested_names)
     return await super().async_save(
-        directory, flattened_train_state, save_args=save_args)
+        directory, flattened_train_state, save_args=save_args
+    )
 
   def restore(
       self,
@@ -575,7 +596,8 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     if version is None:
       raise ValueError('Expected version for restoration.')
     flattened_train_state, flattened_nested_names, flattened_state_specs = (
-        _tensorstore_prepare(item, specs))
+        _tensorstore_prepare(item, specs)
+    )
     # At that point, the flattened entries do not contain any reference to
     # MaskedNode's.
     self._set_param_names(flattened_nested_names)
@@ -594,13 +616,15 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
           dtype=shape_struct.dtype,
       )
 
-    restore_args = jax.tree_map(create_restore_args, flattened_state_specs,
-                                flattened_train_state)
+    restore_args = jax.tree_map(
+        create_restore_args, flattened_state_specs, flattened_train_state
+    )
 
     # Consequently, we restore the checkpoint that does not contain any
     # reference to MaskedNode's.
     restored_train_state = super().restore(
-        directory, item=flattened_train_state, restore_args=restore_args)
+        directory, item=flattened_train_state, restore_args=restore_args
+    )
     if self._enforce_restore_shape_check:
       _check_restored_shapes(restored_train_state, flattened_train_state)
 
@@ -612,7 +636,8 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   def structure(self, directory: epath.Path) -> PyTree:
     return jax.tree_util.tree_map(
         orbax.checkpoint.utils.leaf_placeholder,
-        flax.serialization.to_state_dict(self._param_names))
+        flax.serialization.to_state_dict(self._param_names),
+    )
 
 
 class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
@@ -741,9 +766,7 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
     )
     item.save(checkpoint_path)
 
-  def restore(
-      self, directory: epath.Path, item: Any = None
-  ) -> None:
+  def restore(self, directory: epath.Path, item: Any = None) -> None:
     """Restores the given item.
 
     Args:
