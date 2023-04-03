@@ -41,8 +41,7 @@ gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE
 
 After ssh-ing the VM, you can install the paxml stable release from PyPI, or the dev version from github.
 
-For installing the stable release using
-[pip](https://pypi.org/project/pip/):
+For installing the stable release from PyPI (https://pypi.org/project/paxml/):
 
 ```bash
 $ python3 -m pip install -U pip
@@ -50,12 +49,14 @@ $ python3 -m pip install paxml jax[tpu] \
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
 
-For installing the dev version from github:
+For installing the dev version from github, and for the ease of editing code:
 
 ```bash
 # install the dev version of praxis first 
-$ pip install git+https://github.com/google/praxis
-$ pip install git+https://github.com/google/paxml
+$ git clone https://github.com/google/praxis
+$ pip install -e praxis
+$ git clone https://github.com/google/paxml
+$ pip install -e paxml
 $ pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
 
