@@ -191,6 +191,7 @@ pytype_strict_library(
         ":tuning_lib",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
+        # Implicit clu.metrics dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
@@ -199,6 +200,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:base_model",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",

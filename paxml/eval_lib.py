@@ -23,10 +23,11 @@ import gc
 import sys
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
+from clu import metrics as clu_metrics
 from clu import platform
 from etils import epath
 import jax
@@ -49,6 +50,7 @@ from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import base_model
 from praxis import optimizer_prefix_vectorization
 from praxis import pax_fiddle
 from praxis import py_utils
@@ -57,6 +59,7 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
+
 
 instantiate = base_hyperparams.instantiate
 CheckpointType = checkpoints.CheckpointType
@@ -1365,10 +1368,9 @@ def _is_shape_dtype_struct(x):
   return isinstance(x, jax.ShapeDtypeStruct)
 
 
-def decode_once_spmd_model(
-    jax_task: tasks_lib.SingleTask,
+def _decode_once_spmd_model(
+    model: base_model.BaseModel,
     partitioner: partitioning.Partitioner,
-    task_p: tasks_lib.SingleTask.HParams,
     inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
     train_state: TrainState,
@@ -1379,34 +1381,40 @@ def decode_once_spmd_model(
         Tuple[Tuple[NestedMap, NestedMap], NestedMap],
     ],
     inputs_partition_spec: NestedPartitionSpec,
+    metrics_p: Optional[base_metrics.BaseMetrics.HParams],
 ) -> Tuple[
-    List[Optional[Dict[str, float]]],  # decode metrics.
-    List[Optional[Dict[str, float]]],  # processed decode metrics.
-    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-    List[int],
+    Tuple[
+        List[Optional[Dict[str, float]]],  # decode metrics.
+        List[Optional[Dict[str, float]]],  # processed decode metrics.
+        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+        List[int],
+    ],
+    Mapping[str, clu_metrics.Metric],  # raw decode metrics
 ]:  # performed decode steps.
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
-    jax_task: instantiated model from task_p.
-    task_p: Params for the task that encapsulates an SPMD model.
+    model: model being evaluated.
+    partitioner: partitioner used for the model and the data.
     inputs: instantiated inputs.
     job_log_dir: Directory for the job logs.
     train_state: A TrainState object.
-    summary_writers: The summary writer objects to log summaries.
+    summary_writers: List[eval_lib.SummaryWriter],
     prng_key: The prng key used for decoding.
     decode_step_fn: pjit'ed decode functions.
     inputs_partition_spec: Partition specs for inputs.
+    metrics_p: Parameters to configure how to aggregate the metrics.
 
   Returns:
-    A tuple of (a list of decode metrics,
-                a list of processed decode metrics,
-                a list of optional decoder (seqio) metrics.
-                 list of integers as performed decode steps for each input).
+    A tuple of(
+        tuple of (a list of decode metrics,
+                  a list of processed decode metrics,
+                  a list of optional decoder (seqio) metrics.
+                  list of integers as performed decode steps for each input).
+        raw clu metrics).
       Items from each list are aligned with each input from inputs.
   """
   work_unit = platform.work_unit()
-  metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
 
@@ -1531,9 +1539,7 @@ def decode_once_spmd_model(
       # don't want on-device allocation as would eventually lead to HBM OOM.
       with jax.default_device(jax.devices('cpu')[0]):
         out = jax.tree_map(np.asarray, out)
-        process_decode_output = jax_task.model.process_decode_out(
-            inputs[split], out
-        )
+        process_decode_output = model.process_decode_out(inputs[split], out)
 
       (process_weighted_scalars, processed, processed_metric_updates) = (
           process_decode_output
@@ -1619,13 +1625,80 @@ def decode_once_spmd_model(
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
 
-    # Track metric specified by task_p.track_decoder_metric.
-    if task_p.track_decoder_metric:
-      logging.warn(
-          'Decoder metric tracking is not implemented yet for pjit '
-          'models. Ignoring metric tracking.'
-      )
+  return (
+      decode_metrics_list,
+      processed_decode_metrics_list,
+      seqio_metrics_list,
+      num_decode_steps,
+  ), metrics
 
+
+def decode_once_spmd_model(
+    jax_task: tasks_lib.SingleTask,
+    partitioner: partitioning.Partitioner,
+    task_p: tasks_lib.SingleTask.HParams,
+    inputs: List[base_input.BaseInput],
+    job_log_dir: epath.Path,
+    train_state: TrainState,
+    summary_writers: List[SummaryWriter],
+    prng_key: JTensor,
+    decode_step_fn: Callable[
+        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+    ],
+    inputs_partition_spec: NestedPartitionSpec,
+) -> Tuple[
+    List[Optional[Dict[str, float]]],  # decode metrics.
+    List[Optional[Dict[str, float]]],  # processed decode metrics.
+    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+    List[int],
+]:  # performed decode steps.
+  """Runs the decoding once on the entire decoder datasets for an SPMD model.
+
+  Args:
+    jax_task: instantiated model from task_p.
+    task_p: Params for the task that encapsulates an SPMD model.
+    inputs: instantiated inputs.
+    job_log_dir: Directory for the job logs.
+    train_state: A TrainState object.
+    summary_writers: The summary writer objects to log summaries.
+    prng_key: The prng key used for decoding.
+    decode_step_fn: pjit'ed decode functions.
+    inputs_partition_spec: Partition specs for inputs.
+
+  Returns:
+    A tuple of (a list of decode metrics,
+                a list of processed decode metrics,
+                a list of optional decoder (seqio) metrics.
+                 list of integers as performed decode steps for each input).
+      Items from each list are aligned with each input from inputs.
+  """
+  # Track metric specified by task_p.track_decoder_metric.
+  if task_p.track_decoder_metric:
+    logging.warn(
+        'Decoder metric tracking is not implemented yet for pjit '
+        'models. Ignoring metric tracking.'
+    )
+  (
+      (
+          decode_metrics_list,
+          processed_decode_metrics_list,
+          seqio_metrics_list,
+          num_decode_steps,
+      ),
+      _,
+  ) = _decode_once_spmd_model(
+      jax_task.model,
+      partitioner,
+      inputs,
+      job_log_dir,
+      train_state,
+      summary_writers,
+      prng_key,
+      decode_step_fn,
+      inputs_partition_spec,
+      task_p.metrics,
+  )
   return (
       decode_metrics_list,
       processed_decode_metrics_list,
