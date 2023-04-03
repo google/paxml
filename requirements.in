@@ -8,7 +8,7 @@ flax
 jax @ git+https://github.com/google/jax
 lingvo
 numpy
-orbax
+orbax-checkpoint
 praxis
 protobuf==3.19.6
 pyglove
