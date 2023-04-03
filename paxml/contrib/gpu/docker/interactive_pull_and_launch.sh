@@ -28,6 +28,6 @@ VOCAB_PATH=${3}
 ## By default `<CURRENT_WORKING_DIRECTORY>/workspace` is selected
 # WORKSPACE_PATH=<ADD CUSTOM PATH TO `workspace` dir>
 
-docker run -ti --runtime=nvidia --net=host --ipc=host -v ${PWD}:/pax/paxml -v ${DATASET_PATH}:/pax/paxml/datasets -v ${WORKSPACE_PATH:-${PWD}/workspace}:/pax/paxml/workspace -v ${VOCAB_PATH}:/pax/paxml/vocab --privileged $CONTAINER /bin/bash
+docker run -ti --runtime=nvidia --net=host --ipc=host -v ${DATASET_PATH}:/pax/paxml/datasets -v ${WORKSPACE_PATH:-${PWD}/workspace}:/pax/paxml/workspace -v ${VOCAB_PATH}:/pax/paxml/vocab --privileged $CONTAINER /bin/bash
 
 set +x

@@ -4,8 +4,10 @@ This folder contains scripts that optimize Pax for GPUs.
 ## Building the Container
 The Dockerfile in this folder contains all relevant dataset/gpu dependencies. Run the following command to build a container using this Dockerfile: `bash paxml/contrib/gpu/docker/build.sh <container_name>`. Be sure to run this command from the top-level `paxml` directory in the cloned repository.
 
+The scripts in `scripts_gpu` have been validated with the following paxml commit: [644ca45173c58bd537374c911da375b70634263e](https://github.com/google/paxml/commit/644ca45173c58bd537374c911da375b70634263e). Note that this container is built to run paxml at the tested commit.
+
 ## Running the Container (single node)
-Run the following command to launch a container interactively: `bash paxml/contrib/gpu/docker/interactive_pull_and_launch.sh <container_URL> <dataset_path> <vocab_path>`. Again, make sure this command is run from the top-level directory of the cloned paxml repository. 
+Run the following command to launch a container interactively: `bash paxml/contrib/gpu/docker/interactive_pull_and_launch.sh <container_URL> <dataset_path> <vocab_path> <workspace_path>`, where `<workspace_path>` refers to the directory to be mounted to the container. This is where your experiment configs and run scripts should reside. Again, make sure this command is run from the top-level directory of the cloned paxml repository. 
 
 ## Downloading The Pile and Lambada Datasets
 The scripts `scripts_gpu/download_the_pile.py` and `scripts_gpu/download_lambada.py` will download The Pile and the Lambada datasets to the `TFDS_DATA_DIR` enviroment variable. To control the location of the downloaded datasets, use the following command prior to running the download scripts: `export TFDS_DATA_DIR=<path_to_dowload_data_to>`. After the data has been successfully downloaded, use the same `TFDS_DATA_DIR` when running experiments.
@@ -50,9 +52,6 @@ The table below describes current performance of the given configs. Experiments 
 | 175B | 96    | 24       |    33.6       |      39.7                 |    N/A           |  N/A           |
 
 Note: Estimated walltime is computed assuming full throughput continuously. In practice, true walltime may be greater due to compilation overheads and checkpointing. Linked convergence logs were not necessarily done with the topology described in `configs.py` and may have different walltimes, but the configs provided are the most performant configs tested. The throughput for these performant configs is reported in the table above. 
-
-### Flash Attention
-Praxis provides an experimental implementation of [flash attention](https://github.com/google/praxis/blob/main/praxis/layers/gpu_fast_attention.py) which can give up to a 6% performance improvement for large microbatch sizes. The numbers in the above chart are reported without flash attention. Note that flash attention is still in development and may cause some numerical instability. Thus, it is currently not recommended to use flash attention for convergence runs.
 
 ## Downloading the SentencePiece Model
 First, make sure you have the [Google Clould SDK](https://cloud.google.com/sdk/docs/install) installed. Next, log in to the Cloud using the following command: `gcloud auth login` and following the prompts. Once logged in, use the following command to download the vocab file to your current working directory: 

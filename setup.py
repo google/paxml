@@ -53,8 +53,7 @@ setup(
         'gpu': [
             'jsonlines==3.1.0',
             'pysimdjson==5.0.2',
-            'zstandard==0.18.0',
-            'jax-triton==0.1.3'
+            'zstandard==0.18.0'
             ],
     },
     classifiers=[

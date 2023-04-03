@@ -24,7 +24,7 @@ export VOCAB_PATH=$VOCAB_PATH
 
 mkdir -p ${LOG_DIR}
 python3 /pax/paxml/paxml/main.py \
-    --job_log_dir=${PWD}/${LOG_DIR} \
+    --job_log_dir=${LOG_DIR} \
     --exp=paxml.contrib.gpu.scripts_gpu.configs.Pile126M \
     --tfds_data_dir=$TFDS_DATA_DIR \
     --should_log_compiles=True \
