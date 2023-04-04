@@ -130,10 +130,12 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
     partitioner = partitioning.PjitPartitioner(
         init_is_eval=False, reshard_inputs=True, task_p=self.task.hparams
     )
-    partitioner.setup(self.task, jax.random.PRNGKey(0), inputs_shape_dtype)
+    prng_key = jax.random.PRNGKey(0)
+    partitioner.setup(self.task, prng_key, inputs_shape_dtype)
     train_pg = programs.SingleTaskTrainProgram(
         self.task, self.train_input, partitioner
     )
+    train_pg.setup(prng_key, prng_key, 0, None, None)
     self.assertEqual(2, train_pg.train_unpadded_global_batch_size)
 
 

@@ -380,7 +380,7 @@ def _create_checkpointer(
 
 
 def run_eval_loop_over_test_splits(
-    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.BaseEvalProgram],
     eval_partitioned_train_state: TrainState,
     eval_prng_seed: jax.random.KeyArray,
     summary_writers: List[SummaryWriter],
@@ -1721,7 +1721,7 @@ def _common_eval_or_decode_loop(
     train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
-    eval_programs: Sequence[programs.SingleTaskEvalProgram],
+    eval_programs: Sequence[programs.BaseEvalProgram],
     decode_inputs: Optional[Sequence[base_input.BaseInput]],
 ):
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()

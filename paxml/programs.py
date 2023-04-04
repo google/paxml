@@ -113,16 +113,14 @@ class BaseTrainProgram(Program):
   def __init__(
       self,
       task: tasks_lib.SingleTask,
-      train_input: base_input.BaseInput,
-      partitioner: partitioning.Partitioner,
+      # TODO(laigd): move to setup, and mark these required fields.
+      train_input: Optional[base_input.BaseInput] = None,
+      partitioner: Optional[partitioning.Partitioner] = None,
   ):
     self._task = task
     self._train_input = train_input
     self._partitioner = partitioner
 
-    self._train_unpadded_global_batch_size = (
-        train_input.hparams.cls.get_global_batch_size(train_input.hparams)
-    )
     train_p = self._task.hparams.train
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
@@ -141,12 +139,19 @@ class BaseTrainProgram(Program):
     self._train_summary_handler = None
     self._eval_train_summary_handler = None
 
+    self._train_unpadded_global_batch_size = None
+
   # We need access to partitioner/train_input so that we can avoid building
-  # the train program twice in the training pipeline.
+  # the partitioner twice in the training pipeline.
   # TODO(laigd): reconcile this with base partitioner and BaseExecutor.
-  @property
-  def partitioner(self) -> partitioning.Partitioner:
-    return self._partitioner
+
+  def set_partitioner(self, partitioner: partitioning.Partitioner):
+    assert self._partitioner is None
+    self._partitioner = partitioner
+
+  def set_train_input(self, train_input: base_input.BaseInput):
+    assert self._train_input is None
+    self._train_input = train_input
 
   @property
   def train_input(self) -> base_input.BaseInput:
@@ -169,6 +174,12 @@ class BaseTrainProgram(Program):
     self._train_summary_last_step = init_step - 1
     self._train_summary_handler = train_summary_handler
     self._eval_train_summary_handler = eval_summary_handler
+
+    self._train_unpadded_global_batch_size = (
+        self._train_input.hparams.cls.get_global_batch_size(
+            self._train_input.hparams
+        )
+    )
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     return train_step < self._task.hparams.train.num_train_steps
@@ -396,8 +407,9 @@ class SingleTaskTrainProgram(BaseTrainProgram):
   def __init__(
       self,
       task: tasks_lib.SingleTask,
-      train_input: base_input.BaseInput,
-      partitioner: partitioning.Partitioner,
+      # TODO(laigd): move to setup, and mark these required fields.
+      train_input: Optional[base_input.BaseInput] = None,
+      partitioner: Optional[partitioning.Partitioner] = None,
   ):
     super().__init__(task, train_input, partitioner)
 

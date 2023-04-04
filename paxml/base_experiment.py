@@ -23,6 +23,7 @@ import abc
 from typing import Dict, List, Optional, Type, TypeVar
 from paxml import automl
 from paxml import base_task
+from paxml import partitioning
 from paxml import programs
 from praxis import base_input
 
@@ -116,8 +117,22 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """
     return {'': self.__class__}
 
+  def partitioner(self) -> Optional[partitioning.Partitioner]:
+    """Returns the partitioner to use for partitioning model functions.
+
+    Returns:
+      A Partitioner instance or None, in which case a default partitioner will
+      be created based on the task settings.
+    """
+    return None
+
   def train_program(self) -> Optional[programs.BaseTrainProgram]:
-    """Returns the train_program to use in the main loop."""
+    """Returns the train program to use for training the model.
+
+    Returns:
+      A BaseTrainProgram instance or None, in which case a default train program
+      will be used.
+    """
     return None
 
   def __init_subclass__(cls):
