@@ -307,9 +307,10 @@ class BaseTaskTest(test_utils.TestCase):
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
-  @parameterized.named_parameters(('partial_load_opt_states_true', True),
-                                  ('partial_load_opt_states_false', False))
-  def test_load(self, partial_load_opt_states):
+  @parameterized.named_parameters(('partial_load_opt_states', True, False),
+                                  ('load_no_opt_states', False, False),
+                                  ('load_all_opt_states', False, True))
+  def test_load(self, partial_load_opt_states, load_opt_states):
     input_dims = 3
     output_dims = 5
 
@@ -366,6 +367,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
                 load_rules=load_rules,
                 input_specs_provider_p=CustomInputSpecsProvider.HParams(
                     input_dims=input_dims),
+                load_opt_states=load_opt_states,
                 partial_load_opt_states=partial_load_opt_states),
     }
     task = instantiate(task_p)
@@ -387,7 +389,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # When loading opt states from a checkpoint, ema is not auto-initialized to
     # mdl_vars by default.
-    if not partial_load_opt_states:
+    if not partial_load_opt_states and not load_opt_states:
       for v in train_state.opt_states[0]:
         if 'ema' in v:
           self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
