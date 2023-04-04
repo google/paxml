@@ -142,7 +142,6 @@ pytype_strict_library(
         ":base_task",
         ":checkpoint_version",
         ":train_states",
-        # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit flax.core dependency.
@@ -160,9 +159,13 @@ pytype_strict_test(
     srcs = ["checkpoints_test.py"],
     deps = [
         ":checkpoints",
+        ":train_states",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit etils dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
     ],
 )

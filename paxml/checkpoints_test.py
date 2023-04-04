@@ -18,8 +18,18 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 from etils import epath
-from orbax.checkpoint import utils as orbax_utils
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
+import orbax.checkpoint
 from paxml import checkpoints
+from paxml import train_states
+
+
+orbax_utils = orbax.checkpoint.utils
+ArrayMetadata = checkpoints.ArrayMetadata
+TrainState = train_states.TrainState
 
 
 class CheckpointsTest(parameterized.TestCase):
@@ -105,6 +115,156 @@ class CheckpointsTest(parameterized.TestCase):
         checkpoints.maybe_update_checkpoint_type(specified_format, path),
         expected_format,
     )
+
+
+class PaxMetadataTest(absltest.TestCase):
+
+  def test_from_dict(self):
+    d = dict(
+        version=1.0,
+        train_state_metadata={
+            'a': ArrayMetadata(
+                unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                    shape=(1, 2), dtype=np.float32
+                ),
+                is_optax_masked_node=False,
+            ).to_dict(),
+            'b': {
+                'b1': ArrayMetadata(
+                    unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                        shape=(3, 4), dtype=np.int32
+                    ),
+                    is_optax_masked_node=True,
+                ).to_dict(),
+                'b2': ArrayMetadata(
+                    unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                        shape=(5,), dtype=np.float32
+                    ),
+                    is_optax_masked_node=False,
+                ).to_dict(),
+            },
+        },
+    )
+
+    d_restored = checkpoints.PaxMetadata.from_dict(d).to_dict()
+    self.assertTrue(checkpoints._trees_are_equal(d, d_restored))
+
+  def test_from_padded_and_unpadded(self):
+    padded = TrainState(
+        step=0,
+        opt_states=[],
+        mdl_vars={
+            'a': jnp.ones((2, 3), dtype=jnp.float32),
+            'b': {
+                'b1': optax.MaskedNode(),
+                'b2': jnp.zeros((9,), dtype=jnp.float32),
+            },
+        },
+    )
+    unpadded = TrainState(
+        step=0,
+        opt_states=[],
+        mdl_vars={
+            'a': jax.ShapeDtypeStruct(shape=(1, 2), dtype=np.float32),
+            'b': {
+                'b1': jax.ShapeDtypeStruct(shape=(3, 4), dtype=np.int32),
+                'b2': jax.ShapeDtypeStruct(shape=(5,), dtype=np.float32),
+            },
+        },
+    )
+
+    d_restored = checkpoints.PaxMetadata.from_padded_and_unpadded(
+        padded,
+        unpadded,
+        version=1.0,
+    ).to_dict()
+
+    d_expected = dict(
+        version=1.0,
+        train_state_metadata=dict(
+            mdl_vars={
+                'a': ArrayMetadata(
+                    unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                        shape=(1, 2), dtype=np.float32
+                    ),
+                    is_optax_masked_node=False,
+                ).to_dict(),
+                'b': {
+                    'b1': ArrayMetadata(
+                        unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                            shape=(3, 4), dtype=np.int32
+                        ),
+                        is_optax_masked_node=True,
+                    ).to_dict(),
+                    'b2': ArrayMetadata(
+                        unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                            shape=(5,), dtype=np.float32
+                        ),
+                        is_optax_masked_node=False,
+                    ).to_dict(),
+                },
+            },
+        ),
+    )
+    self.assertTrue(checkpoints._trees_are_equal(d_expected, d_restored))
+
+  def test_equals(self):
+    def _get_metadata(version, shape, dtype, is_masked):
+      return checkpoints.PaxMetadata(
+          version=version,
+          train_state_metadata={
+              'a': ArrayMetadata(
+                  unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                      shape=shape,
+                      dtype=dtype,
+                  ),
+                  is_optax_masked_node=is_masked,
+              )
+          },
+      )
+
+    expected = _get_metadata(1.0, (1, 2), np.float32, True)
+
+    actual1 = _get_metadata(1.0, (1, 2), np.float32, True)
+    self.assertTrue(expected.equals(actual1))
+
+    actual2 = _get_metadata(2.0, (1, 2), np.float32, True)
+    self.assertFalse(expected.equals(actual2))
+
+    actual3 = _get_metadata(1.0, (2, 2), np.float32, True)
+    self.assertFalse(expected.equals(actual3))
+
+    actual4 = _get_metadata(1.0, (1, 2), np.int32, True)
+    self.assertFalse(expected.equals(actual4))
+
+    actual5 = _get_metadata(1.0, (1, 2), np.float32, False)
+    self.assertFalse(expected.equals(actual5))
+
+  def test_is_compatible(self):
+    def _get_metadata(version, shape, dtype, is_masked):
+      return checkpoints.PaxMetadata(
+          version=version,
+          train_state_metadata={
+              'a': ArrayMetadata(
+                  unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                      shape=shape,
+                      dtype=dtype,
+                  ),
+                  is_optax_masked_node=is_masked,
+              )
+          },
+      )
+
+    expected1 = _get_metadata(1.0, (1, 2), np.float32, True)  # masked
+    expected2 = _get_metadata(1.0, (1, 2), np.float32, False)  # not masked
+
+    actual1 = _get_metadata(1.0, (1, 2), np.float32, True)
+    self.assertTrue(expected1.is_compatible(actual1))
+    self.assertFalse(expected2.is_compatible(actual1))
+
+    actual2 = _get_metadata(1.0, (1, 2), np.float32, False)
+    self.assertFalse(expected1.is_compatible(actual2))
+    self.assertTrue(expected2.is_compatible(actual2))
 
 
 if __name__ == '__main__':
