@@ -1389,7 +1389,7 @@ def _decode_once_spmd_model(
         List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
         List[int],
     ],
-    Mapping[str, clu_metrics.Metric],  # raw decode metrics
+    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
 ]:  # performed decode steps.
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
@@ -1448,6 +1448,7 @@ def _decode_once_spmd_model(
   processed_decode_metrics_list = []
   seqio_metrics_list = []
   num_decode_steps = []
+  raw_metrics_list = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
     input_name = inputs[split].name
@@ -1463,6 +1464,7 @@ def _decode_once_spmd_model(
       processed_decode_metrics_list.append(None)
       seqio_metrics_list.append(None)
       num_decode_steps.append(0)
+      raw_metrics_list.append(None)
       continue
     logging.info('Start decoding on input %s', input_name)
     step_num = 0
@@ -1624,13 +1626,14 @@ def _decode_once_spmd_model(
     )
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
+    raw_metrics_list.append(metrics)
 
   return (
       decode_metrics_list,
       processed_decode_metrics_list,
       seqio_metrics_list,
       num_decode_steps,
-  ), metrics
+  ), raw_metrics_list
 
 
 def decode_once_spmd_model(
