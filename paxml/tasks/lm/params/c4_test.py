@@ -17,6 +17,7 @@
 import os
 
 from absl.testing import absltest
+import fiddle as fdl
 import jax
 from jax.lib import xla_bridge
 from paxml.tasks.lm.params import c4
@@ -82,7 +83,7 @@ class C4Test(test_utils.TestCase):
 
     # optimizer and HPs
     optimizer_p = task_p.train.learner.optimizer
-    self.assertEqual(optimizer_p.cls, optimizers.Adam)
+    self.assertEqual(fdl.get_callable(optimizer_p), optimizers.Adam)
     self.assertAlmostEqual(optimizer_p.weight_decay, 0.1)
     self.assertAlmostEqual(optimizer_p.epsilon, 1e-8)
     self.assertAlmostEqual(optimizer_p.beta1, 0.9)

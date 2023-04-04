@@ -574,6 +574,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
+        # Implicit fiddle dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",

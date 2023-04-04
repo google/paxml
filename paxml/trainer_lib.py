@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 from absl import logging
 from clu import platform
 from etils import epath
+import fiddle as fdl
 from flax.core import frozen_dict
 import jax
 from jax import numpy as jnp
@@ -232,7 +233,7 @@ def adjust_input_params_for_small_batch(
     return inp_p
 
   local_device_count = jax.local_device_count()
-  batch_size = inp_p.cls.get_batch_size(inp_p)
+  batch_size = fdl.get_callable(inp_p).get_batch_size(inp_p)  # pytype: disable=attribute-error
 
   if (batch_size % local_device_count == 0 and
       inp_p.num_infeed_hosts == jax.process_count()):
