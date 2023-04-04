@@ -15,7 +15,6 @@ absl-py==1.4.0
     #   mesh-tensorflow
     #   ml-collections
     #   optax
-    #   orbax
     #   orbax-checkpoint
     #   rouge-score
     #   seqio
@@ -57,7 +56,6 @@ bleach==6.0.0
     # via nbconvert
 cached-property==1.5.2
     # via
-    #   orbax
     #   orbax-checkpoint
 cachetools==5.3.0
     # via google-auth
@@ -113,7 +111,6 @@ etils[enp,epath]==1.1.1
     #   -r paxml-requirements.in
     #   array-record
     #   clu
-    #   orbax
     #   orbax-checkpoint
     #   tensorflow-datasets
     #   tfds-nightly
@@ -185,7 +182,6 @@ importlib-resources==5.12.0
     #   etils
     #   jsonschema
     #   matplotlib
-    #   orbax
     #   orbax-checkpoint
     #   tensorflow-datasets
     #   tfds-nightly
@@ -220,7 +216,6 @@ jax @ git+https://github.com/google/jax
     #   clu
     #   flax
     #   optax
-    #   orbax
     #   orbax-checkpoint
     #   seqio
     #   seqio-nightly
@@ -231,7 +226,6 @@ jaxlib==0.4.7
     #   chex
     #   clu
     #   optax
-    #   orbax
     #   orbax-checkpoint
     #   seqio
     #   seqio-nightly
@@ -342,7 +336,6 @@ mpmath==1.3.0
 msgpack==1.0.5
     # via
     #   flax
-    #   orbax
     #   orbax-checkpoint
 mypy-extensions==1.0.0
     # via typing-inspect
@@ -368,7 +361,6 @@ nest-asyncio==1.5.6
     #   ipykernel
     #   nbclassic
     #   notebook
-    #   orbax
     #   orbax-checkpoint
 nltk==3.8.1
     # via
@@ -397,7 +389,6 @@ numpy==1.24.2
     #   ml-dtypes
     #   opt-einsum
     #   optax
-    #   orbax
     #   orbax-checkpoint
     #   pandas
     #   rouge-score
@@ -426,10 +417,10 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.1.7
-    # via flax
-orbax-checkpoint==0.1.7
-    # via -r paxml-requirements.in
+orbax-checkpoint==0.1.8
+    # via
+    #   -r paxml-requirements.in
+    #   flax
 packaging==23.0
     # via
     #   clu
@@ -541,7 +532,6 @@ pyyaml==6.0
     #   jupyter-events
     #   libcst
     #   ml-collections
-    #   orbax
     #   orbax-checkpoint
     #   transformers
 pyzmq==25.0.2
@@ -682,7 +672,6 @@ tensorstore==0.1.35
     # via
     #   -r paxml-requirements.in
     #   flax
-    #   orbax
     #   orbax-checkpoint
 termcolor==2.2.0
     # via
@@ -759,7 +748,6 @@ typing-extensions==4.5.0
     #   ipython
     #   libcst
     #   optax
-    #   orbax
     #   orbax-checkpoint
     #   rich
     #   tensorflow
