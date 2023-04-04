@@ -32,34 +32,36 @@ set -x
 CONTAINER=<CONTAINER_NAME>
 
 # << CHANGE ! >>
-BASE_PAXML_WORKSPACE_DIR=<PATH_TO_CLONED_PAXML_REPO>
+BASE_WORKSPACE_DIR=<PATH_TO_WORKSPACE> ## location to write logs and checkpoints to
 BASE_TFDS_DATA_DIR=<PATH_TO_TFDS_DATA_DIR>
 BASE_VOCAB_PATH=<PATH_TO_VOCAB>
 
 # Default env variables for paths required by pax training scripts
-PAXML_DIR=/pax/paxml
+WORKSPACE_DIR=/pax/paxml/workspace
 TFDS_DATA_DIR=/pax/datasets/
 GPT_VOCAB_PATH=/pax/vocab
 
 # Add the pax/JAX specific mounts
-MOUNTS="--container-mounts=$BASE_PAXML_WORKSPACE_DIR:$PAXML_DIR,$BASE_VOCAB_PATH:$GPT_VOCAB_PATH,$BASE_TFDS_DATA_DIR:/$TFDS_DATA_DIR"
+MOUNTS="--container-mounts=$BASE_WORKSPACE_DIR:$WORKSPACE_DIR,$BASE_VOCAB_PATH:$GPT_VOCAB_PATH,$BASE_TFDS_DATA_DIR:/$TFDS_DATA_DIR"
 
 # Add pax/JAX specific exports
-EXPORTS="--export=ALL,TFDS_DATA_DIR=${TFDS_DATA_DIR},PAXML_DIR=${PAXML_DIR},GPT_VOCAB_PATH=${GPT_VOCAB_PATH}"
+EXPORTS="--export=ALL,TFDS_DATA_DIR=${TFDS_DATA_DIR},WORKSPACE_DIR=${WORKSPACE_DIR},GPT_VOCAB_PATH=${GPT_VOCAB_PATH}"
 #-------------------------------------------------------------------------------
+
+LOG_DIR_LOCAL='pile_126m'
 
 # << INSERT SENTENCEPIECE MODEL NAME ! >>
 read -r -d '' cmd <<EOF
 echo "*******STARTING********" \
 && nvidia-smi \
-&& bash ${PAXML_DIR}/paxml/contrib/gpu/scripts_gpu/run_pile_multinode.sh $TFDS_DATA_DIR ${GPT_VOCAB_PATH}/<NAME_OF_SPM_MODEL> 'pile_126m'
+&& bash /pax/paxml/paxml/contrib/gpu/scripts_gpu/run_pile_multinode.sh $TFDS_DATA_DIR ${GPT_VOCAB_PATH}/<NAME_OF_SPM_MODEL> 'workspace/${LOG_DIR_LOCAL}'
 EOF
 
 # create run specific output directory for ease of analysis
-mkdir -p "${BASE_PAXML_WORKSPACE_DIR}/outputs/multinode/126m_pile"
+mkdir -p "${BASE_WORKSPACE_DIR}/outputs/multinode/126m_pile"
 
 # redirect both stdout and stderr in the same file for ease of analysis
-OUTFILE="${BASE_PAXML_WORKSPACE_DIR}/outputs/multinode/126m_pile/output-%j-%n-%t.txt"
+OUTFILE="${BASE_WORKSPACE_DIR}/outputs/multinode/126m_pile/output-%j-%n-%t.txt"
 
 echo $cmd
 srun -o $OUTFILE -e $OUTFILE --container-image="$CONTAINER" $MOUNTS $EXPORTS bash -c "${cmd}"
