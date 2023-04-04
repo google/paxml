@@ -26,6 +26,5 @@ python3 /pax/paxml/paxml/main.py \
     --job_log_dir=${LOG_DIR} \
     --exp=paxml.contrib.gpu.scripts_gpu.configs.SmallPileTest \
     --tfds_data_dir=$TFDS_DATA_DIR \
-    --should_log_compiles=True \
     --alsologtostderr &> ${PWD}/${LOG_DIR}/output.log
 
