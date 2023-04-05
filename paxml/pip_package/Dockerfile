@@ -71,7 +71,7 @@ RUN cd /paxml && \
     /praxis/requirements.in \
     --output-file $WHEEL_FOLDER/paxml_requirements.txt
 
-RUN pip3 install -r paxml/paxml/pip_package/requirements.txt
+RUN pip3 install --no-deps -r paxml/paxml/pip_package/requirements.txt
 
 RUN mv paxml/paxml/pip_package /paxml/
 RUN cd /paxml && bash pip_package/build.sh

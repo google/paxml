@@ -21,6 +21,7 @@ the `tasks` Python submodule.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import enum
 import itertools
@@ -1371,6 +1372,54 @@ class SingleTask(base_task.BaseTask):
     else:
       return mdl_vars
 
+  def _maybe_delete_unneeded_opt_vars(
+      self,
+      rules,
+      opt_states,
+      is_opt_states_initialized,
+      loading_rules,
+      ignore_rules,
+      ckpt_path,
+  ):
+    # pylint: disable=g-doc-args
+    """Delete some opt vars before they get are loaded from the checkpoint.
+
+    This reduces the maximum HBM usage in the beginning of the experiment.
+    Otherwise, when the variables are being loadded, at the same time there
+    could exist two copies of opt varaibles on the same device - the first copy
+    initialized randomly, and the other one loaded from the checkpoint. Here the
+    randomly initalized variables are released before checkpoint loading. This
+    avoids OOMing in some large models.
+    """
+    # pylint: enable=g-doc-args
+    if rules.partial_load_opt_states or rules.load_opt_states:
+      opt_states_serialized = flax.serialization.to_state_dict(opt_states)
+      opt_states_flat = _flatten_dict(opt_states_serialized)
+      flattened_opt_vars = dict(opt_states_flat)
+      opt_state_names = [x[0] for x in opt_states_flat]
+      if rules.partial_load_opt_states:
+        # Delete matching vars from the checkpoint
+        # Make a copy as we don't want to modify `is_opt_states_initialized`
+        # which is going to be used later.
+        is_opt_states_initialized_copy = copy.deepcopy(
+            is_opt_states_initialized)
+        opt_state_mapping, _ = _get_var_mapping(
+            opt_state_names,
+            loading_rules,
+            ignore_rules,
+            is_opt_states_initialized_copy,
+            ckpt_path,
+            kind='Opt State',
+            safe_load=False,
+            target_partition_specs=None)
+      else:
+        # Delete all opt vars
+        opt_state_mapping = opt_state_names
+
+      jax.block_until_ready(flattened_opt_vars)
+      for k in opt_state_mapping:
+        flattened_opt_vars[k].delete()
+
   def _apply_init_checkpoint_rule(
       self,
       train_state: TrainState,
@@ -1421,12 +1470,12 @@ class SingleTask(base_task.BaseTask):
     ]
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
-    var_names = [x[0] for x in model_vars.FlattenItems()]  # pytype: disable=attribute-error  # jax-ndarray
+    flattened_model_vars = dict(model_vars.FlattenItems())  # pytype: disable=attribute-error
     # matched_pspecs: pspecs for the init checkpoint, inferred from model_vars.
     # model_vars_mapping: Mapping from names in model_vars to names in the init
     #                     checkpoint.
     model_vars_mapping, matched_pspecs = _get_var_mapping(
-        var_names,
+        list(flattened_model_vars.keys()),
         loading_rules,
         ignore_rules,
         is_var_initialized,
@@ -1434,6 +1483,16 @@ class SingleTask(base_task.BaseTask):
         kind='Var',
         safe_load=rules.safe_load,
         target_partition_specs=target_partition_specs)
+
+    # TODO(b/276310871): Avoid initialization of the variables in the first
+    # place.
+    # Free vars that will be replaced by the checkpoint to save device memory.
+    jax.block_until_ready(flattened_model_vars)
+    for k in model_vars_mapping:
+      flattened_model_vars[k].delete()
+    self._maybe_delete_unneeded_opt_vars(
+        rules, train_state.opt_states, is_opt_states_initialized, loading_rules,
+        ignore_rules, ckpt_path)
 
     if uses_gda:
       ckpt_train_state, train_state_pspecs = _make_train_state(
@@ -1514,7 +1573,7 @@ class SingleTask(base_task.BaseTask):
       else:
         train_state = train_state.replace(
             opt_states=loaded_train_state.opt_states)
-        is_opt_states_initialized = {'all': ckpt_path}
+        load_status[2] = {'all': ckpt_path}
         logging.info(
             'Initialization by external checkpoint: train_state.opt_states is '
             'overwritten by value from %s', ckpt_path)

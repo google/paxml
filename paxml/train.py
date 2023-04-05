@@ -644,6 +644,92 @@ def write_experiment_class_vars_file(
     exp_summary_fpath.write_text(cls_vars_summary)
 
 
+def _maybe_update_latest_model_step(
+    train_input: base_input.BaseInput,
+    train_input_p: base_input.BaseInput.HParams,
+    initial_global_step: int,
+) -> base_input.BaseInput:
+  """Updates `train_input_p` in place its latest model step."""
+  if not hasattr(train_input_p, 'deterministic_input_start_index'):
+    return train_input
+  dp = train_input_p.deterministic_input_start_index
+  dp._latest_model_step = (
+      initial_global_step  # pylint: disable=protected-access
+  )
+  logging.info('Reinstantiating input because _latest_model_step is updated.')
+  return instantiate(train_input_p)
+
+
+class _SummaryContextManager(contextlib.ExitStack):
+  """Manage summary writers."""
+
+  _exit_callbacks = []
+
+  def __init__(
+      self,
+      job_log_dir: epath.Path,
+      eval_input_names: Sequence[str],
+      decode_input_names: Sequence[str],
+      eval_skip_train: bool = False,
+  ):
+    """Initialize context manager.
+
+    Args:
+      job_log_dir: Directory for the job logs.
+      eval_input_names: list of names for the eval input pipelines.
+      decode_input_names: list of names for the decode input pipelines.
+      eval_skip_train: By default, we also run eval on the training data input
+        (`eval_train`), specifically on a batch not yet used for training. When
+        set to True, this is skipped.
+    """
+    super().__init__()
+    self.summary_base_dir = job_log_dir / 'summaries'
+    self.summary_train_dir = self.summary_base_dir / 'train'
+    self.summary_eval_dir = self.summary_base_dir / 'eval_train'
+    self.summary_writer = summary_utils.get_summary_writer
+    if eval_input_names:
+      self.summary_eval_test_dirs = [
+          self.summary_base_dir / f'eval_test_{name}'
+          for name in eval_input_names
+      ]
+    else:
+      self.summary_eval_test_dirs = []
+    if decode_input_names:
+      self.summary_decode_dirs = [
+          self.summary_base_dir / f'decode_test_{name}'
+          for name in decode_input_names
+      ]
+    else:
+      self.summary_decode_dirs = []
+    self.eval_skip_train = eval_skip_train
+
+  def __enter__(
+      self,
+  ) -> Tuple[SummaryWriter, SummaryWriter, SummaryWriter, SummaryWriter]:
+    self.train_summary_writer = self.enter_context(
+        self.summary_writer(self.summary_train_dir)
+    )
+    self.eval_summary_writer = None
+    if not self.eval_skip_train:
+      self.eval_summary_writer = self.enter_context(
+          self.summary_writer(self.summary_eval_dir)
+      )
+    self.eval_test_summary_writers = [
+        self.enter_context(self.summary_writer(d))
+        for d in self.summary_eval_test_dirs
+    ]
+    self.decode_summary_writers = [
+        self.enter_context(self.summary_writer(d))
+        for d in self.summary_decode_dirs
+    ]
+    return (
+        self.train_summary_writer,
+        self.eval_summary_writer,
+        self.eval_test_summary_writers,
+        self.decode_summary_writers,
+    )
+
+
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.PathLike,
@@ -761,12 +847,34 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.'
     )
 
+  # Creates the task.
+  jax_task = instantiate(task_p)
+  if jax_task.early_stopping_fn is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = jax_task.early_stopping_fn
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'train_and_evel function parameter.'
+      )
+
+  # Creates the partitioner, which will be set up later.
+  partitioner = experiment_config.partitioner()
+  if not partitioner:
+    reshard_inputs = checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
+    partitioner = partitioning.create_partitioner(
+        jax_task,
+        reshard_inputs=reshard_inputs,
+        auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
+    )
+
   if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(
-        task_p,
+        jax_task,
         train_input_p,
         job_log_dir,
         checkpointer,
+        partitioner,
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
@@ -775,10 +883,11 @@ def train_and_evaluate(
     )
   else:
     train_and_evaluate_pmap(
-        task_p,
+        jax_task,
         train_input_p,
         job_log_dir,
         checkpointer,
+        partitioner,
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
@@ -787,97 +896,12 @@ def train_and_evaluate(
   checkpointer.wait_until_finished()  # No-op if not async.
 
 
-def _maybe_update_latest_model_step(
-    train_input: base_input.BaseInput,
-    train_input_p: base_input.BaseInput.HParams,
-    initial_global_step: int,
-) -> base_input.BaseInput:
-  """Updates `train_input_p` in place its latest model step."""
-  if not hasattr(train_input_p, 'deterministic_input_start_index'):
-    return train_input
-  dp = train_input_p.deterministic_input_start_index
-  dp._latest_model_step = (
-      initial_global_step  # pylint: disable=protected-access
-  )
-  logging.info('Reinstanting input because _latest_model_step is updated.')
-  return instantiate(train_input_p)
-
-
-class _SummaryContextManager(contextlib.ExitStack):
-  """Manage summary writers."""
-
-  _exit_callbacks = []
-
-  def __init__(
-      self,
-      job_log_dir: epath.Path,
-      eval_input_names: Sequence[str],
-      decode_input_names: Sequence[str],
-      eval_skip_train: bool = False,
-  ):
-    """Initialize context manager.
-
-    Args:
-      job_log_dir: Directory for the job logs.
-      eval_input_names: list of names for the eval input pipelines.
-      decode_input_names: list of names for the decode input pipelines.
-      eval_skip_train: By default, we also run eval on the training data input
-        (`eval_train`), specifically on a batch not yet used for training. When
-        set to True, this is skipped.
-    """
-    super().__init__()
-    self.summary_base_dir = job_log_dir / 'summaries'
-    self.summary_train_dir = self.summary_base_dir / 'train'
-    self.summary_eval_dir = self.summary_base_dir / 'eval_train'
-    self.summary_writer = summary_utils.get_summary_writer
-    if eval_input_names:
-      self.summary_eval_test_dirs = [
-          self.summary_base_dir / f'eval_test_{name}'
-          for name in eval_input_names
-      ]
-    else:
-      self.summary_eval_test_dirs = []
-    if decode_input_names:
-      self.summary_decode_dirs = [
-          self.summary_base_dir / f'decode_test_{name}'
-          for name in decode_input_names
-      ]
-    else:
-      self.summary_decode_dirs = []
-    self.eval_skip_train = eval_skip_train
-
-  def __enter__(
-      self,
-  ) -> Tuple[SummaryWriter, SummaryWriter, SummaryWriter, SummaryWriter]:
-    self.train_summary_writer = self.enter_context(
-        self.summary_writer(self.summary_train_dir)
-    )
-    self.eval_summary_writer = None
-    if not self.eval_skip_train:
-      self.eval_summary_writer = self.enter_context(
-          self.summary_writer(self.summary_eval_dir)
-      )
-    self.eval_test_summary_writers = [
-        self.enter_context(self.summary_writer(d))
-        for d in self.summary_eval_test_dirs
-    ]
-    self.decode_summary_writers = [
-        self.enter_context(self.summary_writer(d))
-        for d in self.summary_decode_dirs
-    ]
-    return (
-        self.train_summary_writer,
-        self.eval_summary_writer,
-        self.eval_test_summary_writers,
-        self.decode_summary_writers,
-    )
-
-
 def train_and_evaluate_pmap(
-    task_p: tasks_lib.SingleTask.HParams,
+    task: tasks_lib.SingleTask,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    partitioner: partitioning.Partitioner,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -886,10 +910,11 @@ def train_and_evaluate_pmap(
   """Runs the training and evaluation loop with PMAP.
 
   Args:
-    task_p: HParams for the task encapsulating the data parallel model.
+    task: The task encapsulating the data parallel model.
     train_input_p: HParams for the train data input pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
+    partitioner: Used for partitioning model functions.
     eval_input_p: list of hparams for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -902,8 +927,6 @@ def train_and_evaluate_pmap(
 
   logging.info('Using pmap for data parallelism.')
   (
-      task,
-      partitioner,
       train_program,
       test_eval_programs,
       partitioned_train_state,
@@ -911,14 +934,13 @@ def train_and_evaluate_pmap(
       prng_key,
       train_prng_seed,
       eval_prng_seed,
-      early_stopping_fn,
   ) = _create_program_and_states(
-      task_p,
+      task,
       train_input_p,
       eval_input_p,
       job_log_dir,
       checkpointer,
-      early_stopping_fn=early_stopping_fn,
+      partitioner,
       experiment_train_program=experiment_train_program,
   )
 
@@ -933,7 +955,7 @@ def train_and_evaluate_pmap(
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
         task,
         partitioner,
-        task_p,
+        task.hparams,
         partitioner.get_train_state_metadata().var_weight_hparams,
         decode_input_pipelines,
         decode_key,
@@ -962,10 +984,11 @@ def train_and_evaluate_pmap(
 
 
 def train_and_evaluate_spmd_model(
-    task_p: tasks_lib.SingleTask.HParams,
+    task: tasks_lib.SingleTask,
     train_input_p: base_input.BaseInput.HParams,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    partitioner: partitioning.Partitioner,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -975,10 +998,11 @@ def train_and_evaluate_spmd_model(
   """Runs the training and evaluation loop with PJIT.
 
   Args:
-    task_p: Params for task encapsulating the SPMD model.
+    task: The task encapsulating the SPMD model.
     train_input_p: Params for the train data pipeline.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
+    partitioner: Used for partitioning model functions.
     eval_input_p: list of params for the eval input pipelines.
     decode_input_p: list of hparams for the decode input pipelines.
     early_stopping_fn: An optional callable object for reporting eval metrics
@@ -991,8 +1015,6 @@ def train_and_evaluate_spmd_model(
   """
   logging.info('Using SPMD sharding for model parallelism.')
   (
-      task,
-      partitioner,
       train_program,
       test_eval_programs,
       partitioned_train_state,
@@ -1000,15 +1022,14 @@ def train_and_evaluate_spmd_model(
       prng_key,
       train_prng_seed,
       eval_prng_seed,
-      early_stopping_fn,
   ) = _create_program_and_states(
-      task_p,
+      task,
       train_input_p,
       eval_input_p,
       job_log_dir,
       checkpointer,
+      partitioner,
       enable_auto_sharding,
-      early_stopping_fn,
       experiment_train_program,
   )
 
@@ -1049,7 +1070,7 @@ def train_and_evaluate_spmd_model(
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
         task,
         partitioner,
-        task_p,
+        task.hparams,
         padded_decode_input_pipelines,
         job_log_dir,
         decode_key,
@@ -1080,42 +1101,38 @@ def train_and_evaluate_spmd_model(
 
 
 def _create_program_and_states(
-    task_p: tasks_lib.SingleTask.HParams,
+    jax_task: tasks_lib.SingleTask,
     train_input_p: base_input.BaseInput.HParams,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
+    partitioner: partitioning.Partitioner,
     enable_auto_sharding: bool = False,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     experiment_train_program: Optional[programs.BaseTrainProgram] = None,
-):
+) -> Tuple[
+    programs.BaseTrainProgram,
+    Sequence[programs.BaseEvalProgram],
+    TrainState,
+    int,
+    PRNGKey,
+    PRNGKey,
+    PRNGKey,
+]:
+  task_p = jax_task.hparams
   reshard_inputs = checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
-  jax_task = instantiate(task_p)
   root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
 
-  # Avoid creating the paritioner/input twice if the train program is defined.
-  # TODO(laigd): move this to the BaseExecutor class.
-  if experiment_train_program is not None:
-    partitioner = experiment_train_program.partitioner
-    train_input_pipeline = experiment_train_program.train_input
-  else:
-    # The partitioner only needs shape/dtype information of the prng key.
-    # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key
-    # instead.
-    partitioner = partitioning.create_partitioner(
-        jax_task,
-        reshard_inputs=reshard_inputs,
-        auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
-    )
-    train_input_p = partitioner.preprocess_input_params(train_input_p)
-    train_input_pipeline = instantiate(train_input_p)
-    partitioner.setup(
-        jax_task,
-        root_prng_key,
-        train_inputs_shape_dtype=None,
-        train_input_pipeline=train_input_pipeline,
-        job_log_dir=job_log_dir,
-    )
+  # The partitioner only needs shape/dtype information of the prng key.
+  # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
+  train_input_p = partitioner.preprocess_input_params(train_input_p)
+  train_input_pipeline = instantiate(train_input_p)
+  partitioner.setup(
+      jax_task,
+      root_prng_key,
+      train_inputs_shape_dtype=None,
+      train_input_pipeline=train_input_pipeline,
+      job_log_dir=job_log_dir,
+  )
   train_state_metadata = partitioner.get_train_state_metadata()
 
   # JaxContext needed for shared layer lookup from global scope.
@@ -1148,6 +1165,8 @@ def _create_program_and_states(
   if experiment_train_program:
     logging.info('Using customized train program.')
     train_program = experiment_train_program
+    train_program.set_partitioner(partitioner)
+    train_program.set_train_input(train_input_pipeline)
   else:
     train_program = programs.SingleTaskTrainProgram(
         jax_task, train_input_pipeline, partitioner
@@ -1159,15 +1178,6 @@ def _create_program_and_states(
   train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
   eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
 
-  if jax_task.early_stopping_fn is not None:
-    if early_stopping_fn is None:
-      early_stopping_fn = jax_task.early_stopping_fn
-    else:
-      raise ValueError(
-          'early_stopping_fn is set in both task and '
-          'train_and_evel function parameter.'
-      )
-
   # Construct a list of Eval programs on test data.
   test_eval_programs = [
       programs.SingleTaskEvalProgram(jax_task, e_input_p, partitioner)
@@ -1178,8 +1188,6 @@ def _create_program_and_states(
   )
 
   return (
-      jax_task,
-      partitioner,
       train_program,
       test_eval_programs,
       partitioned_train_state,
@@ -1187,7 +1195,6 @@ def _create_program_and_states(
       prng_key,
       train_prng_seed,
       eval_prng_seed,
-      early_stopping_fn,
   )
 
 
@@ -1198,7 +1205,7 @@ def _train_and_evaluate_common(
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
-    test_eval_programs: Sequence[programs.SingleTaskEvalProgram],
+    test_eval_programs: Sequence[programs.BaseEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,
@@ -1245,10 +1252,6 @@ def _train_and_evaluate_common(
         partitioned_train_state,
         is_vars_replicated=is_vars_replicated,
     )
-    summary_utils.write_total_num_params(train_summary_writer, total_num_params)
-    summary_utils.write_global_batch_size(
-        train_summary_writer, train_program.train_unpadded_global_batch_size
-    )
 
     # TODO(laigd): consider moving this into train program.
     train_summary_handler = summary_utils.SummaryHandler(
@@ -1277,6 +1280,13 @@ def _train_and_evaluate_common(
         step_i,
         train_summary_handler,
         eval_summary_handler,
+    )
+
+    # Note: we need to access train_unpadded_global_batch_size after train
+    # program is setup.
+    summary_utils.write_total_num_params(train_summary_writer, total_num_params)
+    summary_utils.write_global_batch_size(
+        train_summary_writer, train_program.train_unpadded_global_batch_size
     )
 
     # Start the train loop. Make sure all at the same step.

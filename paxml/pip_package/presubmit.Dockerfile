@@ -9,7 +9,7 @@ RUN mv /praxis/praxis /paxml/ && mv /paxml_new/paxml /paxml/
 RUN pip3 uninstall -y fiddle
 RUN pip3 uninstall -y seqio
 RUN pip3 uninstall -y jax
-RUN pip3 install -r /paxml/paxml/pip_package/requirements.txt
+RUN pip3 install --no-deps -r /paxml/paxml/pip_package/requirements.txt
 RUN cd /paxml && bazel build ...
 
 # RUN cd /paxml && bazel test paxml/... --test_output=all --test_verbose_timeout_warnings

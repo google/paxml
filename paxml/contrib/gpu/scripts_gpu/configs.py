@@ -13,16 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Configurations for GPU models."""
+
+import fiddle as fdl
 import jax.numpy as jnp
-from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam, C4SpmdPipelineGpt3AdamOrgHP
-from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset, PileUnsupervisedDataset
 from paxml import experiment_registry
 from paxml import tasks_lib
+from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
+from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
+from paxml.tasks.lm.params.c4 import C4SpmdPipelineGpt3AdamOrgHP
+from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
 from praxis import schedules
 from praxis.layers import transformers
+
 
 WeightInit = base_layer.WeightInit
 
@@ -60,9 +66,11 @@ def configure_gpt3_task(
     model_p.lm_tpl.position_emb_tpl.lookup_style = cls.EMBEDDING_LOOKUP_STYLE
 
   stacked_p = model_p.lm_tpl.stacked_transformer_tpl
-  if stacked_p.cls == transformers.PipelinedTransformer:
+  if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
     stacked_p = stacked_p.pipeline_stage
-  if issubclass(stacked_p.cls, transformers.StackedTransformerRepeated):
+  if issubclass(
+      fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+  ):
     stacked_p = stacked_p.block
   transformer_layer_p = stacked_p.transformer_layer_params_tpl
 
@@ -89,17 +97,17 @@ def configure_gpt3_task(
 ## 8 node
 @experiment_registry.register
 class GPT126M(TransformerLmSpmdAdam):
-    
+
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [64,1,1]
   FPROP_DTYPE = jnp.bfloat16
   MAX_STEPS = 600000
-  
+
   MAX_SEQ_LEN = 2048
   VOCAB_SIZE = 50304
   PACKED_INPUT = True
   PERCORE_BATCH_SIZE = 4
-  
+
   NUM_LAYERS = 12
   NUM_HEADS = 12
   MODEL_DIMS = 768
@@ -108,14 +116,14 @@ class GPT126M(TransformerLmSpmdAdam):
 
   TRAINABLE_POSITION_EMB = True
   TRAINABLE_PE_MAX_SEQ_LEN = MAX_SEQ_LEN
-  
+
   USE_BIAS = True
   LAYERNORM_EPSILON = 1e-5
   ATTEN_LOGIT_CAP = -1.0
   INIT_STD = 0.023
   SOFTMAX_INIT_STD = 0.023
   ACTIVATION_CLS = layers.GELU
-    
+
   ## optimizer-related
   ADAM_BETA1 = 0.9
   ADAM_BETA2 = 0.95
@@ -134,31 +142,32 @@ class GPT126M(TransformerLmSpmdAdam):
   R_COS_MIN_RATIO = 0.1
   LR_COS_MAX = 1.0
 
-  
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
     task_p.train.num_train_steps = self.MAX_STEPS
-    
+
     model_p = task_p.model
-    
+
     ### compute layernorm reductions in fp32. Needed for stable training on GPUs
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl
-    if stacked_p.cls == transformers.PipelinedTransformer:
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
-    if issubclass(stacked_p.cls, transformers.StackedTransformerRepeated):
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
       stacked_p = stacked_p.block
     transformer_layer_p = stacked_p.transformer_layer_params_tpl
     transformer_layer_p.ln_tpl.reductions_in_fp32 = True
     transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
     task_p.model.lm_tpl.final_ln_tpl.reductions_in_fp32 = True
-    
+
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
     softmax_init = WeightInit.Gaussian(self.SOFTMAX_INIT_STD)
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
-    
+
     model_p.apply_eval_sample_weights = True
-    
+
     return task_p
 
 @experiment_registry.register
@@ -209,7 +218,7 @@ class GPT5B(Pile126M):
 ## 96 node
 @experiment_registry.register
 class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
-    
+
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [2,1,1,4]
   DCN_MESH_SHAPE = [8,12,1,1]
@@ -219,28 +228,29 @@ class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
   MAX_STEPS = 75000
 
   LEARNING_RATE = 2e-5
-  
+
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = super().task()
     model_p = task_p.model
-    
+
     ### compute layernorm reductions in fp32. Needed for stable training on GPUs
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl
-    if stacked_p.cls == transformers.PipelinedTransformer:
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
-    if issubclass(stacked_p.cls, transformers.StackedTransformerRepeated):
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
       stacked_p = stacked_p.block
     transformer_layer_p = stacked_p.transformer_layer_params_tpl
-    
+
     transformer_layer_p.ln_tpl.reductions_in_fp32 = True
     transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
     task_p.model.lm_tpl.final_ln_tpl.reductions_in_fp32 = True
-    
+
     return task_p
 
 ## single node training
 @experiment_registry.register
 class SmallPileTest(Pile126M):
   """Base config for an SPMD model."""
-  ICI_MESH_SHAPE = [8,1,1]
-    
+  ICI_MESH_SHAPE = [8, 1, 1]

@@ -38,6 +38,7 @@ pytype_library(
     tags = ["keep_dep"],
     deps = [
         # Implicit absl.logging dependency.
+        # Implicit fiddle dependency.
         # Implicit jax dependency.
         "//paxml:base_experiment",
         "//paxml:experiment_registry",
@@ -70,8 +71,8 @@ py_strict_test(
     deps = [
         ":params",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle dependency.
         # Implicit jax dependency.
-        "//praxis:base_hyperparams",
         "//praxis:optimizers",
         "//praxis:schedules",
         "//praxis:test_utils",

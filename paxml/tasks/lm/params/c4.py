@@ -20,6 +20,7 @@ import math
 from typing import Dict, List, Optional
 
 from absl import logging
+import fiddle as fdl
 import jax
 from jax import numpy as jnp
 from paxml import base_experiment
@@ -342,7 +343,7 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
     model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
 
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
-    if stacked_p.cls == transformers.PipelinedTransformer:
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if self.USE_REPEATED_LAYER:
       stacked_p = stacked_p.block
@@ -400,7 +401,7 @@ class TransformerLmSpmdPipelineAdam(
     model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
 
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
-    if stacked_p.cls == transformers.PipelinedTransformer:
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if self.USE_REPEATED_LAYER:
       stacked_p = stacked_p.block
@@ -495,9 +496,11 @@ def configure_gpt3_task(
     model_p.lm_tpl.position_emb_tpl.lookup_style = cls.EMBEDDING_LOOKUP_STYLE
 
   stacked_p = model_p.lm_tpl.stacked_transformer_tpl
-  if stacked_p.cls == transformers.PipelinedTransformer:
+  if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
     stacked_p = stacked_p.pipeline_stage
-  if issubclass(stacked_p.cls, transformers.StackedTransformerRepeated):
+  if issubclass(
+      fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+  ):
     stacked_p = stacked_p.block
   transformer_layer_p = stacked_p.transformer_layer_params_tpl
 

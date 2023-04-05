@@ -72,6 +72,7 @@ def pax_targets(
         add_main_gpu_target = True,
         add_main_mpm_target = True,
         main_kwargs = None,
+        add_smoke_test = True,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
         smoke_test_args = None,
@@ -103,6 +104,7 @@ def pax_targets(
       add_main_gpu_target: Build with jax GPU dependency.
       add_main_mpm_target: Add a ':main_mpm' target.
       main_kwargs: dict of args to provide when building main binary.
+      add_smoke_test: Whether to add the :all_experiments_smoke_test target.
       smoke_test_args: The list of command line arguments that can be passed to the
        :all_experiments_smoke_test target.
       smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
@@ -182,31 +184,32 @@ def pax_targets(
 
         # Google-internal tests.
 
-    test_name = "all_experiments_smoke_test"
-    test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
+    if add_smoke_test:
+        test_name = "all_experiments_smoke_test"
+        test_name = test_name if not prefix_name else "%s_%s" % (prefix_name, test_name)
 
-    smoke_test_args = smoke_test_args or []
-    if smoke_test_exclude_regexes:
-        smoke_test_args.append("--exclude_regexes=" + _shell_quote(smoke_test_exclude_regexes))
-    if smoke_test_include_only_regexes:
-        smoke_test_args.append("--include_only_regexes=" + _shell_quote(smoke_test_include_only_regexes))
+        smoke_test_args = smoke_test_args or []
+        if smoke_test_exclude_regexes:
+            smoke_test_args.append("--exclude_regexes=" + _shell_quote(smoke_test_exclude_regexes))
+        if smoke_test_include_only_regexes:
+            smoke_test_args.append("--include_only_regexes=" + _shell_quote(smoke_test_include_only_regexes))
 
-    smoke_test_kwargs = smoke_test_kwargs or {}
-    _export_test(
-        name = test_name,
-        test_src = "//paxml:experiment_imports_all_test.py",
-        exp_sources = exp_sources,
-        deps = [
-            # Implicit absl.app dependency.
-            # Implicit absl.flags dependency.
-            # Implicit absl.testing.absltest.absltest dependency.
-            "//paxml:experiment_imports_test_helper",
-            "//paxml:experiment_registry",
-        ] + extra_deps,
-        timeout = "long",
-        args = smoke_test_args,
-        **smoke_test_kwargs
-    )
+        smoke_test_kwargs = smoke_test_kwargs or {}
+        _export_test(
+            name = test_name,
+            test_src = "//paxml:experiment_imports_all_test.py",
+            exp_sources = exp_sources,
+            deps = [
+                # Implicit absl.app dependency.
+                # Implicit absl.flags dependency.
+                # Implicit absl.testing.absltest.absltest dependency.
+                "//paxml:experiment_imports_test_helper",
+                "//paxml:experiment_registry",
+            ] + extra_deps,
+            timeout = "long",
+            args = smoke_test_args,
+            **smoke_test_kwargs
+        )
 
     dump_hparams_name = "dump_hparams"
     dump_hparams_name = dump_hparams_name if not prefix_name else "%s_%s" % (

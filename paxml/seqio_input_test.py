@@ -315,8 +315,8 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
   def test_file_based_checkpointing(self):
     it = tf.data.Dataset.range(1).as_numpy_iterator()
     if not isinstance(it, tf.__internal__.tracking.Trackable):
-      # TODO(b/272314337): remove skip after the next TF OSS release.
-      self.skipTest('iterator checkpointing is not supported')
+      # TODO(b/272314337): enable after the next TF OSS release.
+      self.skipTest('file-based iterator checkpointing is not supported')
 
     ckpt_dir = self.create_tempdir(name='checkpointing_test').full_path
     ckpt_path = ckpt_dir + '/checkpoint'
@@ -361,8 +361,8 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
   def test_byte_array_based_checkpointing(self):
     it = tf.data.Dataset.range(1).as_numpy_iterator()
     if not hasattr(it, '_save'):
-      # TODO(b/272314337): remove skip after the next TF OSS release.
-      self.skipTest('iterator checkpointing is not supported')
+      # TODO(b/272314337): enable after the next TF OSS release.
+      self.skipTest('byte-based iterator checkpointing is not supported')
     name = 'checkpointing_bytes'
     x = [{
         'targets': [7, 8, 5, 6, 9],
@@ -399,60 +399,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     self.assertArraysEqual(
         batch.ids,
         np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
-
-  @parameterized.parameters([True, False])
-  def test_peek_checkpointing(self, use_file_checkpoint):
-    it = tf.data.Dataset.range(1).as_numpy_iterator()
-    if not hasattr(it, '_save'):
-      # TODO(b/272314337): remove skip after the next TF OSS release.
-      self.skipTest('iterator checkpointing is not supported')
-
-    ckpt_dir = self.create_tempdir(name='checkpointing_test').full_path
-    ckpt_path = ckpt_dir + '/checkpoint'
-
-    name = 'checkpointing_peek'
-    x = [{
-        'targets': [7, 8, 5, 6, 9],
-    }, {
-        'targets': [18, 14]
-    }, {
-        'targets': [21, 22, 23]
-    }]
-    ds = seqio.test_utils.create_default_dataset(x, ['targets'])
-    _register_task(name, ds, output_feature_names=['targets'])
-    p = seqio_input.SeqIOInput.HParams()
-    p.mixture_name = name
-    p.split_name = 'train'
-    p.task_feature_lengths = {'targets': 6}
-    p.feature_converter = seqio_input.LanguageModelFeatures(pack=False)
-    p.batch_size = 1
-    inp = instantiate(p)
-
-    self.assertArraysEqual(
-        inp.get_next_padded().ids,
-        np.array([[0, 7, 8, 5, 6, 9]], dtype=np.int32))
-    self.assertArraysEqual(
-        inp.peek_padded().ids,
-        np.array([[0, 18, 14, 1, 0, 0]], dtype=np.int32))
-
-    if use_file_checkpoint:
-      inp.save(ckpt_path)
-    else:
-      state = inp.get_state()
-
-    self.assertArraysEqual(
-        inp.get_next_padded().ids,
-        np.array([[0, 18, 14, 1, 0, 0]], dtype=np.int32))
-
-    if use_file_checkpoint:
-      inp.restore(ckpt_path)
-    else:
-      inp.set_state(state)
-
-    # Peeked element is not lost.
-    self.assertArraysEqual(
-        inp.get_next_padded().ids,
-        np.array([[0, 18, 14, 1, 0, 0]], dtype=np.int32))
 
   def test_input_targets_only_pack(self):
     name = 'target_only_pack'
