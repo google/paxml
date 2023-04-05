@@ -759,12 +759,6 @@ def train_step_single_learner(
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
-    # Make updated nontrainable variable peekable from GradientTransformers.
-    # Some optimizers, e.g. `optimizers.DynamicAccumulator`, assume special
-    # non-trainable variables being set during fprop for controlling their
-    # behavior.
-    if NON_TRAINABLE in fwd_updated_vars:
-      mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
     transformed_grads, new_opt_states = learner.update_states(
         grads, states.opt_states[0], mdl_vars, var_weight_hparams)
     mdl_vars = learner.apply_gradient(mdl_vars, transformed_grads,
