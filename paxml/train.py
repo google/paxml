@@ -871,10 +871,14 @@ def train_and_evaluate(
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
     )
 
+  # Creates the train program.
+  train_program = experiment_config.train_program()
+
   if task_p.model.ici_mesh_shape is not None:
     train_and_evaluate_spmd_model(
         jax_task,
         train_input_p,
+        train_program,
         job_log_dir,
         checkpointer,
         partitioner,
@@ -882,19 +886,18 @@ def train_and_evaluate(
         decode_input_p,
         early_stopping_fn,
         enable_auto_sharding,
-        experiment_train_program=experiment_config.train_program(),
     )
   else:
     train_and_evaluate_pmap(
         jax_task,
         train_input_p,
+        train_program,
         job_log_dir,
         checkpointer,
         partitioner,
         eval_input_p,
         decode_input_p,
         early_stopping_fn,
-        experiment_train_program=experiment_config.train_program(),
     )
   checkpointer.wait_until_finished()  # No-op if not async.
 
@@ -902,19 +905,20 @@ def train_and_evaluate(
 def train_and_evaluate_pmap(
     task: tasks_lib.SingleTask,
     train_input_p: base_input.BaseInput.HParams,
+    train_program: programs.BaseTrainProgram,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     partitioner: partitioning.Partitioner,
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ) -> None:
   """Runs the training and evaluation loop with PMAP.
 
   Args:
     task: The task encapsulating the data parallel model.
     train_input_p: HParams for the train data input pipeline.
+    train_program: The program used for model training.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
     partitioner: Used for partitioning model functions.
@@ -924,13 +928,11 @@ def train_and_evaluate_pmap(
       and determining whether to early stop current training. The callable
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
-    experiment_train_program: An embedded train_program that's constructed in
-      experiment. If specified, the program will be used for train steps.
   """
 
   logging.info('Using pmap for data parallelism.')
   (
-      train_program,
+      train_input,
       test_eval_programs,
       partitioned_train_state,
       total_num_params,
@@ -944,7 +946,6 @@ def train_and_evaluate_pmap(
       job_log_dir,
       checkpointer,
       partitioner,
-      experiment_train_program=experiment_train_program,
   )
 
   def partition_decode_once_fns(prng_key, decode_input_p):
@@ -971,6 +972,7 @@ def train_and_evaluate_pmap(
       task,
       partitioner,
       train_program,
+      train_input,
       partitioned_train_state,
       prng_key,
       test_eval_programs,
@@ -989,6 +991,7 @@ def train_and_evaluate_pmap(
 def train_and_evaluate_spmd_model(
     task: tasks_lib.SingleTask,
     train_input_p: base_input.BaseInput.HParams,
+    train_program: programs.BaseTrainProgram,
     job_log_dir: epath.Path,
     checkpointer: _TrainingCheckpointer,
     partitioner: partitioning.Partitioner,
@@ -996,13 +999,13 @@ def train_and_evaluate_spmd_model(
     decode_input_p: Sequence[base_input.BaseInput.HParams],
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     enable_auto_sharding: bool = False,
-    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ) -> None:
   """Runs the training and evaluation loop with PJIT.
 
   Args:
     task: The task encapsulating the SPMD model.
     train_input_p: Params for the train data pipeline.
+    train_program: The program used for model training.
     job_log_dir: Directory for the job logs.
     checkpointer: Callbacks for checkpointing.
     partitioner: Used for partitioning model functions.
@@ -1013,12 +1016,10 @@ def train_and_evaluate_spmd_model(
       object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
       should_stop_early.
     enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
-    experiment_train_program: An embedded train_program that's constructed in
-      experiment. If specified, the program will be used for train steps.
   """
   logging.info('Using SPMD sharding for model parallelism.')
   (
-      train_program,
+      train_input,
       test_eval_programs,
       partitioned_train_state,
       total_num_params,
@@ -1033,7 +1034,6 @@ def train_and_evaluate_spmd_model(
       checkpointer,
       partitioner,
       enable_auto_sharding,
-      experiment_train_program,
   )
 
   def partition_decode_once_fns(
@@ -1088,6 +1088,7 @@ def train_and_evaluate_spmd_model(
       task,
       partitioner,
       train_program,
+      train_input,
       partitioned_train_state,
       prng_key,
       test_eval_programs,
@@ -1111,9 +1112,8 @@ def _create_program_and_states(
     checkpointer: _TrainingCheckpointer,
     partitioner: partitioning.Partitioner,
     enable_auto_sharding: bool = False,
-    experiment_train_program: Optional[programs.BaseTrainProgram] = None,
 ) -> Tuple[
-    programs.BaseTrainProgram,
+    base_input.BaseInput,
     Sequence[programs.BaseEvalProgram],
     TrainState,
     int,
@@ -1146,12 +1146,15 @@ def _create_program_and_states(
     )
 
   # Restore TrainState from checkpoint or initialize it.
-  train_input = (
+  train_input_for_checkpoint = (
       train_input_pipeline if task_p.train.enable_input_checkpointing else None
   )
   partitioned_train_state, total_num_params, root_prng_key = (
       checkpointer.get_model_states(
-          partitioner, train_state_metadata, root_prng_key, train_input
+          partitioner,
+          train_state_metadata,
+          root_prng_key,
+          train_input_for_checkpoint,
       )
   )
 
@@ -1164,15 +1167,6 @@ def _create_program_and_states(
   if not task_p.train.enable_input_checkpointing:
     train_input_pipeline = _maybe_update_latest_model_step(
         train_input_pipeline, train_input_p, initial_global_step
-    )
-  if experiment_train_program:
-    logging.info('Using customized train program.')
-    train_program = experiment_train_program
-    train_program.set_partitioner(partitioner)
-    train_program.set_train_input(train_input_pipeline)
-  else:
-    train_program = programs.SingleTaskTrainProgram(
-        jax_task, train_input_pipeline, partitioner
     )
 
   prng_key, train_prng_seed, eval_prng_seed = jax.random.split(root_prng_key, 3)
@@ -1191,7 +1185,7 @@ def _create_program_and_states(
   )
 
   return (
-      train_program,
+      train_input_pipeline,
       test_eval_programs,
       partitioned_train_state,
       total_num_params,
@@ -1205,6 +1199,7 @@ def _train_and_evaluate_common(
     task: tasks_lib.SingleTask,
     partitioner: partitioning.Partitioner,
     train_program: programs.BaseTrainProgram,
+    train_input: base_input.BaseInput,
     partitioned_train_state,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
@@ -1223,8 +1218,8 @@ def _train_and_evaluate_common(
   task_p = task.hparams
   train_p = task_p.train
   train_state_metadata = partitioner.get_train_state_metadata()
-  train_input = (
-      train_program.train_input if train_p.enable_input_checkpointing else None
+  train_input_for_checkpoint = (
+      train_input if train_p.enable_input_checkpointing else None
   )
 
   if decode_input_p:
@@ -1278,6 +1273,9 @@ def _train_and_evaluate_common(
         )
     )
     train_program.setup(
+        task,
+        train_input,
+        partitioner,
         train_prng_seed,
         eval_prng_seed,
         step_i,
@@ -1305,7 +1303,7 @@ def _train_and_evaluate_common(
           step_i,
           partitioned_train_state,
           train_state_metadata.partition_specs,
-          train_input,
+          train_input_for_checkpoint,
       )
 
       if not train_program.should_run(partitioned_train_state, step_i):
@@ -1430,7 +1428,7 @@ def _train_and_evaluate_common(
         step_i,
         partitioned_train_state=partitioned_train_state,
         train_state_pspecs=train_state_metadata.partition_specs,
-        train_input_pipeline=train_input,
+        train_input_pipeline=train_input_for_checkpoint,
     )
 
     checkpointer.wait_until_finished()
