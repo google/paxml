@@ -867,18 +867,19 @@ def train_and_evaluate(
   train_program = experiment_config.train_program()
 
   if task_p.model.ici_mesh_shape is not None:
-    train_and_evaluate_spmd_model(
-        jax_task,
-        train_input_p,
-        train_program,
-        job_log_dir,
-        checkpointer,
-        partitioner,
-        eval_input_p,
-        decode_input_p,
-        early_stopping_fn,
-        enable_auto_sharding,
-    )
+    with partitioner.global_mesh:
+      train_and_evaluate_spmd_model(
+          jax_task,
+          train_input_p,
+          train_program,
+          job_log_dir,
+          checkpointer,
+          partitioner,
+          eval_input_p,
+          decode_input_p,
+          early_stopping_fn,
+          enable_auto_sharding,
+      )
   else:
     train_and_evaluate_pmap(
         jax_task,
