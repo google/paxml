@@ -495,38 +495,6 @@ def _maybe_aggregate_metrics_summaries(
           aggregated_summaries, per_example_out)
 
 
-# TODO(pax-dev): Delete after all users are removed.
-def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
-  """A helper function to zero out grads for non-learnable vars.
-
-  Args:
-    grads: a nested structure of var gradients.
-    var_weight_hparams: a nested structure of the variable weight params.
-      var_weight_hparams must have the same structure as grads.
-
-  Returns:
-    grads with gradient for non-learnable vars zero-ed out.
-  """
-  asserts.assert_same_structure(grads, var_weight_hparams)
-  var_is_learnable = jax.tree_util.tree_map(
-      lambda x: not base_layer.var_not_trainable(x), var_weight_hparams)
-
-  def _maybe_zero_out_grad_fn(var_grad, var_learnable):
-    if var_learnable:
-      return var_grad
-    elif var_grad.dtype == jax.dtypes.float0:
-      # Gradient of an integer-valued input cannot be consumed by jnp operation.
-      # Zeros dtype should be int32 same as the original input that produced
-      # float0.
-      return jnp.zeros_like(var_grad, dtype=jnp.int32)
-    else:
-      return jnp.zeros_like(var_grad)
-
-  # Zero-out gradient for non-learnable vars.
-  return jax.tree_util.tree_map(_maybe_zero_out_grad_fn, grads,
-                                var_is_learnable)
-
-
 def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
                                           var_weight_hparams):
   """A helper function to synchronize non-learnable vars for pmap training.
