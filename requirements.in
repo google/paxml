@@ -15,5 +15,6 @@ pyglove==0.3.0
 seqio==0.0.15
 t5==0.9.3
 tensorflow==2.9.3
+tensorflow-datasets==4.8.3
 tensorflow-text==2.9.0
 tensorstore==0.1.35
