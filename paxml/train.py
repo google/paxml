@@ -348,14 +348,6 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     """Restore using CheckpointManager, setting up additional args."""
     restore_args = None
     if py_utils.pmap_use_tensorstore():
-      # TODO(gaoi) add support for input checkpointing using tensorstore
-      if train_input_pipeline:
-        raise ValueError(
-            'Input checkpointing is not supported when using'
-            ' pmap_use_tensorstore=True. Please set'
-            ' Task.Train.enable_input_checkpoint=False'
-        )
-
       def _get_spec(shape):
         if shape.shape:
           return jax.sharding.PartitionSpec(None)
