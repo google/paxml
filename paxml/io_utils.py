@@ -332,9 +332,11 @@ def checkpoint_progress(job_log_dir: epath.Path, checkpoint_step: Optional[int],
       fname.unlink()
 
 
-def get_checkpoint_step(job_log_dir: epath.Path,
-                        restore_checkpoint_dir: epath.Path,
-                        mode: EvaluationMode) -> Optional[int]:
+def get_checkpoint_step(
+    job_log_dir: epath.Path,
+    restore_checkpoint_dir: epath.Path,
+    mode: EvaluationMode,
+) -> int:
   """Gets the latest checkpoint step to eval/decode on.
 
   Args:
@@ -361,5 +363,4 @@ def get_checkpoint_step(job_log_dir: epath.Path,
     logging.info('Resuming %s from step %d.', mode.value, step)
     return step
 
-  return checkpoints.retrieve_latest_checkpoint_step(
-      restore_checkpoint_dir)
+  return checkpoints.retrieve_latest_checkpoint_step(restore_checkpoint_dir)

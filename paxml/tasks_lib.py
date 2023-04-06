@@ -1580,8 +1580,6 @@ class SingleTask(base_task.BaseTask):
           state_specs=train_state_pspecs,
           step=rules.step)
 
-    if loaded_train_state is None:
-      raise RuntimeError(f'Cannot find checkpoint from {ckpt_path}')
     # Use NestedMap's utility accessors
     loaded_vars = dict(NestedMap(loaded_train_state.mdl_vars).FlattenItems())
 

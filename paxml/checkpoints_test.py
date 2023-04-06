@@ -116,6 +116,23 @@ class CheckpointsTest(parameterized.TestCase):
         expected_format,
     )
 
+  def test_retrieve_latest_checkpoint_step_no_checkpoint_raises_exception(self):
+    checkpoint_dir = epath.Path(self.create_tempdir('random').full_path)
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        f'No checkpoints were found in directory {checkpoint_dir=!r}',
+    ):
+      checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+
+  def test_retrieve_latest_checkpoint_step_dir_does_not_exist_raises_exception(
+      self,
+  ):
+    checkpoint_dir = epath.Path('does_not_exist')
+    with self.assertRaisesWithLiteralMatch(
+        ValueError, f'{checkpoint_dir=!r} does not exist'
+    ):
+      checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+
 
 class PaxMetadataTest(absltest.TestCase):
 
