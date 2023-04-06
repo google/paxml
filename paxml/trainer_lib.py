@@ -495,6 +495,7 @@ def _maybe_aggregate_metrics_summaries(
           aggregated_summaries, per_example_out)
 
 
+# TODO(pax-dev): Delete after all users are removed.
 def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
   """A helper function to zero out grads for non-learnable vars.
 
@@ -668,7 +669,7 @@ def train_step_single_learner(
       states.step, states.mdl_vars, var_weight_hparams, prng_key)
 
   def _loss_fn(
-      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key
+      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
   ) -> Tuple[JTensor, sgf.GradAuxInfo]:
     """Computes loss as well as other auxiliary outputs."""
     if fprop_dtype == jnp.float32:
@@ -716,19 +717,37 @@ def train_step_single_learner(
 
   prng_key, subkey = jax.random.split(prng_key)
 
-  # Layers may have integer-valued non-trainable vars. `allow_int=True` is
-  # needed to allow jax.grad to differentiate wrt integer-values.
-  # However, the gradient of an integer input will have a trivial vector-space
-  # dtype (float0). They cannot be consumed by jnp operations.
-  # _zero_gradient_for_non_learnable_vars needs to handle jax.dtypes.float0
-  # specially.
+  # Skip variables for gradients.
+  excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
+      var_weight_hparams, learner
+  )
 
-  if learner.stochastic_gradient is None:
-    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
-  else:
-    grad_fn = functools.partial(
-        learner.stochastic_gradient.grad_fn, _loss_fn
+  def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
+    with_grad = tasks_lib.filter_vars_for_grad(mdl_vars, excluded_for_grad)
+    no_grad = jax.tree_map(
+        lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
     )
+
+    def _loss(
+        mdl_vars_grad: NestedJTensor,
+        mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+        prng_key: PRNGKey,
+    ):
+      mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
+      merged_vars = jax.tree_map(
+          lambda e, x, y: y if e else x,
+          excluded_for_grad,
+          mdl_vars_grad,
+          mdl_vars_nograd,
+      )
+      return _loss_fn(merged_vars, inputs, prng_key)
+
+    if learner.stochastic_gradient is None:
+      g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
+    else:
+      g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
+    return g(with_grad, (no_grad, inputs), prng_key)
+
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
   (
@@ -745,8 +764,6 @@ def train_step_single_learner(
 
   # Carry out backward computation under a JaxContext.
   with base_layer.JaxContext.new_context(hparams=context_p):
-    grads = _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams)
-
     if base_layer.is_running_under_pmap():
       # Aggregate grads across different model replicas.
       grads = jax.lax.psum(grads, axis_name=PMAP_PARALLEL_AXIS_NAME)
@@ -759,10 +776,22 @@ def train_step_single_learner(
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
+    vars_with_grad = tasks_lib.filter_vars_for_grad(mdl_vars, excluded_for_grad)
+    wps_with_grad = tasks_lib.filter_vars_for_grad(
+        var_weight_hparams, excluded_for_grad
+    )
     transformed_grads, new_opt_states = learner.update_states(
-        grads, states.opt_states[0], mdl_vars, var_weight_hparams)
-    mdl_vars = learner.apply_gradient(mdl_vars, transformed_grads,
-                                      var_weight_hparams)
+        grads, states.opt_states[0], vars_with_grad, wps_with_grad
+    )
+    vars_with_grad = learner.apply_gradient(
+        vars_with_grad, transformed_grads, wps_with_grad
+    )
+    mdl_vars = jax.tree_map(
+        lambda e, old, new: old if e else new,
+        excluded_for_grad,
+        mdl_vars,
+        vars_with_grad,
+    )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
       if collection in states.mdl_vars:
@@ -773,22 +802,16 @@ def train_step_single_learner(
             states.mdl_vars[collection], fwd_updated_vars[collection],
             var_weight_hparams[collection])
 
-    # lastly, we avoid updating variables in learner.bprop_variable_exclusion.
-    if learner.hparams.bprop_variable_inclusion:
-      assert not learner.hparams.bprop_variable_exclusion, (
-          'Providing both bprop_variable_exclusion and bprop_variable_inclusion'
-          ' is not supported.'
-      )
-      mdl_vars = py_utils.update_matched_variables(
-          states.mdl_vars, mdl_vars, learner.hparams.bprop_variable_inclusion
-      )
-    else:
-      mdl_vars = py_utils.update_matched_variables(
-          states.mdl_vars,
-          mdl_vars,
-          learner.hparams.bprop_variable_exclusion,
-          invert=True,
-      )
+    # We may have updated non-trainable vars that have been explicitly excluded.
+    mdl_vars = jax.tree_map(
+        lambda e, old, new: old if e else new,
+        # Filter out only the explicitly masked non-trainables.
+        tasks_lib.get_excluded_var_mask_for_grad(
+            var_weight_hparams, learner, mask_all_non_trainable=False
+        ),
+        states.mdl_vars,
+        mdl_vars,
+    )
     new_states = states.new_state(
         mdl_vars=mdl_vars, opt_states=[new_opt_states])
     # Finally fetch all backward summary tensors. We do not aggregate the scalar

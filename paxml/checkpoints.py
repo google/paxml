@@ -669,8 +669,11 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       raise ValueError('Expected version for saving.')
     # Extract/flatten data structure to store to disk. Flax requires a flattened
     # data structure to be passed to the checkpointer.
+    # Keep bprop_masked_node to be consistent with restore. This allows us to
+    # restore a legacy checkpoint which uses placeholder tensors instead of mask
+    # nodes.
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
-        jax.device_get(item)
+        jax.device_get(item), is_leaf=py_utils.is_bprop_masked_node
     )
     checkpoint_target = {
         'flattened_state': flattened_state,
@@ -698,7 +701,9 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     if version is None:
       raise ValueError('Expected version for restoration.')
     # Input the same data structure as in save_checkpoint().
-    flattened_state, pytree_state = jax.tree_util.tree_flatten(item)
+    flattened_state, pytree_state = jax.tree_util.tree_flatten(
+        item, is_leaf=py_utils.is_bprop_masked_node
+    )
     str_pytree_state = str(pytree_state)
     input_target = {
         'flattened_state': flattened_state,
@@ -723,7 +728,16 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
           restored_str_pytree_state,
           str_pytree_state,
       )
-    return jax.tree_util.tree_unflatten(pytree_state, restored_state)
+    restored = jax.tree_util.tree_unflatten(pytree_state, restored_state)
+    # With bprop var inclusion, legacy checkpoint still has placeholder tensors
+    # the optimizer state.
+    restored = jax.tree_util.tree_map(
+        lambda x, y: x if py_utils.is_bprop_masked_node(x) else y,
+        item,
+        restored,
+        is_leaf=py_utils.is_bprop_masked_node,
+    )
+    return restored
 
 
 class FlaxCheckpointer(orbax.checkpoint.Checkpointer):

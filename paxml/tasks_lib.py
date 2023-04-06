@@ -121,6 +121,7 @@ def has_ema(task_p: SingleTask.HParams) -> bool:
 
 def extract_ema(
     model_states: train_states.TrainState,
+    merge_for_bprop_exclusion: bool = True,
 ) -> train_states.TrainState:
   """Finds the ema state from optimizer states."""
   if len(model_states.opt_states) != 1:
@@ -129,12 +130,14 @@ def extract_ema(
         f'`{len(model_states.opt_states)}`).'
     )
   vectorized = is_vectorized(model_states)
+  extracted = None
   if not vectorized:
     for v in model_states.opt_states[0]:
       if isinstance(v, dict) and 'ema' in v:
-        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
+        extracted = v.ema
+        break
   else:
-    ret = None
+    extracted = None
     # For vectorized model, the structure looks like this:
     # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
     # It is a list of dictionaries. The key corresponds to the #stages.
@@ -145,25 +148,32 @@ def extract_ema(
       if isinstance(item, tuple):
         for v in item:
           if isinstance(v, dict) and 'ema' in v:
-            if ret is None:
-              ret = v.ema
+            if extracted is None:
+              extracted = v.ema
             else:
-              ret = jax.tree_map(
+              extracted = jax.tree_map(
                   lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
-                  ret,
+                  extracted,
                   v.ema,
                   is_leaf=py_utils.is_optax_masked_node,
               )
-    ret = jax.tree_map(
+    extracted = jax.tree_map(
         lambda x: None if py_utils.is_optax_masked_node(x) else x,
-        ret,
+        extracted,
         is_leaf=py_utils.is_optax_masked_node,
     )
-    if ret is not None:
-      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
-  raise ValueError(
-      'Could not find EMA states in `%r`.' % model_states.opt_states
-  )
+  if extracted is None:
+    raise ValueError(
+        'Could not find EMA states in `%r`.' % model_states.opt_states
+    )
+  if merge_for_bprop_exclusion:
+    extracted = jax.tree_util.tree_map(
+        lambda x, y: y if py_utils.is_bprop_masked_node(x) else x,
+        extracted,
+        model_states.mdl_vars,
+        is_leaf=py_utils.is_bprop_masked_node
+    )
+  return TrainState(step=model_states.step, mdl_vars=extracted, opt_states={})
 
 
 def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
@@ -641,6 +651,43 @@ class CheckpointLoadingRules(NamedTuple):
       base_input.BaseInputSpecsProvider.HParams] = None
 
 
+def get_excluded_var_mask_for_grad(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+    mask_all_non_trainable: bool = True,
+) -> NestedMap:
+  """Returns booleans indication if each var should be excluded for grad."""
+  # Skip variables for gradients.
+  if learner.hparams.bprop_variable_inclusion:
+    assert not learner.hparams.bprop_variable_exclusion
+    excluded_for_grad = py_utils.match_variable_names(
+        var_weight_hparams, learner.hparams.bprop_variable_inclusion
+    )
+    excluded_for_grad = jax.tree_map(lambda x: not x, excluded_for_grad)
+  else:
+    excluded_for_grad = py_utils.match_variable_names(
+        var_weight_hparams, learner.hparams.bprop_variable_exclusion
+    )
+  if mask_all_non_trainable:
+    excluded_for_grad = jax.tree_util.tree_map(
+        lambda x, e: base_layer.var_not_trainable(x) or e,
+        var_weight_hparams,
+        excluded_for_grad,
+    )
+  return excluded_for_grad
+
+
+def filter_vars_for_grad(
+    mdl_vars: NestedMap, excluded_for_grad: NestedMap
+) -> NestedMap:
+  """Filters out vars that should be excluded for grad."""
+  return jax.tree_map(
+      lambda v, e: py_utils.BpropMaskedNode() if e else v,
+      mdl_vars,
+      excluded_for_grad,
+  )
+
+
 def create_state_partition_specs(
     var_weight_hparams: NestedJTensor,
     mesh_shape: Sequence[int],
@@ -671,16 +718,22 @@ def create_state_partition_specs(
   if discard_opt_states:
     opt_var_partition_specs = {}
   else:
-    grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
     opt_var_weight_hparams = []
-    for grad_tx in grad_txs:
+    for learner in learners:
+      excluded = get_excluded_var_mask_for_grad(var_weight_hparams, learner)
+      var_weight_hparams_for_opt = filter_vars_for_grad(
+          var_weight_hparams, excluded
+      )
+      grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
       assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
       opt_var_weight_hparams.append(
-          grad_tx.init_partition_spec(var_weight_hparams))
+          grad_tx.init_partition_spec(var_weight_hparams_for_opt)
+      )
     opt_var_partition_specs = base_layer.var_partition_specs(
         opt_var_weight_hparams,
         mesh_shape=mesh_shape,
-        device_axis_names=mesh_axis_names)
+        device_axis_names=mesh_axis_names,
+    )
 
     # Note that due to the double nesting of sharded chain we need to un-mask
     # the outer MaskedState() if present. If this is only a single optimizer
@@ -721,9 +774,15 @@ def _create_opt_states(
   Returns:
     A list of NestedJTensor to update `opt_states` in TrainState.
   """
-  grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
   asserts.assert_same_structure(mdl_vars, var_weight_hparams)
-  return [x.init(mdl_vars) for x in grad_txs]  # pytype: disable=bad-return-type  # numpy-scalars
+  opt_states = []
+  for learner in learners:
+    excluded = get_excluded_var_mask_for_grad(var_weight_hparams, learner)
+    var_weight_hparams = filter_vars_for_grad(var_weight_hparams, excluded)
+    filtered_mdl_vars = filter_vars_for_grad(mdl_vars, excluded)
+    grad_tx = learner.get_grad_tx(var_weight_hparams)
+    opt_states.append(grad_tx.init(filtered_mdl_vars))
+  return opt_states  # pytype: disable=bad-return-type
 
 
 def create_state(
@@ -1536,7 +1595,11 @@ class SingleTask(base_task.BaseTask):
       if ema_required:
         loaded_vars.update(
             NestedMap.FromNestedDict(
-                {'ema': extract_ema(loaded_train_state).mdl_vars}
+                {
+                    'ema': extract_ema(
+                        loaded_train_state, merge_for_bprop_exclusion=False
+                    ).mdl_vars
+                }
             ).FlattenItems()
         )
     else:

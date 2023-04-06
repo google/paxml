@@ -735,6 +735,91 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
             v.ema['params']['var01'],
         )
 
+  def test_var_exclusion(self):
+    # Set up the model.
+    input_dims = 2
+    output_dims = 2
+
+    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+
+    lp = task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer.learning_rate = 5.0
+    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+
+    task_p_exclusion = task_p.clone()
+    task_p_exclusion.train.learner.bprop_variable_exclusion = '.*var01'
+    task_p_inclusion = task_p.clone()
+    task_p_inclusion.train.learner.bprop_variable_inclusion = '.*repeated_ffn.*'
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
+    )
+    train_state = trainer_lib.initialize_model_state(
+        instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
+    )
+    train_state_exclusion = trainer_lib.initialize_model_state(
+        instantiate(task_p_exclusion), jax.random.PRNGKey(1245), sample_inputs
+    )
+    train_state_inclusion = trainer_lib.initialize_model_state(
+        instantiate(task_p_inclusion), jax.random.PRNGKey(1245), sample_inputs
+    )
+
+    self.assertFalse(
+        py_utils.is_bprop_masked_node(
+            train_state.opt_states[0]['no_prefix'][2]['m']['params']['var01']
+        )
+    )
+    self.assertTrue(
+        py_utils.is_bprop_masked_node(
+            train_state_exclusion.opt_states[0]['no_prefix'][2]['m']['params'][
+                'var01'
+            ]
+        )
+    )
+    self.assertTrue(
+        py_utils.is_bprop_masked_node(
+            train_state_inclusion.opt_states[0]['no_prefix'][2]['m']['params'][
+                'var01'
+            ]
+        )
+    )
+
+  def test_extract_ema_with_var_exclusion(self):
+    input_dims = 2
+    output_dims = 2
+
+    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel02,
+        name='mdl',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    lp = task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer.learning_rate = 5.0
+    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.ema_decay = 0.9999
+    lp.bprop_variable_exclusion = '.*var01'
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    train_state = trainer_lib.initialize_model_state(
+        instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
+    )
+
+    extracted = tasks_lib.extract_ema(train_state)
+
+    self.assertAllClose(
+        train_state.mdl_vars['params']['var01'],
+        extracted.mdl_vars['params']['var01'],
+    )
 
 if __name__ == '__main__':
   absltest.main()
