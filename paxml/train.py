@@ -573,6 +573,9 @@ def _create_checkpointer(
           ' enable_input_checkpointing=False.'
       )
     train_input_checkpointer = checkpoints.BaseInputCheckpointHandler()
+
+  if task_p.train.enable_input_checkpointing:
+    train_input_p.input_checkpointing_enabled = True
   checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
       checkpoint_dir,
       checkpointer,

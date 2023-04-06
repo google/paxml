@@ -39,6 +39,7 @@ from praxis import py_utils
 from praxis import pytypes
 import seqio
 import tensorflow.compat.v2 as tf
+import tensorflow_datasets as tfds
 
 sub_config_field = base_hyperparams.sub_config_field
 NestedMap = py_utils.NestedMap
@@ -376,6 +377,13 @@ class SeqIOInput(base_input.BaseInput):
       examples.
     overridden_vocab: the vocab overridden. If not set, it would be derived from
       `output_features` of underlining task_or_mixture.
+    enable_symbolic_checkpointing: Whether to use symbolic checkpointing instead
+      of explicit checkpointing. Note that task.train.enable_input_checkpointing
+      must be enabled to use this feature.
+    experimental_enable_index_shuffle: Enables index shuffle, which is required
+      for symbolic checkpointing of training inputs (otherwise defaults to
+      explicit checkpointing). Applicable only for tf.data inputs that have
+      checkpointing enabled.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -449,6 +457,8 @@ class SeqIOInput(base_input.BaseInput):
   targets_iter_converted: Any = dataclasses.field(init=False, repr=False)
   targets_iter_ori: Any = dataclasses.field(init=False, repr=False)
   _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
+  enable_symbolic_checkpointing: Optional[bool] = True
+  experimental_enable_index_shuffle: Optional[bool] = True
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -463,6 +473,8 @@ class SeqIOInput(base_input.BaseInput):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
       self.input_random_seed = 42
+    if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
+      self.configure_symbolic_checkpointing()
     super().__post_init__()
     self._validate_hparams()
     self._dataset = self._get_dataset()
@@ -558,6 +570,19 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
+
+  def configure_symbolic_checkpointing(self):
+    read_config = tfds.ReadConfig()
+    options = tf.data.Options()
+    options.experimental_symbolic_checkpoint = True
+    read_config.experimental_index_shuffle = (
+        self.experimental_enable_index_shuffle
+    )
+    read_config.options = options
+    # Disable readahead for random access used by index shuffle.
+    if self.experimental_enable_index_shuffle:
+      read_config.override_readahead = tfds.Readahead.DISABLE
+    seqio.set_tfds_read_config_override(read_config)
 
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
