@@ -32,7 +32,6 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import orbax.checkpoint
-import typing
 from paxml import base_task
 from paxml import checkpoint_version
 from paxml import train_states
@@ -329,42 +328,14 @@ def save_checkpoint(
   )
 
 
-def latest_checkpoint(checkpoint_dir: epath.PathLike) -> epath.Path:
+def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
   """Gets the path to the latest checkpoint.
 
-  Use this method instead of latest_checkpoint_if_exists() if checkpoint
-  existence is expected.
-
   Args:
     checkpoint_dir: The base directory from where to retrieve checkpoints.
 
   Returns:
-    Path to the latest checkpoint.
-
-  Raises:
-    ValueError: checkpoint_dir does not exist or no checkpoint files were found
-    in it.
-  """
-  checkpoint_dir = epath.Path(checkpoint_dir)
-  path = latest_checkpoint_if_exists(checkpoint_dir)
-  if path is None:
-    _raise_checkpoint_missing_error(checkpoint_dir)
-  return path
-
-
-def latest_checkpoint_if_exists(
-    checkpoint_dir: epath.PathLike,
-) -> Optional[epath.Path]:
-  """Gets the path to the latest checkpoint if any.
-
-  Use this method instead of latest_checkpoint() if you want to handle the case
-  where no checkpoint exists (e.g., the caller waits for a checkpoint).
-
-  Args:
-    checkpoint_dir: The base directory from where to retrieve checkpoints.
-
-  Returns:
-    Path to the latest checkpoint or None if there is no checkpoint.
+    Path to latest checkpoint or None if there is no checkpoint.
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
@@ -382,15 +353,13 @@ def latest_checkpoint_if_exists(
   return checkpoint_dir / checkpoint_assets[-1]
 
 
-def retrieve_latest_checkpoint_step_if_exists(
+def retrieve_latest_checkpoint_step(
     checkpoint_dir: epath.Path,
 ) -> Optional[int]:
-  """Retrieves the latest checkpoint step within the given directory if any.
+  """Retrieves the latest checkpoint step if any.
 
-  Use this method instead of retrieve_latest_checkpoint_step() if you want to
-  handle the case where no checkpoint exists (e.g., the caller waits for a
-  checkpoint). Note that this broadcasts the checkpoint step from host 0 to
-  ensure that all processes get the exact same checkpoint step.
+  Note that this broadcasts the checkpoint step from host 0 to ensure that all
+  processes get the exact same checkpoint step.
 
   Args:
     checkpoint_dir: The base directory from where to retrieve checkpoints.
@@ -401,7 +370,7 @@ def retrieve_latest_checkpoint_step_if_exists(
   if not checkpoint_dir.exists():
     checkpoint_step = -1
   else:
-    latest_checkpoint_path = latest_checkpoint_if_exists(checkpoint_dir)
+    latest_checkpoint_path = latest_checkpoint(checkpoint_dir)
     if latest_checkpoint_path is None:
       checkpoint_step = -1
     else:
@@ -416,36 +385,6 @@ def retrieve_latest_checkpoint_step_if_exists(
   if step == -1:
     return None
   return step
-
-
-def retrieve_latest_checkpoint_step(checkpoint_dir: epath.Path) -> int:
-  """Returns the latest checkpoint step within the given directory.
-
-  Use this method instead of retrieve_latest_checkpoint_step_if_exists() if
-  checkpoint existence is expected. Note that this broadcasts the checkpoint
-  step from host 0 to ensure that all processes get the exact same checkpoint
-  step.
-
-  Args:
-    checkpoint_dir: The base directory from where to retrieve checkpoints.
-
-  Raises:
-    ValueError: checkpoint_dir does not exist or no checkpoint files were found
-    in it.
-  """
-  step = retrieve_latest_checkpoint_step_if_exists(checkpoint_dir)
-  if step is None:
-    _raise_checkpoint_missing_error(checkpoint_dir)
-  return typing.cast(int, step)
-
-
-def _raise_checkpoint_missing_error(checkpoint_dir: epath.Path):
-  """Raise checkpoint missing error with helpful message."""
-  if not checkpoint_dir.exists():
-    raise ValueError(f'{checkpoint_dir=!r} does not exist')
-  raise ValueError(
-      f'No checkpoints were found in directory {checkpoint_dir=!r}'
-  )
 
 
 def validate_metadata(
@@ -500,7 +439,7 @@ def restore_checkpoint(
     enforce_restore_shape_check: bool = False,
     state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
     tensorstore_use_ocdbt: bool = False,
-) -> train_states.TrainState:
+) -> Optional[train_states.TrainState]:
   """Restores a checkpoint from the provided base directory.
 
   This is typically called on an unreplicated TrainState instance.
@@ -522,15 +461,19 @@ def restore_checkpoint(
     tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Returns:
-    A restored `TrainState` instance.
+    A restored `TrainState` instance. If no step specified and no checkpoint
+    files present, return None.
 
   Raises:
-    ValueError: Checkpoint is not found or a mismatch between the current
-    checkpoint structure and the saved checkpoint one is detected.
+    ValueError: When a mismatch between the current checkpoint structure and
+    the saved checkpoint one is detected.
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
   if step is None:
     step = retrieve_latest_checkpoint_step(checkpoint_dir)
+    if step is None:
+      logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
+      return None
   checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )

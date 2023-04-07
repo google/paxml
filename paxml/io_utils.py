@@ -336,7 +336,7 @@ def get_checkpoint_step(
     job_log_dir: epath.Path,
     restore_checkpoint_dir: epath.Path,
     mode: EvaluationMode,
-) -> int:
+) -> Optional[int]:
   """Gets the latest checkpoint step to eval/decode on.
 
   Args:
