@@ -939,9 +939,6 @@ class SingleTask(base_task.BaseTask):
       trainer_lib.EarlyStoppingFn.
   """
 
-  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
-  model: base_model.BaseModel
-
   @dataclasses.dataclass(frozen=True)
   class InferWriter:
     """Parameters for generating and writing outputs from a model.
