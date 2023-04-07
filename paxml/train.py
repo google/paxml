@@ -136,6 +136,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
       self,
       step_i,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
       train_state_pspecs,
       train_input_pipeline,
   ):
@@ -147,6 +148,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
       step_i,
       *,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
       train_state_pspecs,
       train_input_pipeline,
   ):
@@ -206,6 +208,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       step_i: int,
       *,
       partitioned_train_state: Any,
+      train_state_unpadded_shape_dtype_struct: Any = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       force: Optional[bool] = False,
   ):
@@ -215,6 +218,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       self.checkpoint_manager.save(
           step_i,
           partitioned_train_state,
+          train_state_unpadded_shape_dtype_struct,
           train_input_pipeline,
           force=force,
       )
@@ -226,6 +230,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       self,
       step_i,
       train_state_global_shapes,
+      train_state_unpadded_shape_dtype_struct,
       global_mesh,
       train_state_pspecs,
       train_input_pipeline,
@@ -241,6 +246,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     return self.checkpoint_manager.restore(
         step_i,
         train_state_global_shapes,
+        train_state_unpadded_shape_dtype_struct,
         train_input_pipeline,
         restore_kwargs=restore_args,
     )
@@ -250,6 +256,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       step_i,
       *,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct=None,
       train_state_pspecs=None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ):
@@ -260,14 +267,15 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       self._save_with_args(
           step_i,
           partitioned_train_state=partitioned_train_state,
+          train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
           train_input_pipeline=train_input_pipeline,
-          force=True,
       )
 
   def save_if_needed(
       self,
       step_i,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct=None,
       train_state_pspecs=None,
       train_input_pipeline=None,
   ):
@@ -277,6 +285,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     self._save_with_args(
         step_i,
         partitioned_train_state=partitioned_train_state,
+        train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
         train_input_pipeline=train_input_pipeline,
     )
     self.checkpoint_manager.check_for_errors()
@@ -297,6 +306,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
         partitioned_train_state = self._restore_with_args(
             step,
             metadata.padded_global_shapes,
+            metadata.unpadded_global_shapes,
             partitioner.global_mesh,
             metadata.partition_specs,
             train_input_pipeline,
@@ -343,6 +353,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self,
       step_i: int,
       train_state_global_shapes: Optional[TrainState],
+      train_state_unpadded_shape_dtype_struct: Optional[TrainState],
       train_input_pipeline: Optional[base_input.BaseInput],
   ):
     """Restore using CheckpointManager, setting up additional args."""
@@ -367,6 +378,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     restored_state = self.checkpoint_manager.restore(
         step_i,
         train_state_global_shapes,
+        train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
         train_input_pipeline=train_input_pipeline,
         restore_kwargs=restore_args,
     )
@@ -389,6 +401,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, int, PRNGKey]:
+    # Note that this method restores the "unpadded" train state.
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       step = self.checkpoint_manager.latest_step()
@@ -396,7 +409,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         train_state = None
       else:
         train_state = self._restore_with_args(
-            step, train_state_global_shapes, train_input_pipeline
+            step,
+            train_state_global_shapes,
+            metadata.unpadded_global_shapes,
+            train_input_pipeline,
         )
     monitoring.record_event_duration_secs(
         _READ_CHECKPOINT_EVENT, restore_period.elapsed
@@ -419,12 +435,14 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       step_i: int,
       *,
       train_state: Any,
+      train_state_unpadded_shape_dtype_struct: Any,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       force: Optional[bool] = False,
   ):
     self.checkpoint_manager.save(
         step_i,
         train_state,
+        train_state_unpadded_shape_dtype_struct,
         train_input_pipeline,
         force=force,
     )
@@ -433,6 +451,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self,
       step_i,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
       train_input_pipeline,
       is_final=False,
   ):
@@ -451,6 +470,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         self._save_with_args(
             step_i,
             train_state=fully_replicated_gda_train_state,
+            train_state_unpadded_shape_dtype_struct=(
+                train_state_unpadded_shape_dtype_struct
+            ),
             train_input_pipeline=train_input_pipeline,
             force=is_final,
         )
@@ -461,6 +483,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
         self._save_with_args(
             step_i,
             train_state=unreplicated_train_state,
+            train_state_unpadded_shape_dtype_struct=(
+                train_state_unpadded_shape_dtype_struct
+            ),
             train_input_pipeline=train_input_pipeline,
             force=is_final,
         )
@@ -472,6 +497,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       self,
       step_i,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
       train_state_pspecs,
       train_input_pipeline=None,
   ):
@@ -480,6 +506,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._save(
         step_i,
         partitioned_train_state,
+        train_state_unpadded_shape_dtype_struct,
         train_input_pipeline,
     )
     self.checkpoint_manager.check_for_errors()
@@ -489,13 +516,18 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       step_i,
       *,
       partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
       train_state_pspecs,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ):
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
       self._save(
-          step_i, partitioned_train_state, train_input_pipeline, is_final=True
+          step_i,
+          partitioned_train_state,
+          train_state_unpadded_shape_dtype_struct,
+          train_input_pipeline,
+          is_final=True,
       )
 
   @property
@@ -1295,6 +1327,7 @@ def _train_and_evaluate_common(
       checkpointer.save_if_needed(
           step_i,
           partitioned_train_state,
+          train_state_metadata.unpadded_global_shapes,
           train_state_metadata.partition_specs,
           train_input_for_checkpoint,
       )
@@ -1420,6 +1453,7 @@ def _train_and_evaluate_common(
     checkpointer.save_final(
         step_i,
         partitioned_train_state=partitioned_train_state,
+        train_state_unpadded_shape_dtype_struct=train_state_metadata.unpadded_global_shapes,
         train_state_pspecs=train_state_metadata.partition_specs,
         train_input_pipeline=train_input_for_checkpoint,
     )

@@ -18,6 +18,11 @@
 #
 # Past versions:
 #
+# 1.1
+# - metadata has a new key 'train_state_metadata', which is a pytree of array
+# metadata corresponding to the train state, including shape, dtype and
+# is_masked_node for `TrainState.mdl_vars`.
+#
 # 1.0
 # - Checkpoints folders are organized into per-step directories, where each has
 # a subdirectory for every item.
@@ -30,7 +35,7 @@
 # other words, the msgpack file may be 'checkpoint_1' instead of
 # 'checkpoint_1/checkpoint', where 'checkpoint' is the msgpack file.
 
-_VERSION: float = 1.0
+_VERSION: float = 1.1
 _VERSION_KEY: str = 'version'
 
 

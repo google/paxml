@@ -15,8 +15,10 @@
 
 """Tests for Pax checkpoint_managers."""
 
+import copy
 import datetime
 import functools
+import json
 import os
 from typing import Any, List, Optional
 from unittest import mock
@@ -29,6 +31,7 @@ import jax
 from jax.experimental import multihost_utils
 from jax.sharding import Mesh
 import numpy as np
+import optax
 import orbax.checkpoint
 from paxml import checkpoint_managers
 from paxml import checkpoints
@@ -94,7 +97,16 @@ def create_train_state(step: int = 0):
       lambda _: axes,
       train_state,
   )
-  return global_mesh, state_specs, train_state
+  train_state_unpadded_shape_dtype_struct = jax.tree_util.tree_map(
+      lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), train_state
+  )
+  train_state.mdl_vars['b'] = optax.MaskedNode()  # masking a node
+  return (
+      global_mesh,
+      state_specs,
+      train_state,
+      train_state_unpadded_shape_dtype_struct,
+  )
 
 
 class TestInput(base_input.BaseInput):
@@ -138,7 +150,12 @@ class CheckpointManagerTest(parameterized.TestCase):
   def setUp(self):
     super().setUp()
     self.directory = self.create_tempdir(name='checkpointing_test').full_path
-    self.global_mesh, self.state_specs, self.train_state = create_train_state()
+    (
+        self.global_mesh,
+        self.state_specs,
+        self.train_state,
+        self.train_state_unpadded_shape_dtype_struct,
+    ) = create_train_state()
 
   def create_checkpointer(self, checkpoint_type: CheckpointType):
     if checkpoint_type == CheckpointType.FLAX:
@@ -179,6 +196,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       step: int,
       train_state: Any,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
+      train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
   ) -> bool:
     train_state = train_state.replace(
         step=orbax.checkpoint.test_utils.create_sharded_array(
@@ -189,7 +207,13 @@ class CheckpointManagerTest(parameterized.TestCase):
             ),
         )
     )
-    return checkpoint_manager.save(step, train_state, train_input_pipeline)
+
+    return checkpoint_manager.save(
+        step,
+        train_state,
+        train_state_unpadded_shape_dtype_struct,
+        train_input_pipeline,
+    )
 
   def restore(
       self,
@@ -200,6 +224,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpoint_type: CheckpointType,
       global_mesh: Optional[Mesh] = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
+      train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
@@ -208,7 +233,11 @@ class CheckpointManagerTest(parameterized.TestCase):
     elif checkpoint_type == CheckpointType.FLAX:
       restore_kwargs = None
     return checkpoint_manager.restore(
-        step, train_state, train_input_pipeline, restore_kwargs=restore_kwargs
+        step,
+        train_state,
+        train_state_unpadded_shape_dtype_struct,
+        train_input_pipeline,
+        restore_kwargs=restore_kwargs,
     )
 
   @parameterized.parameters(
@@ -233,7 +262,15 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_type=checkpoint_type,
         train_input_pipeline=train_input_pipeline,
     )
-    self.save(checkpoint_manager, 0, self.train_state, train_input_pipeline)
+    self.save(
+        checkpoint_manager,
+        0,
+        self.train_state,
+        train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=(
+            self.train_state_unpadded_shape_dtype_struct
+        ),
+    )
     if use_train_input:
       train_input_pipeline.reset()
     expected = self.train_state
@@ -251,6 +288,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_type,
         global_mesh=self.global_mesh,
         train_input_pipeline=train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
     if train_input_pipeline:
       # restored inputs should start from the second batch
@@ -258,6 +296,100 @@ class CheckpointManagerTest(parameterized.TestCase):
       orbax.checkpoint.test_utils.assert_tree_equal(
           self, expected_inputs, restored_inputs
       )
+    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+
+    # incompatible unpadded shape
+    wrong_unpadded_shape_dtype_struct = copy.deepcopy(
+        self.train_state_unpadded_shape_dtype_struct
+    )
+    a = self.train_state_unpadded_shape_dtype_struct.mdl_vars['a']
+    wrong_a = jax.ShapeDtypeStruct((10,), a.dtype)
+    wrong_unpadded_shape_dtype_struct.mdl_vars['a'] = wrong_a
+    with self.assertRaises(ValueError):
+      restored = self.restore(
+          checkpoint_manager,
+          0,
+          train_state_global_shapes,
+          self.state_specs,
+          checkpoint_type,
+          global_mesh=self.global_mesh,
+          train_input_pipeline=train_input_pipeline,
+          train_state_unpadded_shape_dtype_struct=wrong_unpadded_shape_dtype_struct,
+      )
+
+    # wrong unpadded shape of a masked node (no error)
+    wrong_masked_unpadded_shape_dtype_struct = copy.deepcopy(
+        self.train_state_unpadded_shape_dtype_struct
+    )
+    b = self.train_state_unpadded_shape_dtype_struct.mdl_vars['b']
+    wrong_b = jax.ShapeDtypeStruct((10,), b.dtype)
+    wrong_masked_unpadded_shape_dtype_struct.mdl_vars['b'] = wrong_b
+    restored = self.restore(
+        checkpoint_manager,
+        0,
+        train_state_global_shapes,
+        self.state_specs,
+        checkpoint_type,
+        global_mesh=self.global_mesh,
+        train_input_pipeline=train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=wrong_masked_unpadded_shape_dtype_struct,
+    )
+
+  @parameterized.parameters(
+      (CheckpointType.GDA,),
+      (CheckpointType.FLAX,),
+  )
+  def test_save_restore_unpadded(self, checkpoint_type):
+    # test restore with unpadded shape saved/not saved
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+        train_input_pipeline=None,
+    )
+
+    def _save(save_unpadded_shape):
+      self.save(
+          checkpoint_manager,
+          0,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=(
+              self.train_state_unpadded_shape_dtype_struct
+              if save_unpadded_shape
+              else None
+          ),
+      )
+
+    with self.assertRaises(ValueError):
+      _save(save_unpadded_shape=False)
+    _save(save_unpadded_shape=True)
+
+    expected = self.train_state
+    if checkpoint_type == CheckpointType.FLAX:
+      expected = jax.tree_util.tree_map(
+          lambda x: np.asarray(x.addressable_data(0)),
+          expected,
+      )
+    train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+
+    def _restore(check_unpadded_shape):
+      return self.restore(
+          checkpoint_manager,
+          0,
+          train_state_global_shapes,
+          self.state_specs,
+          checkpoint_type,
+          global_mesh=self.global_mesh,
+          train_state_unpadded_shape_dtype_struct=(
+              self.train_state_unpadded_shape_dtype_struct
+              if check_unpadded_shape
+              else None
+          ),
+      )
+
+    with self.assertRaises(ValueError):
+      restored = _restore(check_unpadded_shape=False)
+    restored = _restore(check_unpadded_shape=True)
+
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
   @parameterized.parameters(
@@ -276,7 +408,13 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_type=checkpoint_type,
         train_input_pipeline=train_input_pipeline,
     )
-    self.save(checkpoint_manager, 0, self.train_state, None)
+    self.save(
+        checkpoint_manager,
+        0,
+        self.train_state,
+        None,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
     _ = self.restore(
         checkpoint_manager,
@@ -286,6 +424,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_type,
         global_mesh=self.global_mesh,
         train_input_pipeline=train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
     restored_inputs = train_input_pipeline.get_next()
     orbax.checkpoint.test_utils.assert_tree_equal(
@@ -307,7 +446,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
 
     if max_to_keep is None:
       expected_steps = steps
@@ -345,7 +489,12 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        self.save(checkpoint_manager, step, self.train_state)
+        self.save(
+            checkpoint_manager,
+            step,
+            self.train_state,
+            train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+        )
         checkpoint_datetimes.append(current_datetime)
         current_datetime += datetime.timedelta(hours=1)
 
@@ -374,7 +523,12 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
 
     saved_steps = [2000, 4000, 6000, 8000]
 
@@ -414,7 +568,12 @@ class CheckpointManagerTest(parameterized.TestCase):
       with mock.patch('datetime.datetime', autospec=True) as dt:
         dt.now.return_value = current_datetime
         dt.fromtimestamp.return_value = zero_datetime
-        self.save(checkpoint_manager, step, self.train_state)
+        self.save(
+            checkpoint_manager,
+            step,
+            self.train_state,
+            train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+        )
         current_datetime += datetime.timedelta(hours=1)
 
     # expect saved steps at multipliers of 3000.
@@ -439,7 +598,12 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     steps = list(range(0, 10000, 1000))
     for step in steps:
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
 
     saved_steps = steps
 
@@ -462,7 +626,12 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     step = 10000
     steps.append(step)
-    self.save(checkpoint_manager, step, self.train_state)
+    self.save(
+        checkpoint_manager,
+        step,
+        self.train_state,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
 
     saved_steps_2 = steps[-max_to_keep:]
 
@@ -487,7 +656,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
 
     for step in range(save_step + 1):
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
 
     saved_steps = [0, save_step]
 
@@ -511,7 +685,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     ) as commit_callback:
       commit_callback.side_effect = _fake_on_commit_callback
       checkpoint_manager = self.create_checkpoint_manager(options)
-      self.save(checkpoint_manager, 0, self.train_state)
+      self.save(
+          checkpoint_manager,
+          0,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
       # Step 0 not finalized.
       self.assertLen(
           orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory),
@@ -522,7 +701,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertEmpty(
         orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory)
     )
-    self.save(checkpoint_manager, 0, self.train_state)
+    self.save(
+        checkpoint_manager,
+        0,
+        self.train_state,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
     self.assertSameElements(
         _expected_checkpoint_filenames([0]),
         _actual_checkpoint_filenames(checkpoint_manager.directory),
@@ -539,7 +723,14 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
 
     for step in range(4):
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=(
+              self.train_state_unpadded_shape_dtype_struct
+          ),
+      )
 
     self.assertSameElements(
         _expected_checkpoint_filenames([0, 1], checkpoint_type=checkpoint_type),
@@ -560,23 +751,44 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
 
     for step in range(3):
-      self.save(checkpoint_manager, step, self.train_state)
+      self.save(
+          checkpoint_manager,
+          step,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+      )
     self.assertSameElements([1, 2], checkpoint_manager.all_steps())
 
     new_checkpoint_manager = self.create_checkpoint_manager(
         options, checkpoint_type=checkpoint_type
     )
     self.assertSameElements([1, 2], new_checkpoint_manager.all_steps())
-    self.save(new_checkpoint_manager, 3, self.train_state)
+    self.save(
+        new_checkpoint_manager,
+        3,
+        self.train_state,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
     self.assertSameElements([2, 3], new_checkpoint_manager.all_steps())
 
-  @parameterized.parameters((CheckpointType.GDA,), (CheckpointType.FLAX,))
-  def test_restore_legacy_format(self, checkpoint_type):
+  @parameterized.parameters(
+      (CheckpointType.GDA, 0.0),
+      (CheckpointType.FLAX, 0.0),
+      (CheckpointType.GDA, 1.0),
+      (CheckpointType.FLAX, 1.0),
+  )
+  def test_restore_legacy_format(self, checkpoint_type, legacy_version):
+    live_version = 1.1
     checkpoint_manager = self.create_checkpoint_manager(
         checkpoint_managers.CheckpointManagerOptions(),
         checkpoint_type=checkpoint_type,
     )
-    self.save(checkpoint_manager, 0, self.train_state)
+    self.save(
+        checkpoint_manager,
+        0,
+        self.train_state,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
 
     step_dir = checkpoint_manager._manager._get_save_directory(
         0, checkpoint_manager.directory
@@ -584,24 +796,36 @@ class CheckpointManagerTest(parameterized.TestCase):
     self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
     self.assertTrue((step_dir / 'state').exists())
     self.assertTrue((step_dir / 'metadata').exists())
+    fp_metadata = step_dir / 'metadata' / 'metadata'
+    metadata = json.loads(fp_metadata.read_text())
+    self.assertEqual(live_version, metadata['version'])
+    self.assertIn('train_state_metadata', metadata)
 
-    # Transform directory to what we would expect in a version 0 checkpoint with
-    # no per-item subdirectories.
-    (step_dir / 'metadata').rmtree()
-    for d in (step_dir / 'state').iterdir():  # parameter directories
-      if checkpoint_type == CheckpointType.GDA:
-        assert d.is_dir(), d
-        (step_dir / d.name).mkdir()
-        for f in d.iterdir():
+    if legacy_version == 0.0:
+      # Transform directory to what we would expect in a version 0 checkpoint
+      # with no per-item subdirectories.
+      (step_dir / 'metadata').rmtree()
+      for d in (step_dir / 'state').iterdir():  # parameter directories
+        if checkpoint_type == CheckpointType.GDA:
+          assert d.is_dir(), d
+          (step_dir / d.name).mkdir()
+          for f in d.iterdir():
+            assert f.is_file(), f
+            f.copy(step_dir / d.name / f.name)
+        else:
+          f = d
           assert f.is_file(), f
-          f.copy(step_dir / d.name / f.name)
-      else:
-        f = d
-        assert f.is_file(), f
-        assert f.name == 'checkpoint'
-        f.copy(step_dir / f.name)
-    (step_dir / 'state').rmtree()
-    checkpoint_manager._manager._version = 0.0
+          assert f.name == 'checkpoint'
+          f.copy(step_dir / f.name)
+      (step_dir / 'state').rmtree()
+      checkpoint_manager._manager._version = 0.0
+    elif legacy_version == 1.0:
+      # Transform metadata to what we would expect in a version 1 checkpoint
+      metadata = json.loads(fp_metadata.read_text())
+      metadata['version'] = 1.0
+      del metadata['train_state_metadata']
+      fp_metadata.write_text(json.dumps(metadata))
+      checkpoint_manager._manager._version = 1.0
 
     expected = self.train_state
     if checkpoint_type == CheckpointType.FLAX:
@@ -610,6 +834,11 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+    train_state_unpadded_shape_dtype_struct = jax.tree_util.tree_map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
+        train_state_global_shapes,
+    )
+    # restoring old checkpoint using old checkpoint_manager
     restored = self.restore(
         checkpoint_manager,
         0,
@@ -617,6 +846,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.state_specs,
         checkpoint_type,
         global_mesh=self.global_mesh,
+        train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
     )
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
@@ -625,9 +855,47 @@ class CheckpointManagerTest(parameterized.TestCase):
     step_dir = checkpoint_manager._manager._get_save_directory(
         1, checkpoint_manager.directory
     )
-    self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
-    self.assertFalse((step_dir / 'state').exists())
-    self.assertFalse((step_dir / 'metadata').exists())
+    if legacy_version == 0.0:
+      # assertions against version 0 checkpoint
+      self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
+      self.assertFalse((step_dir / 'state').exists())
+      self.assertFalse((step_dir / 'metadata').exists())
+    elif legacy_version == 1.0:
+      # assertions against version 1 checkpoint
+      self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
+      self.assertTrue((step_dir / 'state').exists())
+      self.assertTrue((step_dir / 'metadata').exists())
+      metadata = json.loads(fp_metadata.read_text())
+      self.assertNotIn('train_state_metadata', metadata)
+    else:
+      raise ValueError(f'Unknown legacy version {legacy_version}')
+
+    # Restoring again the old format.
+    # We construct checkpoint_manager again to make sure it reads the correct
+    # version from the checkpoint dir.
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+    )
+    self.assertEqual(legacy_version, checkpoint_manager._manager._version)
+
+    restored = self.restore(
+        checkpoint_manager,
+        1,
+        train_state_global_shapes,
+        self.state_specs,
+        checkpoint_type,
+        global_mesh=self.global_mesh,
+        train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
+    )
+    expected = self.train_state
+    expected = expected.replace(step=expected.step + 1)  # increment the step
+    if checkpoint_type == CheckpointType.FLAX:
+      expected = jax.tree_util.tree_map(
+          lambda x: np.asarray(x.addressable_data(0)),
+          expected,
+      )
+    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
 
 if __name__ == '__main__':

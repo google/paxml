@@ -75,12 +75,15 @@ pytype_strict_library(
     srcs = ["checkpoint_managers.py"],
     deps = [
         ":checkpoints",
+        # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
+        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//paxml:preemption",
         "//praxis:base_input",
         "//praxis:py_utils",
+        "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -722,6 +725,7 @@ py_strict_test(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:base_input",
         "//praxis:py_utils",

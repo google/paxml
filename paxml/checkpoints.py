@@ -101,10 +101,37 @@ def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   return orbax.checkpoint.utils.is_tmp_checkpoint(x)
 
 
-def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
+def make_metadata(
+    version: Optional[float] = None,
+    train_state: Optional[train_states.TrainState] = None,
+    train_state_unpadded_shape_dtype_struct: Optional[
+        train_states.TrainState
+    ] = None,
+) -> Mapping[str, Any]:
+  """Returns metadata dict."""
   if version is None:
     version = get_version()
-  return {get_version_key(): version}
+
+  if version > 1:
+    if train_state is None:
+      raise ValueError(
+          'train_state is required for version>1, to save the unpadded'
+          ' shapes/dtypes/maskednodes in the checkpoint metadata.'
+      )
+    if train_state_unpadded_shape_dtype_struct is None:
+      train_state_unpadded_shape_dtype_struct = get_shape_dtype_struct(
+          train_state
+      )
+      logging.warning(
+          'train_state_unpadded_shape_dtype_struct is not provided. We assume'
+          ' `train_state` is unpadded.'
+      )
+    metadata_dict = PaxMetadata.from_padded_and_unpadded(
+        train_state, train_state_unpadded_shape_dtype_struct, version=version
+    ).to_dict()
+    return metadata_dict
+  else:
+    return {get_version_key(): version}
 
 
 def metadata_exists(directory: epath.Path) -> bool:
@@ -208,6 +235,12 @@ def retrieve_checkpoint_type(
     return CheckpointType.FLAX
 
 
+def get_shape_dtype_struct(nested: Any) -> Any:
+  return jax.tree_util.tree_map(
+      lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), nested
+  )
+
+
 def save_checkpoint(
     train_state: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
@@ -215,6 +248,9 @@ def save_checkpoint(
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: Optional[train_states.TrainState] = None,
     async_checkpointer: Optional[AsyncCheckpointer] = None,
+    train_state_unpadded_shape_dtype_struct: Optional[
+        train_states.TrainState
+    ] = None,
 ) -> None:
   """Saves a checkpoint into the provided base directory.
 
@@ -231,11 +267,14 @@ def save_checkpoint(
     async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
+    train_state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the
+      unpadded train state.
 
   Raises:
     ValueError: If the global step has an unexpected shape, if `state_specs`
-    is not specified for persistence-based checkpointing or if
-    `checkpoint_type` is invalid.
+    is not specified for persistence-based checkpointing, if
+    `checkpoint_type` is invalid, or if unpadded shapes/dtypes are not provided
+    for version > 1.
   """
   del state_specs
 
@@ -260,8 +299,24 @@ def save_checkpoint(
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
+  if version > 1 and train_state_unpadded_shape_dtype_struct is None:
+    train_state_unpadded_shape_dtype_struct = get_shape_dtype_struct(
+        train_state
+    )
+    logging.warning(
+        """train_state_unpadded_shape_dtype_struct is not provided. Saving the
+        shapes of train_state  as the unpadded shapes."""
+    )
+
   # Save metadata.
-  save_metadata(checkpoint_step_dir, make_metadata())
+  save_metadata(
+      checkpoint_step_dir,
+      make_metadata(
+          version,
+          train_state,
+          train_state_unpadded_shape_dtype_struct,
+      ),
+  )
 
 
 def latest_checkpoint(checkpoint_dir: epath.PathLike) -> epath.Path:
@@ -383,6 +438,48 @@ def _raise_checkpoint_missing_error(checkpoint_dir: epath.Path):
   )
 
 
+def validate_metadata(
+    version: float,
+    checkpoint_step_dir: epath.Path,
+    state_global_shapes: train_states.TrainState,
+    state_unpadded_global_shapes: Optional[train_states.TrainState],
+):
+  """Validates metadata."""
+  if version > 1:
+    if state_unpadded_global_shapes is None:
+      # TODO(b/275559482): as we migrate to version 1.1, we will require users
+      # to provide unpadded shapes/dtypes during restore. Currently, if it is
+      # not provided (None), we issue a warning, but we plan to raise an error
+      # soon.
+      logging.warning(
+          'Stage_unpadded_global_shapes is not provided. Skipping checking the'
+          ' unpadded shapes.'
+      )
+      # raise ValueError(
+      #     """For checkpoint version > 1.0, we require users to provide
+      #   `train_state_unpadded_shape_dtype_struct` during checkpoint
+      #   saving/restoring, to avoid potential silent bugs when loading
+      #   checkpoints to incompatible unpadded shapes of TrainState."""
+      # )
+    else:
+      restored_metadata = PaxMetadata.from_dict(
+          restore_metadata(checkpoint_step_dir)
+      )
+      metadata = PaxMetadata.from_dict(
+          make_metadata(
+              version,
+              state_global_shapes,
+              state_unpadded_global_shapes,
+          )
+      )
+      if not metadata.is_compatible(restored_metadata):
+        raise ValueError(
+            'PaxMetadata is not compatible with the restored PaxMetadata. '
+            f'expected PaxMetadata = {restored_metadata}. '
+            f'actual PaxMetadata = {metadata}.'
+        )
+
+
 def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
@@ -391,6 +488,7 @@ def restore_checkpoint(
     state_specs: Optional[train_states.TrainState] = None,
     step: Optional[int] = None,
     enforce_restore_shape_check: bool = False,
+    state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
 ) -> train_states.TrainState:
   """Restores a checkpoint from the provided base directory.
 
@@ -408,6 +506,8 @@ def restore_checkpoint(
     step: Step number to load a checkpoint from or None to load the latest.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
+    state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the unpadded
+      state.
 
   Returns:
     A restored `TrainState` instance.
@@ -425,24 +525,32 @@ def restore_checkpoint(
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
+  validate_metadata(
+      version,
+      checkpoint_step_dir,
+      state_global_shapes,
+      state_unpadded_shape_dtype_struct,
+  )
+
   if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler(
             enforce_restore_shape_check=enforce_restore_shape_check
         )
     )
-    restored_train_state = checkpointer.restore(
+    return checkpointer.restore(
         checkpoint_restore_dir,
         item=state_global_shapes,
         specs=state_specs,
         mesh=global_mesh,
         version=version,
     )
-    return restored_train_state
   elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
     return checkpointer.restore(
-        checkpoint_restore_dir, item=state_global_shapes, version=version
+        checkpoint_restore_dir,
+        item=state_global_shapes,
+        version=version,
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')

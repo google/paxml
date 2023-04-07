@@ -22,17 +22,27 @@ import typing
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from etils import epath
+from absl import logging
 import jax
+import optax
 import orbax.checkpoint
 from paxml import checkpoints
 from praxis import base_input
 from praxis import py_utils
+from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
 from paxml import preemption  # mapped to internal
 
 
 CheckpointType = checkpoints.CheckpointType
+Nested = pytypes.Nested
+# TODO(pax-dev): pytyping doesn't like either
+# Optional[pytypes.NestedShapeDtypeStruct]
+# or pytypes.NestedShapeDtypeStruct | None,
+# Switch to the right type hint once pytyping versions are in sync.
+OptionalNestedShapeDtypeStruct = Any
+
 
 CHECKPOINT_PREFIX = 'checkpoint_'
 STATE_ITEM_NAME = checkpoints.STATE_ITEM_NAME
@@ -67,14 +77,23 @@ def _update_args_with_version(item_kwargs, version):
   return kwargs
 
 
-def _create_items_dict_with_metadata(item, version):
-  items = {
-      STATE_ITEM_NAME: item,
-  }
+def _create_items_dict_with_metadata(
+    train_state,
+    train_state_unpadded_shape_dtype_struct,
+    version,
+):
+  """Returns items dict with metadata."""
+  # (padded) train_state
+  items = {STATE_ITEM_NAME: train_state}
+
   if version > 0:
-    items.update(
-        {METADATA_ITEM_NAME: checkpoints.make_metadata(version=version)}
+    metadata = checkpoints.make_metadata(
+        version,
+        train_state,
+        train_state_unpadded_shape_dtype_struct,
     )
+    items.update({METADATA_ITEM_NAME: metadata})
+
   return items
 
 
@@ -242,11 +261,12 @@ class OrbaxCheckpointManager:
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
   ):
     checkpointers = {
-        checkpoints.STATE_ITEM_NAME: checkpointer,
+        STATE_ITEM_NAME: checkpointer,
         METADATA_ITEM_NAME: orbax.checkpoint.Checkpointer(
             orbax.checkpoint.JsonCheckpointHandler()
         ),
     }
+
     if train_input_checkpointer:
       checkpointers[INPUT_ITEM_NAME] = train_input_checkpointer
     self._manager = _CheckpointManagerImpl(
@@ -289,31 +309,78 @@ class OrbaxCheckpointManager:
       self,
       step: int,
       train_state: Any,
+      train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       force: Optional[bool] = False,
   ) -> bool:
+    """See superclass documentation."""
+    if self.version > 1.0 and train_state_unpadded_shape_dtype_struct is None:
+      raise ValueError(
+          """For checkpoint version > 1.0, we require users to provide
+          `train_state_unpadded_shape_dtype_struct` during checkpoint
+          saving/restoring, to avoid potential silent bugs when loading
+          checkpoints to incompatible unpadded shapes of TrainState."""
+      )
+
+    # save_kwargs
     save_kwargs = _update_args_with_version(None, self.version)
-    items = _create_items_dict_with_metadata(train_state, self.version)
+
+    # items
+    items = _create_items_dict_with_metadata(
+        train_state,
+        train_state_unpadded_shape_dtype_struct,
+        self.version,
+    )
+
     if train_input_pipeline:
       items[INPUT_ITEM_NAME] = train_input_pipeline
+
     return self._manager.save(step, items, save_kwargs=save_kwargs, force=force)
 
   def restore(
       self,
       step: int,
       train_state: Any,
+      train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       restore_kwargs: Optional[Any] = None,
   ) -> Any:
     """See superclass documentation."""
+    if self.version > 1.0 and train_state_unpadded_shape_dtype_struct is None:
+      raise ValueError(
+          """For checkpoint version > 1.0, we require users to provide
+          `train_state_unpadded_shape_dtype_struct` during checkpoint
+          saving/restoring, to avoid potential silent bugs when loading
+          checkpoints to incompatible unpadded shapes of TrainState.""")
+
     # Propagate version to CheckpointHandler.
     restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
-    items = _create_items_dict_with_metadata(train_state, self.version)
+
+    items = _create_items_dict_with_metadata(
+        train_state,
+        train_state_unpadded_shape_dtype_struct,
+        self.version,
+    )
+
     # Train input checkpoint may not exist if input checkpointing wasn't
     # previously enabled
     if train_input_pipeline and self._train_checkpoint_exists(step):
       items[INPUT_ITEM_NAME] = train_input_pipeline
 
-    return self._manager.restore(
+    restored = self._manager.restore(
         step, items=items, restore_kwargs=restore_kwargs
-    )[STATE_ITEM_NAME]
+    )
+
+    if self.version > 1.0:
+      restored_metadata = checkpoints.PaxMetadata.from_dict(
+          restored[METADATA_ITEM_NAME]
+      )
+      metadata = checkpoints.PaxMetadata.from_dict(items[METADATA_ITEM_NAME])
+      if not metadata.is_compatible(restored_metadata):
+        raise ValueError(
+            'PaxMetadata is not compatible with the restored PaxMetadata. '
+            f'expected PaxMetadata = {restored_metadata}. '
+            f'actual PaxMetadata = {metadata}.'
+        )
+
+    return restored[STATE_ITEM_NAME]
