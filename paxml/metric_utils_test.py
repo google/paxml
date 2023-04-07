@@ -52,21 +52,35 @@ class MockMetric(clu_metrics.Metric):
     raise NotImplementedError('Other mock metrics should define this.')
 
 
-def _mock_image(batch_size=None) -> clu_values.Image:
+def _mock_clu_image(batch_size=None) -> clu_values.Image:
   base_shape = [12, 12, 3]
   if batch_size:
     base_shape = [batch_size] + base_shape
   return clu_values.Image(np.ones(base_shape))
 
 
-def _mock_audio(batch_size=None) -> clu_values.Audio:
+def _mock_seqio_image(batch_size=None) -> seqio.metrics.Image:
+  base_shape = [12, 12, 3]
+  if batch_size:
+    base_shape = [batch_size] + base_shape
+  return seqio.metrics.Image(np.ones(base_shape))
+
+
+def _mock_clu_audio(batch_size=None) -> clu_values.Audio:
   base_shape = [12, 1]  # [time, channel]
   if batch_size:
     base_shape = [batch_size] + base_shape
   return clu_values.Audio(np.ones(base_shape), sample_rate=44_100)
 
 
-def _mock_video(batch_size=None) -> clu_values.Summary:
+def _mock_seqio_audio(batch_size=None) -> seqio.metrics.Audio:
+  base_shape = [12, 1]  # [time, channel]
+  if batch_size:
+    base_shape = [batch_size] + base_shape
+  return seqio.metrics.Audio(np.ones(base_shape), sample_rate=44_100)
+
+
+def _mock_clu_video(batch_size=None) -> clu_values.Summary:
   class Metadata(object):
     message: str = 'dummy metadata'
 
@@ -112,12 +126,12 @@ class MetricUtilsTest(absltest.TestCase):
         return [
             clu_values.Scalar(5),
             clu_values.Text('hi'),
-            _mock_image(batch_size=None),
-            _mock_image(batch_size=2),
-            _mock_video(batch_size=None),
-            _mock_video(batch_size=2),
-            _mock_audio(batch_size=None),
-            _mock_audio(batch_size=2),
+            _mock_clu_image(batch_size=None),
+            _mock_clu_image(batch_size=2),
+            _mock_clu_video(batch_size=None),
+            _mock_clu_video(batch_size=2),
+            _mock_clu_audio(batch_size=None),
+            _mock_clu_audio(batch_size=2),
         ]
     metrics = {'test': ScalarListMetric()}
 
@@ -155,12 +169,12 @@ class MetricUtilsTest(absltest.TestCase):
             'scalar_0': clu_values.Scalar(1),
             'scalar_1': clu_values.Scalar(2),
             'text_0': clu_values.Text('test3'),
-            'image_0': _mock_image(None),
-            'image_1': _mock_image(5),
-            'video_0': _mock_video(None),
-            'video_1': _mock_video(2),
-            'audio_0': _mock_audio(None),
-            'audio_1': _mock_audio(2),
+            'image_0': _mock_clu_image(None),
+            'image_1': _mock_clu_image(5),
+            'video_0': _mock_clu_video(None),
+            'video_1': _mock_clu_video(2),
+            'audio_0': _mock_clu_audio(None),
+            'audio_1': _mock_clu_audio(2),
         }
 
     metrics = {'test': ScalarDictMetric()}
@@ -188,8 +202,8 @@ class MetricUtilsTest(absltest.TestCase):
             'scalar_0': clu_values.Scalar(1),
             'list_0': [clu_values.Scalar(1), clu_values.Scalar(2)],
             'list_1': [clu_values.Scalar(1), clu_values.Text('test')],
-            'tuple_0': (_mock_image(None), _mock_image(5)),
-            'image_0': _mock_image(5),
+            'tuple_0': (_mock_clu_image(None), _mock_clu_image(5)),
+            'image_0': _mock_clu_image(5),
             'histogram_0': clu_values.Histogram(
                 np.array([1, 2, 3]), num_buckets=2
             ),
@@ -222,12 +236,12 @@ class MetricUtilsTest(absltest.TestCase):
             'scalar_0': clu_values.Scalar(1),
             'list_0': [clu_values.Scalar(1), clu_values.Scalar(2)],
             'list_1': [clu_values.Scalar(1), clu_values.Text('test')],
-            'tuple_0': (_mock_image(None), _mock_image(5)),
-            'image_0': _mock_image(5),
-            'video_0': _mock_video(None),
-            'video_1': _mock_video(2),
-            'audio_0': _mock_audio(None),
-            'audio_1': _mock_audio(2),
+            'image_tuple_0': (_mock_clu_image(None), _mock_clu_image(5)),
+            'image_0': _mock_clu_image(5),
+            'video_0': _mock_clu_video(None),
+            'video_1': _mock_clu_video(2),
+            'audio_0': _mock_clu_audio(None),
+            'audio_1': _mock_clu_audio(2),
             'histogram_0': clu_values.Histogram(
                 np.array([1, 2, 3]), num_buckets=2
             ),
@@ -238,6 +252,31 @@ class MetricUtilsTest(absltest.TestCase):
     test_dir = self._test_dir()
     with summary_utils.get_summary_writer(test_dir):
       metric_utils.write_clu_metric_summaries(metric_values, step_i=0)
+
+  def test_write_seqio_metric_summaries(self):
+    @flax.struct.dataclass
+    class MixedDictMetric(MockMetric):
+
+      def compute_value(self) -> Dict[str, Any]:
+        return {
+            'scalar_0': seqio.metrics.Scalar(1),
+            'list_0': [seqio.metrics.Scalar(1), seqio.metrics.Scalar(2)],
+            'list_1': [seqio.metrics.Scalar(1), seqio.metrics.Text('test')],
+            'image_tuple_0': (_mock_seqio_image(None), _mock_seqio_image(5)),
+            'image_0': _mock_seqio_image(5),
+            'audio_0': _mock_seqio_audio(None),
+            'audio_1': _mock_seqio_audio(2),
+            'histogram_0': seqio.metrics.Histogram(
+                np.array([1, 2, 3]), bins=2
+            ),
+        }
+
+    metrics = {'test': MixedDictMetric()}
+    metric_values = metric_utils.compute_metric_values(metrics)
+    test_dir = self._test_dir()
+    with summary_utils.get_summary_writer(test_dir):
+      metric_utils.write_seqio_metric_summaries(
+          [metric_values], step=0, metric_name_prefix='test_prefix')
 
   def is_float_convertible(self):
     self.assertTrue(metric_utils.is_float_convertible(0.1))
