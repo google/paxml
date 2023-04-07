@@ -604,6 +604,8 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit optax dependency.
         "//praxis:base_layer",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
     ],
 )
 
@@ -857,6 +859,7 @@ py_strict_test(
     deps = [
         ":checkpoints",
         ":learners",
+        ":partitioning",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.

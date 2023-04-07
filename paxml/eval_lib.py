@@ -231,7 +231,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partitioned_train_state = self._restore(
         self.restore_checkpoint_step, train_state_metadata
     )
-    root_prng_key, partitioned_train_state = (
+    root_prng_key, partitioned_train_state, _ = (
         self._partitioner.initialize_prng_key_and_train_state(
             root_prng_key,
             partitioned_train_state,
@@ -325,7 +325,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         self.restore_checkpoint_step,
         train_state_metadata.unpadded_global_shapes,
     )
-    root_prng_key, replicated_model_states = (
+    root_prng_key, replicated_model_states, _ = (
         self._partitioner.initialize_prng_key_and_train_state(
             root_prng_key,
             model_states,

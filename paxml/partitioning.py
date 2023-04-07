@@ -19,7 +19,7 @@ import abc
 import dataclasses
 import functools
 import json
-from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
 from clu import platform
@@ -49,6 +49,7 @@ NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
+TrainStateProvenance = train_states.TrainStateProvenance
 TrainStateMetadata = trainer_lib.TrainStateMetadata
 RunningMode = trainer_lib.RunningMode
 
@@ -304,14 +305,14 @@ class Partitioner(metaclass=abc.ABCMeta):
       train_state: Optional[TrainState],
       checkpoint_type: Optional[CheckpointType],
       discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState]:
+  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
     """Initialize the root prng key and train state.
 
     Depending on the partitioner, this may involve actions like splitting the
     root_prng_key, replicating the train_state, etc.
 
     Args:
-      proot_rng_key: The root prng key.
+      root_prng_key: The root prng key.
       train_state: The train state restored from checkpoint. If None, will
         initialize it from scratch.
       checkpoint_type: The checkpoint type.
@@ -319,7 +320,8 @@ class Partitioner(metaclass=abc.ABCMeta):
         optimizer states or not, from train_state.
 
     Returns:
-      The properly initialized root prng key and train state.
+      The properly initialized root prng key, train state, and train state
+      provenance (none if model restored from checkpoint).
     """
 
   @abc.abstractmethod
@@ -518,13 +520,14 @@ class PmapPartitioner(Partitioner):
       train_state: Optional[TrainState],
       checkpoint_type: Optional[CheckpointType],
       discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState]:
+  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
     """Initialize the root prng key and train state."""
     root_prng_key, init_key = jax.random.split(root_prng_key)
+    train_state_provenance = None
     if train_state is None:
       # If no checkpoint was restored, initialize with random weights.
       metadata = self.get_train_state_metadata(discard_opt_states)
-      train_state = trainer_lib.initialize_model_state(
+      train_state, train_state_provenance = trainer_lib.initialize_model_state(
           self._jax_task,
           init_key,
           metadata.input_shape_dtype,
@@ -550,7 +553,7 @@ class PmapPartitioner(Partitioner):
     # different key.
     root_prng_key = jax.random.fold_in(root_prng_key, jax.process_index())
     logging.info('root prng key: %s', root_prng_key)
-    return root_prng_key, replicated_train_state
+    return root_prng_key, replicated_train_state, train_state_provenance
 
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""
@@ -688,11 +691,12 @@ class PjitPartitioner(Partitioner):
       train_state: Optional[TrainState],
       checkpoint_type: Optional[CheckpointType],
       discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState]:
+  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
     """Initialize the root prng key and train state."""
     root_prng_key, init_key = jax.random.split(root_prng_key)
     # train_state should already be partitioned.
     partitioned_train_state = train_state
+    train_state_provenance = None
     if partitioned_train_state is None:
       # If no checkpoint was restored, initialize with random weights.
       metadata = self.get_train_state_metadata(discard_opt_states)
@@ -700,19 +704,20 @@ class PjitPartitioner(Partitioner):
       # eval/decode pipeline, do_eval is not properly set (see the pmap
       # version). But since we're enabling always_use_train_for_model_init this
       # is probably fine.
-      partitioned_train_state = trainer_lib.initialize_partitioned_model_states(
-          self._jax_task,
-          init_key,
-          metadata.input_shape_dtype,
-          metadata.partition_specs,
-          global_mesh=self.global_mesh,
-          # Note: We currently enforce that the checkpoint to reload via
-          # init_checkpoint_rules are in the same format as the checkpoint
-          # solution used by the experiment.
-          checkpoint_type=checkpoint_type,
-          discard_opt_states=discard_opt_states,
+      partitioned_train_state, train_state_provenance = (
+          trainer_lib.initialize_partitioned_model_states(
+              self._jax_task,
+              init_key,
+              metadata.input_shape_dtype,
+              metadata.partition_specs,
+              global_mesh=self.global_mesh,
+              # Note: We currently enforce that the checkpoint to reload via
+              # init_checkpoint_rules are in the same format as the checkpoint
+              # solution used by the experiment.
+              checkpoint_type=checkpoint_type,
+              discard_opt_states=discard_opt_states,
+          )
       )
-
     logging.info(
         'partitioned train state shapes (global shape): %s',
         jax.tree_map(lambda x: x.shape, partitioned_train_state),
@@ -722,7 +727,7 @@ class PjitPartitioner(Partitioner):
     # use a single global key instead to rely on pjit to split for different
     # replicas.
     logging.info('root prng key: %s', root_prng_key)
-    return root_prng_key, partitioned_train_state
+    return root_prng_key, partitioned_train_state, train_state_provenance
 
   def preprocess_prng_key(self, prng_key: PRNGKey) -> PRNGKey:
     """Preprocess the key before using it to run the partitioned function."""

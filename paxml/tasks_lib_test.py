@@ -27,6 +27,7 @@ import jax.numpy as jnp
 import numpy as np
 from paxml import checkpoints
 from paxml import learners
+from paxml import partitioning
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
@@ -41,6 +42,8 @@ from praxis import pytypes
 from praxis import schedules
 from praxis import test_utils
 
+
+CheckpointType = checkpoints.CheckpointType
 NestedMap = py_utils.NestedMap
 WeightHParams = base_layer.WeightHParams
 JTensor = pytypes.JTensor
@@ -395,6 +398,155 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
           self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
                               v.ema['params']['var01'][0])
 
+  @parameterized.named_parameters(
+      ('partial_load_opt_states', True, False, False),
+      ('load_no_opt_states', False, False, False),
+      ('load_all_opt_states', False, True, False),
+      ('restore_from_local_checkpoint', False, False, True),
+  )
+  def test_load_provenance(
+      self,
+      partial_load_opt_states,
+      load_opt_states,
+      load_from_cp_train_state,
+  ):
+    input_dims = 3
+    output_dims = 5
+
+    # Initialize external task and save checkpoint
+    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    lp = ext_task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+
+    # Enable ema
+    lp.optimizer.ema_decay = 0.9999
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
+    )
+    ext_train_state = trainer_lib.initialize_replicate_model_state(
+        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs
+    )
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+
+    # Create task with warm-start
+    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+    task_p.train.learner = lp.clone()
+    load_rules = [(r'params/(.*)', 'params/{}')]
+    if partial_load_opt_states:
+      load_rules.extend([(r'(.*)m/params/(.*)', '{}m/params/{}')])
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                input_dims=input_dims
+            ),
+            load_opt_states=load_opt_states,
+            partial_load_opt_states=partial_load_opt_states,
+        ),
+    }
+    task = instantiate(task_p)
+
+    partitioner = partitioning.create_partitioner(
+        task,
+        reshard_inputs=False,
+        auto_sharding_mode=True,
+    )
+    prng_key = jax.random.PRNGKey(1)
+    partitioner.setup(task, prng_key, sample_inputs)
+    if load_from_cp_train_state:
+      train_state = trainer_lib.initialize_replicate_model_state(
+          task, prng_key, sample_inputs
+      )
+    else:
+      train_state = None
+    _, _, train_state_provenance = (
+        partitioner.initialize_prng_key_and_train_state(
+            prng_key,
+            train_state,
+            CheckpointType.FLAX,
+        )
+    )
+
+    # train_state_provenance should be None if restoring train_state
+    # from an existing checkpoint i.e. in the case of preemption
+    if load_from_cp_train_state:
+      self.assertIsNone(train_state_provenance)
+      return
+
+    var_provenance_serialized = flax.serialization.to_state_dict(
+        train_state_provenance.mdl_vars
+    )
+    opt_provenance_serialized = flax.serialization.to_state_dict(
+        train_state_provenance.opt_states
+    )
+    mdl_var01 = (
+        repr(var_provenance_serialized['params']['var01'])
+        .replace('"(', '')
+        .replace(')"', '')
+    )
+    self.assertEqual(
+        mdl_var01,
+        tempdir.full_path + ':latest',
+    )
+    opt_state_v_params_var01 = (
+        repr(opt_provenance_serialized['0']['2']['v']['params']['var01'])
+        .replace('"(', '')
+        .replace(')"', '')
+    )
+    opt_state_m_params_var01 = (
+        repr(opt_provenance_serialized['0']['2']['m']['params']['var01'])
+        .replace('"(', '')
+        .replace(')"', '')
+    )
+
+    # loads opt_states in its entirety
+    if load_opt_states and not partial_load_opt_states:
+      self.assertEqual(
+          opt_state_m_params_var01,
+          tempdir.full_path + ':latest',
+      )
+      self.assertEqual(
+          opt_state_v_params_var01,
+          tempdir.full_path + ':latest',
+      )
+
+    # only load r'(.*)m/params/(.*)' opt_states
+    if partial_load_opt_states:
+      self.assertEqual(
+          opt_state_m_params_var01,
+          tempdir.full_path + ':latest',
+      )
+      self.assertEqual(
+          opt_state_v_params_var01,
+          'random_init',
+      )
+
+    # don't load any opt_states
+    if not partial_load_opt_states and not load_opt_states:
+      self.assertEqual(
+          opt_state_m_params_var01,
+          'random_init',
+      )
+      self.assertEqual(
+          opt_state_v_params_var01,
+          'random_init',
+      )
+
   def test_load_with_incorrect_loading_rules(self):
     input_dims = 3
     output_dims = 5
@@ -499,7 +651,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p = ext_task_p.clone()
     task_p.train.learner = lp.clone()
     load_rules = [(r'(.*)', '{}')]
-    ignore_rules = ['.*softmax.*']
+    ignore_rules = ['.*softmax.*', 'params/lm/final_ln/bias.*',
+                    'params/lm/transformer/repeat/.*/query/b']
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path:
             tasks_lib.CheckpointLoadingRules(
@@ -614,7 +767,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task = instantiate(task_p)
 
     # Now initialize also includes warm start (loading from ckpt)
-    train_state = trainer_lib.initialize_model_state(
+    train_state, _ = trainer_lib.initialize_model_state(
         task, jax.random.PRNGKey(1), sample_inputs
     )
 
@@ -670,7 +823,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
-    ext_train_state = trainer_lib.initialize_model_state(
+    ext_train_state, _ = trainer_lib.initialize_model_state(
         instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
     )
 
@@ -711,7 +864,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     # Now initialize also includes warm start (loading from ckpt)
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
-    train_state = trainer_lib.initialize_model_state(
+    train_state, _ = trainer_lib.initialize_model_state(
         task,
         jax.random.PRNGKey(5678),
         sample_inputs,
@@ -759,13 +912,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
     )
-    train_state = trainer_lib.initialize_model_state(
+    train_state, _ = trainer_lib.initialize_model_state(
         instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
     )
-    train_state_exclusion = trainer_lib.initialize_model_state(
+    train_state_exclusion, _ = trainer_lib.initialize_model_state(
         instantiate(task_p_exclusion), jax.random.PRNGKey(1245), sample_inputs
     )
-    train_state_inclusion = trainer_lib.initialize_model_state(
+    train_state_inclusion, _ = trainer_lib.initialize_model_state(
         instantiate(task_p_inclusion), jax.random.PRNGKey(1245), sample_inputs
     )
 
@@ -810,7 +963,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
-    train_state = trainer_lib.initialize_model_state(
+    train_state, _ = trainer_lib.initialize_model_state(
         instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
     )
 

@@ -59,6 +59,8 @@ NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
+TensorProvenance = train_states.TensorProvenance
+TrainStateProvenance = train_states.TrainStateProvenance
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
@@ -224,6 +226,25 @@ def write_post_init_model_hparams_file(
         params_file.write(params_inits_text)
 
 
+def write_train_provenance_file(
+    train_state_provenance: train_states.TrainStateProvenance,
+    job_log_dir: epath.Path,
+) -> None:
+  """Writes a file with train state provenance into the root `job_log_dir`."""
+  if jax.process_index() == 0:
+    filename = job_log_dir / 'train_state_provenance.txt'
+    if filename.exists():
+      return
+    job_log_dir.mkdir(parents=True, exist_ok=True)
+    with filename.open('w') as provenance_file:
+      output = ''
+      for attr, val in vars(train_state_provenance).items():
+        attr_formatted = attr.replace('_', ' ').capitalize() + '\n'
+        provenance_out = summary_utils.pretty_repr_provenance(val) + '\n\n'
+        output += attr_formatted + provenance_out
+      provenance_file.write(output)
+
+
 def adjust_input_params_for_small_batch(
     inp_p: base_input.BaseInput.HParams,
     global_mesh: jax.sharding.Mesh) -> base_input.BaseInput.HParams:
@@ -301,11 +322,11 @@ def initialize_model_state(
     do_init_checkpoint_rules: bool = True,
     is_eval: bool = False,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-) -> TrainState:
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes the model states.
 
   Weights are random initialized first.
-  Then we restores weights based on the init_checkpoint_rules.
+  Then we restore weights based on the init_checkpoint_rules.
 
   Args:
     jax_task: An instance of tasks.SingleTask.
@@ -321,7 +342,7 @@ def initialize_model_state(
       the init_checkpoint_rules.
 
   Returns:
-    TrainState - training states.
+    Training state and train state provenance.
   """
   model = jax_task.model
   prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
@@ -357,6 +378,9 @@ def initialize_model_state(
     del initial_vars['params_axes']
   train_state = jax_task.create_train_state(initial_vars, var_weight_hparams,
                                             discard_opt_states)
+  train_state_provenance = train_states.build_train_state_provenance(
+      train_state
+  )
   # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
     if checkpoint_type == CheckpointType.UNSPECIFIED:
@@ -366,8 +390,11 @@ def initialize_model_state(
         checkpoint_type = CheckpointType.FLAX
     # Overwrite some parts if init_checkpoint_rules are set (warm-start)
     # Note that this assumes a pmap model with Flax checkpoint(s).
-    train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
-        train_state, checkpoint_type=checkpoint_type)
+    train_state, train_state_provenance, update_opt_states = (
+        jax_task.apply_init_checkpoint_rules(
+            train_state, train_state_provenance, checkpoint_type=checkpoint_type
+        )
+    )
     if update_opt_states:
       # Free the previous opt_states as it will be re-computed.
       jax.tree_util.tree_map(lambda x: x.delete(), train_state.opt_states)
@@ -375,7 +402,7 @@ def initialize_model_state(
       opt_states = jax_task.create_opt_states(train_state.mdl_vars,
                                               var_weight_hparams)
       train_state = train_state.replace(opt_states=opt_states)
-  return train_state
+  return train_state, train_state_provenance
 
 
 def replicate_model_state(model_states: TrainState) -> TrainState:
@@ -394,10 +421,12 @@ def initialize_replicate_model_state(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     inputs_shape_dtype: NestedShapeDtypeLike,
-    discard_opt_states: bool = False) -> TrainState:
+    discard_opt_states: bool = False,
+) -> TrainState:
   """Initializes and replicates the model states."""
-  model_states = initialize_model_state(jax_task, prng_key, inputs_shape_dtype,
-                                        discard_opt_states)
+  model_states, _ = initialize_model_state(
+      jax_task, prng_key, inputs_shape_dtype, discard_opt_states
+  )
   return replicate_model_state(model_states)
 
 
@@ -988,7 +1017,7 @@ def initialize_partitioned_model_states(
     global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.GDA,
     do_init_checkpoint_rules: bool = True,
-) -> TrainState:
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first.
@@ -1026,12 +1055,13 @@ def initialize_partitioned_model_states(
   assert train_state_partition_specs is not None
 
   def init_model_from_seed(prng_key):
-    outs = initialize_model_state(
+    outs, _ = initialize_model_state(
         jax_task,
         prng_key,
         global_input_shapes,
         discard_opt_states,
-        do_init_checkpoint_rules=False)
+        do_init_checkpoint_rules=False,
+    )
     return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
                                               train_state_unpadded_shapes,
                                               model.hparams.mesh_shape,
@@ -1053,19 +1083,26 @@ def initialize_partitioned_model_states(
   init_fn = bind_mesh(init_fn, global_mesh)
 
   partitioned_vars = init_fn(prng_key)
+  train_state_provenance = train_states.build_train_state_provenance(
+      partitioned_vars
+  )
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
   if (do_init_checkpoint_rules and
       jax_task.hparams.train.init_from_checkpoint_rules):
     # TODO(b/230132535): Note that this application after constructing the
     # partitioned vars is currently inconsistent with what is being performed
     # for pmap models.
-    partitioned_vars, _ = jax_task.apply_init_checkpoint_rules(
-        partitioned_vars,
-        train_state_partition_specs=train_state_partition_specs,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type)
+    partitioned_vars, train_state_provenance, _ = (
+        jax_task.apply_init_checkpoint_rules(
+            partitioned_vars,
+            train_state_provenance,
+            train_state_partition_specs=train_state_partition_specs,
+            global_mesh=global_mesh,
+            checkpoint_type=checkpoint_type,
+        )
+    )
 
-  return partitioned_vars
+  return partitioned_vars, train_state_provenance
 
 
 def shard_on_batch_dim_partition_spec(

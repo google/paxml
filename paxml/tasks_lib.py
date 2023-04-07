@@ -60,9 +60,12 @@ CheckpointType = checkpoints.CheckpointType
 Nested = pytypes.Nested
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor
+NestedWeightHParams = base_layer.NestedWeightHParams
 JTensor = base_layer.JTensor
 PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
+TensorProvenance = train_states.TensorProvenance
+TrainStateProvenance = train_states.TrainStateProvenance
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
@@ -298,21 +301,32 @@ def _assign_model_vars(
     model_vars: Union[NestedMap, Dict[str, Any]],
     loaded_vars: Dict[str, Any],
     model_vars_mapping: Dict[str, str],
+    model_provenance: Union[
+        NestedMap, Dict[str, Any]
+    ],
+    loaded_provenance: Dict[str, Any],
 ) -> None:
   """Sets current model vars from loaded model vars using provided mapping."""
   used_vars = set()
   for var_name, init_var_name in model_vars_mapping.items():
     loaded_var = loaded_vars[init_var_name]
+    loaded_var_provenance = loaded_provenance[init_var_name]
     if init_var_name not in used_vars:
       used_vars.add(init_var_name)
     else:
       # Allow the copy of cross-host Jax arrays.
       with jax.spmd_mode('allow_all'):
         loaded_var = jnp.copy(loaded_var)
-    if isinstance(model_vars, NestedMap):
+    if isinstance(
+        model_vars, NestedMap
+    ):
       model_vars.Set(var_name, loaded_var)
     else:
       _set_nested_dict_value(model_vars, var_name, loaded_var)
+    if isinstance(model_provenance, NestedMap):
+      model_provenance.Set(var_name, loaded_var_provenance)
+    else:
+      _set_nested_dict_value(model_provenance, var_name, loaded_var_provenance)
 
 
 def _make_train_state(
@@ -448,13 +462,16 @@ def _make_train_state(
   return ckpt_train_state, train_state_pspecs
 
 
-def _load_partial_opt_states(train_state: TrainState,
-                             loaded_train_state: TrainState,
-                             loading_rules: Sequence[Tuple[re.Pattern[str],
-                                                           str]],
-                             ignore_rules: Optional[Sequence[re.Pattern[str]]],
-                             is_opt_states_initialized: Dict[str, str],
-                             ckpt_path: str) -> TrainState:
+def _load_partial_opt_states(
+    train_state: TrainState,
+    train_state_provenance: TrainStateProvenance,
+    loaded_train_state: TrainState,
+    loaded_state_provenance: TrainStateProvenance,
+    loading_rules: Sequence[Tuple[re.Pattern[str], str]],
+    ignore_rules: Optional[Sequence[re.Pattern[str]]],
+    is_opt_states_initialized: Dict[str, str],
+    ckpt_path: str,
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Loads optimizer state from given checkpoint based on specified rules."""
   opt_states_serialized = flax.serialization.to_state_dict(
       train_state.opt_states)
@@ -462,6 +479,12 @@ def _load_partial_opt_states(train_state: TrainState,
 
   loaded_opt_states_flat = _flatten_dict(
       flax.serialization.to_state_dict(loaded_train_state.opt_states))
+  opt_provenance_serialized = flax.serialization.to_state_dict(
+      train_state_provenance.opt_states
+  )
+  loaded_opt_provenance_flat = _flatten_dict(
+      flax.serialization.to_state_dict(loaded_state_provenance.opt_states)
+  )
 
   opt_state_names = [x[0] for x in opt_states_flat]
   opt_state_mapping, _ = _get_var_mapping(
@@ -475,13 +498,23 @@ def _load_partial_opt_states(train_state: TrainState,
       target_partition_specs=None)
   logging.info('opt_state_mapping: %r', opt_state_mapping)
 
-  _assign_model_vars(opt_states_serialized, dict(loaded_opt_states_flat),
-                     opt_state_mapping)
+  _assign_model_vars(
+      opt_states_serialized,
+      dict(loaded_opt_states_flat),
+      opt_state_mapping,
+      opt_provenance_serialized,
+      dict(loaded_opt_provenance_flat),
+  )
 
   restored_opt_states = flax.serialization.from_state_dict(
       train_state.opt_states, opt_states_serialized)
   train_state = train_state.replace(opt_states=restored_opt_states)
 
+  restored_opt_provenance = flax.serialization.from_state_dict(
+      train_state_provenance.opt_states, opt_provenance_serialized)
+  train_state_provenance = train_state_provenance.replace(
+      opt_states=restored_opt_provenance
+  )
   # Verify that:
   # 1) the tree structure of the restored opt states match the original opt
   #    states structure.
@@ -494,7 +527,7 @@ def _load_partial_opt_states(train_state: TrainState,
     assert orig_item[0] == updated_item[0]
     assert orig_item[1].size == updated_item[1].size
   logging.info('Partially restored opt_state verified.')
-  return train_state
+  return train_state, train_state_provenance
 
 
 # TODO(pax-dev): Move this function when `pmap_use_tensorstore` flag is deleted.
@@ -1482,13 +1515,14 @@ class SingleTask(base_task.BaseTask):
   def _apply_init_checkpoint_rule(
       self,
       train_state: TrainState,
+      train_state_provenance: TrainStateProvenance,
       ckpt_path: str,
       rules: CheckpointLoadingRules,
       load_status: List[Any],
       global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
       target_partition_specs: Optional[TrainState] = None,
-  ):
+  ) -> Tuple[TrainState, TrainStateProvenance]:
     """Applies one CheckpointLoadingRules to train_state."""
     uses_gda = (
         checkpoint_type == CheckpointType.GDA
@@ -1582,7 +1616,13 @@ class SingleTask(base_task.BaseTask):
 
     # Use NestedMap's utility accessors
     loaded_vars = dict(NestedMap(loaded_train_state.mdl_vars).FlattenItems())
-
+    loaded_state_provenance = train_states.build_train_state_provenance(
+        loaded_train_state, ckpt_path, rules.step
+    )
+    provenance_model_vars = train_state_provenance.mdl_vars
+    flat_loaded_vars_provenance = dict(
+        NestedMap(loaded_state_provenance.mdl_vars).FlattenItems()
+    )
     # Load EMA state if specified
     if load_ema_states:
       ema_required = False
@@ -1600,70 +1640,110 @@ class SingleTask(base_task.BaseTask):
                 }
             ).FlattenItems()
         )
+        flat_loaded_vars_provenance.update(
+            NestedMap.FromNestedDict(
+                {'ema': extract_ema(loaded_train_state).mdl_vars}
+            ).FlattenItems()
+        )
     else:
       # Check if rules use ema state
       for _, ref in rules.load_rules:
         if ref.startswith('ema/'):
           raise RuntimeError('Load ema state but ema is not enabled for ckpt')
 
-    _assign_model_vars(model_vars, loaded_vars, model_vars_mapping)
+    _assign_model_vars(
+        model_vars,
+        loaded_vars,
+        model_vars_mapping,
+        provenance_model_vars,
+        flat_loaded_vars_provenance,
+    )
     train_state = train_state.replace(mdl_vars=model_vars)
 
     if rules.partial_load_opt_states:
-      train_state = _load_partial_opt_states(train_state, loaded_train_state,
-                                             loading_rules, ignore_rules,
-                                             is_opt_states_initialized,
-                                             ckpt_path)
+      train_state, train_state_provenance = _load_partial_opt_states(
+          train_state,
+          train_state_provenance,
+          loaded_train_state,
+          loaded_state_provenance,
+          loading_rules,
+          ignore_rules,
+          is_opt_states_initialized,
+          ckpt_path,
+      )
 
     if rules.load_step:
       if is_step_loaded:
-        logging.info('train_state.step is already initialized by %s, skip.',
-                     is_step_loaded)
+        logging.info(
+            'train_state.step is already initialized by %s, skip.',
+            is_step_loaded,
+        )
       else:
-        train_state = train_state.replace(step=loaded_train_state.step)
+        loaded_step = loaded_train_state.step
+        train_state = train_state.replace(step=loaded_step)
+        train_state_provenance = train_state_provenance.replace(
+            step=loaded_step
+        )
         load_status[0] = ckpt_path
         logging.info(
-            'Initialization by external checkpoint: step is overwritten by '
-            'value from %s with value %s', ckpt_path, train_state.step)
+            (
+                'Initialization by external checkpoint: step is overwritten by '
+                'value from %s with value %s'
+            ),
+            ckpt_path,
+            train_state.step,
+        )
 
     if rules.load_opt_states and not rules.partial_load_opt_states:
       if is_opt_states_initialized:
         logging.info(
             'train_state.opt_states is already initialized by %s, skip.',
-            is_opt_states_initialized)
+            is_opt_states_initialized,
+        )
       else:
         train_state = train_state.replace(
-            opt_states=loaded_train_state.opt_states)
+            opt_states=loaded_train_state.opt_states
+        )
+        train_state_provenance = train_state_provenance.replace(
+            opt_states=loaded_state_provenance.opt_states
+        )
         load_status[2] = {'all': ckpt_path}
         logging.info(
-            'Initialization by external checkpoint: train_state.opt_states is '
-            'overwritten by value from %s', ckpt_path)
+            (
+                'Initialization by external checkpoint: train_state.opt_states'
+                ' is overwritten by value from %s'
+            ),
+            ckpt_path,
+        )
 
-    return train_state
+    return train_state, train_state_provenance
 
   def apply_init_checkpoint_rules(
       self,
       train_state: TrainState,
+      train_state_provenance: TrainStateProvenance,
       train_state_partition_specs: Optional[TrainState] = None,
       global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
-  ) -> Tuple[TrainState, bool]:
+  ) -> Tuple[TrainState, TrainStateProvenance, bool]:
     """Applies p.train.init_from_checkpoint_rules to update train_state.
 
     Args:
       train_state: initialized train_state.
+      train_state_provenance: initialized train_state provenance
       train_state_partition_specs: The TrainState specs for initialized
         train_state. Required for GDA-based checkpoints.
       global_mesh: optional mesh used to restore checkpoint if needed.
       checkpoint_type: used to restore checkpoint.
 
     Returns:
-      A tuple of the updated new train state, and whether caller needs
+      A tuple of the updated new train state, the train state provenance, and
+      whether caller needs
       to recompute opt_states after mdl_vars are updated.
     """
     all_rules = self.hparams.train.init_from_checkpoint_rules
     if not all_rules:
-      return train_state, False
+      return train_state, train_state_provenance, False
 
     # mdl_vars are Python dict. First, convert it to NestedMap for convenience.
     train_state = train_state.replace(
@@ -1679,16 +1759,18 @@ class SingleTask(base_task.BaseTask):
         is_step_loaded, is_var_initialized, is_opt_states_initialized
     ]
     for ckpt_path, rules in all_rules.items():
-      train_state = self._apply_init_checkpoint_rule(
+      train_state, train_state_provenance = self._apply_init_checkpoint_rule(
           train_state,
+          train_state_provenance,
           ckpt_path,
           rules,
           load_status,
           global_mesh,
           checkpoint_type,
-          target_partition_specs=train_state_partition_specs)
+          target_partition_specs=train_state_partition_specs,
+      )
 
     # Convert mdl_vars back to Python dict for compatibility.
     train_state = train_state.replace(
         mdl_vars=train_state.mdl_vars.ToNestedDict())  # pytype: disable=attribute-error  # jax-ndarray
-    return train_state, not load_status[2]
+    return train_state, train_state_provenance, not load_status[2]

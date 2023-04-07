@@ -65,6 +65,7 @@ PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
 TrainState = train_states.TrainState
+TrainStateProvenance = train_states.TrainStateProvenance
 
 PARAMS = base_layer.PARAMS
 NON_PAX_RNG_KEY = base_layer.NON_PAX_RNG_KEY
@@ -161,7 +162,7 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
       metadata: trainer_lib.TrainStateMetadata,
       root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int, PRNGKey]:
+  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     """Restores TrainState from checkpoint or initializes it.
 
     Args:
@@ -299,7 +300,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       metadata: trainer_lib.TrainStateMetadata,
       root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int, PRNGKey]:
+  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     step = self.checkpoint_manager.latest_step()
     if step is None:
       partitioned_train_state = None
@@ -317,7 +318,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           _READ_CHECKPOINT_EVENT, restore_period.elapsed
       )
 
-    root_prng_key, partitioned_train_state = (
+    root_prng_key, partitioned_train_state, train_state_provenance = (
         partitioner.initialize_prng_key_and_train_state(
             root_prng_key,
             partitioned_train_state,
@@ -326,7 +327,12 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     )
 
     total_num_params = py_utils.total_num_vars(partitioned_train_state.mdl_vars)
-    return partitioned_train_state, total_num_params, root_prng_key
+    return (
+        partitioned_train_state,
+        train_state_provenance,
+        total_num_params,
+        root_prng_key,
+    )
 
   @property
   def checkpoint_type(self) -> CheckpointType:
@@ -404,8 +410,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       metadata: trainer_lib.TrainStateMetadata,
       root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, int, PRNGKey]:
-    # Note that this method restores the "unpadded" train state.
+  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       step = self.checkpoint_manager.latest_step()
@@ -423,7 +428,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     )
 
     # TODO(laigd): move the logic below outside of get_model_states.
-    root_prng_key, replicated_train_state = (
+    root_prng_key, replicated_train_state, train_state_provenance = (
         partitioner.initialize_prng_key_and_train_state(
             root_prng_key, train_state, self.checkpoint_type
         )
@@ -432,7 +437,12 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     total_num_params = py_utils.total_num_vars(replicated_train_state.mdl_vars)
     assert total_num_params % jax.local_device_count() == 0
     total_num_params = total_num_params // jax.local_device_count()
-    return replicated_train_state, total_num_params, root_prng_key
+    return (
+        replicated_train_state,
+        train_state_provenance,
+        total_num_params,
+        root_prng_key,
+    )
 
   def _save_with_args(
       self,
@@ -976,6 +986,7 @@ def train_and_evaluate_pmap(
       train_input,
       test_eval_programs,
       partitioned_train_state,
+      train_state_provenance,
       total_num_params,
       prng_key,
       train_prng_seed,
@@ -1015,6 +1026,7 @@ def train_and_evaluate_pmap(
       train_program,
       train_input,
       partitioned_train_state,
+      train_state_provenance,
       prng_key,
       test_eval_programs,
       decode_input_p,
@@ -1063,6 +1075,7 @@ def train_and_evaluate_spmd_model(
       train_input,
       test_eval_programs,
       partitioned_train_state,
+      train_state_provenance,
       total_num_params,
       prng_key,
       train_prng_seed,
@@ -1131,6 +1144,7 @@ def train_and_evaluate_spmd_model(
       train_program,
       train_input,
       partitioned_train_state,
+      train_state_provenance,
       prng_key,
       test_eval_programs,
       decode_input_p,
@@ -1157,6 +1171,7 @@ def _create_program_and_states(
     base_input.BaseInput,
     Sequence[programs.BaseEvalProgram],
     TrainState,
+    TrainStateProvenance,
     int,
     PRNGKey,
     PRNGKey,
@@ -1190,14 +1205,18 @@ def _create_program_and_states(
   train_input_for_checkpoint = (
       train_input_pipeline if task_p.train.enable_input_checkpointing else None
   )
-  partitioned_train_state, total_num_params, root_prng_key = (
-      checkpointer.get_model_states(
-          partitioner,
-          train_state_metadata,
-          root_prng_key,
-          train_input_for_checkpoint,
-      )
+  (
+      partitioned_train_state,
+      train_state_provenance,
+      total_num_params,
+      root_prng_key,
+  ) = checkpointer.get_model_states(
+      partitioner,
+      train_state_metadata,
+      root_prng_key,
+      train_input_for_checkpoint,
   )
+  trainer_lib.write_train_provenance_file(train_state_provenance, job_log_dir)
 
   initial_global_step = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
@@ -1229,6 +1248,7 @@ def _create_program_and_states(
       train_input_pipeline,
       test_eval_programs,
       partitioned_train_state,
+      train_state_provenance,
       total_num_params,
       prng_key,
       train_prng_seed,
@@ -1242,6 +1262,7 @@ def _train_and_evaluate_common(
     train_program: programs.BaseTrainProgram,
     train_input: base_input.BaseInput,
     partitioned_train_state,
+    train_state_provenance: TrainStateProvenance,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
     test_eval_programs: Sequence[programs.BaseEvalProgram],
@@ -1291,6 +1312,11 @@ def _train_and_evaluate_common(
         partitioned_train_state,
         is_vars_replicated=is_vars_replicated,
     )
+    # train_state_provenance is None when model restored from checkpoint
+    if train_state_provenance:
+      summary_utils.write_model_provenance(
+          train_summary_writer, train_state_provenance
+      )
 
     # TODO(laigd): consider moving this into train program.
     train_summary_handler = summary_utils.SummaryHandler(
