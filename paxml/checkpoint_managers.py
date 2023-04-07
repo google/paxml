@@ -24,7 +24,6 @@ from typing import Any, Mapping, Optional, Sequence, Union
 from etils import epath
 from absl import logging
 import jax
-import optax
 import orbax.checkpoint
 from paxml import checkpoints
 from praxis import base_input
@@ -81,6 +80,7 @@ def _create_items_dict_with_metadata(
     train_state,
     train_state_unpadded_shape_dtype_struct,
     version,
+    tensorstore_use_ocdbt: Optional[bool] = None
 ):
   """Returns items dict with metadata."""
   # (padded) train_state
@@ -91,6 +91,7 @@ def _create_items_dict_with_metadata(
         version,
         train_state,
         train_state_unpadded_shape_dtype_struct,
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt
     )
     items.update({METADATA_ITEM_NAME: metadata})
 
@@ -132,13 +133,14 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       directory: epath.PathLike,
       *args,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+      tensorstore_use_ocdbt: Optional[bool] = None,
       **kwargs,
   ):
     if checkpoint_type == CheckpointType.UNSPECIFIED:
       raise ValueError('Must specify checkpoint type.')
     self._checkpoint_type = checkpoint_type
 
-    self._version = checkpoints.get_version()
+    self._version = checkpoints.get_version(tensorstore_use_ocdbt)
     # Check for existing checkpoints and retrieve version information. The
     # specific version may impact the checkpoint format, so it must be known in
     # advance of any operations.
@@ -259,7 +261,9 @@ class OrbaxCheckpointManager:
       train_input_checkpointer: Optional[orbax.checkpoint.Checkpointer] = None,
       options: Optional[CheckpointManagerOptions] = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+      tensorstore_use_ocdbt: Optional[bool] = None,
   ):
+    self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     checkpointers = {
         STATE_ITEM_NAME: checkpointer,
         METADATA_ITEM_NAME: orbax.checkpoint.Checkpointer(
@@ -274,6 +278,7 @@ class OrbaxCheckpointManager:
         checkpointers,
         options=options,
         checkpoint_type=checkpoint_type,
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
     )
 
   @property
@@ -330,6 +335,7 @@ class OrbaxCheckpointManager:
         train_state,
         train_state_unpadded_shape_dtype_struct,
         self.version,
+        tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
     )
 
     if train_input_pipeline:
@@ -360,6 +366,7 @@ class OrbaxCheckpointManager:
         train_state,
         train_state_unpadded_shape_dtype_struct,
         self.version,
+        tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
     )
 
     # Train input checkpoint may not exist if input checkpointing wasn't

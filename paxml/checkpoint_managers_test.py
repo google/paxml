@@ -188,6 +188,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         train_input_checkpointer,
         checkpoint_type=checkpoint_type,
         options=options,
+        tensorstore_use_ocdbt=False,
     )
 
   def save(

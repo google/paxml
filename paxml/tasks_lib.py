@@ -505,6 +505,7 @@ def restore_pmap_from_tensorstore(
     global_mesh=None,
     checkpoint_type=CheckpointType.GDA,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ):
   """Restores pmap checkpoints from tensorstore.
 
@@ -524,6 +525,7 @@ def restore_pmap_from_tensorstore(
     checkpoint_type: The type of checkpoint to use.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
+    tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Returns:
     Restored model states of type `DeviceArray`, `GlobalDeviceArray` or
@@ -552,6 +554,7 @@ def restore_pmap_from_tensorstore(
         state_specs=fully_replicated_state_specs,
         step=step,
         enforce_restore_shape_check=enforce_restore_shape_check,
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
     )
   if global_mesh is not None:
     return fully_replicated_gda_model_states
@@ -1442,9 +1445,9 @@ class SingleTask(base_task.BaseTask):
 
     This reduces the maximum HBM usage in the beginning of the experiment.
     Otherwise, when the variables are being loadded, at the same time there
-    could exist two copies of opt varaibles on the same device - the first copy
+    could exist two copies of opt variables on the same device - the first copy
     initialized randomly, and the other one loaded from the checkpoint. Here the
-    randomly initalized variables are released before checkpoint loading. This
+    randomly initialized variables are released before checkpoint loading. This
     avoids OOMing in some large models.
     """
     # pylint: enable=g-doc-args

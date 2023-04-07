@@ -193,12 +193,14 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     if checkpoint_type == CheckpointType.FLAX:
       raise ValueError('FLAX checkpointing not supported for pjit models.')
     self._enable_checkpoint_saving = enable_checkpoint_saving
+    self._ocdbt_coordinator_server = ocdbt_coordinator_server
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -339,12 +341,14 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
+    self._ocdbt_coordinator_server = ocdbt_coordinator_server
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -545,6 +549,7 @@ def _create_checkpointer(
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
     maybe_use_persistence_checkpointing: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> _TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
@@ -553,7 +558,10 @@ def _create_checkpointer(
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
 
-  checkpoints.reregister_type_handlers(train_p.tensorstore_metadata_key)
+  ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
+      tensorstore_metadata_key=train_p.tensorstore_metadata_key,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+  )
   options = checkpoint_managers.CheckpointManagerOptions(
       max_to_keep=max_to_keep,
       save_interval_steps=save_interval_steps,
@@ -569,7 +577,8 @@ def _create_checkpointer(
     else:
       checkpointer = checkpoints.AsyncCheckpointer(
           checkpoints.PaxCheckpointHandler(
-              enforce_restore_shape_check=enforce_restore_shape_check
+              enforce_restore_shape_check=enforce_restore_shape_check,
+              use_ocdbt=tensorstore_use_ocdbt,
           ),
           timeout_secs=600,
       )
@@ -577,7 +586,8 @@ def _create_checkpointer(
     if checkpoint_type == CheckpointType.GDA:
       checkpointer = Checkpointer(
           PaxCheckpointHandler(
-              enforce_restore_shape_check=enforce_restore_shape_check
+              enforce_restore_shape_check=enforce_restore_shape_check,
+              use_ocdbt=tensorstore_use_ocdbt,
           )
       )
     elif checkpoint_type == CheckpointType.PERSISTENCE:
@@ -606,6 +616,7 @@ def _create_checkpointer(
       train_input_checkpointer=train_input_checkpointer,
       options=options,
       checkpoint_type=checkpoint_type,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
 
   if task_p.model.ici_mesh_shape is not None:
@@ -613,6 +624,7 @@ def _create_checkpointer(
         checkpoint_manager,
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
+        ocdbt_coordinator_server=ocdbt_coordinator_server,
     )
   else:
     checkpointer = _OrbaxPmapTrainingCheckpointer(
@@ -620,6 +632,7 @@ def _create_checkpointer(
         checkpoint_manager,
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
+        ocdbt_coordinator_server=ocdbt_coordinator_server,
     )
 
   return checkpointer
@@ -769,6 +782,7 @@ def train_and_evaluate(
     enable_async_checkpointing: bool = False,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -796,6 +810,7 @@ def train_and_evaluate(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
+    tensorstore_use_ocdbt: Uses OCDBT format for saving new checkpoints.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -868,6 +883,7 @@ def train_and_evaluate(
       enable_checkpoint_saving=enable_checkpoint_saving,
       enforce_restore_shape_check=enforce_restore_shape_check,
       maybe_use_persistence_checkpointing=maybe_use_persistence_checkpointing,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
   if not enable_checkpoint_saving:
     logging.info(
