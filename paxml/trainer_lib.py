@@ -1157,6 +1157,11 @@ def get_inputs_shape_dtype(
 
 
 def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
+  logging.info(
+      'get_input_partition_specs from mesh_axis_names=%s and '
+      'inputs_shape_dtype=%s',
+      mesh_axis_names,
+      inputs_shape_dtype)
   # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
       shard_on_batch_dim_partition_spec, mesh_axis_names)
