@@ -718,9 +718,16 @@ def train_step_single_learner(
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
       var_weight_hparams, learner
   )
+  # Excluded for optimizer states.
+  excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
+      var_weight_hparams,
+      learner,
+  )
 
   def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
-    with_grad = tasks_lib.filter_vars_for_grad(mdl_vars, excluded_for_grad)
+    with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_grad
+    )
     no_grad = jax.tree_map(
         lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
     )
@@ -743,7 +750,15 @@ def train_step_single_learner(
       g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
     else:
       g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
-    return g(with_grad, (no_grad, inputs), prng_key)
+    values, grads = g(with_grad, (no_grad, inputs), prng_key)
+    grads = jax.tree_map(
+        lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
+        excluded_for_opt,
+        excluded_for_grad,
+        mdl_vars,
+        grads,
+    )
+    return values, grads
 
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
@@ -773,21 +788,26 @@ def train_step_single_learner(
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
-    vars_with_grad = tasks_lib.filter_vars_for_grad(mdl_vars, excluded_for_grad)
-    wps_with_grad = tasks_lib.filter_vars_for_grad(
-        var_weight_hparams, excluded_for_grad
+    # Make updated non-trainable vars visible to EMA.
+    if NON_TRAINABLE in fwd_updated_vars:
+      mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
+    vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_opt
+    )
+    wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
+        var_weight_hparams, excluded_for_opt
     )
     transformed_grads, new_opt_states = learner.update_states(
-        grads, states.opt_states[0], vars_with_grad, wps_with_grad
+        grads, states.opt_states[0], vars_with_opt, wps_with_opt
     )
-    vars_with_grad = learner.apply_gradient(
-        vars_with_grad, transformed_grads, wps_with_grad
+    vars_with_opt = learner.apply_gradient(
+        vars_with_opt, transformed_grads, wps_with_opt
     )
     mdl_vars = jax.tree_map(
         lambda e, old, new: old if e else new,
         excluded_for_grad,
         mdl_vars,
-        vars_with_grad,
+        vars_with_opt,
     )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
@@ -803,7 +823,7 @@ def train_step_single_learner(
     mdl_vars = jax.tree_map(
         lambda e, old, new: old if e else new,
         # Filter out only the explicitly masked non-trainables.
-        tasks_lib.get_excluded_var_mask_for_grad(
+        tasks_lib.get_excluded_var_mask_for_grad_or_opt(
             var_weight_hparams, learner, mask_all_non_trainable=False
         ),
         states.mdl_vars,

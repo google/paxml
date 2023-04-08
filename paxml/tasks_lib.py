@@ -687,12 +687,12 @@ class CheckpointLoadingRules(NamedTuple):
       base_input.BaseInputSpecsProvider.HParams] = None
 
 
-def get_excluded_var_mask_for_grad(
+def get_excluded_var_mask_for_grad_or_opt(
     var_weight_hparams: NestedJTensor,
     learner: learners_lib.Learner,
-    mask_all_non_trainable: bool = True,
+    mask_all_non_trainable: bool,
 ) -> NestedMap:
-  """Returns booleans indication if each var should be excluded for grad."""
+  """Returns whether each var should be excluded for grad/optimizer."""
   # Skip variables for gradients.
   if learner.hparams.bprop_variable_inclusion:
     assert not learner.hparams.bprop_variable_exclusion
@@ -713,10 +713,30 @@ def get_excluded_var_mask_for_grad(
   return excluded_for_grad
 
 
-def filter_vars_for_grad(
+def get_excluded_var_mask_for_opt(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+) -> NestedMap:
+  """Returns whether each var should be excluded for optimizer."""
+  return get_excluded_var_mask_for_grad_or_opt(
+      var_weight_hparams, learner, learner.optimizer.hparams.ema_decay == 0.0
+  )
+
+
+def get_excluded_var_mask_for_grad(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+) -> NestedMap:
+  """Returns whether each var should be excluded for optimizer."""
+  return get_excluded_var_mask_for_grad_or_opt(
+      var_weight_hparams, learner, True
+  )
+
+
+def filter_vars_for_grad_or_opt(
     mdl_vars: NestedMap, excluded_for_grad: NestedMap
 ) -> NestedMap:
-  """Filters out vars that should be excluded for grad."""
+  """Filters out vars that should be excluded for grad or optimizer."""
   return jax.tree_map(
       lambda v, e: py_utils.BpropMaskedNode() if e else v,
       mdl_vars,
@@ -756,8 +776,11 @@ def create_state_partition_specs(
   else:
     opt_var_weight_hparams = []
     for learner in learners:
-      excluded = get_excluded_var_mask_for_grad(var_weight_hparams, learner)
-      var_weight_hparams_for_opt = filter_vars_for_grad(
+      excluded = get_excluded_var_mask_for_opt(
+          var_weight_hparams,
+          learner,
+      )
+      var_weight_hparams_for_opt = filter_vars_for_grad_or_opt(
           var_weight_hparams, excluded
       )
       grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
@@ -813,9 +836,14 @@ def _create_opt_states(
   asserts.assert_same_structure(mdl_vars, var_weight_hparams)
   opt_states = []
   for learner in learners:
-    excluded = get_excluded_var_mask_for_grad(var_weight_hparams, learner)
-    var_weight_hparams = filter_vars_for_grad(var_weight_hparams, excluded)
-    filtered_mdl_vars = filter_vars_for_grad(mdl_vars, excluded)
+    excluded = get_excluded_var_mask_for_opt(
+        var_weight_hparams,
+        learner,
+    )
+    var_weight_hparams = filter_vars_for_grad_or_opt(
+        var_weight_hparams, excluded
+    )
+    filtered_mdl_vars = filter_vars_for_grad_or_opt(mdl_vars, excluded)
     grad_tx = learner.get_grad_tx(var_weight_hparams)
     opt_states.append(grad_tx.init(filtered_mdl_vars))
   return opt_states  # pytype: disable=bad-return-type
@@ -1635,11 +1663,7 @@ class SingleTask(base_task.BaseTask):
       if ema_required:
         loaded_vars.update(
             NestedMap.FromNestedDict(
-                {
-                    'ema': extract_ema(
-                        loaded_train_state, merge_for_bprop_exclusion=False
-                    ).mdl_vars
-                }
+                {'ema': extract_ema(loaded_train_state).mdl_vars}
             ).FlattenItems()
         )
         flat_loaded_vars_provenance.update(
