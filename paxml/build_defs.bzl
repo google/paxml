@@ -75,6 +75,7 @@ def pax_targets(
         add_smoke_test = True,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
+        smoke_test_py_test_rule = py_strict_test,
         smoke_test_args = None,
         smoke_test_kwargs = None,
         main_src = "//paxml:main.py"):
@@ -207,6 +208,7 @@ def pax_targets(
                 "//paxml:experiment_registry",
             ] + extra_deps,
             timeout = "long",
+            py_test_rule = smoke_test_py_test_rule,
             args = smoke_test_args,
             **smoke_test_kwargs
         )
@@ -261,6 +263,7 @@ def _export_test(
         test_src,
         deps,
         exp_sources,
+        py_test_rule,
         args,
         **kwargs):
     """Define a `py_test()` at the current package.
@@ -276,7 +279,7 @@ def _export_test(
     test_copied = "%s.py" % name
     _copy_src(output_name = test_copied, source_target = test_src, exp_sources = exp_sources)
 
-    py_strict_test(
+    py_test_rule(
         name = name,
         python_version = "PY3",
         srcs_version = "PY3",
