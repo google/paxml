@@ -158,6 +158,14 @@ def _write_input_specs(
   )
 
 
+def _get_shape_dtype(
+    inputs: Union[NestedShapeDtypeLike, NestedJTensor]
+) -> NestedShapeDtypeLike:
+  """Returns the shape/dtype information for the given input."""
+  fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype)
+  return jax.tree_map(fn, inputs)
+
+
 class Partitioner(metaclass=abc.ABCMeta):
   """Interface for partitioning computations.
 
@@ -665,10 +673,7 @@ class PjitPartitioner(Partitioner):
     global_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
-    perhost_inputs_shape_dtype = jax.tree_map(
-        lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
-        sample_inputs,
-    )
+    perhost_inputs_shape_dtype = _get_shape_dtype(sample_inputs)
     _write_input_specs(perhost_inputs_shape_dtype, self._job_log_dir)
     return global_shape_dtype
 
@@ -844,9 +849,11 @@ class PjitPartitioner(Partitioner):
         # When there are input padding on multi-host, we use a different device
         # order in the program's input sharding. We now make sure they are
         # resharded back to the device order consistent with the global mesh.
-        inputs = jax.tree_util.tree_map(
-            lambda x, s: base_layer.maybe_shard(x, s, self._mesh_names), inputs,
-            input_partition_spec)
+        inputs = jax.tree_map(
+            lambda x, s: base_layer.maybe_shard(x, s, self._mesh_names),
+            inputs,
+            input_partition_spec,
+        )
         # Vars/inputs are padded at program entry/exit to avoid uneven sharding.
         # We slice the vars to remove padding before the step computation, and
         # pad them after the step computation to make user code independent of
@@ -1042,6 +1049,10 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # Whether step_fn is used for evaluation.
     is_eval: bool
 
+    # The input shape/dtype information for step_fn. If not set, it'll use
+    # self.train_inputs_shape_dtype instead.
+    inputs_shape_dtype: NestedShapeDtypeLike
+
     # Whether to replicate the output when auto sharding is enabled.
     # TODO(pax-dev): support custom output partition spec.
     replicate_output: bool
@@ -1102,6 +1113,14 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     logging.info('Auto sharding is enabled in PAX.')
     return global_shape_dtype
 
+  @property
+  def _auto_sharding_input_spec(self) -> NestedShapeDtypeLike:
+    input_spec = self._auto_sharding_info.inputs_shape_dtype
+    if input_spec:
+      return input_spec
+    assert self.train_inputs_shape_dtype
+    return jax.tree_util.tree_map(lambda x: x, self.train_inputs_shape_dtype)
+
   def _partition_auto_shard(
       self,
       step_fn: Partitioner.PartitionedStepFn,
@@ -1134,6 +1153,15 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         fn_out_partition_specs,
         use_pspec_on_array_inputs=True)
 
+    logging.info(
+        (
+            'Lowering auto sharded function with input shapes:'
+            ' train_state_metadata=%s, prng_key=%s, inputs=%s'
+        ),
+        metadata.unpadded_global_shapes,
+        jax.tree_map(lambda x: x.shape, self._init_key),
+        jax.tree_map(lambda x: x.shape, inputs_shape_dtype),
+    )
     # NOTE(pax-dev): The following is currently incompatible with variable
     # uneven-sharding padding.
     (
@@ -1158,6 +1186,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       )
     train_state_metadata = self._get_train_state_metadata_default()
     assert self._train_inputs_shape_dtype
+    assert not self._auto_sharding_result
     # Currently we run auto-sharding only once to get the train state
     # partition spec, and reuse it for all subsequent get_train_state_metadata()
     # and partition() calls.
@@ -1167,48 +1196,49 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     train_state_metadata = self._maybe_discard_opt_states(
         train_state_metadata, self._auto_sharding_info.is_eval
     )
-    if not self._auto_sharding_result:
-      input_partition_spec = trainer_lib.get_input_partition_specs(
-          self._mesh_names, self._train_inputs_shape_dtype
-      )
-      wrapped_step_fn = self._get_step_fn(
-          self._auto_sharding_info.step_fn,
-          self._auto_sharding_info.is_eval,
-          train_state_metadata,
-          input_partition_spec=input_partition_spec,
-          is_auto_sharding=True,
-      )
+    input_partition_spec = trainer_lib.get_input_partition_specs(
+        self._mesh_names, self._auto_sharding_input_spec
+    )
+    logging.info(
+        'Running auto sharding for %r', self._auto_sharding_info.step_fn
+    )
+    wrapped_step_fn = self._get_step_fn(
+        self._auto_sharding_info.step_fn,
+        self._auto_sharding_info.is_eval,
+        train_state_metadata,
+        input_partition_spec=input_partition_spec,
+        is_auto_sharding=True,
+    )
 
-      with self.global_mesh:
-        partitioned_step_fn, input_pspec, train_state_pspec = (
-            self._partition_auto_shard(
-                wrapped_step_fn,
-                self._auto_sharding_info.is_eval,
-                self._train_inputs_shape_dtype,
-                input_partition_spec,
-                train_state_metadata,
-            )
-        )
-      # unpadded_global_batch_size is not used for AOT-compiled functions, so we
-      # always pass None to avoid recompilation.
-      def _wrapped_partitioned_step(
-          state, prng_key, inputs, unpadded_global_batch_size=None
-      ):
-        del unpadded_global_batch_size
-        # The unpadded_global_batch_size passed to partitioned_step_fn need to
-        # be the same as the one used to run compile_for_auto_sharding.
-        return partitioned_step_fn(state, prng_key, inputs)
-
-      self._auto_sharding_result = (
-          AutoShardingPjitPartitioner._AutoShardingResult(
-              _wrapped_partitioned_step,
-              train_state_pspec,
-              input_pspec,
-              jax.tree_util.tree_map(
-                  lambda x: x, self._train_inputs_shape_dtype
-              ),
+    with self.global_mesh:
+      partitioned_step_fn, input_pspec, train_state_pspec = (
+          self._partition_auto_shard(
+              wrapped_step_fn,
+              self._auto_sharding_info.is_eval,
+              self._auto_sharding_input_spec,
+              input_partition_spec,
+              train_state_metadata,
           )
       )
+
+    # unpadded_global_batch_size is not used for AOT-compiled functions, so we
+    # always pass None to avoid recompilation.
+    def _wrapped_partitioned_step(
+        state, prng_key, inputs, unpadded_global_batch_size=None
+    ):
+      del unpadded_global_batch_size
+      # The unpadded_global_batch_size passed to partitioned_step_fn need to
+      # be the same as the one used to run compile_for_auto_sharding.
+      return partitioned_step_fn(state, prng_key, inputs)
+
+    self._auto_sharding_result = (
+        AutoShardingPjitPartitioner._AutoShardingResult(
+            _wrapped_partitioned_step,
+            train_state_pspec,
+            input_pspec,
+            self._auto_sharding_input_spec,
+        )
+    )
 
     partition_specs = self._auto_sharding_result.train_state_partition_spec
     self._train_state_metadata = dataclasses.replace(
@@ -1230,17 +1260,29 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # The step function doesn't need opt_states when is_eval=True.
     if not self._auto_sharding_result:
       self.get_train_state_metadata(discard_opt_states=is_eval)
-    if (
-        step_fn is self._auto_sharding_info.step_fn
-        and inputs_shape_dtype == self._auto_sharding_result.inputs_shape_dtype
-    ):
-      return (
-          self._auto_sharding_result.partitioned_step_fn,
-          self._auto_sharding_result.input_partition_spec,
-      )
-    # Only the first call can be used with pjit.Auto.
-    # For any following partition calls, we fall back to manual sharding if
-    # it is not already partitioned.
+    if step_fn is self._auto_sharding_info.step_fn:
+      if inputs_shape_dtype == self._auto_sharding_result.inputs_shape_dtype:
+        logging.info('Reusing auto-sharding partitioned function.')
+        return (
+            self._auto_sharding_result.partitioned_step_fn,
+            self._auto_sharding_result.input_partition_spec,
+        )
+      else:
+        logging.warning(
+            'Cannot reuse auto-sharding partitioned function. This may indicate'
+            ' a bug in the partition process, maybe'
+            ' AutoShardingInfo.inputs_shape_dtype not set correctly.'
+        )
+        logging.warning(
+            'Input shape/dtype used by the cached partitioned function: %s',
+            self._auto_sharding_result.inputs_shape_dtype,
+        )
+
+    logging.info(
+        'Falling back to manual sharding for %r with input spec %s',
+        step_fn,
+        inputs_shape_dtype,
+    )
     return super().partition(step_fn, inputs_shape_dtype, is_eval)
 
 
@@ -1269,11 +1311,14 @@ def get_step_fn(mode: RunningMode) -> Tuple[Partitioner.StepFn, bool]:
   return step_fn, is_eval
 
 
+# TODO(laigd): find a way to use instantiated input pipeline instead of using
+# auto_sharding_input_params for auto sharding.
 def create_partitioner(
     jax_task: tasks_lib.SingleTask,
     init_is_eval: bool = False,
     reshard_inputs: bool = False,
     auto_sharding_mode: Optional[RunningMode] = None,
+    auto_sharding_input_params: Optional[base_input.BaseInput.HParams] = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
@@ -1286,6 +1331,9 @@ def create_partitioner(
     auto_sharding_mode: One of TRAIN, EVAL, and DECODE, that determines the step
       function to use for auto-sharding (when pjit is used). If None, it means
       to disable auto-sharding.
+    auto_sharding_input_params: The config for the input generator that provides
+      inputs for the auto-sharded step function. If not set, it'll use the
+      information from training input instead.
 
   Returns:
     A Partitioner instance.
@@ -1298,8 +1346,16 @@ def create_partitioner(
     if auto_sharding_mode:
       step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
+      global_inputs_shape_dtype = None
+      if auto_sharding_input_params:
+        _, global_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+            auto_sharding_input_params
+        )
       auto_sharding_info = AutoShardingPjitPartitioner.AutoShardingInfo(
-          step_fn, step_fn_is_eval, replicate_output
+          step_fn,
+          step_fn_is_eval,
+          inputs_shape_dtype=global_inputs_shape_dtype,
+          replicate_output=replicate_output,
       )
       partitioner = AutoShardingPjitPartitioner(
           init_is_eval, reshard_inputs, task_p, auto_sharding_info

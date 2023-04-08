@@ -488,6 +488,9 @@ def evaluate(
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
+      auto_sharding_input_params=eval_input_p[0]
+      if enable_auto_sharding
+      else None,
   )
   input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
@@ -650,13 +653,14 @@ def decode(
 
   decoder_inputs = experiment_config.decoder_datasets()
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
-
   if not run_eval:
     eval_inputs = []
-  if not decoder_inputs and not eval_inputs:
+  combined_input_ps = decoder_inputs + eval_inputs  # Use decode inputs first.
+
+  if not combined_input_ps:
     logging.info('No input datasets defined.')
     return
-  for inp in decoder_inputs + eval_inputs:
+  for inp in combined_input_ps:
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
@@ -678,6 +682,9 @@ def decode(
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
+      auto_sharding_input_params=combined_input_ps[0]
+      if enable_auto_sharding
+      else None,
   )
   input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
@@ -691,9 +698,7 @@ def decode(
 
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_params(
-        (decoder_inputs + eval_inputs)[0]
-    )
+    input_p = partitioner.preprocess_input_params(combined_input_ps[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
