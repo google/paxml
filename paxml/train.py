@@ -272,6 +272,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           partitioned_train_state=partitioned_train_state,
           train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
           train_input_pipeline=train_input_pipeline,
+          force=True,
       )
 
   def save_if_needed(
