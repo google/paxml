@@ -888,6 +888,94 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
             v.ema['params']['var01'],
         )
 
+  @parameterized.named_parameters(('load_excluded_true', True),
+                                  ('load_excluded_false', False))
+  def test_load_ema_gda_with_bprop_exclusion(self, load_excluded):
+    # Test an EMA var excluded by bprop_exclusion rule, and it should sitll be
+    # loaded via the original var.
+    input_dims = 2
+    output_dims = 2
+
+    # Initialize external task and save checkpoint
+    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel02,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    ext_task_p.train.learner = learners.Learner.HParams().set(
+        loss_name='loss',
+        optimizer=optimizers.ShardedSgd.HParams().set(
+            learning_rate=0.0,
+            lr_schedule=schedules.Constant.HParams(value=0.0),
+            ema_decay=0.9999,
+        ),
+        bprop_variable_exclusion='.*var01',
+    )
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_train_state, _ = trainer_lib.initialize_model_state(
+        instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
+    )
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+    )
+
+    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+    task_p.train.learner = learners.Learner.HParams().set(
+        loss_name='loss',
+        optimizer=optimizers.ShardedSgd.HParams().set(
+            learning_rate=0.0,
+            lr_schedule=schedules.Constant.HParams(value=0.0),
+        ),
+    )
+    load_rules = [(
+        r'params/repeated_ffn/sub/bias/b',
+        'ema/params/repeated_ffn/sub/bias/b',
+    )]
+    if load_excluded:
+      load_rules.append((r'params/var01', 'ema/params/var01'))
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            input_specs_provider_p=CustomInputSpecsProvider.HParams(
+                input_dims=input_dims
+            ),
+        ),
+    }
+    task = instantiate(task_p)
+
+    # Now initialize also includes warm start (loading from ckpt)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    train_state, _ = trainer_lib.initialize_model_state(
+        task,
+        jax.random.PRNGKey(5678),
+        sample_inputs,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+    )
+
+    if load_excluded:
+      self.assertAllClose(
+          ext_train_state.mdl_vars['params']['var01'],
+          train_state.mdl_vars['params']['var01'],
+      )
+
+    self.assertAllClose(
+        ext_train_state.mdl_vars['params']['repeated_ffn']['sub']['bias']['b'],
+        train_state.mdl_vars['params']['repeated_ffn']['sub']['bias']['b'],
+    )
+
   def test_var_exclusion(self):
     # Set up the model.
     input_dims = 2

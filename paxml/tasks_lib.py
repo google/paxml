@@ -353,41 +353,65 @@ def _make_train_state(
     if train_state_pspecs is not None:
       train_state_pspecs = train_state_pspecs.replace(opt_states={})
 
-  def _filter_vars_and_get_pspecs(variables):
+  def is_masked(x):
+    return py_utils.is_optax_masked_node(x) or py_utils.is_bprop_masked_node(x)
+
+  def _filter_vars_and_get_pspecs(variables, must_include_for_ema=None):
+    # must_include_for_ema is a mask indicating if the non-EMA var must be
+    # included to be used as the EMA of a bprop-excluded var.
     prefix = py_utils.extract_prefixed_keys_from_nested_map(
-        variables, key_separator='.'
+        # extract_prefixed_keys_from_nested_map doesn't work with mask nodes.
+        jax.tree_map(
+            lambda x: True if is_masked(x) else x, variables, is_leaf=is_masked
+        ),
+        key_separator='.',
     )
-    flatten_prefix, treedef = jax.tree_util.tree_flatten(
-        prefix, is_leaf=py_utils.is_optax_masked_node
-    )
+    flatten_prefix, treedef = jax.tree_util.tree_flatten(prefix)
     flatten_variable, _ = jax.tree_util.tree_flatten(
-        variables, is_leaf=py_utils.is_optax_masked_node
+        variables, is_leaf=is_masked
     )
+    if must_include_for_ema is None:
+      must_include = [False] * len(flatten_prefix)
+    else:
+      must_include, _ = jax.tree_util.tree_flatten(
+          must_include_for_ema, is_leaf=is_masked
+      )
 
     if len(flatten_prefix) != len(flatten_variable):
       raise ValueError('variables and its prefix has different length')
 
     for i in range(len(flatten_prefix)):
       k = flatten_prefix[i]
-      if k not in matched_pspecs:
+      if is_masked(flatten_variable[i]):
+        assert not must_include[i]
+        if k in matched_pspecs:
+          # Preserve original type. If it's bprop-excluded in ema it will be
+          # checked later.
+          flatten_prefix[i] = flatten_variable[i]
+        else:
+          flatten_prefix[i] = flatten_variable[i] = optax.MaskedNode()
+      elif k in matched_pspecs:
+        flatten_prefix[i] = matched_pspecs[k]
+      elif must_include[i]:
+        flatten_prefix[i] = matched_pspecs['ema.' + k]
+      else:
         flatten_prefix[i] = optax.MaskedNode()
         flatten_variable[i] = optax.MaskedNode()
-      else:
-        flatten_prefix[i] = matched_pspecs[k]
     return jax.tree_util.tree_unflatten(
         treedef, flatten_variable
     ), jax.tree_util.tree_unflatten(treedef, flatten_prefix)
 
-  filtered_vars, pspecs = _filter_vars_and_get_pspecs(ckpt_train_state.mdl_vars)
-  ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
-  if train_state_pspecs is not None:
-    train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
-
+  # Tracking vars requested but missing from ema due to bprop exclusion.
+  missing_in_ema = None
   # TODO(nanxinchen): move this to a helper function
   if load_ema_states:
     new_states = []
     new_states_pspecs = []
     vectorized = is_vectorized(ckpt_train_state)
+
+    missing_in_ema = jax.tree_map(
+        lambda _: True, ckpt_train_state.mdl_vars, is_leaf=is_masked
+    )
 
     if not vectorized:
       for i, v in enumerate(ckpt_train_state.opt_states[0]):
@@ -397,6 +421,12 @@ def _make_train_state(
             new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
         else:
           filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v)
+          # is_bprop_masked_node means matched but excluded.
+          missing_in_ema = jax.tree_map(
+              lambda x, y: x and py_utils.is_bprop_masked_node(y),
+              missing_in_ema,
+              filtered_ema['ema'],
+          )
           v = (
               filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
           )
@@ -436,6 +466,15 @@ def _make_train_state(
             return v
 
           new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray
+          for v in new_states0[key]:
+            if isinstance(v, dict) and 'ema' in v:
+              # is_bprop_masked_node means matched but excluded.
+              missing_in_ema = jax.tree_map(
+                  lambda x, y: x and py_utils.is_bprop_masked_node(y),
+                  missing_in_ema,
+                  v['ema'],
+                  is_leaf=is_masked,
+              )
           if new_states_pspecs0 is not None:
             new_states_pspecs0[key] = tuple(  # pytype: disable=unsupported-operands  # jax-ndarray
                 update_for_ema(v, update_pspecs=True)
@@ -458,6 +497,13 @@ def _make_train_state(
                 + train_state_pspecs.opt_states[1:]
             )
         )
+
+  filtered_vars, pspecs = _filter_vars_and_get_pspecs(
+      ckpt_train_state.mdl_vars, missing_in_ema
+  )
+  ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
+  if train_state_pspecs is not None:
+    train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
 
   return ckpt_train_state, train_state_pspecs
 
