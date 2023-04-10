@@ -581,7 +581,15 @@ def _create_checkpointer(
   )
 
   if checkpoint_type == CheckpointType.FLAX:
-    checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
+    if tensorstore_use_ocdbt:
+      checkpointer = Checkpointer(
+          PaxCheckpointHandler(
+              enforce_restore_shape_check=enforce_restore_shape_check,
+              use_ocdbt=tensorstore_use_ocdbt,
+          )
+      )
+    else:
+      checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
   elif enable_async_checkpointing:
     if maybe_use_persistence_checkpointing:
       raise NotImplementedError('Persistence checkpointer not supported.')
