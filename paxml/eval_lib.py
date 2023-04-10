@@ -140,7 +140,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       restore_checkpoint_step: int,
       partitioner: partitioning.Partitioner,
       enforce_restore_shape_check: bool = False,
-      tensorstore_use_ocdbt: bool = False,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -150,7 +150,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
     self._enforce_restore_shape_check = enforce_restore_shape_check
-    self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
+    self._ocdbt_coordinator_server = ocdbt_coordinator_server
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -202,7 +202,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         state_specs=train_state_metadata.partition_specs,
         step=step,
         enforce_restore_shape_check=self._enforce_restore_shape_check,
-        tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+        tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
     )
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}'
@@ -261,7 +261,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       partitioner: partitioning.Partitioner,
       mode: EvaluationMode,
       enforce_restore_shape_check: bool = False,
-      tensorstore_use_ocdbt: bool = False,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     super().__init__(
         jax_task,
@@ -271,7 +271,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         restore_checkpoint_step,
         partitioner,
         enforce_restore_shape_check=enforce_restore_shape_check,
-        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+        ocdbt_coordinator_server=ocdbt_coordinator_server,
     )
     self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
         jax_task.hparams.track_decoder_metric
@@ -291,7 +291,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step,
           checkpoint_type=self.checkpoint_type,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
-          tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
     else:
       model_states = checkpoints.restore_checkpoint(
@@ -300,7 +300,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           checkpoint_type=self.checkpoint_type,
           step=step,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
-          tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
     if model_states:
       if self.use_ema:
@@ -366,7 +366,7 @@ def _create_checkpointer(
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
-  checkpoints.reregister_type_handlers(
+  ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=jax_task.hparams.train.tensorstore_metadata_key,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
@@ -384,7 +384,7 @@ def _create_checkpointer(
       restore_checkpoint_step,
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
-      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+      ocdbt_coordinator_server=ocdbt_coordinator_server,
       **extra_kwargs,
   )
 
