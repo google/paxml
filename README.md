@@ -103,6 +103,13 @@ Note: In case you need to start using a second notebook while the first notebook
 `pkill -9 python3` 
 to free up the TPUs.
 
+### FAQs
+
+1. Pax runs on Jax, you can find details on running Jax jobs on Cloud TPU [here](https://cloud.google.com/tpu/docs/run-calculation-jax), also you can find details on running Jax jobs on a Cloud TPU pod [here](https://cloud.google.com/tpu/docs/jax-pods)
+
+2. If you run into dependency errors, please refer to the `requirements.txt` file in the branch corresponding to the stable release you are installing.
+For e.g., for the [stable release 0.4.0](https://pypi.org/project/paxml/0.4.0/) use branch `r0.4.0` and refer to the [requirements.txt](https://github.com/google/paxml/blob/r0.4.0/paxml/pip_package/requirements.txt) for the exact versions of the dependencies used for the stable release.
+
 ## Example Convergence Runs
 Here are some sample convergence runs on [c4 dataset](https://www.tensorflow.org/datasets/catalog/c4).
 
