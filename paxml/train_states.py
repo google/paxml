@@ -22,7 +22,7 @@ from typing import Any, List, Optional, Tuple
 
 from flax import struct as flax_struct
 import jax
-from jax._src.sharding_impls import PartitionSpec
+from jax.sharding import PartitionSpec
 import optax
 from praxis import base_layer
 from praxis import py_utils
