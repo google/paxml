@@ -160,21 +160,29 @@ def extract_ema(
                   v.ema,
                   is_leaf=py_utils.is_optax_masked_node,
               )
-    extracted = jax.tree_map(
-        lambda x: None if py_utils.is_optax_masked_node(x) else x,
-        extracted,
-        is_leaf=py_utils.is_optax_masked_node,
-    )
   if extracted is None:
     raise ValueError(
         'Could not find EMA states in `%r`.' % model_states.opt_states
     )
+  extracted = jax.tree_map(
+      lambda x: None if py_utils.is_optax_masked_node(x) else x,
+      extracted,
+      is_leaf=py_utils.is_optax_masked_node,
+  )
+
+  def _replace_bprop_masked(x, from_mdl_vars):
+    if not py_utils.is_bprop_masked_node(x):
+      return x
+    if py_utils.is_optax_masked_node(from_mdl_vars):
+      return None
+    return from_mdl_vars
+
   if merge_for_bprop_exclusion:
     extracted = jax.tree_util.tree_map(
-        lambda x, y: y if py_utils.is_bprop_masked_node(x) else x,
+        _replace_bprop_masked,
         extracted,
         model_states.mdl_vars,
-        is_leaf=py_utils.is_bprop_masked_node
+        is_leaf=py_utils.is_bprop_masked_node,
     )
   return TrainState(step=model_states.step, mdl_vars=extracted, opt_states={})
 
