@@ -56,13 +56,12 @@ Every layer will need to have its parameters configured to initial values.
 When you look at the class definition for `BaseLayer`, you will see that
 `HParams()` should also be overridden in order to define the layer's
 configuration. HParams for configuration is in the process of being replaced by
-the Fiddle configuration library; cf: Pax [RFC-25][rfc-25] and
-[RFC-25a][rfc-25a].
+the Fiddle configuration library; cf: Pax [Upcoming feature-25][upcoming-feature-25] and
+[Upcoming feature-25a][upcoming-feature-25a].
 
 Tip: We recommend that you configure your layer using
 [Fiddle](internal-link/fiddle).
 
-TODO: Update this section when Fiddle has been fully implemented on Pax.
 
 #### `setup`
 
@@ -146,8 +145,6 @@ specific optimizer being used for training.)
 
 For a list of existing layers: https://github.com/google/praxis/tree/main/praxis/layers/
 
-TODO: To be written. Voluteers welcome.
-
 ### Report Summaries
 
 Users may want to report summaries to be shown in TensorBoard. Inside layer
@@ -163,7 +160,6 @@ self.add_summary(
 WARNING: Do not use `ffn.__call__` directly, you will get a mysterious error
 about try_setup.
 
-TODO: To be written. Voluteers welcome.
 
 
 <!-- Reference Links -->
@@ -174,5 +170,5 @@ TODO: To be written. Voluteers welcome.
 [models]: https://github.com/google/paxml/tree/main/paxml/docs/models.md
 [pax-elements]: https://github.com/google/paxml/tree/main/paxml/docs/learning-pax.md#pax-elements
 [plethora]: https://github.com/google/praxis/tree/main/praxis/layers
-[rfc-25]: internal-link/pax-rfc-25
-[rfc-25a]: internal-link/pax-rfc-25a
+[upcoming-feature-25]: internal-link/pax-upcoming-feature-25
+[upcoming-feature-25a]: internal-link/pax-upcoming-feature-25a

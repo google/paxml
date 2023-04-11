@@ -71,13 +71,6 @@ subclass is a `SingleTask` which requires the following Hparams:
       vn: HParams to control variational noise.
 ```
 
-### Select an Existing Task
-
-TODO: To be written. Volunteers welcome.
-
-### Combine Tasks into Mixtures
-
-TODO: To be written. Volunteers welcome.
 
 
 <!-- Reference Links -->
