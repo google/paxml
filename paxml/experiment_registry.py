@@ -17,10 +17,9 @@
 import collections
 import functools
 import importlib
+import sys
 import traceback
 from typing import Dict, List, Mapping, Optional
-
-from absl import logging
 
 from paxml import base_experiment
 
@@ -123,8 +122,11 @@ class _ExperimentRegistryHelper:
       raise ValueError(f'Experiment already registered: {canonical_key}')
     cls._registry[canonical_key] = experiment_class
     cls._registry_tags[canonical_key] = list(tags or [])
-    logging.info('Registered experiment `%s`%s', canonical_key,
-                 ' (overwritten)' if preexisting else '')
+    # Use print - absl.logging doesn't work since this happens before main.
+    print(
+        'Registered experiment `%s`%s' %
+        (canonical_key, ' (overwritten)' if preexisting else ''),
+        file=sys.stderr)
     if preexisting:
       # No need to update secondary keys.
       return experiment_class
