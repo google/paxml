@@ -1773,6 +1773,7 @@ def get_eval_hparams_for_seqio(
     shuffle: bool = None,
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
+    check_split_exists: bool = False
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1817,6 +1818,9 @@ def get_eval_hparams_for_seqio(
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
     eval_metrics_retain_task_features: retain the provided feature lengths.
+    check_split_exists: If set, checks for `split_name` existing as a split
+    in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
+    have splits specified, this can cause file operations.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1864,6 +1868,14 @@ def get_eval_hparams_for_seqio(
     # tasks with varying splits.
     hp.split_name = select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
+
+    if check_split_exists and hp.split_name not in task.splits:
+      logging.warning(
+          'task %s does not have split named `%s` and will not be evaluated.',
+          task.name,
+          hp.split_name,
+      )
+      continue
     if require_metric_fns:
       if not task.metric_fns:
         logging.warning(

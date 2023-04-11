@@ -828,6 +828,24 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         'score_task',
     ])
 
+  def test_get_eval_hparams_for_seqio_missing_split(self):
+    self._setup_seqio_test_registry()
+    mixture_name = 'test_mixture'
+    batch_size = 32
+    feature_lengths = {'inputs': 1024, 'targets': 256}
+    seed = 123
+    predict_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture_name,
+        batch_size,
+        feature_lengths,
+        seed,
+        seqio_input.MetricType.PREDICT,
+        split_name='eval',
+        check_split_exists=True
+    )
+    # None of the tasks have 'eval' split so this should be empty.
+    self.assertListEqual([p.name for p in predict_hparams], [])
+
   def test_get_eval_hparams_for_seqio_scoring_keeps_lengths(self):
     feature_lengths = {'inputs': 1024, 'targets': 3, 'weights': 3}
     self._setup_seqio_test_registry(task_feature_lengths=feature_lengths)
