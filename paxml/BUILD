@@ -651,6 +651,17 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "parameterized_experiment",
+    srcs = ["parameterized_experiment.py"],
+    deps = [
+        ":base_experiment",
+        ":base_task",
+        "//praxis:base_input",
+        "//praxis:pax_fiddle",
+    ],
+)
+
 py_strict_test(
     name = "partitioning_test",
     srcs = ["partitioning_test.py"],
@@ -897,5 +908,21 @@ py_strict_test(
         # Implicit etils dependency.
         "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "parameterized_experiment_test",
+    srcs = ["parameterized_experiment_test.py"],
+    deps = [
+        ":parameterized_experiment",
+        ":tasks_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
+        "//praxis:base_input",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:test_utils",
+        "//praxis/layers:models",
     ],
 )
