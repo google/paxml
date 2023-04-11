@@ -1059,6 +1059,12 @@ class PaxMetadata:
     if dataclasses.is_dataclass(train_state_metadata):
       train_state_metadata = dataclasses.asdict(train_state_metadata)
 
+    # serialize to a nested dict so that it is json-serializable
+    train_state_metadata = orbax.checkpoint.utils.serialize_tree(
+        train_state_metadata,
+        keep_empty_nodes=True,
+    )
+
     return dict(
         version=self.version,
         train_state_metadata=train_state_metadata,

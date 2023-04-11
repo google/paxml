@@ -166,10 +166,12 @@ pytype_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit etils dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
+        "//praxis:pytypes",
     ],
 )
 
