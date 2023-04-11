@@ -384,6 +384,10 @@ class SeqIOInput(base_input.BaseInput):
       for symbolic checkpointing of training inputs (otherwise defaults to
       explicit checkpointing). Applicable only for tf.data inputs that have
       checkpointing enabled.
+    log_preprocessed_targets: Whether to write preprocessed_targets to log_dir.
+      Note that doing so will expose raw data inputs, and user should ensure
+      that data are not sensitive and/or the log_dir has the appropriate
+      permissions to prevent this from happening.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -459,6 +463,7 @@ class SeqIOInput(base_input.BaseInput):
   _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
   enable_symbolic_checkpointing: Optional[bool] = True
   experimental_enable_index_shuffle: Optional[bool] = True
+  log_preprocessed_targets: Optional[bool] = False
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -1217,7 +1222,8 @@ class SeqIOInput(base_input.BaseInput):
             example.get('targets_pretokenized', 'None'),
             example.get('is_correct', 'N/A'), target_post, score)
         verbose_entries_idx += 1
-      ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
+      if self.log_preprocessed_targets:
+        ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
       ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
 
     return scores_list, targets_list

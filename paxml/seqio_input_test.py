@@ -15,7 +15,7 @@
 
 """Tests for seqio_input."""
 
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -723,6 +723,24 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         ],
     )
 
+  def _construct_scoring_task_enum_fields(
+      self,
+      p: seqio_input.SeqIOInput.HParams,
+      ds: tf.data.Dataset,
+      scores: Sequence[float],
+  ) -> Sequence[Tuple[Optional[str], NestedMap]]:
+    enumerated_ds = seqio_input._enumerate_dataset(
+        ds, p.is_training, shard_info=None
+    )
+    enumerated_iter = enumerated_ds.as_numpy_iterator()
+    eval_output = []
+    for i in range(len(list(ds))):
+      ex = next(enumerated_iter)
+      enum_id = py_utils.get_enumeration_id(ex)
+      ex.update({'scores': scores[i]})
+      eval_output.append((enum_id, ex))
+    return eval_output
+
   def test_compute_metrics_eval(self):
     task_name = 'compute_metrics_eval'
     x = [{
@@ -746,19 +764,42 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.reset_for_eval = True
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
-    enumerated_ds = seqio_input._enumerate_dataset(
-        ds, p.is_training, shard_info=None
-    )
-    enumerated_iter = enumerated_ds.as_numpy_iterator()
-    eval_output = []
-    for i in range(len(x)):
-      ex = next(enumerated_iter)
-      enum_id = py_utils.get_enumeration_id(ex)
-      ex.update({'scores': scores[i]})
-      eval_output.append((enum_id, ex))
+    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
     m = inp.compute_metrics_eval(eval_output)
     self.assertLen(m, 1)
     self.assertEqual(m[0]['total_score'], 3.5)
+
+  @parameterized.named_parameters(
+      ('log_preprocessed_targets', True),
+      ('skip_log_preprocessed_targets', False),
+  )
+  def test_mutate_outputs_to_write(self, log_preprocessed_targets):
+    task_name = 'compute_metrics_eval'
+    x = [{
+        'inputs': [7, 8],
+        'targets': [3, 9],
+    }]
+    ds = seqio.test_utils.create_default_dataset(x)
+    dataset_fn = lambda split, shuffle_files, seed=None: ds
+    _register_dummy_task(task_name, dataset_fn)
+    p = seqio_input.SeqIOInput.HParams()
+    p.mixture_name = task_name
+    p.split_name = 'validation'
+    p.task_feature_lengths = {'inputs': 2, 'targets': 2}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=False, weights_on_targets_only=True)
+    p.batch_size = 1
+    p.is_training = False
+    p.log_preprocessed_targets = log_preprocessed_targets
+    inp = instantiate(p)
+    scores = np.array([1.0, 2.5], dtype=np.float32)
+    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
+    _ = inp.compute_metrics_eval(eval_output)
+    self.assertIn('seqio_postprocessed_targets', eval_output[0][1])
+    if log_preprocessed_targets:
+      self.assertIn('seqio_preprocessed_targets', eval_output[0][1])
+    else:
+      self.assertNotIn('seqio_preprocessed_targets', eval_output[0][1])
 
   def _setup_seqio_test_registry(self,
                                  num_examples=10,
