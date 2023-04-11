@@ -1225,7 +1225,8 @@ def _create_program_and_states(
       root_prng_key,
       train_input_for_checkpoint,
   )
-  trainer_lib.write_train_provenance_file(train_state_provenance, job_log_dir)
+  if train_state_provenance:
+    trainer_lib.write_train_provenance_file(train_state_provenance, job_log_dir)
 
   initial_global_step = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
