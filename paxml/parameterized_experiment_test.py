@@ -68,6 +68,10 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     )
     self.assertEqual(experiment.eval_datasets(), experiment_cfg.eval_datasets)
     self.assertEqual(
+        experiment.datasets(),
+        [experiment_cfg.training_dataset] + experiment_cfg.eval_datasets,
+    )
+    self.assertEqual(
         experiment.decoder_datasets(), experiment_cfg.decoder_datasets
     )
     self.assertEqual(
@@ -84,6 +88,25 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     )
     with self.assertRaisesRegex(ValueError, expected_msg):
       pax_fiddle.build(experiment_cfg)
+
+  def test_datasets_without_training_dataset(self):
+    experiment_cfg = example_experiment_cfg()
+    del experiment_cfg.training_dataset
+    experiment = pax_fiddle.build(experiment_cfg)
+    self.assertEqual(experiment.datasets(), experiment_cfg.eval_datasets)
+
+  def test_datasets_without_eval_datasets(self):
+    experiment_cfg = example_experiment_cfg()
+    del experiment_cfg.eval_datasets
+    experiment = pax_fiddle.build(experiment_cfg)
+    self.assertEqual(experiment.datasets(), [experiment_cfg.training_dataset])
+
+  def test_datasets_without_training_or_eval_datasets(self):
+    experiment_cfg = example_experiment_cfg()
+    del experiment_cfg.training_dataset
+    del experiment_cfg.eval_datasets
+    experiment = pax_fiddle.build(experiment_cfg)
+    self.assertEmpty(experiment.datasets())
 
   def test_eval_dataset_with_is_training_true_throws_error(self):
     experiment_cfg = example_experiment_cfg()
@@ -118,7 +141,7 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     experiment = pax_fiddle.build(experiment_cfg)
     self.assertEmpty(experiment.eval_datasets())
 
-  def test_decoder_dataset_fallback(self):
+  def test_decoder_datasets_fallback(self):
     experiment_cfg = example_experiment_cfg()
     del experiment_cfg.decoder_datasets
     experiment = pax_fiddle.build(experiment_cfg)
