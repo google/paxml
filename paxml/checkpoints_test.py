@@ -15,9 +15,12 @@
 
 """Basic, lightweight tests for checkpoints.py."""
 
+import json
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from etils import epath
+import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -25,6 +28,7 @@ import optax
 import orbax.checkpoint
 from paxml import checkpoints
 from paxml import train_states
+from praxis import pytypes
 
 
 orbax_utils = orbax.checkpoint.utils
@@ -117,7 +121,16 @@ class CheckpointsTest(parameterized.TestCase):
     )
 
 
-class PaxMetadataTest(absltest.TestCase):
+class _CustomPyTreeNode(flax.struct.PyTreeNode):
+  a: pytypes.NestedShapeDtypeLike
+
+
+@flax.struct.dataclass
+class _CustomFlaxDataclass:
+  a: pytypes.NestedShapeDtypeLike
+
+
+class PaxMetadataTest(parameterized.TestCase):
 
   def test_from_dict(self):
     d = dict(
@@ -265,6 +278,66 @@ class PaxMetadataTest(absltest.TestCase):
     actual2 = _get_metadata(1.0, (1, 2), np.float32, False)
     self.assertFalse(expected1.is_compatible(actual2))
     self.assertTrue(expected2.is_compatible(actual2))
+
+  @parameterized.parameters(
+      (
+          checkpoints.PaxMetadata(
+              version=1.1,
+              train_state_metadata={
+                  'mdl_vars': {
+                      'a': ArrayMetadata(
+                          unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                              shape=(1, 2),
+                              dtype=np.float32,
+                          ),
+                          is_optax_masked_node=False,
+                      )
+                  },
+              },
+          ),
+      ),
+      (
+          checkpoints.PaxMetadata(
+              version=1.1,
+              train_state_metadata={
+                  'mdl_vars': _CustomPyTreeNode(
+                      a=ArrayMetadata(
+                          unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                              shape=(1, 2),
+                              dtype=np.float32,
+                          ),
+                          is_optax_masked_node=False,
+                      ),
+                  ),
+              },
+          ),
+      ),
+      (
+          checkpoints.PaxMetadata(
+              version=1.1,
+              train_state_metadata={
+                  'mdl_vars': _CustomFlaxDataclass(
+                      a=ArrayMetadata(
+                          unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                              shape=(1, 2),
+                              dtype=np.float32,
+                          ),
+                          is_optax_masked_node=False,
+                      ),
+                  ),
+              },
+          ),
+      ),
+  )
+  def test_is_json_serializable(self, pax_metadata):
+    d = pax_metadata.to_dict()
+    serialized = json.dumps(d)
+    expected = (
+        '{"version": 1.1, "train_state_metadata": {"mdl_vars": {"a":'
+        ' {"_array_metadata_tag": true, "dtype": "float32",'
+        ' "is_optax_masked_node": false, "unpadded_shape": [1, 2]}}}}'
+    )
+    self.assertEqual(expected, serialized)
 
 
 if __name__ == '__main__':

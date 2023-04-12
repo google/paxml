@@ -59,6 +59,8 @@ NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
+TensorProvenance = train_states.TensorProvenance
+TrainStateProvenance = train_states.TrainStateProvenance
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
@@ -224,6 +226,25 @@ def write_post_init_model_hparams_file(
         params_file.write(params_inits_text)
 
 
+def write_train_provenance_file(
+    train_state_provenance: train_states.TrainStateProvenance,
+    job_log_dir: epath.Path,
+) -> None:
+  """Writes a file with train state provenance into the root `job_log_dir`."""
+  if jax.process_index() == 0:
+    filename = job_log_dir / 'train_state_provenance.txt'
+    if filename.exists():
+      return
+    job_log_dir.mkdir(parents=True, exist_ok=True)
+    with filename.open('w') as provenance_file:
+      output = ''
+      for attr, val in vars(train_state_provenance).items():
+        attr_formatted = attr.replace('_', ' ').capitalize() + '\n'
+        provenance_out = summary_utils.pretty_repr_provenance(val) + '\n\n'
+        output += attr_formatted + provenance_out
+      provenance_file.write(output)
+
+
 def adjust_input_params_for_small_batch(
     inp_p: base_input.BaseInput.HParams,
     global_mesh: jax.sharding.Mesh) -> base_input.BaseInput.HParams:
@@ -301,11 +322,11 @@ def initialize_model_state(
     do_init_checkpoint_rules: bool = True,
     is_eval: bool = False,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-) -> TrainState:
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes the model states.
 
   Weights are random initialized first.
-  Then we restores weights based on the init_checkpoint_rules.
+  Then we restore weights based on the init_checkpoint_rules.
 
   Args:
     jax_task: An instance of tasks.SingleTask.
@@ -321,7 +342,7 @@ def initialize_model_state(
       the init_checkpoint_rules.
 
   Returns:
-    TrainState - training states.
+    Training state and train state provenance.
   """
   model = jax_task.model
   prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
@@ -357,6 +378,9 @@ def initialize_model_state(
     del initial_vars['params_axes']
   train_state = jax_task.create_train_state(initial_vars, var_weight_hparams,
                                             discard_opt_states)
+  train_state_provenance = train_states.build_train_state_provenance(
+      train_state
+  )
   # `do_init_checkpoint_rules` is False for pjit/spmd.
   if do_init_checkpoint_rules:
     if checkpoint_type == CheckpointType.UNSPECIFIED:
@@ -366,8 +390,11 @@ def initialize_model_state(
         checkpoint_type = CheckpointType.FLAX
     # Overwrite some parts if init_checkpoint_rules are set (warm-start)
     # Note that this assumes a pmap model with Flax checkpoint(s).
-    train_state, update_opt_states = jax_task.apply_init_checkpoint_rules(
-        train_state, checkpoint_type=checkpoint_type)
+    train_state, train_state_provenance, update_opt_states = (
+        jax_task.apply_init_checkpoint_rules(
+            train_state, train_state_provenance, checkpoint_type=checkpoint_type
+        )
+    )
     if update_opt_states:
       # Free the previous opt_states as it will be re-computed.
       jax.tree_util.tree_map(lambda x: x.delete(), train_state.opt_states)
@@ -375,7 +402,7 @@ def initialize_model_state(
       opt_states = jax_task.create_opt_states(train_state.mdl_vars,
                                               var_weight_hparams)
       train_state = train_state.replace(opt_states=opt_states)
-  return train_state
+  return train_state, train_state_provenance
 
 
 def replicate_model_state(model_states: TrainState) -> TrainState:
@@ -394,10 +421,12 @@ def initialize_replicate_model_state(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
     inputs_shape_dtype: NestedShapeDtypeLike,
-    discard_opt_states: bool = False) -> TrainState:
+    discard_opt_states: bool = False,
+) -> TrainState:
   """Initializes and replicates the model states."""
-  model_states = initialize_model_state(jax_task, prng_key, inputs_shape_dtype,
-                                        discard_opt_states)
+  model_states, _ = initialize_model_state(
+      jax_task, prng_key, inputs_shape_dtype, discard_opt_states
+  )
   return replicate_model_state(model_states)
 
 
@@ -493,37 +522,6 @@ def _maybe_aggregate_metrics_summaries(
 
   return (weighted_loss, mean_loss, loss_weight, aggregated_scalars,  # pytype: disable=bad-return-type  # jax-ndarray
           aggregated_summaries, per_example_out)
-
-
-def _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams):
-  """A helper function to zero out grads for non-learnable vars.
-
-  Args:
-    grads: a nested structure of var gradients.
-    var_weight_hparams: a nested structure of the variable weight params.
-      var_weight_hparams must have the same structure as grads.
-
-  Returns:
-    grads with gradient for non-learnable vars zero-ed out.
-  """
-  asserts.assert_same_structure(grads, var_weight_hparams)
-  var_is_learnable = jax.tree_util.tree_map(
-      lambda x: not base_layer.var_not_trainable(x), var_weight_hparams)
-
-  def _maybe_zero_out_grad_fn(var_grad, var_learnable):
-    if var_learnable:
-      return var_grad
-    elif var_grad.dtype == jax.dtypes.float0:
-      # Gradient of an integer-valued input cannot be consumed by jnp operation.
-      # Zeros dtype should be int32 same as the original input that produced
-      # float0.
-      return jnp.zeros_like(var_grad, dtype=jnp.int32)
-    else:
-      return jnp.zeros_like(var_grad)
-
-  # Zero-out gradient for non-learnable vars.
-  return jax.tree_util.tree_map(_maybe_zero_out_grad_fn, grads,
-                                var_is_learnable)
 
 
 def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
@@ -668,7 +666,7 @@ def train_step_single_learner(
       states.step, states.mdl_vars, var_weight_hparams, prng_key)
 
   def _loss_fn(
-      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key
+      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
   ) -> Tuple[JTensor, sgf.GradAuxInfo]:
     """Computes loss as well as other auxiliary outputs."""
     if fprop_dtype == jnp.float32:
@@ -716,19 +714,52 @@ def train_step_single_learner(
 
   prng_key, subkey = jax.random.split(prng_key)
 
-  # Layers may have integer-valued non-trainable vars. `allow_int=True` is
-  # needed to allow jax.grad to differentiate wrt integer-values.
-  # However, the gradient of an integer input will have a trivial vector-space
-  # dtype (float0). They cannot be consumed by jnp operations.
-  # _zero_gradient_for_non_learnable_vars needs to handle jax.dtypes.float0
-  # specially.
+  # Skip variables for gradients.
+  excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
+      var_weight_hparams, learner
+  )
+  # Excluded for optimizer states.
+  excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
+      var_weight_hparams,
+      learner,
+  )
 
-  if learner.stochastic_gradient is None:
-    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True, allow_int=True)
-  else:
-    grad_fn = functools.partial(
-        learner.stochastic_gradient.grad_fn, _loss_fn
+  def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
+    with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_grad
     )
+    no_grad = jax.tree_map(
+        lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
+    )
+
+    def _loss(
+        mdl_vars_grad: NestedJTensor,
+        mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+        prng_key: PRNGKey,
+    ):
+      mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
+      merged_vars = jax.tree_map(
+          lambda e, x, y: y if e else x,
+          excluded_for_grad,
+          mdl_vars_grad,
+          mdl_vars_nograd,
+      )
+      return _loss_fn(merged_vars, inputs, prng_key)
+
+    if learner.stochastic_gradient is None:
+      g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
+    else:
+      g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
+    values, grads = g(with_grad, (no_grad, inputs), prng_key)
+    grads = jax.tree_map(
+        lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
+        excluded_for_opt,
+        excluded_for_grad,
+        mdl_vars,
+        grads,
+    )
+    return values, grads
+
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
   (
@@ -745,8 +776,6 @@ def train_step_single_learner(
 
   # Carry out backward computation under a JaxContext.
   with base_layer.JaxContext.new_context(hparams=context_p):
-    grads = _zero_gradient_for_non_learnable_vars(grads, var_weight_hparams)
-
     if base_layer.is_running_under_pmap():
       # Aggregate grads across different model replicas.
       grads = jax.lax.psum(grads, axis_name=PMAP_PARALLEL_AXIS_NAME)
@@ -759,16 +788,27 @@ def train_step_single_learner(
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
-    # Make updated nontrainable variable peekable from GradientTransformers.
-    # Some optimizers, e.g. `optimizers.DynamicAccumulator`, assume special
-    # non-trainable variables being set during fprop for controlling their
-    # behavior.
+    # Make updated non-trainable vars visible to EMA.
     if NON_TRAINABLE in fwd_updated_vars:
       mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
+    vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_opt
+    )
+    wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
+        var_weight_hparams, excluded_for_opt
+    )
     transformed_grads, new_opt_states = learner.update_states(
-        grads, states.opt_states[0], mdl_vars, var_weight_hparams)
-    mdl_vars = learner.apply_gradient(mdl_vars, transformed_grads,
-                                      var_weight_hparams)
+        grads, states.opt_states[0], vars_with_opt, wps_with_opt
+    )
+    vars_with_opt = learner.apply_gradient(
+        vars_with_opt, transformed_grads, wps_with_opt
+    )
+    mdl_vars = jax.tree_map(
+        lambda e, old, new: old if e else new,
+        excluded_for_grad,
+        mdl_vars,
+        vars_with_opt,
+    )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
       if collection in states.mdl_vars:
@@ -779,22 +819,16 @@ def train_step_single_learner(
             states.mdl_vars[collection], fwd_updated_vars[collection],
             var_weight_hparams[collection])
 
-    # lastly, we avoid updating variables in learner.bprop_variable_exclusion.
-    if learner.hparams.bprop_variable_inclusion:
-      assert not learner.hparams.bprop_variable_exclusion, (
-          'Providing both bprop_variable_exclusion and bprop_variable_inclusion'
-          ' is not supported.'
-      )
-      mdl_vars = py_utils.update_matched_variables(
-          states.mdl_vars, mdl_vars, learner.hparams.bprop_variable_inclusion
-      )
-    else:
-      mdl_vars = py_utils.update_matched_variables(
-          states.mdl_vars,
-          mdl_vars,
-          learner.hparams.bprop_variable_exclusion,
-          invert=True,
-      )
+    # We may have updated non-trainable vars that have been explicitly excluded.
+    mdl_vars = jax.tree_map(
+        lambda e, old, new: old if e else new,
+        # Filter out only the explicitly masked non-trainables.
+        tasks_lib.get_excluded_var_mask_for_grad_or_opt(
+            var_weight_hparams, learner, mask_all_non_trainable=False
+        ),
+        states.mdl_vars,
+        mdl_vars,
+    )
     new_states = states.new_state(
         mdl_vars=mdl_vars, opt_states=[new_opt_states])
     # Finally fetch all backward summary tensors. We do not aggregate the scalar
@@ -1003,7 +1037,7 @@ def initialize_partitioned_model_states(
     global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.GDA,
     do_init_checkpoint_rules: bool = True,
-) -> TrainState:
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first.
@@ -1041,12 +1075,13 @@ def initialize_partitioned_model_states(
   assert train_state_partition_specs is not None
 
   def init_model_from_seed(prng_key):
-    outs = initialize_model_state(
+    outs, _ = initialize_model_state(
         jax_task,
         prng_key,
         global_input_shapes,
         discard_opt_states,
-        do_init_checkpoint_rules=False)
+        do_init_checkpoint_rules=False,
+    )
     return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
                                               train_state_unpadded_shapes,
                                               model.hparams.mesh_shape,
@@ -1068,19 +1103,26 @@ def initialize_partitioned_model_states(
   init_fn = bind_mesh(init_fn, global_mesh)
 
   partitioned_vars = init_fn(prng_key)
+  train_state_provenance = train_states.build_train_state_provenance(
+      partitioned_vars
+  )
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
   if (do_init_checkpoint_rules and
       jax_task.hparams.train.init_from_checkpoint_rules):
     # TODO(b/230132535): Note that this application after constructing the
     # partitioned vars is currently inconsistent with what is being performed
     # for pmap models.
-    partitioned_vars, _ = jax_task.apply_init_checkpoint_rules(
-        partitioned_vars,
-        train_state_partition_specs=train_state_partition_specs,
-        global_mesh=global_mesh,
-        checkpoint_type=checkpoint_type)
+    partitioned_vars, train_state_provenance, _ = (
+        jax_task.apply_init_checkpoint_rules(
+            partitioned_vars,
+            train_state_provenance,
+            train_state_partition_specs=train_state_partition_specs,
+            global_mesh=global_mesh,
+            checkpoint_type=checkpoint_type,
+        )
+    )
 
-  return partitioned_vars
+  return partitioned_vars, train_state_provenance
 
 
 def shard_on_batch_dim_partition_spec(
@@ -1172,6 +1214,11 @@ def get_inputs_shape_dtype(
 
 
 def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
+  logging.info(
+      'get_input_partition_specs from mesh_axis_names=%s and '
+      'inputs_shape_dtype=%s',
+      mesh_axis_names,
+      inputs_shape_dtype)
   # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
       shard_on_batch_dim_partition_spec, mesh_axis_names)

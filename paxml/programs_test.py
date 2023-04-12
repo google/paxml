@@ -132,10 +132,17 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
     )
     prng_key = jax.random.PRNGKey(0)
     partitioner.setup(self.task, prng_key, inputs_shape_dtype)
-    train_pg = programs.SingleTaskTrainProgram(
-        self.task, self.train_input, partitioner
+    train_pg = programs.SingleTaskTrainProgram()
+    train_pg.setup(
+        self.task,
+        self.train_input,
+        partitioner,
+        prng_key,
+        prng_key,
+        0,
+        None,
+        None,
     )
-    train_pg.setup(prng_key, prng_key, 0, None, None)
     self.assertEqual(2, train_pg.train_unpadded_global_batch_size)
 
 

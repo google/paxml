@@ -60,9 +60,12 @@ CheckpointType = checkpoints.CheckpointType
 Nested = pytypes.Nested
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor
+NestedWeightHParams = base_layer.NestedWeightHParams
 JTensor = base_layer.JTensor
 PartitionSpec = jax.sharding.PartitionSpec
 TrainState = train_states.TrainState
+TensorProvenance = train_states.TensorProvenance
+TrainStateProvenance = train_states.TrainStateProvenance
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
@@ -121,6 +124,7 @@ def has_ema(task_p: SingleTask.HParams) -> bool:
 
 def extract_ema(
     model_states: train_states.TrainState,
+    merge_for_bprop_exclusion: bool = True,
 ) -> train_states.TrainState:
   """Finds the ema state from optimizer states."""
   if len(model_states.opt_states) != 1:
@@ -129,12 +133,14 @@ def extract_ema(
         f'`{len(model_states.opt_states)}`).'
     )
   vectorized = is_vectorized(model_states)
+  extracted = None
   if not vectorized:
     for v in model_states.opt_states[0]:
       if isinstance(v, dict) and 'ema' in v:
-        return TrainState(step=model_states.step, mdl_vars=v.ema, opt_states={})
+        extracted = v.ema
+        break
   else:
-    ret = None
+    extracted = None
     # For vectorized model, the structure looks like this:
     # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
     # It is a list of dictionaries. The key corresponds to the #stages.
@@ -145,25 +151,40 @@ def extract_ema(
       if isinstance(item, tuple):
         for v in item:
           if isinstance(v, dict) and 'ema' in v:
-            if ret is None:
-              ret = v.ema
+            if extracted is None:
+              extracted = v.ema
             else:
-              ret = jax.tree_map(
+              extracted = jax.tree_map(
                   lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
-                  ret,
+                  extracted,
                   v.ema,
                   is_leaf=py_utils.is_optax_masked_node,
               )
-    ret = jax.tree_map(
-        lambda x: None if py_utils.is_optax_masked_node(x) else x,
-        ret,
-        is_leaf=py_utils.is_optax_masked_node,
+  if extracted is None:
+    raise ValueError(
+        'Could not find EMA states in `%r`.' % model_states.opt_states
     )
-    if ret is not None:
-      return TrainState(step=model_states.step, mdl_vars=ret, opt_states={})
-  raise ValueError(
-      'Could not find EMA states in `%r`.' % model_states.opt_states
+  extracted = jax.tree_map(
+      lambda x: None if py_utils.is_optax_masked_node(x) else x,
+      extracted,
+      is_leaf=py_utils.is_optax_masked_node,
   )
+
+  def _replace_bprop_masked(x, from_mdl_vars):
+    if not py_utils.is_bprop_masked_node(x):
+      return x
+    if py_utils.is_optax_masked_node(from_mdl_vars):
+      return None
+    return from_mdl_vars
+
+  if merge_for_bprop_exclusion:
+    extracted = jax.tree_util.tree_map(
+        _replace_bprop_masked,
+        extracted,
+        model_states.mdl_vars,
+        is_leaf=py_utils.is_bprop_masked_node,
+    )
+  return TrainState(step=model_states.step, mdl_vars=extracted, opt_states={})
 
 
 def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
@@ -288,21 +309,32 @@ def _assign_model_vars(
     model_vars: Union[NestedMap, Dict[str, Any]],
     loaded_vars: Dict[str, Any],
     model_vars_mapping: Dict[str, str],
+    model_provenance: Union[
+        NestedMap, Dict[str, Any]
+    ],
+    loaded_provenance: Dict[str, Any],
 ) -> None:
   """Sets current model vars from loaded model vars using provided mapping."""
   used_vars = set()
   for var_name, init_var_name in model_vars_mapping.items():
     loaded_var = loaded_vars[init_var_name]
+    loaded_var_provenance = loaded_provenance[init_var_name]
     if init_var_name not in used_vars:
       used_vars.add(init_var_name)
     else:
       # Allow the copy of cross-host Jax arrays.
       with jax.spmd_mode('allow_all'):
         loaded_var = jnp.copy(loaded_var)
-    if isinstance(model_vars, NestedMap):
+    if isinstance(
+        model_vars, NestedMap
+    ):
       model_vars.Set(var_name, loaded_var)
     else:
       _set_nested_dict_value(model_vars, var_name, loaded_var)
+    if isinstance(model_provenance, NestedMap):
+      model_provenance.Set(var_name, loaded_var_provenance)
+    else:
+      _set_nested_dict_value(model_provenance, var_name, loaded_var_provenance)
 
 
 def _make_train_state(
@@ -329,41 +361,65 @@ def _make_train_state(
     if train_state_pspecs is not None:
       train_state_pspecs = train_state_pspecs.replace(opt_states={})
 
-  def _filter_vars_and_get_pspecs(variables):
+  def is_masked(x):
+    return py_utils.is_optax_masked_node(x) or py_utils.is_bprop_masked_node(x)
+
+  def _filter_vars_and_get_pspecs(variables, must_include_for_ema=None):
+    # must_include_for_ema is a mask indicating if the non-EMA var must be
+    # included to be used as the EMA of a bprop-excluded var.
     prefix = py_utils.extract_prefixed_keys_from_nested_map(
-        variables, key_separator='.'
+        # extract_prefixed_keys_from_nested_map doesn't work with mask nodes.
+        jax.tree_map(
+            lambda x: True if is_masked(x) else x, variables, is_leaf=is_masked
+        ),
+        key_separator='.',
     )
-    flatten_prefix, treedef = jax.tree_util.tree_flatten(
-        prefix, is_leaf=py_utils.is_optax_masked_node
-    )
+    flatten_prefix, treedef = jax.tree_util.tree_flatten(prefix)
     flatten_variable, _ = jax.tree_util.tree_flatten(
-        variables, is_leaf=py_utils.is_optax_masked_node
+        variables, is_leaf=is_masked
     )
+    if must_include_for_ema is None:
+      must_include = [False] * len(flatten_prefix)
+    else:
+      must_include, _ = jax.tree_util.tree_flatten(
+          must_include_for_ema, is_leaf=is_masked
+      )
 
     if len(flatten_prefix) != len(flatten_variable):
       raise ValueError('variables and its prefix has different length')
 
     for i in range(len(flatten_prefix)):
       k = flatten_prefix[i]
-      if k not in matched_pspecs:
+      if is_masked(flatten_variable[i]):
+        assert not must_include[i]
+        if k in matched_pspecs:
+          # Preserve original type. If it's bprop-excluded in ema it will be
+          # checked later.
+          flatten_prefix[i] = flatten_variable[i]
+        else:
+          flatten_prefix[i] = flatten_variable[i] = optax.MaskedNode()
+      elif k in matched_pspecs:
+        flatten_prefix[i] = matched_pspecs[k]
+      elif must_include[i]:
+        flatten_prefix[i] = matched_pspecs['ema.' + k]
+      else:
         flatten_prefix[i] = optax.MaskedNode()
         flatten_variable[i] = optax.MaskedNode()
-      else:
-        flatten_prefix[i] = matched_pspecs[k]
     return jax.tree_util.tree_unflatten(
         treedef, flatten_variable
     ), jax.tree_util.tree_unflatten(treedef, flatten_prefix)
 
-  filtered_vars, pspecs = _filter_vars_and_get_pspecs(ckpt_train_state.mdl_vars)
-  ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
-  if train_state_pspecs is not None:
-    train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
-
+  # Tracking vars requested but missing from ema due to bprop exclusion.
+  missing_in_ema = None
   # TODO(nanxinchen): move this to a helper function
   if load_ema_states:
     new_states = []
     new_states_pspecs = []
     vectorized = is_vectorized(ckpt_train_state)
+
+    missing_in_ema = jax.tree_map(
+        lambda _: True, ckpt_train_state.mdl_vars, is_leaf=is_masked
+    )
 
     if not vectorized:
       for i, v in enumerate(ckpt_train_state.opt_states[0]):
@@ -373,6 +429,12 @@ def _make_train_state(
             new_states_pspecs.append(train_state_pspecs.opt_states[0][i])
         else:
           filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v)
+          # is_bprop_masked_node means matched but excluded.
+          missing_in_ema = jax.tree_map(
+              lambda x, y: x and py_utils.is_bprop_masked_node(y),
+              missing_in_ema,
+              filtered_ema['ema'],
+          )
           v = (
               filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
           )
@@ -412,6 +474,15 @@ def _make_train_state(
             return v
 
           new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray
+          for v in new_states0[key]:
+            if isinstance(v, dict) and 'ema' in v:
+              # is_bprop_masked_node means matched but excluded.
+              missing_in_ema = jax.tree_map(
+                  lambda x, y: x and py_utils.is_bprop_masked_node(y),
+                  missing_in_ema,
+                  v['ema'],
+                  is_leaf=is_masked,
+              )
           if new_states_pspecs0 is not None:
             new_states_pspecs0[key] = tuple(  # pytype: disable=unsupported-operands  # jax-ndarray
                 update_for_ema(v, update_pspecs=True)
@@ -435,16 +506,26 @@ def _make_train_state(
             )
         )
 
+  filtered_vars, pspecs = _filter_vars_and_get_pspecs(
+      ckpt_train_state.mdl_vars, missing_in_ema
+  )
+  ckpt_train_state = ckpt_train_state.replace(mdl_vars=filtered_vars)
+  if train_state_pspecs is not None:
+    train_state_pspecs = train_state_pspecs.replace(mdl_vars=pspecs)
+
   return ckpt_train_state, train_state_pspecs
 
 
-def _load_partial_opt_states(train_state: TrainState,
-                             loaded_train_state: TrainState,
-                             loading_rules: Sequence[Tuple[re.Pattern[str],
-                                                           str]],
-                             ignore_rules: Optional[Sequence[re.Pattern[str]]],
-                             is_opt_states_initialized: Dict[str, str],
-                             ckpt_path: str) -> TrainState:
+def _load_partial_opt_states(
+    train_state: TrainState,
+    train_state_provenance: TrainStateProvenance,
+    loaded_train_state: TrainState,
+    loaded_state_provenance: TrainStateProvenance,
+    loading_rules: Sequence[Tuple[re.Pattern[str], str]],
+    ignore_rules: Optional[Sequence[re.Pattern[str]]],
+    is_opt_states_initialized: Dict[str, str],
+    ckpt_path: str,
+) -> Tuple[TrainState, TrainStateProvenance]:
   """Loads optimizer state from given checkpoint based on specified rules."""
   opt_states_serialized = flax.serialization.to_state_dict(
       train_state.opt_states)
@@ -452,6 +533,12 @@ def _load_partial_opt_states(train_state: TrainState,
 
   loaded_opt_states_flat = _flatten_dict(
       flax.serialization.to_state_dict(loaded_train_state.opt_states))
+  opt_provenance_serialized = flax.serialization.to_state_dict(
+      train_state_provenance.opt_states
+  )
+  loaded_opt_provenance_flat = _flatten_dict(
+      flax.serialization.to_state_dict(loaded_state_provenance.opt_states)
+  )
 
   opt_state_names = [x[0] for x in opt_states_flat]
   opt_state_mapping, _ = _get_var_mapping(
@@ -465,13 +552,23 @@ def _load_partial_opt_states(train_state: TrainState,
       target_partition_specs=None)
   logging.info('opt_state_mapping: %r', opt_state_mapping)
 
-  _assign_model_vars(opt_states_serialized, dict(loaded_opt_states_flat),
-                     opt_state_mapping)
+  _assign_model_vars(
+      opt_states_serialized,
+      dict(loaded_opt_states_flat),
+      opt_state_mapping,
+      opt_provenance_serialized,
+      dict(loaded_opt_provenance_flat),
+  )
 
   restored_opt_states = flax.serialization.from_state_dict(
       train_state.opt_states, opt_states_serialized)
   train_state = train_state.replace(opt_states=restored_opt_states)
 
+  restored_opt_provenance = flax.serialization.from_state_dict(
+      train_state_provenance.opt_states, opt_provenance_serialized)
+  train_state_provenance = train_state_provenance.replace(
+      opt_states=restored_opt_provenance
+  )
   # Verify that:
   # 1) the tree structure of the restored opt states match the original opt
   #    states structure.
@@ -484,7 +581,7 @@ def _load_partial_opt_states(train_state: TrainState,
     assert orig_item[0] == updated_item[0]
     assert orig_item[1].size == updated_item[1].size
   logging.info('Partially restored opt_state verified.')
-  return train_state
+  return train_state, train_state_provenance
 
 
 # TODO(pax-dev): Move this function when `pmap_use_tensorstore` flag is deleted.
@@ -495,6 +592,7 @@ def restore_pmap_from_tensorstore(
     global_mesh=None,
     checkpoint_type=CheckpointType.GDA,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ):
   """Restores pmap checkpoints from tensorstore.
 
@@ -514,6 +612,7 @@ def restore_pmap_from_tensorstore(
     checkpoint_type: The type of checkpoint to use.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
+    tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Returns:
     Restored model states of type `DeviceArray`, `GlobalDeviceArray` or
@@ -542,6 +641,7 @@ def restore_pmap_from_tensorstore(
         state_specs=fully_replicated_state_specs,
         step=step,
         enforce_restore_shape_check=enforce_restore_shape_check,
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
     )
   if global_mesh is not None:
     return fully_replicated_gda_model_states
@@ -641,6 +741,63 @@ class CheckpointLoadingRules(NamedTuple):
       base_input.BaseInputSpecsProvider.HParams] = None
 
 
+def get_excluded_var_mask_for_grad_or_opt(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+    mask_all_non_trainable: bool,
+) -> NestedMap:
+  """Returns whether each var should be excluded for grad/optimizer."""
+  # Skip variables for gradients.
+  if learner.hparams.bprop_variable_inclusion:
+    assert not learner.hparams.bprop_variable_exclusion
+    excluded_for_grad = py_utils.match_variable_names(
+        var_weight_hparams, learner.hparams.bprop_variable_inclusion
+    )
+    excluded_for_grad = jax.tree_map(lambda x: not x, excluded_for_grad)
+  else:
+    excluded_for_grad = py_utils.match_variable_names(
+        var_weight_hparams, learner.hparams.bprop_variable_exclusion
+    )
+  if mask_all_non_trainable:
+    excluded_for_grad = jax.tree_util.tree_map(
+        lambda x, e: base_layer.var_not_trainable(x) or e,
+        var_weight_hparams,
+        excluded_for_grad,
+    )
+  return excluded_for_grad
+
+
+def get_excluded_var_mask_for_opt(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+) -> NestedMap:
+  """Returns whether each var should be excluded for optimizer."""
+  return get_excluded_var_mask_for_grad_or_opt(
+      var_weight_hparams, learner, learner.optimizer.hparams.ema_decay == 0.0
+  )
+
+
+def get_excluded_var_mask_for_grad(
+    var_weight_hparams: NestedJTensor,
+    learner: learners_lib.Learner,
+) -> NestedMap:
+  """Returns whether each var should be excluded for optimizer."""
+  return get_excluded_var_mask_for_grad_or_opt(
+      var_weight_hparams, learner, True
+  )
+
+
+def filter_vars_for_grad_or_opt(
+    mdl_vars: NestedMap, excluded_for_grad: NestedMap
+) -> NestedMap:
+  """Filters out vars that should be excluded for grad or optimizer."""
+  return jax.tree_map(
+      lambda v, e: py_utils.BpropMaskedNode() if e else v,
+      mdl_vars,
+      excluded_for_grad,
+  )
+
+
 def create_state_partition_specs(
     var_weight_hparams: NestedJTensor,
     mesh_shape: Sequence[int],
@@ -671,16 +828,25 @@ def create_state_partition_specs(
   if discard_opt_states:
     opt_var_partition_specs = {}
   else:
-    grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
     opt_var_weight_hparams = []
-    for grad_tx in grad_txs:
+    for learner in learners:
+      excluded = get_excluded_var_mask_for_opt(
+          var_weight_hparams,
+          learner,
+      )
+      var_weight_hparams_for_opt = filter_vars_for_grad_or_opt(
+          var_weight_hparams, excluded
+      )
+      grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
       assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
       opt_var_weight_hparams.append(
-          grad_tx.init_partition_spec(var_weight_hparams))
+          grad_tx.init_partition_spec(var_weight_hparams_for_opt)
+      )
     opt_var_partition_specs = base_layer.var_partition_specs(
         opt_var_weight_hparams,
         mesh_shape=mesh_shape,
-        device_axis_names=mesh_axis_names)
+        device_axis_names=mesh_axis_names,
+    )
 
     # Note that due to the double nesting of sharded chain we need to un-mask
     # the outer MaskedState() if present. If this is only a single optimizer
@@ -721,9 +887,20 @@ def _create_opt_states(
   Returns:
     A list of NestedJTensor to update `opt_states` in TrainState.
   """
-  grad_txs = [x.get_grad_tx(var_weight_hparams) for x in learners]
   asserts.assert_same_structure(mdl_vars, var_weight_hparams)
-  return [x.init(mdl_vars) for x in grad_txs]  # pytype: disable=bad-return-type  # numpy-scalars
+  opt_states = []
+  for learner in learners:
+    excluded = get_excluded_var_mask_for_opt(
+        var_weight_hparams,
+        learner,
+    )
+    var_weight_hparams = filter_vars_for_grad_or_opt(
+        var_weight_hparams, excluded
+    )
+    filtered_mdl_vars = filter_vars_for_grad_or_opt(mdl_vars, excluded)
+    grad_tx = learner.get_grad_tx(var_weight_hparams)
+    opt_states.append(grad_tx.init(filtered_mdl_vars))
+  return opt_states  # pytype: disable=bad-return-type
 
 
 def create_state(
@@ -879,9 +1056,6 @@ class SingleTask(base_task.BaseTask):
       early; the instantiated class should be callable with signature matching
       trainer_lib.EarlyStoppingFn.
   """
-
-  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
-  model: base_model.BaseModel
 
   @dataclasses.dataclass(frozen=True)
   class InferWriter:
@@ -1386,9 +1560,9 @@ class SingleTask(base_task.BaseTask):
 
     This reduces the maximum HBM usage in the beginning of the experiment.
     Otherwise, when the variables are being loadded, at the same time there
-    could exist two copies of opt varaibles on the same device - the first copy
+    could exist two copies of opt variables on the same device - the first copy
     initialized randomly, and the other one loaded from the checkpoint. Here the
-    randomly initalized variables are released before checkpoint loading. This
+    randomly initialized variables are released before checkpoint loading. This
     avoids OOMing in some large models.
     """
     # pylint: enable=g-doc-args
@@ -1423,13 +1597,14 @@ class SingleTask(base_task.BaseTask):
   def _apply_init_checkpoint_rule(
       self,
       train_state: TrainState,
+      train_state_provenance: TrainStateProvenance,
       ckpt_path: str,
       rules: CheckpointLoadingRules,
       load_status: List[Any],
       global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
       target_partition_specs: Optional[TrainState] = None,
-  ):
+  ) -> Tuple[TrainState, TrainStateProvenance]:
     """Applies one CheckpointLoadingRules to train_state."""
     uses_gda = (
         checkpoint_type == CheckpointType.GDA
@@ -1525,7 +1700,13 @@ class SingleTask(base_task.BaseTask):
       raise RuntimeError(f'Cannot find checkpoint from {ckpt_path}')
     # Use NestedMap's utility accessors
     loaded_vars = dict(NestedMap(loaded_train_state.mdl_vars).FlattenItems())
-
+    loaded_state_provenance = train_states.build_train_state_provenance(
+        loaded_train_state, ckpt_path, rules.step
+    )
+    provenance_model_vars = train_state_provenance.mdl_vars
+    flat_loaded_vars_provenance = dict(
+        NestedMap(loaded_state_provenance.mdl_vars).FlattenItems()
+    )
     # Load EMA state if specified
     if load_ema_states:
       ema_required = False
@@ -1539,70 +1720,110 @@ class SingleTask(base_task.BaseTask):
                 {'ema': extract_ema(loaded_train_state).mdl_vars}
             ).FlattenItems()
         )
+        flat_loaded_vars_provenance.update(
+            NestedMap.FromNestedDict(
+                {'ema': extract_ema(loaded_train_state).mdl_vars}
+            ).FlattenItems()
+        )
     else:
       # Check if rules use ema state
       for _, ref in rules.load_rules:
         if ref.startswith('ema/'):
           raise RuntimeError('Load ema state but ema is not enabled for ckpt')
 
-    _assign_model_vars(model_vars, loaded_vars, model_vars_mapping)
+    _assign_model_vars(
+        model_vars,
+        loaded_vars,
+        model_vars_mapping,
+        provenance_model_vars,
+        flat_loaded_vars_provenance,
+    )
     train_state = train_state.replace(mdl_vars=model_vars)
 
     if rules.partial_load_opt_states:
-      train_state = _load_partial_opt_states(train_state, loaded_train_state,
-                                             loading_rules, ignore_rules,
-                                             is_opt_states_initialized,
-                                             ckpt_path)
+      train_state, train_state_provenance = _load_partial_opt_states(
+          train_state,
+          train_state_provenance,
+          loaded_train_state,
+          loaded_state_provenance,
+          loading_rules,
+          ignore_rules,
+          is_opt_states_initialized,
+          ckpt_path,
+      )
 
     if rules.load_step:
       if is_step_loaded:
-        logging.info('train_state.step is already initialized by %s, skip.',
-                     is_step_loaded)
+        logging.info(
+            'train_state.step is already initialized by %s, skip.',
+            is_step_loaded,
+        )
       else:
-        train_state = train_state.replace(step=loaded_train_state.step)
+        loaded_step = loaded_train_state.step
+        train_state = train_state.replace(step=loaded_step)
+        train_state_provenance = train_state_provenance.replace(
+            step=loaded_step
+        )
         load_status[0] = ckpt_path
         logging.info(
-            'Initialization by external checkpoint: step is overwritten by '
-            'value from %s with value %s', ckpt_path, train_state.step)
+            (
+                'Initialization by external checkpoint: step is overwritten by '
+                'value from %s with value %s'
+            ),
+            ckpt_path,
+            train_state.step,
+        )
 
     if rules.load_opt_states and not rules.partial_load_opt_states:
       if is_opt_states_initialized:
         logging.info(
             'train_state.opt_states is already initialized by %s, skip.',
-            is_opt_states_initialized)
+            is_opt_states_initialized,
+        )
       else:
         train_state = train_state.replace(
-            opt_states=loaded_train_state.opt_states)
+            opt_states=loaded_train_state.opt_states
+        )
+        train_state_provenance = train_state_provenance.replace(
+            opt_states=loaded_state_provenance.opt_states
+        )
         load_status[2] = {'all': ckpt_path}
         logging.info(
-            'Initialization by external checkpoint: train_state.opt_states is '
-            'overwritten by value from %s', ckpt_path)
+            (
+                'Initialization by external checkpoint: train_state.opt_states'
+                ' is overwritten by value from %s'
+            ),
+            ckpt_path,
+        )
 
-    return train_state
+    return train_state, train_state_provenance
 
   def apply_init_checkpoint_rules(
       self,
       train_state: TrainState,
+      train_state_provenance: TrainStateProvenance,
       train_state_partition_specs: Optional[TrainState] = None,
       global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
-  ) -> Tuple[TrainState, bool]:
+  ) -> Tuple[TrainState, TrainStateProvenance, bool]:
     """Applies p.train.init_from_checkpoint_rules to update train_state.
 
     Args:
       train_state: initialized train_state.
+      train_state_provenance: initialized train_state provenance
       train_state_partition_specs: The TrainState specs for initialized
         train_state. Required for GDA-based checkpoints.
       global_mesh: optional mesh used to restore checkpoint if needed.
       checkpoint_type: used to restore checkpoint.
 
     Returns:
-      A tuple of the updated new train state, and whether caller needs
+      A tuple of the updated new train state, the train state provenance, and
+      whether caller needs
       to recompute opt_states after mdl_vars are updated.
     """
     all_rules = self.hparams.train.init_from_checkpoint_rules
     if not all_rules:
-      return train_state, False
+      return train_state, train_state_provenance, False
 
     # mdl_vars are Python dict. First, convert it to NestedMap for convenience.
     train_state = train_state.replace(
@@ -1618,16 +1839,18 @@ class SingleTask(base_task.BaseTask):
         is_step_loaded, is_var_initialized, is_opt_states_initialized
     ]
     for ckpt_path, rules in all_rules.items():
-      train_state = self._apply_init_checkpoint_rule(
+      train_state, train_state_provenance = self._apply_init_checkpoint_rule(
           train_state,
+          train_state_provenance,
           ckpt_path,
           rules,
           load_status,
           global_mesh,
           checkpoint_type,
-          target_partition_specs=train_state_partition_specs)
+          target_partition_specs=train_state_partition_specs,
+      )
 
     # Convert mdl_vars back to Python dict for compatibility.
     train_state = train_state.replace(
         mdl_vars=train_state.mdl_vars.ToNestedDict())  # pytype: disable=attribute-error  # jax-ndarray
-    return train_state, not load_status[2]
+    return train_state, train_state_provenance, not load_status[2]

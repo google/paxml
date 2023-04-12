@@ -90,6 +90,11 @@ flags.DEFINE_bool(
     'Enables fully asynchronous checkpointing via GDA and TensorStore. This '
     'means that the training can continue ahead when checkpointing is '
     'happening.')
+flags.DEFINE_bool(
+    'tensorstore_use_ocdbt',
+    False,
+    'If True, uses OCDBT format when saving with Tensorstore.',
+)
 flags.DEFINE_string(
     'jax_traceback_filtering_option', 'auto',
     'Controls how JAX filters internal frames out of tracebacks: '
@@ -253,6 +258,7 @@ def run_experiment(
         enable_async_checkpointing=FLAGS.jax_fully_async_checkpoint,
         enable_checkpoint_saving=enable_checkpoint_saving,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+        tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
     )
 
   elif FLAGS.mode == 'eval':
@@ -265,6 +271,7 @@ def run_experiment(
         early_stopping_fn=early_stopping_fn,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+        tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
     )
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
@@ -281,6 +288,7 @@ def run_experiment(
         enable_checkpoint_saving=enable_checkpoint_saving,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+        tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
     )
   elif FLAGS.mode == 'decode_once':
     if (restore_checkpoint_steps := FLAGS.restore_checkpoint_step) is None:
@@ -303,6 +311,7 @@ def run_experiment(
           enable_auto_sharding=FLAGS.enable_auto_sharding,
           output_pickle=FLAGS.decode_output_pickle,
           enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+          tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
       )
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
@@ -310,6 +319,7 @@ def run_experiment(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
+        tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
     )
 
   # Wait for all processes to exit at the same time because if some tasks

@@ -100,10 +100,37 @@ def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   return orbax.checkpoint.utils.is_tmp_checkpoint(x)
 
 
-def make_metadata(version: Optional[float] = None) -> Mapping[str, Any]:
+def make_metadata(
+    version: Optional[float] = None,
+    train_state: Optional[train_states.TrainState] = None,
+    train_state_unpadded_shape_dtype_struct: Optional[
+        train_states.TrainState] = None,
+    tensorstore_use_ocdbt: Optional[bool] = None,
+) -> Mapping[str, Any]:
+  """Returns metadata dict."""
   if version is None:
-    version = get_version()
-  return {get_version_key(): version}
+    version = get_version(tensorstore_use_ocdbt=tensorstore_use_ocdbt)
+
+  if version > 1:
+    if train_state is None:
+      raise ValueError(
+          'train_state is required for version>1, to save the unpadded'
+          ' shapes/dtypes/maskednodes in the checkpoint metadata.'
+      )
+    if train_state_unpadded_shape_dtype_struct is None:
+      train_state_unpadded_shape_dtype_struct = get_shape_dtype_struct(
+          train_state
+      )
+      logging.warning(
+          'train_state_unpadded_shape_dtype_struct is not provided. We assume'
+          ' `train_state` is unpadded.'
+      )
+    metadata_dict = PaxMetadata.from_padded_and_unpadded(
+        train_state, train_state_unpadded_shape_dtype_struct, version=version
+    ).to_dict()
+    return metadata_dict
+  else:
+    return {get_version_key(): version}
 
 
 def metadata_exists(directory: epath.Path) -> bool:
@@ -125,8 +152,12 @@ def restore_metadata(directory: epath.Path) -> Mapping[str, Any]:
 
 def get_version_and_save_dir(
     checkpoint_step_dir: epath.Path,
+    tensorstore_use_ocdbt: Optional[bool] = None,
 ) -> Tuple[float, epath.Path]:
-  return get_version(), checkpoint_step_dir / STATE_ITEM_NAME
+  return (
+      get_version(tensorstore_use_ocdbt=tensorstore_use_ocdbt),
+      checkpoint_step_dir / STATE_ITEM_NAME,
+  )
 
 
 def get_version_and_restore_dir(
@@ -207,6 +238,12 @@ def retrieve_checkpoint_type(
     return CheckpointType.FLAX
 
 
+def get_shape_dtype_struct(nested: Any) -> Any:
+  return jax.tree_util.tree_map(
+      lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), nested
+  )
+
+
 def save_checkpoint(
     train_state: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
@@ -214,6 +251,9 @@ def save_checkpoint(
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: Optional[train_states.TrainState] = None,
     async_checkpointer: Optional[AsyncCheckpointer] = None,
+    train_state_unpadded_shape_dtype_struct: Optional[
+        train_states.TrainState] = None,
+    tensorstore_use_ocdbt: bool = False,
 ) -> None:
   """Saves a checkpoint into the provided base directory.
 
@@ -230,11 +270,15 @@ def save_checkpoint(
     async_checkpointer: When async checkpointing and Orbax are enabled, allows
       training to continue when checkpointing is going on as checkpointing
       happens in a different thread.
+    train_state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the
+      unpadded train state.
+    tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Raises:
     ValueError: If the global step has an unexpected shape, if `state_specs`
-    is not specified for persistence-based checkpointing or if
-    `checkpoint_type` is invalid.
+    is not specified for persistence-based checkpointing, if
+    `checkpoint_type` is invalid, or if unpadded shapes/dtypes are not provided
+    for version > 1.
   """
   del state_specs
 
@@ -244,12 +288,16 @@ def save_checkpoint(
   checkpoint_step_dir = make_checkpoint_step_dir(
       checkpoint_dir, step, checkpoint_type=checkpoint_type
   )
-  version, checkpoint_save_dir = get_version_and_save_dir(checkpoint_step_dir)
+  version, checkpoint_save_dir = get_version_and_save_dir(
+      checkpoint_step_dir, tensorstore_use_ocdbt=tensorstore_use_ocdbt
+  )
   if checkpoint_type == CheckpointType.GDA:
     if async_checkpointer is not None:
       async_checkpointer.save(checkpoint_save_dir, train_state, version=version)
     else:
-      checkpointer = orbax.checkpoint.Checkpointer(PaxCheckpointHandler())
+      checkpointer = orbax.checkpoint.Checkpointer(
+          PaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
+      )
       checkpointer.save(checkpoint_save_dir, train_state, version=version)
   elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
@@ -259,8 +307,25 @@ def save_checkpoint(
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
+  if version > 1 and train_state_unpadded_shape_dtype_struct is None:
+    train_state_unpadded_shape_dtype_struct = get_shape_dtype_struct(
+        train_state
+    )
+    logging.warning(
+        """train_state_unpadded_shape_dtype_struct is not provided. Saving the
+        shapes of train_state  as the unpadded shapes."""
+    )
+
   # Save metadata.
-  save_metadata(checkpoint_step_dir, make_metadata())
+  save_metadata(
+      checkpoint_step_dir,
+      make_metadata(
+          version,
+          train_state,
+          train_state_unpadded_shape_dtype_struct,
+          tensorstore_use_ocdbt=tensorstore_use_ocdbt
+      ),
+  )
 
 
 def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
@@ -322,6 +387,48 @@ def retrieve_latest_checkpoint_step(
   return step
 
 
+def validate_metadata(
+    version: float,
+    checkpoint_step_dir: epath.Path,
+    state_global_shapes: train_states.TrainState,
+    state_unpadded_global_shapes: Optional[train_states.TrainState],
+):
+  """Validates metadata."""
+  if version > 1:
+    if state_unpadded_global_shapes is None:
+      # TODO(b/275559482): as we migrate to version 1.1, we will require users
+      # to provide unpadded shapes/dtypes during restore. Currently, if it is
+      # not provided (None), we issue a warning, but we plan to raise an error
+      # soon.
+      logging.warning(
+          'Stage_unpadded_global_shapes is not provided. Skipping checking the'
+          ' unpadded shapes.'
+      )
+      # raise ValueError(
+      #     """For checkpoint version > 1.0, we require users to provide
+      #   `train_state_unpadded_shape_dtype_struct` during checkpoint
+      #   saving/restoring, to avoid potential silent bugs when loading
+      #   checkpoints to incompatible unpadded shapes of TrainState."""
+      # )
+    else:
+      restored_metadata = PaxMetadata.from_dict(
+          restore_metadata(checkpoint_step_dir)
+      )
+      metadata = PaxMetadata.from_dict(
+          make_metadata(
+              version,
+              state_global_shapes,
+              state_unpadded_global_shapes,
+          )
+      )
+      if not metadata.is_compatible(restored_metadata):
+        raise ValueError(
+            'PaxMetadata is not compatible with the restored PaxMetadata. '
+            f'expected PaxMetadata = {restored_metadata}. '
+            f'actual PaxMetadata = {metadata}.'
+        )
+
+
 def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
@@ -330,6 +437,8 @@ def restore_checkpoint(
     state_specs: Optional[train_states.TrainState] = None,
     step: Optional[int] = None,
     enforce_restore_shape_check: bool = False,
+    state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
+    tensorstore_use_ocdbt: bool = False,
 ) -> Optional[train_states.TrainState]:
   """Restores a checkpoint from the provided base directory.
 
@@ -347,6 +456,9 @@ def restore_checkpoint(
     step: Step number to load a checkpoint from or None to load the latest.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
+    state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the unpadded
+      state.
+    tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Returns:
     A restored `TrainState` instance. If no step specified and no checkpoint
@@ -368,36 +480,57 @@ def restore_checkpoint(
   version, checkpoint_restore_dir = get_version_and_restore_dir(
       checkpoint_step_dir
   )
+  validate_metadata(
+      version,
+      checkpoint_step_dir,
+      state_global_shapes,
+      state_unpadded_shape_dtype_struct,
+  )
+
   if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler(
-            enforce_restore_shape_check=enforce_restore_shape_check
+            enforce_restore_shape_check=enforce_restore_shape_check,
+            use_ocdbt=tensorstore_use_ocdbt,
         )
     )
-    restored_train_state = checkpointer.restore(
+    return checkpointer.restore(
         checkpoint_restore_dir,
         item=state_global_shapes,
         specs=state_specs,
         mesh=global_mesh,
         version=version,
     )
-    return restored_train_state
   elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
     return checkpointer.restore(
-        checkpoint_restore_dir, item=state_global_shapes, version=version
+        checkpoint_restore_dir,
+        item=state_global_shapes,
+        version=version,
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
 
 
-def reregister_type_handlers(tensorstore_metadata_key: Optional[str] = None):
+def reregister_type_handlers(
+    tensorstore_metadata_key: Optional[str] = None,
+    tensorstore_use_ocdbt: bool = False,
+) -> Any:
   """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
-  if tensorstore_metadata_key is None:
+  if tensorstore_metadata_key is None and not tensorstore_use_ocdbt:
     return
+
+  ts_context = None
+  if tensorstore_use_ocdbt:
+    ts_context, ocdbt_coordinator_server = (
+        orbax.checkpoint.type_handlers.create_coordinator_server_and_context()
+    )
   orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
-      metadata_key=tensorstore_metadata_key
+      metadata_key=tensorstore_metadata_key,
+      use_ocdbt=tensorstore_use_ocdbt,
+      ts_context=ts_context,
   )
+  return ocdbt_coordinator_server
 
 
 def _extract_nested_prefix_names(
@@ -527,10 +660,7 @@ def _tensorstore_reconstruct(
   return jax.tree_util.tree_unflatten(treedef, restored_flattened_train_state)
 
 
-def _check_restored_shapes(
-    restored: Sequence[JTensorOrPartitionSpec],
-    expected: Sequence[JTensorOrPartitionSpec],
-):
+def _check_restored_shapes(restored: Any, expected: Any):
   def _check(a, b):
     if a.shape != b.shape:
       raise ValueError(
@@ -552,18 +682,20 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   from a state dict.
   """
 
+  _param_names: PyTree = None
+
   def __init__(
       self, *args, enforce_restore_shape_check: bool = False, **kwargs
   ):
     self._enforce_restore_shape_check = enforce_restore_shape_check
     super().__init__(*args, **kwargs)
 
-  _param_names: PyTree = None
-
   def _set_param_names(self, param_names: PyTree):
     self._param_names = param_names
 
   def _get_param_names(self, item: PyTree) -> PyTree:
+    if self._param_names is None:
+      return super()._get_param_names(item)
     return self._param_names
 
   async def _write_aggregate_file(
@@ -574,7 +706,10 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       save_args: PyTree,
   ):
     """Skip writing msgpack file for Pax since this file would be unused."""
-    pass
+    if self._use_ocdbt:
+      await super()._write_aggregate_file(
+          directory, item, param_infos, save_args
+      )
 
   async def async_save(
       self,
@@ -585,16 +720,15 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
     if version is None:
-      raise ValueError('Expected version for saving.')
-    flattened_train_state, flattened_nested_names, _ = _tensorstore_prepare(
-        item
-    )
-    # At that point, the flattened entries do not contain any reference to
-    # MaskedNode's.
-    self._set_param_names(flattened_nested_names)
-    return await super().async_save(
-        directory, flattened_train_state, save_args=save_args
-    )
+      raise ValueError('Expected version for sxaving.')
+    if self._use_ocdbt:
+      self._set_param_names(None)
+    else:
+      item, flattened_nested_names, _ = _tensorstore_prepare(item)
+      # At that point, the flattened entries do not contain any reference to
+      # MaskedNode's.
+      self._set_param_names(flattened_nested_names)
+    return await super().async_save(directory, item, save_args=save_args)
 
   def restore(
       self,
@@ -607,12 +741,25 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
       raise ValueError('Expected version for restoration.')
-    flattened_train_state, flattened_nested_names, flattened_state_specs = (
-        _tensorstore_prepare(item, specs)
+    is_ocdbt_checkpoint = orbax.checkpoint.type_handlers.is_ocdbt_checkpoint(
+        directory
     )
-    # At that point, the flattened entries do not contain any reference to
-    # MaskedNode's.
-    self._set_param_names(flattened_nested_names)
+    if is_ocdbt_checkpoint and not self._use_ocdbt:
+      raise ValueError(
+          'Must enable `tensorstore_use_ocdbt` in order to load OCDBT format'
+          ' checkpoint.'
+      )
+    if is_ocdbt_checkpoint:
+      reference_train_state, reference_state_specs = (item, specs)
+    else:
+      reference_train_state, reference_nested_names, reference_state_specs = (
+          _tensorstore_prepare(item, specs)
+      )
+      # At that point, the flattened entries do not contain any reference to
+      # MaskedNode's.
+      # Consequently, we restore the checkpoint that does not contain any
+      # reference to MaskedNode's.
+      self._set_param_names(reference_nested_names)
 
     def create_restore_args(pspec, shape_struct):
       # Providing `None` indicates that the shape should be restored exactly as
@@ -629,23 +776,27 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       )
 
     restore_args = jax.tree_map(
-        create_restore_args, flattened_state_specs, flattened_train_state
+        create_restore_args, reference_state_specs, reference_train_state
     )
-
-    # Consequently, we restore the checkpoint that does not contain any
-    # reference to MaskedNode's.
     restored_train_state = super().restore(
-        directory, item=flattened_train_state, restore_args=restore_args
+        directory, item=reference_train_state, restore_args=restore_args
     )
     if self._enforce_restore_shape_check:
-      _check_restored_shapes(restored_train_state, flattened_train_state)
+      _check_restored_shapes(restored_train_state, reference_train_state)
 
-    # We add back the MaskedNode entries into the pytree.
-    restored_train_state = _tensorstore_reconstruct(item, restored_train_state)
+    if not is_ocdbt_checkpoint:
+      # We add back the MaskedNode entries into the pytree.
+      restored_train_state = _tensorstore_reconstruct(
+          item, restored_train_state
+      )
 
     return restored_train_state
 
   def structure(self, directory: epath.Path) -> PyTree:
+    # Use msgpack file if it exists.
+    if (directory / self._aggregate_filename).exists():
+      return super().structure(directory)
+    # Otherwise, rely on implicit structure from directories.
     return jax.tree_util.tree_map(
         orbax.checkpoint.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names),
@@ -669,8 +820,11 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       raise ValueError('Expected version for saving.')
     # Extract/flatten data structure to store to disk. Flax requires a flattened
     # data structure to be passed to the checkpointer.
+    # Keep bprop_masked_node to be consistent with restore. This allows us to
+    # restore a legacy checkpoint which uses placeholder tensors instead of mask
+    # nodes.
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
-        jax.device_get(item)
+        jax.device_get(item), is_leaf=py_utils.is_bprop_masked_node
     )
     checkpoint_target = {
         'flattened_state': flattened_state,
@@ -698,7 +852,9 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     if version is None:
       raise ValueError('Expected version for restoration.')
     # Input the same data structure as in save_checkpoint().
-    flattened_state, pytree_state = jax.tree_util.tree_flatten(item)
+    flattened_state, pytree_state = jax.tree_util.tree_flatten(
+        item, is_leaf=py_utils.is_bprop_masked_node
+    )
     str_pytree_state = str(pytree_state)
     input_target = {
         'flattened_state': flattened_state,
@@ -723,7 +879,16 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
           restored_str_pytree_state,
           str_pytree_state,
       )
-    return jax.tree_util.tree_unflatten(pytree_state, restored_state)
+    restored = jax.tree_util.tree_unflatten(pytree_state, restored_state)
+    # With bprop var inclusion, legacy checkpoint still has placeholder tensors
+    # the optimizer state.
+    restored = jax.tree_util.tree_map(
+        lambda x, y: x if py_utils.is_bprop_masked_node(x) else y,
+        item,
+        restored,
+        is_leaf=py_utils.is_bprop_masked_node,
+    )
+    return restored
 
 
 class FlaxCheckpointer(orbax.checkpoint.Checkpointer):
@@ -893,6 +1058,12 @@ class PaxMetadata:
     )
     if dataclasses.is_dataclass(train_state_metadata):
       train_state_metadata = dataclasses.asdict(train_state_metadata)
+
+    # serialize to a nested dict so that it is json-serializable
+    train_state_metadata = orbax.checkpoint.utils.serialize_tree(
+        train_state_metadata,
+        keep_empty_nodes=True,
+    )
 
     return dict(
         version=self.version,

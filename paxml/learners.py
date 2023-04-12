@@ -96,6 +96,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       repeat_prefix dims of the variables. This allows stacking variables of
       different layers while not affecting the behavior of optimizers like
       Adafactor.
+    force_repeat_prefix_structure: If true, force optimizer states to have a
+      vectorized repeat_prefix structure, even if no layers are repeated.
+      This should only be enabled when necessary to load broken legacy
+      checkpoints. New models should not use it.
     skip_step_gradient_norm_value: If non-zero, we skip a step entirely if
       gradient_norm exceeds this value.
     enable_skip_step_on_gradient_anomalies: Skips the step if gradient anomaly
@@ -122,6 +126,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   var_norm_summary: bool = True
   check_valid_step: bool = True
   vectorize_on_repeat_prefix: bool = True
+  force_repeat_prefix_structure: bool = False
   skip_step_gradient_norm_value: float = 0.0
   enable_skip_step_on_gradient_anomalies: bool = True
   bprop_variable_exclusion: Union[str, Sequence[str]] = (
@@ -144,6 +149,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     asserts.not_none(p.optimizer)
     self._get_grad_tx = self.optimizer.get_grad_transformation
 
+    if not p.vectorize_on_repeat_prefix:
+      assert not p.force_repeat_prefix_structure, (
+          'force_repeat_prefix_structure requires '
+          'vectorize_on_repeat_prefix=True')
 
   def plot_learning_rate(self, step: int) -> None:
     learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
@@ -159,11 +168,13 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   ) -> optimizers.GeneralGradientTransformation:
     # Apply vectorization on prefix dims.
     if not self._hparams.vectorize_on_repeat_prefix:
+      assert not self._hparams.force_repeat_prefix_structure
       return self._get_grad_tx(var_weight_hparams)
     return opt_vec.get_transformations_with_vectorized_repeat_prefix(
         self._get_grad_tx(var_weight_hparams),
         var_weight_hparams,
         self._hparams.repeat_prefix_sep,
+        force_prefix_structure=self._hparams.force_repeat_prefix_structure,
     )
 
   def scale_gradients(

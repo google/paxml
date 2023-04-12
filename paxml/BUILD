@@ -75,12 +75,15 @@ pytype_strict_library(
     srcs = ["checkpoint_managers.py"],
     deps = [
         ":checkpoints",
+        # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
+        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//paxml:preemption",
         "//praxis:base_input",
         "//praxis:py_utils",
+        "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -163,10 +166,12 @@ pytype_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit etils dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
+        "//praxis:pytypes",
     ],
 )
 
@@ -236,7 +241,6 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_experiment",
-        # Implicit absl.logging dependency.
     ],
 )
 
@@ -393,6 +397,7 @@ pytype_strict_library(
         "//praxis:pytypes",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
+        # Implicit tensorflow_datasets dependency.
     ],
 )
 
@@ -600,6 +605,8 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit optax dependency.
         "//praxis:base_layer",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
     ],
 )
 
@@ -641,6 +648,17 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
+    ],
+)
+
+pytype_strict_library(
+    name = "parameterized_experiment",
+    srcs = ["parameterized_experiment.py"],
+    deps = [
+        ":base_experiment",
+        ":base_task",
+        "//praxis:base_input",
+        "//praxis:pax_fiddle",
     ],
 )
 
@@ -721,6 +739,7 @@ py_strict_test(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:base_input",
         "//praxis:py_utils",
@@ -852,6 +871,7 @@ py_strict_test(
     deps = [
         ":checkpoints",
         ":learners",
+        ":partitioning",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -888,5 +908,21 @@ py_strict_test(
         # Implicit etils dependency.
         "//praxis:base_hyperparams",
         # Implicit pyglove dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "parameterized_experiment_test",
+    srcs = ["parameterized_experiment_test.py"],
+    deps = [
+        ":parameterized_experiment",
+        ":tasks_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit jax dependency.
+        "//praxis:base_input",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:test_utils",
+        "//praxis/layers:models",
     ],
 )

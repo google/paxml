@@ -20,7 +20,8 @@ RUN cd /paxml && \
   --test_verbose_timeout_warnings \
   -- \
   paxml/... \
-  -paxml/tasks/vision:input_generator_test
+  -paxml/tasks/vision:input_generator_test \
+  -paxml:tasks_lib_test
 WORKDIR /
 
 CMD ["/bin/bash"]

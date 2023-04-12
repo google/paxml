@@ -203,8 +203,18 @@ def write_seqio_metric_summaries(
         )
         continue
 
+      if isinstance(v, seqio.metrics.Image):
+        logging.info('Writing summary of %s with image.', metric_name)
+        tf_summary.image(
+            metric_name,
+            v.image,
+            step=step,
+            max_outputs=v.max_outputs)
+        continue
+
       if isinstance(v, seqio.metrics.Histogram):
-        tf_summary.histogram(metric_name, v.values, buckets=v.bins)
+        tf_summary.histogram(metric_name, v.values, buckets=v.bins, step=step)
+        continue
 
       if isinstance(v, seqio.metrics.Generic):
         tf_summary.write(metric_name, v.tensor, metadata=v.metadata, step=step)

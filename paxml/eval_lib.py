@@ -140,6 +140,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       restore_checkpoint_step: int,
       partitioner: partitioning.Partitioner,
       enforce_restore_shape_check: bool = False,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -149,6 +150,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
     self._enforce_restore_shape_check = enforce_restore_shape_check
+    self._ocdbt_coordinator_server = ocdbt_coordinator_server
 
   def retrieve_latest_checkpoint_step(self) -> Optional[int]:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -200,6 +202,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         state_specs=train_state_metadata.partition_specs,
         step=step,
         enforce_restore_shape_check=self._enforce_restore_shape_check,
+        tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
     )
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}'
@@ -235,7 +238,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     partitioned_train_state = self._restore(
         self.restore_checkpoint_step, train_state_metadata
     )
-    root_prng_key, partitioned_train_state = (
+    root_prng_key, partitioned_train_state, _ = (
         self._partitioner.initialize_prng_key_and_train_state(
             root_prng_key,
             partitioned_train_state,
@@ -258,6 +261,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       partitioner: partitioning.Partitioner,
       mode: EvaluationMode,
       enforce_restore_shape_check: bool = False,
+      ocdbt_coordinator_server: Optional[Any] = None,
   ):
     super().__init__(
         jax_task,
@@ -267,6 +271,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         restore_checkpoint_step,
         partitioner,
         enforce_restore_shape_check=enforce_restore_shape_check,
+        ocdbt_coordinator_server=ocdbt_coordinator_server,
     )
     self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
         jax_task.hparams.track_decoder_metric
@@ -286,6 +291,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step,
           checkpoint_type=self.checkpoint_type,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
+          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
     else:
       model_states = checkpoints.restore_checkpoint(
@@ -294,6 +300,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           checkpoint_type=self.checkpoint_type,
           step=step,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
+          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
     if model_states:
       if self.use_ema:
@@ -326,7 +333,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
         self.restore_checkpoint_step,
         train_state_metadata.unpadded_global_shapes,
     )
-    root_prng_key, replicated_model_states = (
+    root_prng_key, replicated_model_states, _ = (
         self._partitioner.initialize_prng_key_and_train_state(
             root_prng_key,
             model_states,
@@ -346,6 +353,7 @@ def _create_checkpointer(
     restore_checkpoint_step: Optional[int],
     partitioner: partitioning.Partitioner,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
@@ -358,8 +366,9 @@ def _create_checkpointer(
     # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
     # retrieved.
 
-  checkpoints.reregister_type_handlers(
-      jax_task.hparams.train.tensorstore_metadata_key
+  ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
+      tensorstore_metadata_key=jax_task.hparams.train.tensorstore_metadata_key,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
@@ -375,6 +384,7 @@ def _create_checkpointer(
       restore_checkpoint_step,
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      ocdbt_coordinator_server=ocdbt_coordinator_server,
       **extra_kwargs,
   )
 
@@ -431,6 +441,7 @@ def evaluate(
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     enable_auto_sharding: bool = False,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> None:
   """Runs the evaluation loop on the entire eval data set.
 
@@ -477,6 +488,9 @@ def evaluate(
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
+      auto_sharding_input_params=eval_input_p[0]
+      if enable_auto_sharding
+      else None,
   )
   input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
@@ -498,6 +512,7 @@ def evaluate(
       restore_checkpoint_step=restore_checkpoint_step,
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
 
   partitioned_train_state, train_state_metadata, prng_key = (
@@ -604,6 +619,7 @@ def decode(
     enable_checkpoint_saving: bool = True,
     output_pickle: bool = True,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> None:
   """Runs decoding on the decoder datasets.
 
@@ -637,13 +653,14 @@ def decode(
 
   decoder_inputs = experiment_config.decoder_datasets()
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
-
   if not run_eval:
     eval_inputs = []
-  if not decoder_inputs and not eval_inputs:
+  combined_input_ps = decoder_inputs + eval_inputs  # Use decode inputs first.
+
+  if not combined_input_ps:
     logging.info('No input datasets defined.')
     return
-  for inp in decoder_inputs + eval_inputs:
+  for inp in combined_input_ps:
     if inp.num_infeed_hosts == 0:
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
@@ -665,6 +682,9 @@ def decode(
       init_is_eval=True,
       reshard_inputs=reshard_inputs,
       auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
+      auto_sharding_input_params=combined_input_ps[0]
+      if enable_auto_sharding
+      else None,
   )
   input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
@@ -678,9 +698,7 @@ def decode(
 
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_params(
-        (decoder_inputs + eval_inputs)[0]
-    )
+    input_p = partitioner.preprocess_input_params(combined_input_ps[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
@@ -695,6 +713,7 @@ def decode(
       restore_checkpoint_step,
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
 
   if continuous_decode:
@@ -1925,6 +1944,7 @@ def infer_and_write(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.Path,
     enforce_restore_shape_check: bool = False,
+    tensorstore_use_ocdbt: bool = False,
 ) -> None:
   """Generates output from a model and writes it out.
 
@@ -1972,6 +1992,7 @@ def infer_and_write(
       restore_checkpoint_step=task_p.infer_writer.restore_checkpoint_step,
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
   for inp in inputs_p:
     if inp.num_infeed_hosts == 0:

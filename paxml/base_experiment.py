@@ -126,14 +126,9 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """
     return None
 
-  def train_program(self) -> Optional[programs.BaseTrainProgram]:
-    """Returns the train program to use for training the model.
-
-    Returns:
-      A BaseTrainProgram instance or None, in which case a default train program
-      will be used.
-    """
-    return None
+  def train_program(self) -> programs.BaseTrainProgram:
+    """Returns the train program to use for training the model."""
+    return programs.SingleTaskTrainProgram()
 
   def __init_subclass__(cls):
     """Modifications to the subclasses."""

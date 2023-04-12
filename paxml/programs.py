@@ -110,48 +110,26 @@ class BaseTrainProgram(Program):
   TODO(hthu): Write a custom program example.
   """
 
-  def __init__(
-      self,
-      task: tasks_lib.SingleTask,
-      # TODO(laigd): move to setup, and mark these required fields.
-      train_input: Optional[base_input.BaseInput] = None,
-      partitioner: Optional[partitioning.Partitioner] = None,
-  ):
-    self._task = task
-    self._train_input = train_input
-    self._partitioner = partitioner
-
-    train_p = self._task.hparams.train
-    self._profiler = profiling.Profiler(
-        num_steps=train_p.profiler_num_steps,
-        min_duration_sec=train_p.profiler_min_duration_sec,
-        max_num_hosts=train_p.profiler_max_num_hosts,
-    )
-    self._first_step_completion_time = None
-
-    # States to initialize lazily by self.setup().
+  def __init__(self):
+    # States to set in self.setup().
+    self._task = None
+    self._train_input = None
+    self._partitioner = None
     self._train_prng_seed = None
     self._eval_prng_seed = None
     self._initial_step = -1
-    self._init_duration_set = False
-    self._train_summary_last_time = None
-    self._train_summary_last_step = None
     self._train_summary_handler = None
     self._eval_train_summary_handler = None
 
+    # States to initialize lazily in self.setup().
     self._train_unpadded_global_batch_size = None
+    self._profiler = None
+    self._train_summary_last_time = None
+    self._train_summary_last_step = None
 
-  # We need access to partitioner/train_input so that we can avoid building
-  # the partitioner twice in the training pipeline.
-  # TODO(laigd): reconcile this with base partitioner and BaseExecutor.
-
-  def set_partitioner(self, partitioner: partitioning.Partitioner):
-    assert self._partitioner is None
-    self._partitioner = partitioner
-
-  def set_train_input(self, train_input: base_input.BaseInput):
-    assert self._train_input is None
-    self._train_input = train_input
+    # Other states used during training.
+    self._first_step_completion_time = None
+    self._init_duration_set = False
 
   @property
   def train_input(self) -> base_input.BaseInput:
@@ -159,6 +137,9 @@ class BaseTrainProgram(Program):
 
   def setup(
       self,
+      task: tasks_lib.SingleTask,
+      train_input: base_input.BaseInput,
+      partitioner: partitioning.Partitioner,
       # TODO(laigd): it should take a root prng key and split it.
       train_prng_seed: pytypes.PRNGKey,
       eval_prng_seed: pytypes.PRNGKey,
@@ -166,20 +147,27 @@ class BaseTrainProgram(Program):
       train_summary_handler: Any,
       eval_summary_handler: Any,
   ) -> None:
+    self._task = task
+    self._train_input = train_input
+    self._partitioner = partitioner
     self._train_prng_seed = train_prng_seed
     self._eval_prng_seed = eval_prng_seed
     self._initial_step = init_step
-    self._init_duration_set = False
-    self._train_summary_last_time = time.time()
-    self._train_summary_last_step = init_step - 1
     self._train_summary_handler = train_summary_handler
     self._eval_train_summary_handler = eval_summary_handler
 
+    # Initializes other states.
     self._train_unpadded_global_batch_size = (
-        self._train_input.hparams.cls.get_global_batch_size(
-            self._train_input.hparams
-        )
+        train_input.hparams.cls.get_global_batch_size(train_input.hparams)
     )
+    train_p = self._task.hparams.train
+    self._profiler = profiling.Profiler(
+        num_steps=train_p.profiler_num_steps,
+        min_duration_sec=train_p.profiler_min_duration_sec,
+        max_num_hosts=train_p.profiler_max_num_hosts,
+    )
+    self._train_summary_last_time = time.time()
+    self._train_summary_last_step = init_step - 1
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     return train_step < self._task.hparams.train.num_train_steps
@@ -404,14 +392,8 @@ class BaseTrainProgram(Program):
 class SingleTaskTrainProgram(BaseTrainProgram):
   """Train program that assumes a single task on a single dataset."""
 
-  def __init__(
-      self,
-      task: tasks_lib.SingleTask,
-      # TODO(laigd): move to setup, and mark these required fields.
-      train_input: Optional[base_input.BaseInput] = None,
-      partitioner: Optional[partitioning.Partitioner] = None,
-  ):
-    super().__init__(task, train_input, partitioner)
+  def __init__(self):
+    super().__init__()
 
     # Train step function information.
     self._train_step_created = False

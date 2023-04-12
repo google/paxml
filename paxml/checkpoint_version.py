@@ -15,8 +15,19 @@
 
 """Stores current checkpoint version and version history."""
 
+from typing import Optional
+
 #
 # Past versions:
+# 1.2
+# - State checkpoint uses Tensorstore's OCDBT format.
+# - The state will consist of Tensorstore-managed files plus a 'checkpoint' file
+#   managed by Orbax, which stores the PyTree structure.
+#
+# 1.1
+# - Metadata has a new key 'train_state_metadata', which is a pytree of array
+# metadata corresponding to the train state, including shape, dtype and
+# is_masked_node for `TrainState.mdl_vars`.
 #
 # 1.0
 # - Checkpoints folders are organized into per-step directories, where each has
@@ -30,11 +41,18 @@
 # other words, the msgpack file may be 'checkpoint_1' instead of
 # 'checkpoint_1/checkpoint', where 'checkpoint' is the msgpack file.
 
-_VERSION: float = 1.0
+# TODO(b/273803615) When rolled out globally, make _OCDBT_VERSION the standard
+# version.
+_OCDBT_VERSION: float = 1.2
+_VERSION: float = 1.1
 _VERSION_KEY: str = 'version'
 
 
-def get_version() -> float:
+def get_version(tensorstore_use_ocdbt: Optional[bool] = None) -> float:
+  if tensorstore_use_ocdbt is None:
+    raise ValueError('Must set the value of `tensorstore_use_ocdbt`.')
+  if tensorstore_use_ocdbt:
+    return _OCDBT_VERSION
   return _VERSION
 
 

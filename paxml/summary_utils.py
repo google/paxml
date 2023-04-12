@@ -47,8 +47,11 @@ FLAGS = flags.FLAGS
 
 
 JTensor = pytypes.JTensor
+Nested = pytypes.Nested
 NestedJTensor = pytypes.NestedJTensor
 TrainState = train_states.TrainState
+TensorProvenance = train_states.TensorProvenance
+TrainStateProvenance = train_states.TrainStateProvenance
 SummaryType = base_layer.SummaryType
 SummaryWriter = tf.summary.SummaryWriter
 WeightedScalars = pytypes.WeightedScalars
@@ -91,6 +94,12 @@ def pretty_repr(values: NestedJTensor, num_spaces: int = 4) -> str:
     return repr(values)
 
 
+def pretty_format_iters(input_str: str) -> str:
+  for c in '{}(),[]':
+    input_str = input_str.replace(c, '')
+  return '\n'.join(l for l in input_str.splitlines() if (l and not l.isspace()))
+
+
 def pretty_repr_shapes(replicated_vars: NestedJTensor,
                        is_vars_replicated) -> str:
   """Returns a pretty representation of the variable shapes."""
@@ -107,9 +116,14 @@ def pretty_repr_shapes(replicated_vars: NestedJTensor,
 
   out = jax.tree_map(pps, replicated_vars)
   out = pretty_repr(out)
-  for c in '{}(),[]':
-    out = out.replace(c, '')
-  return '\n'.join(l for l in out.splitlines() if (l and not l.isspace()))
+  return pretty_format_iters(out)
+
+
+def pretty_repr_provenance(
+    provenance: Union[TensorProvenance, Nested[TensorProvenance]]
+) -> str:
+  provenance_out = pretty_repr(provenance)
+  return pretty_format_iters(provenance_out)
 
 
 def _yield_subtrees(
@@ -429,17 +443,44 @@ def write_summary_entry(summary_writer: SummaryWriter,
                mean_loss)
 
 
-def write_model_structure(train_summary_writer: SummaryWriter,
-                          train_state: TrainState, is_vars_replicated):
+def write_model_structure(
+    train_summary_writer: SummaryWriter,
+    train_state: TrainState,
+    is_vars_replicated,
+):
   """Writes the Model Param structure to TB."""
   with train_summary_writer.as_default():
     out = pretty_repr_shapes(train_state.mdl_vars, is_vars_replicated)
-    tf_summary.text('Model', out, step=0)
+    tf_summary.text(
+        'Model', out, step=0
+    )
   train_summary_writer.flush()
 
 
-def write_total_num_params(train_summary_writer: SummaryWriter,
-                           total_num_params: int):
+def write_model_provenance(
+    train_summary_writer: SummaryWriter,
+    train_state_provenance: TrainStateProvenance,
+):
+  """Writes the TrainStateProvenance to TB."""
+  with train_summary_writer.as_default():
+    mdl_vars_out = pretty_repr_provenance(train_state_provenance.mdl_vars)
+    tf_summary.text(
+        'Model vars provenance',
+        mdl_vars_out,
+        step=0,
+    )
+    opt_states_out = pretty_repr_provenance(train_state_provenance.opt_states)
+    tf_summary.text(
+        'Opt states provenance',
+        opt_states_out,
+        step=0,
+    )
+  train_summary_writer.flush()
+
+
+def write_total_num_params(
+    train_summary_writer: SummaryWriter, total_num_params: int
+):
   """Writes the total number of parameters to TB."""
   with train_summary_writer.as_default():
     # Add whitespace every 3 digit for readability.

@@ -17,16 +17,24 @@
 
 from __future__ import annotations
 
-from typing import List
+import dataclasses
+from typing import Any, List, Optional, Tuple
 
 from flax import struct as flax_struct
 import jax
+from jax.sharding import PartitionSpec
 import optax
 from praxis import base_layer
+from praxis import py_utils
+from praxis import pytypes
 
-NestedJTensor = base_layer.NestedJTensor
+JTensor = py_utils.JTensor
+JTensorProvenance = Tuple[str, Optional[int]]
 JTensorOrPartitionSpec = base_layer.JTensorOrPartitionSpec
+Nested = pytypes.Nested
+NestedJTensor = base_layer.NestedJTensor
 NestedJTensorOrPartitionSpec = base_layer.NestedJTensorOrPartitionSpec
+NestedMap = py_utils.NestedMap
 
 
 # A helper class for managing various train states. This struct may contain the
@@ -53,3 +61,46 @@ class TrainState(flax_struct.PyTreeNode):
   def to_eval_state(self) -> TrainState:
     """Returns a new TrainState with opt_states removed, for eval purpose."""
     return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states={})
+
+
+@dataclasses.dataclass
+class TensorProvenance:
+  checkpoint_path: str = 'random_init'
+  checkpoint_step: Optional[int] = None
+
+  def __repr__(self) -> str:
+    if self.checkpoint_path == 'random_init':
+      return f'"({self.checkpoint_path})"'
+
+    checkpoint_step_repr = (
+        self.checkpoint_step if self.checkpoint_step else 'latest')
+
+    return f'"({self.checkpoint_path}:{checkpoint_step_repr})"'
+
+
+@dataclasses.dataclass
+class TrainStateProvenance:
+  """Provenance for the TrainState pytree struct (not jax-transformable)."""
+  step: TensorProvenance
+  mdl_vars: Nested[TensorProvenance]
+  opt_states: Nested[TensorProvenance]
+
+  def replace(self, **changes: Any) -> TrainStateProvenance:
+    return dataclasses.replace(self, **changes)
+
+
+def build_train_state_provenance(
+    train_state: TrainState,
+    checkpoint_path: Optional[str] = None,
+    step: Optional[int] = None) -> TrainStateProvenance:
+  assert not isinstance(train_state.step, PartitionSpec), (
+      'Tensor provenance is only for tensors')
+
+  provenance = TensorProvenance()
+  if checkpoint_path:
+    provenance = TensorProvenance(checkpoint_path=checkpoint_path,
+                                  checkpoint_step=step)
+  return TrainStateProvenance(
+      step=provenance,
+      mdl_vars=jax.tree_map(lambda x: provenance, train_state.mdl_vars),
+      opt_states=jax.tree_map(lambda x: provenance, train_state.opt_states))

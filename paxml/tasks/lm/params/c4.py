@@ -49,8 +49,15 @@ GPT_SPM_PATH = (
 )
 GPT_EOS_ID = 1
 GPT_VOCABULARY = t5.data.SentencePieceVocabulary(GPT_SPM_PATH)
-C4_GPT_OUTPUT_FEATURES_LM = {
+PASS_THROUGH_VOCABULARY = t5.data.PassThroughVocabulary(size=50257)
+
+C4_GPT_TRAIN_FEATURES_LM = {
     'targets': t5.data.Feature(vocabulary=GPT_VOCABULARY, add_eos=False)
+}
+C4_GPT_EVAL_FEATURES_LM = {
+    'targets': t5.data.Feature(
+        vocabulary=PASS_THROUGH_VOCABULARY, add_eos=False
+    )
 }
 C4_TRAIN_DATADIR = 'gs://mlperf-llm-public2'
 C4_EVAL_DATADIR = 'gs://mlperf-llm-public2'
@@ -118,15 +125,15 @@ TaskRegistry.add_versioned_tfds_task(
         ),
         t5_preprocessors.split_tokens_to_targets_length,
     ],
-    output_features=C4_GPT_OUTPUT_FEATURES_LM,
+    output_features=C4_GPT_TRAIN_FEATURES_LM,
     metric_fns=[],
     shuffle_buffer_size=10000,
 )
 
 TaskRegistry.add_versioned_tfds_task(
-    'c4_lm_v301_gpt_eval',
-    versions=['3.0.4'],
-    pinned_version='3.0.4',
+    'c4_lm_v301_gpt_eval_tokenized',
+    versions=['3.0.5'],
+    pinned_version='3.0.5',
     tfds_name='c4/en',
     tfds_data_dir=C4_EVAL_DATADIR,
     preprocessors=[
@@ -134,17 +141,12 @@ TaskRegistry.add_versioned_tfds_task(
             t5_preprocessors.rekey,
             key_map={
                 'inputs': None,
-                'targets': 'text',
+                'targets': 'ids',
             },
         ),
         seqio.preprocessors.tokenize,
-        functools.partial(
-            t5_preprocessors.reduce_concat_tokens,
-            batch_size=24567,
-        ),
-        t5_preprocessors.split_tokens_to_targets_length,
     ],
-    output_features=C4_GPT_OUTPUT_FEATURES_LM,
+    output_features=C4_GPT_EVAL_FEATURES_LM,
     metric_fns=[],
     shuffle_buffer_size=None,
 )
@@ -188,8 +190,9 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
                    'None' if seed is None else seed)
     p = seqio_input.SeqIOInput.HParams(
         name='C4Train' if is_training else 'C4Validation',
-        mixture_name='c4_lm_v301_gpt' if is_training else 'c4_lm_v301_gpt_eval',
-        split_name='train2' if is_training else 'validation_24567exp',
+        mixture_name='c4_lm_v301_gpt' if is_training
+        else 'c4_lm_v301_gpt_eval_tokenized',
+        split_name='train2' if is_training else 'validation_tokenized_5662seqs',
         task_feature_lengths={'targets': self.MAX_SEQ_LEN},
         use_cached=False,
         repeat=True if is_training else False,

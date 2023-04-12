@@ -39,6 +39,7 @@ from praxis import py_utils
 from praxis import pytypes
 import seqio
 import tensorflow.compat.v2 as tf
+import tensorflow_datasets as tfds
 
 sub_config_field = base_hyperparams.sub_config_field
 NestedMap = py_utils.NestedMap
@@ -376,6 +377,17 @@ class SeqIOInput(base_input.BaseInput):
       examples.
     overridden_vocab: the vocab overridden. If not set, it would be derived from
       `output_features` of underlining task_or_mixture.
+    enable_symbolic_checkpointing: Whether to use symbolic checkpointing instead
+      of explicit checkpointing. Note that task.train.enable_input_checkpointing
+      must be enabled to use this feature.
+    experimental_enable_index_shuffle: Enables index shuffle, which is required
+      for symbolic checkpointing of training inputs (otherwise defaults to
+      explicit checkpointing). Applicable only for tf.data inputs that have
+      checkpointing enabled.
+    log_preprocessed_targets: Whether to write preprocessed_targets to log_dir.
+      Note that doing so will expose raw data inputs, and user should ensure
+      that data are not sensitive and/or the log_dir has the appropriate
+      permissions to prevent this from happening.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -449,6 +461,9 @@ class SeqIOInput(base_input.BaseInput):
   targets_iter_converted: Any = dataclasses.field(init=False, repr=False)
   targets_iter_ori: Any = dataclasses.field(init=False, repr=False)
   _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
+  enable_symbolic_checkpointing: Optional[bool] = True
+  experimental_enable_index_shuffle: Optional[bool] = True
+  log_preprocessed_targets: Optional[bool] = False
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -463,6 +478,8 @@ class SeqIOInput(base_input.BaseInput):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
       self.input_random_seed = 42
+    if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
+      self.configure_symbolic_checkpointing()
     super().__post_init__()
     self._validate_hparams()
     self._dataset = self._get_dataset()
@@ -558,6 +575,19 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
+
+  def configure_symbolic_checkpointing(self):
+    read_config = tfds.ReadConfig()
+    options = tf.data.Options()
+    options.experimental_symbolic_checkpoint = True
+    read_config.experimental_index_shuffle = (
+        self.experimental_enable_index_shuffle
+    )
+    read_config.options = options
+    # Disable readahead for random access used by index shuffle.
+    if self.experimental_enable_index_shuffle:
+      read_config.override_readahead = tfds.Readahead.DISABLE
+    seqio.set_tfds_read_config_override(read_config)
 
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
@@ -1192,7 +1222,8 @@ class SeqIOInput(base_input.BaseInput):
             example.get('targets_pretokenized', 'None'),
             example.get('is_correct', 'N/A'), target_post, score)
         verbose_entries_idx += 1
-      ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
+      if self.log_preprocessed_targets:
+        ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
       ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
 
     return scores_list, targets_list
@@ -1748,6 +1779,7 @@ def get_eval_hparams_for_seqio(
     shuffle: bool = None,
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
+    check_split_exists: bool = False
 ) -> list[SeqIOInput.HParams]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1792,6 +1824,9 @@ def get_eval_hparams_for_seqio(
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
     eval_metrics_retain_task_features: retain the provided feature lengths.
+    check_split_exists: If set, checks for `split_name` existing as a split
+    in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
+    have splits specified, this can cause file operations.
   """
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
@@ -1839,6 +1874,14 @@ def get_eval_hparams_for_seqio(
     # tasks with varying splits.
     hp.split_name = select_split(task.name, split_name)
     assert isinstance(hp.split_name, str)
+
+    if check_split_exists and hp.split_name not in task.splits:
+      logging.warning(
+          'task %s does not have split named `%s` and will not be evaluated.',
+          task.name,
+          hp.split_name,
+      )
+      continue
     if require_metric_fns:
       if not task.metric_fns:
         logging.warning(
