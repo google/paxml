@@ -73,12 +73,14 @@ data set.
 
 For more, see [BigQuery ML Model Evaluation Overview][eval].
 
-## GlobalDeviceArray
+## jax.Array
+**jax.Array** is a unified array object that helps make parallelism a core
+feature of JAX, simplifies and unifies JAX internals, and allows us to unify jit
+and pjit.
 
-With respect to JAX, a **device** is processing unit. A process’s *local
-devices* are those that it can directly address and launch computations on. The
-*global devices* are the set of all devices across all processes.
-
+*   [Jax.Array migration][jax-array-migration]
+*   [Distributed arrays and automatic parallelization][jax-array]
+*   [Using JAX in multi-host and multi-process environments][jax-multi-host]
 
 ## Metrics
 
@@ -107,24 +109,6 @@ Pax uses TensorBoard for visualizing and understanding ML runs and models.
 
 Check out [TensorBoard][tensorboard] for more.
 
-## XManager
-
-**XManager** (**XM**) is a platform for machine learning experimentation. It
-provides a unified way for ML researchers and engineers to interact with their
-experiments at launch, during execution, and after completion. Briefly, you get:
-
-*   An easy way to launch and monitor the state of running experiments.
-*   The ability to schedule and orchestrate arbitrary ML compute workloads on
-    Borg or GCP via XBorg.
-*   The ability to use computational resources fairly, but also take
-    advantage of unused resources using Quota Marketplace or your vertical
-    managed accelerator resources.
-*   A UI for managing experiment artifacts and metadata, linking your experiment
-    runs to code snapshots, and searching across experiments.
-*   ML ecosystem integrations including:
-    *   Easy hyperparameter searches and integration with Vizier.
-    *   Integrations with TensorBoard for experiment analysis and comparisons.
-
 
 <!-- Reference Links -->
 
@@ -141,3 +125,5 @@ experiments at launch, during execution, and after completion. Briefly, you get:
 [metrics]: https://github.com/google/paxml/tree/main/paxml/docs/metrics.md
 [pyglove]: internal-link/pyglove
 [tensorboard]: internal-link/tensorboard
+[jax-array-migration]: https://jax.readthedocs.io/en/latest/jax_array_migration.html
+[jax-array]: https://jax.readthedocs.io/en/latest/notebooks/Distributed_arrays_and_automatic_parallelization.html

@@ -382,7 +382,7 @@ For a more comprehensive intro in Pax, take a look at the Pax 101
 [pax-layers]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax_layer_basics.ipynb
 [paxml-code]: https://github.com/google/paxml/tree/main/paxml
 [praxis-code]: https://github.com/google/praxis/tree/main/praxis
-[resnet-layers]: http://googles/third_party/py/praxis/layers/resnets.py
+[resnet-layers]: https://github.com/google/praxis/tree/main/praxis/layers/resnets.py
 [resnet-model]: https://github.com/google/paxml/tree/main/paxml/tasks/vision/params/imagenet_resnets.py
 [tasks]: https://github.com/google/paxml/tree/main/paxml/docs/tasks.md
 [tensorboard]: https://www.tensorflow.org/tensorboard
