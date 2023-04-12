@@ -130,7 +130,9 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
 
   def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the union of training and eval dataset configs."""
-    return (self._training_dataset or []) + self.eval_datasets()
+    return (
+        [self._training_dataset] if self._training_dataset else []
+    ) + self.eval_datasets()
 
   def training_dataset(self) -> pax_fiddle.Config[base_input.BaseInput]:
     """Returns the training dataset config. Raises an error if it is `None`."""
