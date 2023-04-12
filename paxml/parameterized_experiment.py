@@ -74,6 +74,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
 
   def __init__(
       self,
+      *,
       task: pax_fiddle.Config[base_task.BaseTask],
       training_dataset: Optional[
           pax_fiddle.Config[base_input.BaseInput]
