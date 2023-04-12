@@ -35,12 +35,12 @@ WeightInit = base_layer.WeightInit
 @experiment_registry.register
 class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   """Pipelined Transformer using Adam optimizer."""
-  USE_FLASH_ATTENTION = True
-  USE_TRITON_LAYER_NORM = True
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
 
   USE_REPEATED_LAYER = False
   DCN_MESH_SHAPE = [2, 1, 1, 1]
-  ICI_MESH_SHAPE = [2, 2, 1, 2]
+  ICI_MESH_SHAPE = [2, 2, 1, 4]
   NUM_STAGES = 4
   ## MBS=2 + 2-way DP --> percore MBS=1
   MICROBATCH_SIZE = 2
@@ -143,6 +143,8 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 @experiment_registry.register
 class NVIDIA175BProxy(NVIDIA5B):
   """175B config that works with 4x16 A100-40G."""
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
 
   DCN_MESH_SHAPE = [2, 2, 1, 1]
   ICI_MESH_SHAPE = [1, 1, 1, 16]
