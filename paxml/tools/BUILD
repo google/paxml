@@ -39,4 +39,5 @@ pytype_strict_library(
 exports_files([
     "dump_hparams.py",
     "dump_input_specs.py",
+    "model_analysis.py",
 ])

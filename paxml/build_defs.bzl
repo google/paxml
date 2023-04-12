@@ -258,6 +258,29 @@ def pax_targets(
         exp_sources = exp_sources,
     )
 
+    model_analysis_name = "model_analysis"
+    model_analysis_name = model_analysis_name if not prefix_name else "%s_%s" % (
+        prefix_name,
+        model_analysis_name,
+    )
+    export_binary(
+        name = model_analysis_name,
+        main = "//paxml/tools:model_analysis.py",
+        py_binary_rule = pytype_strict_binary,
+        deps = [
+            # Implicit absl.app dependency.
+            # Implicit absl.flags dependency.
+            # Implicit jax dependency.
+            # Implicit numpy dependency.
+            "//paxml:experiment_registry",
+            "//paxml:tasks_lib",
+            "//paxml:trainer_lib",
+            "//praxis:base_layer",
+            "//praxis:py_utils",
+        ] + extra_deps,
+        exp_sources = exp_sources,
+    )
+
 def _export_test(
         name,
         test_src,
