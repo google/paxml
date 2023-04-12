@@ -1,7 +1,20 @@
-# Version: 0.4.0
+# Version: 1.0.0
 ## Major Features and Improvements
-## Breaking changes
-## Deprecations
+* **Fiddle** - Pax's layer library, Praxis, now has layers and BaseParameterizable configured with [Fiddle](https://github.com/google/fiddle), a Python-first configuration library. Fiddle reduces boilerplate, and adds productivity features including history tracking, graphviz visualization, support for aliasing objects, and more.
+* **CLI Experiment and Data Injectability** - Pax users are now able to select which experiments to run without the need to recompile for each experiment. Using a CLI interface based on Fiddle, users can override subsets of the experiment’s canonical dataset.
+* **CLU Metrics** - Through Praxis, Pax has adopted CLU metrics as its standard metric interface.  This allows other Jax/Flax codebases that have CLU metrics to use them in Praxis.
+* **Orbax Integration** - Pax has consolidated on the [Orbax checkpoint library](https://github.com/google/orbax/tree/main/checkpoint) as the standard checkpointing library.  Orbax supports pjit, pmap, and Pathways checkpointing. Orbax facilitates checkpoint compatibility with other frameworks and provides common functionality throughout the JAX ecosystem.
+* **Flax Interoperability** - Through Praxis, Pax now supports shape inference, `__call__` for forward propagation, and has adopted Linen’s AxisMetadata for its mid-level sharding APIs.  These changes improve interoperability with other Flax-based libraries such as T5X.
+* **Custom Training Loop Support** - Pax now provides limited support for customized training pipelines. Users can define a custom "train program" to encapsulate their training logic and use it in BaseExperiment. Customizable training loops pave the path for features such as multi-task support.
+* **SeqIO** - Pax has adopted [SeqIO](https://github.com/google/seqio). Supporting SeqIO allows users with existing SeqIO Tasks, input pipelines and evaluation workflows to use them directly in Pax. We are working to make the Pax-SeqIO evaluation setup more flexible and robust.
+* **Documentation** - We have added documentation and Jupyter Notebook tutorials to our [docs](https://github.com/google/paxml/tree/main/paxml/docs) folder. (Although you may notice some empty links in the doc, they are placeholders for upcoming docs.)
+## Note
+*   Version: 1.0.0
+*   Build Date: 20230329
+*   Paxml commit: 033eb2421a6fc3e24f76bb19dd260c6776c5933b
+*   Praxis version: 1.0.0
+*   Praxis commit: 621c2ca7bfcd0e21ea118a3d8e40e29b48313c0c
+# Version: 0.4.0
 ## Note
 *   Version: 0.4.0
 *   Build Date: 20230329
