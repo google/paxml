@@ -794,7 +794,9 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
 
   def structure(self, directory: epath.Path) -> PyTree:
     # Use msgpack file if it exists.
-    if (directory / self._aggregate_filename).exists():
+    # Check for _use_ocdbt, since the msgpack file should only exist if the
+    # checkpoint was written with OCDBT.
+    if self._use_ocdbt and (directory / self._aggregate_filename).exists():
       return super().structure(directory)
     # Otherwise, rely on implicit structure from directories.
     return jax.tree_util.tree_map(
