@@ -17,4 +17,6 @@ t5
 tensorflow~=2.9.2
 tensorflow-text~=2.9.0
 tensorstore
+tensorflow-datasets==4.8.3
+tfds-nightly==4.8.3.dev202303280045
 tensorflow-metadata==1.12.0

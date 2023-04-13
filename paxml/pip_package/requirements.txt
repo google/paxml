@@ -15,6 +15,7 @@ absl-py==1.4.0
     #   mesh-tensorflow
     #   ml-collections
     #   optax
+    #   orbax
     #   orbax-checkpoint
     #   rouge-score
     #   seqio
@@ -50,12 +51,13 @@ babel==2.12.1
     # via t5
 backcall==0.2.0
     # via ipython
-beautifulsoup4==4.12.0
+beautifulsoup4==4.12.2
     # via nbconvert
 bleach==6.0.0
     # via nbconvert
 cached-property==1.5.2
     # via
+    #   orbax
     #   orbax-checkpoint
 cachetools==5.3.0
     # via google-auth
@@ -88,7 +90,7 @@ contourpy==1.0.7
     # via matplotlib
 cycler==0.11.0
     # via matplotlib
-debugpy==1.6.6
+debugpy==1.6.7
     # via ipykernel
 decorator==5.1.1
     # via ipython
@@ -106,11 +108,12 @@ editdistance==0.6.2
     #   t5
 einops==0.6.0
     # via -r praxis-requirements.in
-etils[enp,epath]==1.1.1
+etils[enp,epath]==1.2.0
     # via
     #   -r paxml-requirements.in
     #   array-record
     #   clu
+    #   orbax
     #   orbax-checkpoint
     #   tensorflow-datasets
     #   tfds-nightly
@@ -120,7 +123,7 @@ fastjsonschema==2.16.3
     # via nbformat
 fiddle @ git+https://github.com/google/fiddle
     # via -r praxis-requirements.in
-filelock==3.10.7
+filelock==3.11.0
     # via
     #   huggingface-hub
     #   transformers
@@ -143,7 +146,7 @@ gin-config==0.5.0
     # via
     #   mesh-tensorflow
     #   t5
-google-auth==2.17.1
+google-auth==2.17.3
     # via
     #   google-auth-oauthlib
     #   tensorboard
@@ -163,16 +166,16 @@ grpcio==1.53.0
     #   tensorflow
 h5py==3.8.0
     # via tensorflow
-huggingface-hub==0.13.3
+huggingface-hub==0.13.4
     # via transformers
 idna==3.4
     # via
     #   anyio
     #   jsonschema
     #   requests
-immutabledict==2.2.3
+immutabledict==2.2.4
     # via t5
-importlib-metadata==6.1.0
+importlib-metadata==6.3.0
     # via
     #   jupyter-client
     #   markdown
@@ -182,6 +185,7 @@ importlib-resources==5.12.0
     #   etils
     #   jsonschema
     #   matplotlib
+    #   orbax
     #   orbax-checkpoint
     #   tensorflow-datasets
     #   tfds-nightly
@@ -216,6 +220,7 @@ jax @ git+https://github.com/google/jax
     #   clu
     #   flax
     #   optax
+    #   orbax
     #   orbax-checkpoint
     #   seqio
     #   seqio-nightly
@@ -226,6 +231,7 @@ jaxlib==0.4.7
     #   chex
     #   clu
     #   optax
+    #   orbax
     #   orbax-checkpoint
     #   seqio
     #   seqio-nightly
@@ -325,7 +331,7 @@ mistune==2.0.5
     # via nbconvert
 ml-collections==0.1.1
     # via clu
-ml-dtypes==0.0.4
+ml-dtypes==0.1.0
     # via
     #   jax
     #   jaxlib
@@ -336,14 +342,15 @@ mpmath==1.3.0
 msgpack==1.0.5
     # via
     #   flax
+    #   orbax
     #   orbax-checkpoint
 mypy-extensions==1.0.0
     # via typing-inspect
-nbclassic==0.5.4
+nbclassic==0.5.5
     # via notebook
-nbclient==0.7.2
+nbclient==0.7.3
     # via nbconvert
-nbconvert==7.2.10
+nbconvert==7.3.1
     # via
     #   jupyter
     #   jupyter-server
@@ -361,12 +368,13 @@ nest-asyncio==1.5.6
     #   ipykernel
     #   nbclassic
     #   notebook
+    #   orbax
     #   orbax-checkpoint
 nltk==3.8.1
     # via
     #   rouge-score
     #   t5
-notebook==6.5.3
+notebook==6.5.4
     # via
     #   jupyter
     #   jupyter-http-over-ws
@@ -389,6 +397,7 @@ numpy==1.24.2
     #   ml-dtypes
     #   opt-einsum
     #   optax
+    #   orbax
     #   orbax-checkpoint
     #   pandas
     #   rouge-score
@@ -417,11 +426,11 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax-checkpoint==0.1.8
-    # via
-    #   -r paxml-requirements.in
-    #   flax
-packaging==23.0
+orbax==0.1.7
+    # via flax
+orbax-checkpoint==0.2.0
+    # via -r paxml-requirements.in
+packaging==23.1
     # via
     #   clu
     #   huggingface-hub
@@ -435,7 +444,7 @@ packaging==23.0
     #   seqio-nightly
     #   tensorflow
     #   transformers
-pandas==1.5.3
+pandas==2.0.0
     # via t5
 pandocfilters==1.5.0
     # via nbconvert
@@ -445,7 +454,7 @@ pexpect==4.8.0
     # via ipython
 pickleshare==0.7.5
     # via ipython
-pillow==9.4.0
+pillow==9.5.0
     # via
     #   lingvo
     #   matplotlib
@@ -503,7 +512,7 @@ pyglove==0.3.0
     #   -r paxml-requirements.in
     #   seqio
     #   seqio-nightly
-pygments==2.14.0
+pygments==2.15.0
     # via
     #   ipython
     #   jupyter-console
@@ -532,6 +541,7 @@ pyyaml==6.0
     #   jupyter-events
     #   libcst
     #   ml-collections
+    #   orbax
     #   orbax-checkpoint
     #   transformers
 pyzmq==25.0.2
@@ -543,7 +553,7 @@ pyzmq==25.0.2
     #   nbclassic
     #   notebook
     #   qtconsole
-qtconsole==5.4.1
+qtconsole==5.4.2
     # via jupyter
 qtpy==2.3.1
     # via qtconsole
@@ -570,7 +580,7 @@ rfc3986-validator==0.1.1
     # via
     #   jsonschema
     #   jupyter-events
-rich==13.3.3
+rich==13.3.4
     # via flax
 rouge-score==0.1.2
     # via t5
@@ -594,7 +604,7 @@ send2trash==1.8.0
     #   jupyter-server
     #   nbclassic
     #   notebook
-sentencepiece==0.1.97
+sentencepiece==0.1.98
     # via
     #   lingvo
     #   seqio
@@ -602,7 +612,7 @@ sentencepiece==0.1.97
     #   t5
 seqio @ git+https://github.com/google/seqio
     # via -r paxml-requirements.in
-seqio-nightly==0.0.15.dev20230331
+seqio-nightly==0.0.15.dev20230413
     # via t5
 six==1.16.0
     # via
@@ -647,6 +657,8 @@ tensorflow==2.9.3
     #   tensorflow-text
 tensorflow-datasets==4.8.3
     # via
+    #   -r paxml-requirements.in
+    #   -r praxis-requirements.in
     #   lingvo
     #   mesh-tensorflow
 tensorflow-estimator==2.9.0
@@ -659,6 +671,8 @@ tensorflow-io-gcs-filesystem==0.32.0
     # via tensorflow
 tensorflow-metadata==1.12.0
     # via
+    #   -r paxml-requirements.in
+    #   -r praxis-requirements.in
     #   tensorflow-datasets
     #   tfds-nightly
 tensorflow-text==2.9.0
@@ -672,6 +686,7 @@ tensorstore==0.1.35
     # via
     #   -r paxml-requirements.in
     #   flax
+    #   orbax
     #   orbax-checkpoint
 termcolor==2.2.0
     # via
@@ -684,8 +699,10 @@ terminado==0.17.1
     #   jupyter-server-terminals
     #   nbclassic
     #   notebook
-tfds-nightly==4.8.3.dev202303310044
+tfds-nightly==4.8.3.dev202303280045
     # via
+    #   -r paxml-requirements.in
+    #   -r praxis-requirements.in
     #   seqio
     #   seqio-nightly
     #   t5
@@ -693,7 +710,7 @@ threadpoolctl==3.1.0
     # via scikit-learn
 tinycss2==1.2.1
     # via nbconvert
-tokenizers==0.13.2
+tokenizers==0.13.3
     # via transformers
 toml==0.10.2
     # via
@@ -735,7 +752,7 @@ traitlets==5.9.0
     #   nbformat
     #   notebook
     #   qtconsole
-transformers==4.27.4
+transformers==4.28.0
     # via t5
 typing-extensions==4.5.0
     # via
@@ -748,12 +765,15 @@ typing-extensions==4.5.0
     #   ipython
     #   libcst
     #   optax
+    #   orbax
     #   orbax-checkpoint
     #   rich
     #   tensorflow
     #   typing-inspect
 typing-inspect==0.8.0
     # via libcst
+tzdata==2023.3
+    # via pandas
 uri-template==1.2.0
     # via jsonschema
 urllib3==1.26.15
