@@ -17,3 +17,4 @@ t5
 tensorflow~=2.9.2
 tensorflow-text~=2.9.0
 tensorstore
+tensorflow-metadata==1.12.0
