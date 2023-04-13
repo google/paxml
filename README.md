@@ -44,23 +44,28 @@ After ssh-ing the VM, you can install the paxml stable release from PyPI, or the
 For installing the stable release from PyPI (https://pypi.org/project/paxml/):
 
 ```bash
-$ python3 -m pip install -U pip
-$ python3 -m pip install paxml jax[tpu] \
+python3 -m pip install -U pip
+python3 -m pip install paxml jax[tpu] \
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+```
+
+If you encounter issues with transitive dependencies and you are using the native Cloud TPU VM environment, please navigate to the corresponding release branch rX.Y.Z and download `paxml/pip_package/requirements.txt`. This file includes the exact versions of all transitive dependencies needed in the native Cloud TPU VM environment, in which we build/test the corresponding release.
+
+```bash
+git clone -b rX.Y.Z https://github.com/google/paxml
+pip install --no-deps paxml/paxml/pip_package/requirements.txt
 ```
 
 For installing the dev version from github, and for the ease of editing code:
 
 ```bash
 # install the dev version of praxis first 
-$ git clone https://github.com/google/praxis
-$ pip install -e praxis
-$ git clone https://github.com/google/paxml
-$ pip install -e paxml
-$ pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+git clone https://github.com/google/praxis
+pip install -e praxis
+git clone https://github.com/google/paxml
+pip install -e paxml
+pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
-
-If you encounter issues with transitive dependencies, please refer to `paxml/pip_package/requirements.txt` of the corresponding release branch rX.Y.Z for the exact version of dependencies used to build/test each release.
 
 ### Run a test model
 ```bash
@@ -75,6 +80,8 @@ python3 .local/lib/python3.8/site-packages/paxml/main.py \
 --job_log_dir=gs://<your-bucket> \
 --pmap_use_tensorstore=True
 ```
+### Documentations
+Please visit our [docs folder](https://github.com/google/paxml/tree/main/paxml/docs) for documentations and Jupyter Notebook tutorials. Please see the following section for instructions of running Jupyter Notebooks on a Cloud TPU VM.
 
 ### Run a notebook
 You can run the [example notebooks](paxml/docs/tutorials) in the TPU VM in which you just installed paxml. 
