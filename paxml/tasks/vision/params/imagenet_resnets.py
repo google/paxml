@@ -51,21 +51,31 @@ class ImageClassificationInputSpecsProvider(base_input.BaseInputSpecsProvider):
 
   def get_input_specs(self) -> NestedShapeDtypeStruct:
     """Returns specs from the input pipeline for model init."""
-    p = self.hparams
-    if p.height is None or p.width is None:
+    if self.height is None or self.width is None:
       raise ValueError(
-          f'Both `height` (`{p.height}`) and `width` (`{p.width}`) params must '
-          'be set.')
-    if p.num_classes is None:
+          f'Both `height` (`{self.height}`) and `width` (`{self.width}`) params'
+          ' must be set.'
+      )
+    if self.num_classes is None:
       raise ValueError('Parameter `num_classes` must be set.')
-    image_shape = (p.batch_size, p.height, p.width, p.num_color_channels)
+    image_shape = (
+        self.batch_size,
+        self.height,
+        self.width,
+        self.num_color_channels,
+    )
     return NestedMap(
         eval_sample_weights=jax.ShapeDtypeStruct(
-            shape=(p.batch_size,), dtype=jnp.float32),
+            shape=(self.batch_size,), dtype=jnp.float32
+        ),
         image=jax.ShapeDtypeStruct(shape=image_shape, dtype=jnp.float32),
         label_probs=jax.ShapeDtypeStruct(
-            shape=(p.batch_size, p.num_classes), dtype=jnp.float32),
-        weight=jax.ShapeDtypeStruct(shape=(p.batch_size,), dtype=jnp.float32))
+            shape=(self.batch_size, self.num_classes), dtype=jnp.float32
+        ),
+        weight=jax.ShapeDtypeStruct(
+            shape=(self.batch_size,), dtype=jnp.float32
+        ),
+    )
 
 
 @experiment_registry.register(tags=['smoke_test_abstract_init'])

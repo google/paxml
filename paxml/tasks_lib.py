@@ -453,10 +453,6 @@ def _make_train_state(
             opt_states=new_states_pspecs0 + train_state_pspecs.opt_states[1:]
         )
     else:
-      # For vectorized model, the structure looks like this:
-      # opt_states: [{'no_prefix': ({'count': '', 'ema': {'params': {'ctcloss':
-      # It is a list of dictionaries. The key corresponds to the #stages.
-      ckpt_opt_states_0 = ckpt_train_state.opt_states[0]
 
       new_states0 = ckpt_train_state.opt_states[0]
       new_states_pspecs0 = None
@@ -1295,12 +1291,11 @@ class SingleTask(base_task.BaseTask):
 
   def __post_init__(self):
     super().__post_init__()
-    p = self.hparams
 
-    assert p.train.learner is not None
+    assert self.train.learner is not None
     # TODO(yonghui): implement multiple learners.
-    assert not isinstance(p.train.learner, (tuple, list))
-    learner_params = [p.train.learner]
+    assert not isinstance(self.train.learner, (tuple, list))
+    learner_params = [self.train.learner]
     learner_params = NestedMap.FromNestedDict(learner_params)
     uid = itertools.count()
 
@@ -1310,28 +1305,28 @@ class SingleTask(base_task.BaseTask):
 
     self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
 
-    assert p.model is not None
-    if isinstance(p.model, pax_fiddle.Config):
-      self.model = instantiate(p.model)
-    elif isinstance(p.model, base_layer.BaseLayer):
-      self.model = p.model
+    assert self.model is not None
+    if isinstance(self.model, pax_fiddle.Config):
+      self.model = instantiate(self.model)
+    elif isinstance(self.model, base_layer.BaseLayer):
+      self.model = self.model
     else:
       raise ValueError(
           'Expected `model` to be a BaseModel or a Config[BaseModel].')
 
     # instantiate the metrics aggregation helper
-    if p.metrics:
-      self._metrics_aggregator = instantiate(p.metrics)
+    if self.metrics:
+      self._metrics_aggregator = instantiate(self.metrics)
     else:
       metrics_p = base_metrics.MeanMetrics.HParams()
       self._metrics_aggregator = instantiate(metrics_p)
 
     # instantiate the loss aggregation helper
-    if p.loss_aggregator:
+    if self.loss_aggregator:
       if any([learner.loss_name is not None for learner in self._learners]):
         raise ValueError('If a `loss_aggregator` is specified, all '
                          '`loss_names` on the learner are expected to be None.')
-      self._loss_aggregator_inst = instantiate(p.loss_aggregator)
+      self._loss_aggregator_inst = instantiate(self.loss_aggregator)
     else:
       if self._learners[0].loss_name is None:
         raise ValueError('`loss_name` on the learner is None. Must be set.')
@@ -1339,8 +1334,8 @@ class SingleTask(base_task.BaseTask):
           loss_key=self._learners[0].loss_name)
       self._loss_aggregator_inst = instantiate(loss_p)
 
-    if p.infer_writer:
-      self._inference_runner = p.infer_writer.inference_runner.Instantiate(
+    if self.infer_writer:
+      self._inference_runner = self.infer_writer.inference_runner.Instantiate(
           model=self.model
       )
 
@@ -1420,8 +1415,8 @@ class SingleTask(base_task.BaseTask):
       A TrainState contains jax.ShapeDtypeStruct for all the forward and
         backward variables.
     """
-    mesh_shape = self.hparams.model.mesh_shape
-    mesh_axis_names = self.hparams.model.mesh_axis_names
+    mesh_shape = self.model.mesh_shape
+    mesh_axis_names = self.model.mesh_axis_names
     return create_state_padded_shapes(
         var_weight_hparams,
         mesh_shape,
@@ -1466,11 +1461,10 @@ class SingleTask(base_task.BaseTask):
       A TrainState contains PartitionSpecs for all the forward and/or backward
         variables depending on the value of is_eval, or None.
     """
-    p = self.hparams
-    mesh_shape = p.model.mesh_shape
+    mesh_shape = self.model.mesh_shape
     if mesh_shape is None:
       return None
-    mesh_axis_names = p.model.mesh_axis_names
+    mesh_axis_names = self.model.mesh_axis_names
     return create_state_partition_specs(
         var_weight_hparams,
         mesh_shape,
@@ -1507,9 +1501,9 @@ class SingleTask(base_task.BaseTask):
     """
     p = self.hparams
 
-    if p.vn.vn_scale > 0.0:
+    if self.vn.vn_scale > 0.0:
       names = py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
-      regexp = re.compile(p.vn.vn_regex)
+      regexp = re.compile(self.vn.vn_regex)
 
       # This is the mask of variational noise
       # True: apply vn; False: without vn
@@ -1821,7 +1815,7 @@ class SingleTask(base_task.BaseTask):
       whether caller needs
       to recompute opt_states after mdl_vars are updated.
     """
-    all_rules = self.hparams.train.init_from_checkpoint_rules
+    all_rules = self.train.init_from_checkpoint_rules
     if not all_rules:
       return train_state, train_state_provenance, False
 

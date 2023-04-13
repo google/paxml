@@ -38,35 +38,36 @@ class StopWithLowerMetric(automl.BaseReward):
   metrics_replacement: Optional[Dict[str, float]] = None
 
   def get_threshold(self, global_step: int) -> float:
-    p = self._hparams
-    if isinstance(p.threshold, float):
-      return p.threshold
-    for i, (step, value) in enumerate(p.threshold):
+    if isinstance(self.threshold, float):
+      return self.threshold
+    for i, (step, value) in enumerate(self.threshold):
       if step <= global_step and (
-          i == len(p.threshold) - 1 or p.threshold[i + 1][0] > global_step):
+          i == len(self.threshold) - 1 or self.threshold[i + 1][0] > global_step
+      ):
         return value
     return 0.0
 
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
-    p = self._hparams
-    reward = p.metric.get_value(metrics_dict)
+    reward = self.metric.get_value(metrics_dict)
     if reward < self.get_threshold(global_step):
-      if p.skip:
+      if self.skip:
         raise automl.EarlyStoppingError(
-            skip=p.skip,
+            skip=self.skip,
             skip_reason='Trial skipped due to lower metric value.',
-            step=global_step)
+            step=global_step,
+        )
       else:
         raise automl.EarlyStoppingError(
             skip=False,
             step=global_step,
-            reward=p.reward_replacement,
-            metrics=p.metrics_replacement)
+            reward=self.reward_replacement,
+            metrics=self.metrics_replacement,
+        )
     return reward
 
   @property
   def used_metrics(self):
-    return [self._hparams.metric]
+    return [self.metric]
 
 
 class MockTask(pg.Dict):

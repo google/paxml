@@ -200,10 +200,10 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     inputs_flat, _ = jax.tree_flatten(inputs)
     batch_size = inputs_flat[0].shape[0]
 
-    if self.hparams.inner_batch_size is None:
+    if self.inner_batch_size is None:
       inner_batch_size = batch_size
     else:
-      inner_batch_size = self.hparams.inner_batch_size
+      inner_batch_size = self.inner_batch_size
     if batch_size % inner_batch_size != 0:
       raise ValueError('`batch_size` must be divisible by `inner_batch_size`.')
     num_iters = batch_size // inner_batch_size
@@ -273,7 +273,10 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     # Add noise to normalized gradients.
     grads = self._add_noise(
         grads,
-        p.noise_multiplier * aux.loss_weight * p.l2_norm_clip / batch_size,
+        self.noise_multiplier
+        * aux.loss_weight
+        * self.l2_norm_clip
+        / batch_size,
         prng_key,
     )
     return (values, aux), grads
@@ -303,7 +306,7 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
       microbatch_size, ...)`.
     """
     batch_size = tensor.shape[0]
-    microbatch_size = self.hparams.microbatch_size
+    microbatch_size = self.microbatch_size
     return tensor.reshape((batch_size // microbatch_size, microbatch_size,
                            *tensor.shape[1:]))
 
@@ -328,6 +331,6 @@ class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
 
   def _prepare_for_microbatching(self, tensor: JTensor) -> JTensor:
     shape = tensor.shape
-    num_repeat = self.hparams.microbatch_size
+    num_repeat = self.microbatch_size
     return jnp.repeat(tensor, num_repeat, axis=0).reshape(
         (shape[0], num_repeat, *shape[1:]))

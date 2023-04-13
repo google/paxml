@@ -203,7 +203,6 @@ class MeanMetrics(BaseMetrics):
   _metrics: Any = dataclasses.field(init=False, repr=False)
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-    p = self.hparams
 
     def _pmap_mean(value, weight):
       assert base_layer.is_running_under_pmap()
@@ -212,8 +211,9 @@ class MeanMetrics(BaseMetrics):
       sum_weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       return (sum_value / (sum_weight + 1e-8), sum_weight)
 
-    return _pmap_aggregate_metrics(_pmap_mean, batch_metrics, p.metric_keys,
-                                   reshard)
+    return _pmap_aggregate_metrics(
+        _pmap_mean, batch_metrics, self.metric_keys, reshard
+    )
 
   def finalize(self):
     """Finalize aggregation over all batches and returns the metrics."""
@@ -238,7 +238,6 @@ class MaxMetrics(BaseMetrics):
   _metrics: Any = dataclasses.field(init=False, repr=False)
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-    p = self.hparams
 
     def _pmap_max(value, weight):
       assert base_layer.is_running_under_pmap()
@@ -246,8 +245,9 @@ class MaxMetrics(BaseMetrics):
       sum_weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       return (max_value, sum_weight)
 
-    return _pmap_aggregate_metrics(_pmap_max, batch_metrics, p.metric_keys,
-                                   reshard)
+    return _pmap_aggregate_metrics(
+        _pmap_max, batch_metrics, self.metric_keys, reshard
+    )
 
   def finalize(self):
     """Finalize aggregation over all batches and returns the metrics."""
@@ -271,7 +271,6 @@ class HistogramMetrics(BaseMetrics):
   histogram_key: Optional[str] = None
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-    p = self.hparams
 
     def _pmap_sum(value, weight):
       assert base_layer.is_running_under_pmap()
@@ -279,8 +278,9 @@ class HistogramMetrics(BaseMetrics):
       weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       return (value, weight)
 
-    return _pmap_aggregate_metrics(_pmap_sum, batch_metrics, [p.histogram_key],
-                                   reshard)
+    return _pmap_aggregate_metrics(
+        _pmap_sum, batch_metrics, [self.histogram_key], reshard
+    )
 
   def finalize(self):
     """Finalize aggregation over all batches and returns the metrics."""
@@ -323,8 +323,7 @@ class CompositeMetrics(BaseMetrics):
 
   def __post_init__(self):
     super().__post_init__()
-    p = self.hparams
-    self.metrics_calcs = [instantiate(m) for m in p.metrics_p]
+    self.metrics_calcs = [instantiate(m) for m in self.metrics_p]
 
   def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
     all_metrics = collections.defaultdict()
@@ -383,7 +382,7 @@ class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
       if no such weight is applicable).
 
     """
-    loss_key = self.hparams.loss_key
+    loss_key = self.loss_key
 
     assert loss_key in batch_metrics
     loss, loss_weight = batch_metrics[loss_key]
@@ -422,7 +421,7 @@ class MultiLossAggregator(LossAggregator):
     total_weighted_loss = 0.0
     total_mean_loss = 0.0
     if base_layer.is_running_under_pmap():
-      for key in self.hparams.loss_keys:
+      for key in self.loss_keys:
         assert key in batch_metrics
 
         loss, loss_weight = batch_metrics[key]
@@ -438,7 +437,7 @@ class MultiLossAggregator(LossAggregator):
         total_mean_loss += mean_loss
 
     else:
-      for key in self.hparams.loss_keys:
+      for key in self.loss_keys:
         loss, loss_weight = batch_metrics[key]
         loss_weight = jax.lax.stop_gradient(loss_weight)
 

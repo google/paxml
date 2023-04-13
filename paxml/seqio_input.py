@@ -492,38 +492,44 @@ class SeqIOInput(base_input.BaseInput):
     self.is_targets_init = False
 
   def _validate_deterministic(self):
-    if self.hparams.deterministic_input:
+    if self.deterministic_input:
       raise ValueError('deterministic_input is not supported')
 
   def _validate_eval_task(self):
     assert isinstance(self.mixture_or_task_inst, seqio.Task)
-    p = self.hparams
     # weights_on_targets_only must be true if computing scoring metric fns and
     # using LanguageModelFeatures as feature converter.
-    if (self.mixture_or_task_inst.score_metric_fns
-        and isinstance(p.feature_converter, LanguageModelFeatures)
-        and not p.feature_converter.weights_on_targets_only):
+    if (
+        self.mixture_or_task_inst.score_metric_fns
+        and isinstance(self.feature_converter, LanguageModelFeatures)
+        and not self.feature_converter.weights_on_targets_only
+    ):
       raise ValueError(
           'All language modeling scoring evals must set '
           'LanguageModelFeatures.weights_on_targets_only=True')
 
   def _validate_hparams(self):
-    p = self.hparams
-    if not p.mixture_name and not p.mixture_or_task:
+    if not self.mixture_name and not self.mixture_or_task:
       raise ValueError("One of 'mixture_name' and 'task' must be set.")
-    if p.mixture_name and p.mixture_or_task:
+    if self.mixture_name and self.mixture_or_task:
       raise ValueError(
           "Only one of 'mixture_name' and 'mixture_or_task' can be set."
-          " Got %s and %s." % (p.mixture_name, p.mixture_or_task))
-    if p.is_training and p.split_name != 'train':
+          ' Got %s and %s.' % (self.mixture_name, self.mixture_or_task)
+      )
+    if self.is_training and self.split_name != 'train':
       logging.warning(
-          'SeqIO input hparams p.is_training=True but p.split_name is '
-          'not "train" but p.split_name=%s', p.split_name)
+          (
+              'SeqIO input hparams p.is_training=True but p.split_name is '
+              'not "train" but p.split_name=%s'
+          ),
+          self.split_name,
+      )
 
-    self._mixture_or_task_inst = p.mixture_or_task or seqio.get_mixture_or_task(
-        p.mixture_name)
+    self._mixture_or_task_inst = (
+        self.mixture_or_task or seqio.get_mixture_or_task(self.mixture_name)
+    )
     shard_info = seqio.ShardInfo(
-        index=p.infeed_host_index, num_shards=p.num_infeed_hosts
+        index=self.infeed_host_index, num_shards=self.num_infeed_hosts
     )
     logging.info(
         'ShardInfo for %s: shard_id: %d, num_shards: %d, ',
@@ -534,10 +540,12 @@ class SeqIOInput(base_input.BaseInput):
     self._shard_info = shard_info
     self._validate_deterministic()
 
-    if not p.is_training and isinstance(self.mixture_or_task_inst, seqio.Task):
+    if not self.is_training and isinstance(
+        self.mixture_or_task_inst, seqio.Task
+    ):
       self._validate_eval_task()
 
-    if p.eval_loop_num_batches is None and p.repeat:
+    if self.eval_loop_num_batches is None and self.repeat:
       raise ValueError(
           'Dataset has eval_loop_num_batches set to None while repeat is True. '
           'This would lead to an endless eval.'
@@ -551,18 +559,16 @@ class SeqIOInput(base_input.BaseInput):
   @property
   def should_shuffle(self) -> bool:
     """Indicates whether this SeqIOInput shuffles the data or not."""
-    p = self.hparams
-    if p.shuffle is None:
-      return p.is_training and not self.is_deterministic
-    return p.shuffle
+    if self.shuffle is None:
+      return self.is_training and not self.is_deterministic
+    return self.shuffle
 
   @property
   def should_repeat(self) -> bool:
     """Indicates whether this SeqIOInput repeats the data or not."""
-    p = self.hparams
-    if p.repeat is None:
-      return p.is_training and not self.is_deterministic
-    return p.repeat
+    if self.repeat is None:
+      return self.is_training and not self.is_deterministic
+    return self.repeat
 
   @property
   def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
@@ -595,96 +601,107 @@ class SeqIOInput(base_input.BaseInput):
     Corresponds to`eval_loop_num_batches` when reset_for_eval=True;
     otherwise eval runs on full dataset.
     """
-    p = self.hparams
     if (
-        not p.is_training
-        and p.batch_size
-        and p.eval_loop_num_batches
-        and not p.reset_for_eval
+        not self.is_training
+        and self.batch_size
+        and self.eval_loop_num_batches
+        and not self.reset_for_eval
     ):
-      return p.eval_loop_num_batches * p.batch_size * p.num_infeed_hosts
+      return (
+          self.eval_loop_num_batches * self.batch_size * self.num_infeed_hosts
+      )
     return -1
 
   def _get_dataset(self) -> tf.data.Dataset:
-    p = self.hparams
     logging.info(
-        "Initializing dataset for task '%s' with a per host batch size of %d "
-        'and a seed of %s', self.mixture_or_task_inst.name, p.batch_size,
-        p.input_random_seed)
+        (
+            "Initializing dataset for task '%s' with a per host batch size of"
+            ' %d and a seed of %s'
+        ),
+        self.mixture_or_task_inst.name,
+        self.batch_size,
+        self.input_random_seed,
+    )
     ds = self._get_backing_ds(
         shuffle=self.should_shuffle,
         num_epochs=-1 if self.should_repeat else 1,
         shard_info=self._shard_info)
     ds = self._pad_to_batch_size(ds)
     ds = ds.batch(
-        p.batch_size,
-        drop_remainder=p.drop_remainder,
+        self.batch_size,
+        drop_remainder=self.drop_remainder,
         num_parallel_calls=tf.data.AUTOTUNE,
     )
-    if p.num_batches_to_skip:
-      if p.is_training:
-        ds = ds.skip(p.num_batches_to_skip)
+    if self.num_batches_to_skip:
+      if self.is_training:
+        ds = ds.skip(self.num_batches_to_skip)
       else:
         logging.warning(
-            "num_batches_to_skip set tp '%d' but has no effect because "
-            "is_training is false", p.num_batches_to_skip)
+            (
+                "num_batches_to_skip set tp '%d' but has no effect because "
+                'is_training is false'
+            ),
+            self.num_batches_to_skip,
+        )
 
     return ds
 
   def _gen_targets_dataset(self):
-    p = self.hparams
     self._len_full_ds = 0
-    inputs_length = p.task_feature_lengths['inputs']
+    inputs_length = self.task_feature_lengths['inputs']
     # if set, p.eval_metrics_targets_length
     # overrides p.task_feature_lengths['targets']
     targets_length = (
-        p.eval_metrics_targets_length
-        if p.eval_metrics_targets_length
-        else p.task_feature_lengths['targets']
+        self.eval_metrics_targets_length
+        if self.eval_metrics_targets_length
+        else self.task_feature_lengths['targets']
     )
     sharded_datasets = []
     sharded_datasets_converted = []
 
     largest_shard = 0
-    for host_idx in range(p.num_infeed_hosts):
+    for host_idx in range(self.num_infeed_hosts):
       shard_info = seqio.ShardInfo(
-          index=host_idx, num_shards=p.num_infeed_hosts
+          index=host_idx, num_shards=self.num_infeed_hosts
       )
       ds_shard = self.mixture_or_task_inst.get_dataset(
           sequence_length={'inputs': inputs_length, 'targets': targets_length},
-          split=p.split_name,
+          split=self.split_name,
           shuffle=False,
           num_epochs=1,
           shard_info=shard_info,
-          seed=p.input_random_seed,
-          use_cached=p.use_cached,
-          trim_output_features=p.trim_output_features,
+          seed=self.input_random_seed,
+          use_cached=self.use_cached,
+          trim_output_features=self.trim_output_features,
       )
-      if p.use_enumeration:
-        ds_shard = _enumerate_dataset(
-            ds_shard, p.is_training, shard_info
-        )
+      if self.use_enumeration:
+        ds_shard = _enumerate_dataset(ds_shard, self.is_training, shard_info)
       else:
         sharded_datasets_converted.append(
-            p.feature_converter(ds_shard, p.task_feature_lengths))
+            self.feature_converter(ds_shard, self.task_feature_lengths)
+        )
       shard_num_examples = _get_num_examples(ds_shard)
       if shard_num_examples > largest_shard:
         largest_shard = shard_num_examples
-      logging.info('Targets shard %d/%d has %d examples',
-                   host_idx, p.num_infeed_hosts, shard_num_examples)
+      logging.info(
+          'Targets shard %d/%d has %d examples',
+          host_idx,
+          self.num_infeed_hosts,
+          shard_num_examples,
+      )
       self._len_full_ds += shard_num_examples
       sharded_datasets.append(ds_shard)
 
     # Interleave sharded dataset so it can be read sequentially on
     # single host. The shards may be uneven so we need to repeat based on the
     # largest shard to avoid missing any data.
-    choice_dataset = tf.data.Dataset.range(p.num_infeed_hosts).repeat(
+    choice_dataset = tf.data.Dataset.range(self.num_infeed_hosts).repeat(
         largest_shard
     )
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
     )
-    if not p.use_enumeration:
+    if not self.use_enumeration:
       self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
           sharded_datasets_converted, choice_dataset
       )
@@ -700,9 +717,8 @@ class SeqIOInput(base_input.BaseInput):
 
   def _gen_targets_iter(self) -> None:
     """Generate targets iterator."""
-    p = self.hparams
     self.targets_iter = self.targets_ds.as_numpy_iterator()
-    if not p.use_enumeration:
+    if not self.use_enumeration:
       self.targets_iter_converted = (
           self.targets_ds_converted.as_numpy_iterator()
       )
@@ -741,8 +757,8 @@ class SeqIOInput(base_input.BaseInput):
     self._iter = self._dataset.as_numpy_iterator()
 
   def _get_vocab(self, key) -> seqio.Vocabulary:
-    if self.hparams.overridden_vocab is not None:
-      return self.hparams.overridden_vocab
+    if self.overridden_vocab is not None:
+      return self.overridden_vocab
 
     features = self.mixture_or_task_inst.output_features
     if key not in ('src', 'tgt', None):
@@ -772,26 +788,27 @@ class SeqIOInput(base_input.BaseInput):
                       shuffle: bool,
                       num_epochs: int,
                       shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
-    p = self.hparams
     kwargs = dict(
-        sequence_length=p.task_feature_lengths,
-        split=p.split_name,
+        sequence_length=self.task_feature_lengths,
+        split=self.split_name,
         shuffle=shuffle,
         num_epochs=num_epochs,
         shard_info=shard_info,
-        use_cached=p.use_cached,
-        seed=p.input_random_seed,
-        trim_output_features=p.trim_output_features,
+        use_cached=self.use_cached,
+        seed=self.input_random_seed,
+        trim_output_features=self.trim_output_features,
     )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
 
-    ds = p.feature_converter(ds, task_feature_lengths=p.task_feature_lengths)
+    ds = self.feature_converter(
+        ds, task_feature_lengths=self.task_feature_lengths
+    )
 
-    if p.use_enumeration:
+    if self.use_enumeration:
       # We want to add enumeration provenance fields *after* applying all
       # feature converters since feature converters don't pass through
       # unrecognized fields by default
-      ds = _enumerate_dataset(ds, p.is_training, shard_info)
+      ds = _enumerate_dataset(ds, self.is_training, shard_info)
 
     return ds
 
@@ -831,10 +848,12 @@ class SeqIOInput(base_input.BaseInput):
 
     ds = ds.map(_add_weight)
     p = self.hparams
-    if (p.is_training or
-        not p.reset_for_eval or
-        not p.eval_auto_pad or
-        self.should_repeat):
+    if (
+        self.is_training
+        or not self.reset_for_eval
+        or not self.eval_auto_pad
+        or self.should_repeat
+    ):
       return ds
 
     # p.reset_for_eval=True: We are running eval over exactly one epoch.
@@ -848,12 +867,12 @@ class SeqIOInput(base_input.BaseInput):
     # of epochs.
     ds = ds.cache()
     local_num = _get_num_examples(ds)
-    local_num_batches = (local_num + p.batch_size - 1) // p.batch_size
+    local_num_batches = (local_num + self.batch_size - 1) // self.batch_size
     # Find the max number of batches required across all Jax processes.
     num_batches_all = multihost_utils.process_allgather(
         jnp.array([local_num_batches]), tiled=False)
     num_batches = int(jnp.max(num_batches_all))
-    pad_num = num_batches * p.batch_size - local_num
+    pad_num = num_batches * self.batch_size - local_num
     assert pad_num >= 0
     logging.info(
         'Eval data has %d local entries, padding now with '
@@ -892,14 +911,12 @@ class SeqIOInput(base_input.BaseInput):
       plain_text_output: Optional[TextIO] = None) -> Tuple[
           Sequence[str], Sequence[str]]:
     """Builds 1-to-1 mapped predictions and targets lists via prefix matches."""
-    # TODO(b/241386390): deprecate prefix-based matching for metrics computation
-    p = self.hparams
-    assert not p.use_enumeration
+    assert not self.use_enumeration
     assert self.targets_ds
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # get a dict key-ed by detokenized inputs (tokenized inputs are truncated
     # to inputs_length).
-    inputs_length = p.task_feature_lengths['inputs']
+    inputs_length = self.task_feature_lengths['inputs']
     assert inputs_length is not None
 
     # Note that lists are used per prefix since there may be duplicates
@@ -919,7 +936,7 @@ class SeqIOInput(base_input.BaseInput):
         if self._num_eval_examples > 0:
           raise Exception(
               'Exhausted eval data with reset_for_eval=False after'
-              f' {num_examples-1} examples (batch_size={p.batch_size})'
+              f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
         logging.info('Exhausted eval data after %d steps', num_examples - 1)
         self._gen_targets_iter()
@@ -978,13 +995,14 @@ class SeqIOInput(base_input.BaseInput):
     )
     logging.info(
         'Data %s has %s examples for computing eval metrics.',
-        p.name,
+        self.name,
         eval_data_size,
     )
     if eval_data_size != len(predictions_list):
       raise ValueError(
-          f'Data {p.name} expects {eval_data_size} examples for computing eval'
-          f' metrics, got {len(predictions_list)}.')
+          f'Data {self.name} expects {eval_data_size} examples for computing'
+          f' eval metrics, got {len(predictions_list)}.'
+      )
 
     # Log a few examples for inspection and sanity check.
     it = iter(targets)
@@ -1012,7 +1030,6 @@ class SeqIOInput(base_input.BaseInput):
     assert self.targets_ds
     if self._cached_targets_with_enum_key is not None:
       return self._cached_targets_with_enum_key
-    p = self.hparams
     targets = {}
     num_examples = 0
     while (
@@ -1028,7 +1045,7 @@ class SeqIOInput(base_input.BaseInput):
         if self._num_eval_examples > 0:
           raise Exception(
               'Exhausted eval data with reset_for_eval=False after'
-              f' {num_examples-1} examples (batch_size={p.batch_size})'
+              f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
         logging.info(
             'Exhausted target eval data after %d examples', num_examples - 1
@@ -1051,7 +1068,7 @@ class SeqIOInput(base_input.BaseInput):
         linearized_field_value = linearized_field_value[np.newaxis, :]
         targets[key][field] = linearized_field_value
 
-    if p.reset_for_eval:
+    if self.reset_for_eval:
       self._cached_targets_with_enum_key = targets  # populate cache
     return targets
 
@@ -1060,7 +1077,7 @@ class SeqIOInput(base_input.BaseInput):
       plain_text_output: Optional[TextIO] = None) -> Tuple[
           Sequence[Any], Sequence[Any]]:
     """Builds 1-to-1 mapped predictions and targets lists using enum fields."""
-    assert self.hparams.use_enumeration
+    assert self.use_enumeration
 
     targets = self._get_targets_with_enum_key()
 
@@ -1119,7 +1136,6 @@ class SeqIOInput(base_input.BaseInput):
     """Build 1-to-1 mapped scores and targets for metrics via label matching."""
     # TODO(b/241386390): deprecate label-based matching for metrics computation.
     assert self.targets_ds
-    p = self.hparams
     # Prepare ground truth label data by dumping out seqio eval dataset and
     # produce a dict key-ed by tuple of `labels` token ids.
     targets = collections.defaultdict(list)
@@ -1136,7 +1152,7 @@ class SeqIOInput(base_input.BaseInput):
         if self._num_eval_examples > 0:
           raise Exception(
               'Exhausted eval data with reset_for_eval=False after'
-              f' {num_examples-1} examples (batch_size={p.batch_size})'
+              f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
         logging.info(
             'Exhausted target eval data after %d examples', num_examples - 1
@@ -1183,20 +1199,21 @@ class SeqIOInput(base_input.BaseInput):
     )
     logging.info(
         'Data %s has %s examples for computing eval metrics.',
-        p.name,
+        self.name,
         eval_data_size,
     )
     if eval_data_size != len(scores_list):
       raise ValueError(
-          f'Data {p.name} expects {eval_data_size} examples for computing eval'
-          f' metrics, got {len(scores_list)}.')
+          f'Data {self.name} expects {eval_data_size} examples for computing'
+          f' eval metrics, got {len(scores_list)}.'
+      )
 
     return scores_list, targets_list
 
   def _build_scoring_metric_inputs_with_enum(
       self, answers: Dict[str, NestedMap],
       verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
-    assert self.hparams.use_enumeration
+    assert self.use_enumeration
     targets = self._get_targets_with_enum_key()
 
     # Construct (scoring output, seqio target) lists by joining on enum ID
@@ -1270,21 +1287,19 @@ class SeqIOInput(base_input.BaseInput):
       Typically a list of metrics, each element being a mapping from a string
       metric name to a float.
     """
-    # TODO(b/236078932): integrate with seqio evaluator.
-    # Current known limitations: assumes LanguageModel decoder output format,
-    # specifically the prediction string has key='decoded_substr'.
-    # Also assumes inputs and targets field names are 'inputs' and 'targets'.
-    p = self.hparams
     task = self.mixture_or_task_inst
     if not isinstance(task, seqio.Task):
-      logging.warning('compute_metrics is only supported for seqio.Tasks, '
-                      'got %s for %s.', type(task), p.name)
+      logging.warning(
+          'compute_metrics is only supported for seqio.Tasks, got %s for %s.',
+          type(task),
+          self.name,
+      )
       return []
     # If there are no seqio decode/predict metrics to compute return empty list
     if not task.predict_metric_fns:
       logging.info('no predict_metric_fns defined on task: %s', task.name)
       return []
-    if is_packing_on(p.feature_converter):
+    if is_packing_on(self.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
@@ -1303,7 +1318,7 @@ class SeqIOInput(base_input.BaseInput):
       self._gen_targets_artifacts()
 
     answers = dict(decoder_outputs)
-    if p.use_enumeration:
+    if self.use_enumeration:
       (predictions_list, targets_list) = (
           self._build_predict_metric_inputs_with_enum(
               answers, verbose_entries, plain_text_output
@@ -1361,17 +1376,21 @@ class SeqIOInput(base_input.BaseInput):
       Typically a list of metrics, each element being a mapping from a string
       metric name to a float.
     """
-    p = self.hparams
     task = self.mixture_or_task_inst
     if not isinstance(task, seqio.Task):
       logging.warning(
-          'compute_metrics_eval() is only supported for seqio.Tasks, '
-          'got %s for %s.', type(task), p.name)
+          (
+              'compute_metrics_eval() is only supported for seqio.Tasks, '
+              'got %s for %s.'
+          ),
+          type(task),
+          self.name,
+      )
       return []
     if not task.score_metric_fns:
       logging.info('no score_metric_fns defined on task: %s', task.name)
       return []
-    if is_packing_on(p.feature_converter):
+    if is_packing_on(self.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
@@ -1389,7 +1408,7 @@ class SeqIOInput(base_input.BaseInput):
     if not self.is_targets_init:
       self._gen_targets_artifacts()
 
-    if p.use_enumeration:
+    if self.use_enumeration:
       answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
       scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
           answers, verbose_entries)

@@ -71,13 +71,13 @@ class CustomInputSpecsProvider(base_input.BaseInputSpecsProvider):
   input_dims: int = 0
 
   def get_input_specs(self) -> pytypes.NestedShapeDtypeStruct:
-    p = self.hparams
     batch_size = 1
 
     return NestedMap(
         inputs=jax.ShapeDtypeStruct(
-            (batch_size, p.input_dims), dtype=jnp.float32)
+            (batch_size, self.input_dims), dtype=jnp.float32
         )
+    )
 
 
 class LMInputSpecsProvider(base_input.BaseInputSpecsProvider):
@@ -903,7 +903,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     for v in ext_train_state.opt_states[0]:
       if 'ema' in v:
-        ext_ema = v.ema
+        pass
 
     # Now initialize also includes warm start (loading from ckpt)
     sample_inputs = NestedMap(

@@ -463,7 +463,7 @@ class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
       return False
     log_pplx = metrics['eval_test_C4Validation/metrics/log_pplx']
 
-    if log_pplx <= self.hparams.target_log_pplx:
+    if log_pplx <= self.target_log_pplx:
       return True
     return False
 

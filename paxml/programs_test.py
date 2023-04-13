@@ -56,9 +56,8 @@ class TestInput(base_input.BaseInput):
   seq_length: int = 2
 
   def get_next(self):
-    p = self.hparams
     return NestedMap(
-        image=jnp.zeros((p.batch_size, p.seq_length), dtype=jnp.float32)
+        image=jnp.zeros((self.batch_size, self.seq_length), dtype=jnp.float32)
     )
 
 

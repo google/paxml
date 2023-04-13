@@ -20,6 +20,7 @@ import collections
 import dataclasses
 import inspect
 import math
+import typing
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
 
 from paxml import automl_interfaces
@@ -182,7 +183,7 @@ class RandomSearch(BaseAlgorithm):
   seed: Optional[int] = None
 
   def __call__(self):
-    return pg.geno.Random(seed=self._hparams.seed)
+    return pg.geno.Random(seed=self.seed)
 
 
 class Sweeping(BaseAlgorithm):
@@ -216,10 +217,11 @@ class RegularizedEvolution(BaseAlgorithm):
 
   def __call__(self):
     return pg.evolution.regularized_evolution(
-        self._hparams.mutator,
-        population_size=self._hparams.population_size,
-        tournament_size=self._hparams.tournament_size,
-        seed=self._hparams.seed)
+        self.mutator,
+        population_size=self.population_size,
+        tournament_size=self.tournament_size,
+        seed=self.seed,
+    )
 
 
 #
@@ -253,18 +255,19 @@ class SingleObjective(BaseReward):
 
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     del global_step
-    reward = self._hparams.metric.get_value(metrics_dict)
+    assert self.metric is not None
+    reward = self.metric.get_value(metrics_dict)
 
-    if self._hparams.goal == 'minimize':
+    if self.goal == 'minimize':
       reward *= -1
-    if self._hparams.reward_for_nan is not None and math.isnan(reward):
-      reward = self._hparams.reward_for_nan
+    if self.reward_for_nan is not None and math.isnan(reward):
+      reward = self.reward_for_nan
     return reward
 
   @property
   def used_metrics(self) -> Sequence[Metric]:
-    assert self._hparams.metric is not None
-    return [self._hparams.metric]
+    assert self.metric is not None
+    return [self.metric]
 
 
 class MultiObjectiveAggregator(
@@ -273,7 +276,7 @@ class MultiObjectiveAggregator(
   """Base class for multi objective aggregators."""
 
   @abc.abstractmethod
-  def __call__(self, values: Sequence[float]) -> float:
+  def __call__(self, values: Sequence[float]) -> Union[float, complex]:
     """Aggregate multiple values into a single value."""
 
 
@@ -303,28 +306,29 @@ class MultiObjective(BaseReward):
     if len(self.metrics) > 1 and self.aggregator_tpl is None:
       raise ValueError('Param `aggregator` must be provided.')
     super().__post_init__()
-    if self._hparams.aggregator_tpl is not None:
-      self._aggregator = self._hparams.aggregator_tpl.Instantiate()
+    if self.aggregator_tpl is not None:
+      self._aggregator = self.aggregator_tpl.Instantiate()
 
   def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
     del global_step
-    metric_values = [m.get_value(metrics_dict) for m in self._hparams.metrics]
-    if (self._hparams.reward_for_nan is not None
-        and any(math.isnan(m) for m in metric_values)):
-      return self._hparams.reward_for_nan
+    metric_values = [m.get_value(metrics_dict) for m in self.metrics]
+    if self.reward_for_nan is not None and any(
+        math.isnan(m) for m in metric_values
+    ):
+      return self.reward_for_nan
     if len(metric_values) == 1:
       reward = metric_values[0]
     else:
       assert self._aggregator is not None
       reward = self._aggregator(metric_values)
-    if self._hparams.goal == 'minimize':
+    if self.goal == 'minimize':
       reward *= -1
     return reward
 
   @property
   def used_metrics(self) -> Sequence[Metric]:
-    assert self._hparams.metrics is not None
-    return self._hparams.metrics
+    assert self.metrics is not None
+    return self.metrics
 
 
 class WeightedSumAggregator(MultiObjectiveAggregator):
@@ -340,19 +344,23 @@ class WeightedSumAggregator(MultiObjectiveAggregator):
 
   def __post_init__(self):
     super().__post_init__()
-    weights = self._hparams.weights
+    weights = self.weights
+    weights = typing.cast(Sequence[float], weights)
     if not weights or sum([abs(w) for w in weights]) == 0:
       raise ValueError(f'Invalid value for `weights`: {weights}')
     self._sum_of_weights = sum([abs(w) for w in weights]) * 1.0
 
-  def __call__(self, values: Sequence[float]) -> float:
+  def __call__(self, values: Sequence[float]) -> Union[float, complex]:
     """Aggregate multiple values into a single value."""
-    if len(values) != len(self._hparams.weights):
+    if len(values) != len(self.weights):
       raise ValueError(
-          f'The length of weights ({self._hparams.weights}) does not match '
-          f'the length of objective values {values!r}.')
-    return sum([w * v for w, v in zip(
-        self._hparams.weights, values)]) / self._sum_of_weights
+          f'The length of weights ({self.weights}) does not match '
+          f'the length of objective values {values!r}.'
+      )
+    return (
+        sum([w * v for w, v in zip(self.weights, values)])
+        / self._sum_of_weights
+    )
 
 
 def weighted_sum_reward(
@@ -387,7 +395,7 @@ class TwoObjectiveAggregator(MultiObjectiveAggregator):
     if self.cost_objective is None:
       raise ValueError('Param `cost_objective` must be provided.')
 
-  def __call__(self, values: Sequence[float]) -> float:
+  def __call__(self, values: Sequence[float]) -> Union[float, complex]:
     """Aggregate multiple values into a single value."""
     if len(values) != 2:
       raise ValueError('Only two objectives are supported. Encountered: %r' %
@@ -395,7 +403,7 @@ class TwoObjectiveAggregator(MultiObjectiveAggregator):
     return self.aggregate(*values)
 
   @abc.abstractmethod
-  def aggregate(self, quality: float, cost: float) -> float:
+  def aggregate(self, quality: float, cost: float) -> Union[float, complex]:
     """Aggregate quality and cost into a single value."""
 
 
@@ -410,10 +418,10 @@ class TunasAbsolute(TwoObjectiveAggregator):
   https://arxiv.org/abs/2008.06120
   """
 
-  def aggregate(self, quality: float, cost: float) -> float:
+  def aggregate(self, quality: float, cost: float) -> Union[float, complex]:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self._hparams.cost_objective
-    cost_adjustment = self._hparams.exponent * abs(cost_ratio - 1)
+    cost_ratio = cost / self.cost_objective
+    cost_adjustment = self.exponent * abs(cost_ratio - 1)
     return quality + cost_adjustment
 
 
@@ -427,10 +435,10 @@ class MnasHard(TwoObjectiveAggregator):
   https://arxiv.org/pdf/1807.11626.pdf
   """
 
-  def aggregate(self, quality: float, cost: float) -> float:
+  def aggregate(self, quality: float, cost: float) -> Union[float, complex]:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self._hparams.cost_objective
-    cost_adjustment = min(pow(cost_ratio, self._hparams.exponent), 1.)
+    cost_ratio = cost / self.cost_objective
+    cost_adjustment = min(pow(cost_ratio, self.exponent), 1.0)
     return quality * cost_adjustment
 
 
@@ -445,10 +453,10 @@ class MnasSoft(TwoObjectiveAggregator):
   https://arxiv.org/pdf/1807.11626.pdf
   """
 
-  def aggregate(self, quality: float, cost: float) -> float:
+  def aggregate(self, quality: float, cost: float) -> Union[float, complex]:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self._hparams.cost_objective
-    cost_adjustment = pow(cost_ratio, self._hparams.exponent)
+    cost_ratio = cost / self.cost_objective
+    cost_adjustment = pow(cost_ratio, self.exponent)
     return quality * cost_adjustment
 
 
@@ -513,9 +521,8 @@ class AverageMetricValues(MultiSubExperimentCrossStepMetricAggregator):
 
     metrics = {}
     for k, v in accumulated_metrics.items():
-      if self._hparams.last_n is not None:
-        metrics[k] = sum(v[-self._hparams.last_n:]) / len(
-            v[-self._hparams.last_n:])
+      if self.last_n is not None:
+        metrics[k] = sum(v[-self.last_n :]) / len(v[-self.last_n :])
       else:
         metrics[k] = sum(v) / len(v)
     return metrics
@@ -534,7 +541,7 @@ class MetricsWithMaxValue(MultiSubExperimentCrossStepMetricAggregator):
       self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
-    metric = self._hparams.metric or Metric('reward')
+    metric = self.metric or Metric('reward')
     max_i, max_value = None, None
     # TODO(daiyip): current code assumes that all metrics are reported at
     # the same step, which might not be the case if we allow multiple processes
@@ -560,7 +567,7 @@ class MetricsWithMinValue(MultiSubExperimentCrossStepMetricAggregator):
       self, merged_metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
       ) -> Dict[str, float]:
     """Returns an aggregated metric dict from metrics from multiple steps."""
-    metric = self._hparams.metric or Metric('reward')
+    metric = self.metric or Metric('reward')
     min_i, min_value = None, None
     for i, (_, step_metrics) in enumerate(merged_metrics_across_steps):
       v = metric.get_value(step_metrics)
@@ -589,14 +596,15 @@ class EarlyStoppingByValue(BaseEarlyStoppingPolicy):
 
   def __call__(self) -> pg.early_stopping.StepWise:
     def metric_to_watch(m: pg.tuning.Measurement) -> float:
-      metric = self._hparams.metric
+      metric = self.metric
       if metric is None:
         return m.reward
       return metric.get_value(m.metrics)
     return pg.early_stopping.early_stop_by_value(
-        step_values=self._hparams.step_values,
+        step_values=self.step_values,
         metric=metric_to_watch,
-        maximize=self._hparams.maximize)()
+        maximize=self.maximize,
+    )()
 
 
 class EarlyStoppingByRank(BaseEarlyStoppingPolicy):
@@ -615,14 +623,15 @@ class EarlyStoppingByRank(BaseEarlyStoppingPolicy):
 
   def __call__(self) -> pg.early_stopping.StepWise:
     def metric_to_watch(m: pg.tuning.Measurement) -> float:
-      metric = self._hparams.metric
+      metric = self.metric
       if metric is None:
         return m.reward
       return metric.get_value(m.metrics)
     return pg.early_stopping.early_stop_by_rank(
-        step_ranks=self._hparams.step_ranks,
+        step_ranks=self.step_ranks,
         metric=metric_to_watch,
-        maximize=self._hparams.maximize)()
+        maximize=self.maximize,
+    )()
 
 
 #

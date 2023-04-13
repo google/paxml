@@ -137,11 +137,10 @@ class TestInput(base_input.BaseInput):
     return py_utils.NestedMap(data=t)
 
   def _get_dataset(self):
-    p = self.hparams
     d = tf.data.Dataset.range(10)
-    d = d.shard(p.num_infeed_hosts, p.infeed_host_index)
+    d = d.shard(self.num_infeed_hosts, self.infeed_host_index)
     d = d.map(self._to_nested_map)
-    d = d.batch(p.batch_size)
+    d = d.batch(self.batch_size)
     return d
 
 

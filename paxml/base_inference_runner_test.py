@@ -47,7 +47,7 @@ class DummyInference(base_inference_runner.BaseInferenceRunner):
   def infer(self, train_state: TrainState, prng_key: PRNGKey,
             var_weight_hparams: NestedWeightHParams,
             input_batch: NestedMap) -> NestedMap:
-    return self.hparams.output
+    return self.output
 
 
 class BaseInferenceRunnerTest(test_utils.TestCase):
