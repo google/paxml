@@ -735,8 +735,12 @@ class SeqIOInput(base_input.BaseInput):
     self.is_targets_init = True
 
   def save(self, checkpoint_path: epath.PathLike):
-    self._ckpt = tf.train.Checkpoint(it=self._iter)
-    self._ckpt.write(checkpoint_path)
+    try:
+      self._ckpt = tf.train.Checkpoint(it=self._iter)
+      self._ckpt.write(checkpoint_path)
+    except tf.errors.UnimplementedError as e:
+      raise NotImplementedError(
+          'Checkpointing is not supported for this SeqIO input') from e
 
   def restore(self, checkpoint_path: epath.PathLike):
     self._peek = None
