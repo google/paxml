@@ -192,7 +192,7 @@ class Lambada126M(GPT126M, LambadaDataset):
 class GPT5B(Pile126M):
   
   USE_REPEATED_LAYER = True
-  ICI_MESH_SHAPE = [4,1,2]
+  ICI_MESH_SHAPE = [1,4,2]
   DCN_MESH_SHAPE = [32,1,1]
   MAX_STEPS = 75000
     
