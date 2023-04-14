@@ -70,7 +70,6 @@ NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
 EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
 
 PRNGKey = pytypes.PRNGKey
-sub_config_field = base_hyperparams.sub_config_field
 RegexStr = str
 
 instantiate = base_hyperparams.instantiate
@@ -1181,8 +1180,8 @@ class SingleTask(base_task.BaseTask):
         padding/truncating is involved.
     """
 
-    learner: learners_lib.Learner.HParams = sub_config_field(
-        learners_lib.Learner.HParams
+    learner: pax_fiddle.Config[learners_lib.Learner] = (
+        pax_fiddle.template_field(learners_lib.Learner)
     )
     num_train_steps: float = 1e7
     save_interval_steps: int = 5000

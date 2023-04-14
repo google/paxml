@@ -41,7 +41,6 @@ import seqio
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
-sub_config_field = base_hyperparams.sub_config_field
 NestedMap = py_utils.NestedMap
 NestedNpTensor = pytypes.NestedNpTensor
 ParamsT = pytypes.HParamsT
