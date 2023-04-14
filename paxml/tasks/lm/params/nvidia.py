@@ -31,6 +31,111 @@ from praxis.layers import gpu_fast_attention
 
 WeightInit = base_layer.WeightInit
 
+@experiment_registry.register
+class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
+  """Pipelined Transformer using Adam optimizer."""
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  USE_REPEATED_LAYER = True
+
+  DCN_MESH_SHAPE = [1, 1, 1]
+  ICI_MESH_SHAPE = [16, 1, 1]
+
+  PERCORE_BATCH_SIZE = 4
+
+  NUM_LAYERS = 24
+  NUM_HEADS = 32
+  DIMS_PER_HEAD = 64
+  MODEL_DIMS = 2048
+  HIDDEN_DIMS = 8192
+
+  MAX_SEQ_LEN = 2048
+  VOCAB_SIZE = 51200
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
+  PACKED_INPUT = True
+
+  FPROP_DTYPE = jnp.bfloat16
+
+  TRAINABLE_POSITION_EMB = True
+  TRAINABLE_PE_MAX_SEQ_LEN = MAX_SEQ_LEN
+
+  INIT_STD = 0.023
+  SOFTMAX_INIT_STD = 0.023
+
+  # optimizer related
+  LEARNING_RATE = 6e-4
+  ADAM_BETA1 = 0.9
+  ADAM_BETA2 = 0.95
+  ADAM_EPSILON = 1e-8
+  ADAM_EPSILON_ROOT = 0.0
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  CLIP_THRESHOLD = 1.0
+
+  # Learning rate schedule
+  LR_SCHEDULE = 'linear_rampup_cosine_decay'
+  LR_COS_WARMUP = 0
+  LR_COS_DECAY_START = 1
+  LR_COS_DECAY_END = 500000
+  LR_COS_MIN_RATIO = 0.1
+  LR_COS_MAX = 1.0
+
+  def task(self) -> tasks_lib.SingleTask.HParams:
+    """Returns the task parameters."""
+    task_p = super().task()
+    task_p.train.save_interval_steps = 100000
+
+    model_p = task_p.model
+    model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
+
+    if self.USE_FLASH_ATTENTION:
+      layer_p = (
+          model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage.transformer_layer_params_tpl
+      )
+      # Use Triton flash attention.
+      assert layer_p.tr_atten_tpl.cls == layers.DotProductAttention
+      fused_tr_atten_tpl = pax_fiddle.Config(
+          gpu_fast_attention.GpuTritonFusedDotProductAttention,
+      )
+      fused_tr_atten_tpl.copy_fields_from(layer_p.tr_atten_tpl)
+      layer_p.tr_atten_tpl = fused_tr_atten_tpl
+
+    # Use Triton Layer Norm.
+    if self.USE_TRITON_LAYER_NORM:
+      assert layer_p.ln_tpl.cls == layers.LayerNorm
+      fused_ln_tpl = pax_fiddle.Config(
+          gpu_fast_attention.GpuTritonFusedLayerNorm,
+      )
+      fused_ln_tpl.copy_fields_from(layer_p.ln_tpl)
+      layer_p.ln_tpl = fused_ln_tpl
+
+    scale = self.SOFTMAX_INIT_STD
+    if not scale:
+      scale = 1.0 / math.sqrt(self.MODEL_DIMS)
+    softmax_init = WeightInit.Gaussian(scale)
+
+    lp = task_p.train.learner
+    lp.loss_name = 'total_loss'
+    lp.optimizer = optimizers.Adam.HParams(
+        beta1=self.ADAM_BETA1,
+        beta2=self.ADAM_BETA2,
+        weight_decay=self.WEIGHT_DECAY,
+        epsilon=self.ADAM_EPSILON,
+        epsilon_root=self.ADAM_EPSILON_ROOT,
+        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+        clip_threshold=self.CLIP_THRESHOLD,
+    )
+    lp.optimizer.learning_rate = self.LEARNING_RATE
+
+    lp.optimizer.lr_schedule = schedules.LinearRampupCosineDecay.HParams(
+        warmup_steps=self.LR_COS_WARMUP,
+        decay_start=self.LR_COS_DECAY_START,
+        decay_end=self.LR_COS_DECAY_END,
+        min_ratio=self.LR_COS_MIN_RATIO,
+        max=self.LR_COS_MAX,
+    )
+    return task_p
 
 @experiment_registry.register
 class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
@@ -39,10 +144,10 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   USE_TRITON_LAYER_NORM = False
 
   USE_REPEATED_LAYER = False
-  DCN_MESH_SHAPE = [2, 1, 1, 1]
-  ICI_MESH_SHAPE = [2, 2, 1, 4]
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [4, 2, 1, 2]
   NUM_STAGES = 4
-  ## MBS=2 + 2-way DP --> percore MBS=1
+
   MICROBATCH_SIZE = 2
   PERCORE_BATCH_SIZE = 1
 
@@ -139,6 +244,93 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
     )
     return task_p
 
+@experiment_registry.register
+class NVIDIA8_3B(NVIDIA1_3B):
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  DCN_MESH_SHAPE = [1, 1, 1]
+  ICI_MESH_SHAPE = [4, 1, 4]
+  PERCORE_BATCH_SIZE = 4
+
+  NUM_LAYERS = 40
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 64
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 4 * 4096
+
+@experiment_registry.register
+class NVIDIA10B(NVIDIA1_3B):
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  DCN_MESH_SHAPE = [1, 1, 1]
+  ICI_MESH_SHAPE = [2, 1, 8]
+  PERCORE_BATCH_SIZE = 0.25
+
+  NUM_LAYERS = 32
+  NUM_HEADS = 40
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 5120
+  HIDDEN_DIMS = 4 * 5120
+
+@experiment_registry.register
+class NVIDIA40BProxy(NVIDIA5B):
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [2, 2, 1, 4]
+  NUM_STAGES = 2
+  
+  MICROBATCH_SIZE = 4
+  PERCORE_BATCH_SIZE = 16
+
+  NUM_LAYERS = 12
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 4 * 8192
+
+@experiment_registry.register
+class NVIDIA70BProxy(NVIDIA5B):
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [2, 2, 1, 4]
+  NUM_STAGES = 2
+  
+  MAX_SEQ_LEN = 2048
+
+  MICROBATCH_SIZE = 4
+  PERCORE_BATCH_SIZE = 8
+
+  NUM_LAYERS = 20
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 4 * 8192
+
+@experiment_registry.register
+class NVIDIA116BProxy(NVIDIA5B):
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [4, 1, 1, 4]
+  NUM_STAGES = 4
+  
+  MAX_SEQ_LEN = 2048
+
+  MICROBATCH_SIZE = 2
+  PERCORE_BATCH_SIZE = 6
+
+  NUM_LAYERS = 16
+  NUM_HEADS = 96
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 12288
+  HIDDEN_DIMS = 4 * 12288
 
 @experiment_registry.register
 class NVIDIA175BProxy(NVIDIA5B):
@@ -146,18 +338,17 @@ class NVIDIA175BProxy(NVIDIA5B):
   USE_FLASH_ATTENTION = False
   USE_TRITON_LAYER_NORM = False
 
-  DCN_MESH_SHAPE = [2, 2, 1, 1]
-  ICI_MESH_SHAPE = [1, 1, 1, 16]
-  NUM_STAGES = 2
-  MICROBATCH_SIZE = 2
-  PERCORE_BATCH_SIZE = 1
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [4, 1, 1, 4]
+  NUM_STAGES = 4
+  MICROBATCH_SIZE = 1
+  PERCORE_BATCH_SIZE = 6
 
   NUM_LAYERS = 24
   NUM_HEADS = 96
   DIMS_PER_HEAD = 128
   MODEL_DIMS = 12288
   HIDDEN_DIMS = 4 * 12288
-
 
 @experiment_registry.register
 class TestSmallConfig(NVIDIA5B):
