@@ -1051,7 +1051,7 @@ class SingleTask(base_task.BaseTask):
     early_stopping_fn: Function to control whether to stop the training loop
       early; the instantiated class should be callable with signature matching
       trainer_lib.EarlyStoppingFn.
-    summary_verbsosity: Summary verbosity to be used for logging summaries. The
+    summary_verbosity: Summary verbosity to be used for logging summaries. The
       following are some notes on summary verbosity levels: * The larger the
       verbosity value, the more verbose. * The convention is to use non-negative
       integers. * The default verbosity level at the context level is 3, meaning
