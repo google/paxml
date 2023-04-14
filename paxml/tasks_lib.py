@@ -1171,8 +1171,14 @@ class SingleTask(base_task.BaseTask):
         train apply.
       tensorstore_metadata_key: The name applied to metadata files created by
         Tensorstore. Uses Tensorstore default if not specified.
-      enable_input_checkpointing: Whether to checkpoint training input. Must 
-        be supported by the BaseInput implementation.
+      enable_input_checkpointing: Whether to checkpoint training input. Must be
+        supported by the BaseInput implementation.
+      restore_transformations: Orbax-style transformations. See Orbax
+        documentation. `tensorstore_use_ocdbt` must be enabled. Note that some
+        shape checking may be disabled when using this option. Use
+        `enforce_restore_shape_check` to counteract this, though this may not
+        necessarily be suitable for all cases, particularly when
+        padding/truncating is involved.
     """
 
     learner: learners_lib.Learner.HParams = sub_config_field(
@@ -1209,6 +1215,7 @@ class SingleTask(base_task.BaseTask):
     )
     tensorstore_metadata_key: Optional[str] = None
     enable_input_checkpointing: Optional[bool] = False
+    restore_transformations: Optional[Dict[str, Any]] = None
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
   @dataclasses.dataclass(frozen=True)

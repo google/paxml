@@ -744,6 +744,7 @@ py_strict_test(
         "//praxis:base_input",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
+        # Implicit tensorstore dependency.
     ],
 )
 

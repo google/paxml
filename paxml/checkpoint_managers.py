@@ -359,6 +359,11 @@ class OrbaxCheckpointManager:
           saving/restoring, to avoid potential silent bugs when loading
           checkpoints to incompatible unpadded shapes of TrainState.""")
 
+    uses_transformations = (
+        restore_kwargs
+        and 'transforms' in restore_kwargs
+        and restore_kwargs['transforms'] is not None
+    )
     # Propagate version to CheckpointHandler.
     restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
 
@@ -378,7 +383,9 @@ class OrbaxCheckpointManager:
         step, items=items, restore_kwargs=restore_kwargs
     )
 
-    if self.version > 1.0:
+    # Skip metadata checks if using transformations, since the TrainState may be
+    # completely altered.
+    if self.version > 1.0 and not uses_transformations:
       restored_metadata = checkpoints.PaxMetadata.from_dict(
           restored[METADATA_ITEM_NAME]
       )

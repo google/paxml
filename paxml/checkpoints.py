@@ -737,6 +737,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       specs: Optional[PyTree] = None,
       mesh: Optional[jax.sharding.Mesh] = None,
       version: Optional[float] = None,
+      transforms: Optional[PyTree] = None,
   ) -> PyTree:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
@@ -779,7 +780,10 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
         create_restore_args, reference_state_specs, reference_train_state
     )
     restored_train_state = super().restore(
-        directory, item=reference_train_state, restore_args=restore_args
+        directory,
+        item=reference_train_state,
+        restore_args=restore_args,
+        transforms=transforms,
     )
     if self._enforce_restore_shape_check:
       _check_restored_shapes(restored_train_state, reference_train_state)

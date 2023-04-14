@@ -15,12 +15,13 @@
 
 """Tests for Pax checkpoint_managers."""
 
+import contextlib
 import copy
 import datetime
 import functools
 import json
 import os
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 from absl import flags
@@ -39,12 +40,31 @@ from paxml import train_states
 from praxis import base_input
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
+import tensorstore as ts
 
 
 CheckpointType = checkpoints.CheckpointType
 FLAGS = flags.FLAGS
 CHECKPOINT_PREFIX = checkpoint_managers.CHECKPOINT_PREFIX
 TrainState = train_states.TrainState
+
+
+@contextlib.contextmanager
+def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
+  """Use OCDBT driver within context."""
+  original_registry = list(
+      orbax.checkpoint.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
+  )
+  if use_ocdbt:
+    orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
+        use_ocdbt=use_ocdbt, ts_context=ts_context
+    )
+  try:
+    yield
+  finally:
+    orbax.checkpoint.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
+        original_registry
+    )
 
 
 def _expected_checkpoint_filenames(
@@ -156,14 +176,16 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.train_state_unpadded_shape_dtype_struct,
     ) = create_train_state()
 
-  def create_checkpointer(self, checkpoint_type: CheckpointType):
+  def create_checkpointer(
+      self, checkpoint_type: CheckpointType, tensorstore_use_ocdbt: bool = False
+  ):
     if checkpoint_type == CheckpointType.FLAX:
       checkpointer = checkpoints.FlaxCheckpointer(
           checkpoints.FlaxCheckpointHandler()
       )
     elif checkpoint_type == CheckpointType.GDA:
       checkpointer = orbax.checkpoint.Checkpointer(
-          checkpoints.PaxCheckpointHandler()
+          checkpoints.PaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
       )
     else:
       raise ValueError('Unsupported CheckpointType.')
@@ -174,8 +196,11 @@ class CheckpointManagerTest(parameterized.TestCase):
       options: checkpoint_managers.CheckpointManagerOptions,
       checkpoint_type: CheckpointType = CheckpointType.GDA,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
+      tensorstore_use_ocdbt: bool = False,
   ) -> checkpoint_managers.OrbaxCheckpointManager:
-    checkpointer = self.create_checkpointer(checkpoint_type)
+    checkpointer = self.create_checkpointer(
+        checkpoint_type, tensorstore_use_ocdbt=tensorstore_use_ocdbt
+    )
     train_input_checkpointer = (
         checkpoints.Checkpointer(checkpoints.BaseInputCheckpointHandler())
         if train_input_pipeline
@@ -187,7 +212,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         train_input_checkpointer,
         checkpoint_type=checkpoint_type,
         options=options,
-        tensorstore_use_ocdbt=False,
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
     )
 
   def save(
@@ -225,11 +250,16 @@ class CheckpointManagerTest(parameterized.TestCase):
       global_mesh: Optional[Mesh] = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
+      transforms: Optional[Dict[str, Any]] = None,
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
     if checkpoint_type == CheckpointType.GDA:
-      restore_kwargs = {'specs': state_specs, 'mesh': global_mesh}
+      restore_kwargs = {
+          'specs': state_specs,
+          'mesh': global_mesh,
+          'transforms': transforms,
+      }
     elif checkpoint_type == CheckpointType.FLAX:
       restore_kwargs = None
     return checkpoint_manager.restore(
@@ -896,6 +926,79 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+
+  def test_transforms(self):
+    ts_context = ts.Context({
+        'cache_pool#ocdbt': {'total_bytes_limit': 100000000},
+        'file_io_concurrency': {'limit': 128},
+    })
+    # OCDBT required to use transforms.
+    with ocdbt_checkpoint_context(True, ts_context):
+      checkpoint_type = CheckpointType.GDA
+      checkpoint_manager = self.create_checkpoint_manager(
+          checkpoint_managers.CheckpointManagerOptions(),
+          checkpoint_type=checkpoint_type,
+          tensorstore_use_ocdbt=True,
+      )
+
+      train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+      train_state_unpadded_shape_dtype_struct = jax.tree_util.tree_map(
+          lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
+          train_state_global_shapes,
+      )
+      self.save(
+          checkpoint_manager,
+          0,
+          self.train_state,
+          train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
+      )
+
+      mdl_vars = self.train_state.mdl_vars
+      mdl_vars['x'] = mdl_vars['a']
+      mdl_vars['y'] = {'z': mdl_vars['b']}
+      del mdl_vars['a'], mdl_vars['b']
+      expected = TrainState(
+          self.train_state.step,
+          mdl_vars,
+          orbax.checkpoint.test_utils.apply_function(
+              self.train_state.opt_states, lambda x: x * 2
+          ),
+      )
+      axes = jax.sharding.PartitionSpec(
+          None,
+      )
+      state_specs = jax.tree_util.tree_map(
+          lambda _: axes,
+          expected,
+      )
+      transforms = {
+          r'(.*)opt_states(.*)': orbax.checkpoint.Transform(
+              value_fn=lambda x: x * 2
+          ),
+          'mdl_vars': {
+              'x': orbax.checkpoint.Transform(original_key='mdl_vars/a'),
+              'y': {
+                  'z': orbax.checkpoint.Transform(original_key='mdl_vars/b'),
+              },
+          },
+      }
+
+      train_state_global_shapes = jax.eval_shape(lambda x: x, expected)
+      train_state_unpadded_shape_dtype_struct = jax.tree_util.tree_map(
+          lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
+          train_state_global_shapes,
+      )
+      restored = self.restore(
+          checkpoint_manager,
+          0,
+          train_state_global_shapes,
+          state_specs,
+          checkpoint_type,
+          global_mesh=self.global_mesh,
+          train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
+          transforms=transforms,
+      )
+      orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
 
 if __name__ == '__main__':

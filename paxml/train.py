@@ -22,7 +22,7 @@ import gc
 import re
 import time
 import typing
-from typing import Any, Callable, Optional, Sequence, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
 
 from absl import logging
 from etils import epath
@@ -195,6 +195,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
       ocdbt_coordinator_server: Optional[Any] = None,
+      restore_transformations: Optional[Dict[str, Any]] = None,
   ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
@@ -202,6 +203,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       raise ValueError('FLAX checkpointing not supported for pjit models.')
     self._enable_checkpoint_saving = enable_checkpoint_saving
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
+    self._restore_transformations = restore_transformations
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -240,7 +242,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
   ):
     restore_args = {}
     if self._checkpoint_type == CheckpointType.GDA:
-      restore_args = {'specs': train_state_pspecs, 'mesh': global_mesh}
+      restore_args = {
+          'specs': train_state_pspecs,
+          'mesh': global_mesh,
+          'transforms': self._restore_transformations,
+      }
     elif self._checkpoint_type == CheckpointType.PERSISTENCE:
       restore_args = {
           'state_specs': train_state_pspecs,
@@ -349,6 +355,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
       ocdbt_coordinator_server: Optional[Any] = None,
+      restore_transformations: Optional[Dict[str, Any]] = None,
   ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
@@ -356,6 +363,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
+    self._restore_transformations = restore_transformations
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -568,6 +576,7 @@ def _create_checkpointer(
   max_to_keep = train_p.save_max_to_keep
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
+  restore_transformations = train_p.restore_transformations
 
   ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=train_p.tensorstore_metadata_key,
@@ -644,6 +653,7 @@ def _create_checkpointer(
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
         ocdbt_coordinator_server=ocdbt_coordinator_server,
+        restore_transformations=restore_transformations,
     )
   else:
     checkpointer = _OrbaxPmapTrainingCheckpointer(
@@ -652,6 +662,7 @@ def _create_checkpointer(
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
         ocdbt_coordinator_server=ocdbt_coordinator_server,
+        restore_transformations=restore_transformations,
     )
 
   return checkpointer
