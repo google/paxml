@@ -24,7 +24,9 @@ from flax import struct
 import jax
 from jax import numpy as jnp
 import optax
+from paxml.ghostnorm import base as ghostnorm_base
 from praxis import base_hyperparams
+from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
 
@@ -32,6 +34,7 @@ JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
 NestedMap = py_utils.NestedMap
 PRNGKey = pytypes.PRNGKey
+PARAMS = base_layer.PARAMS
 
 
 @struct.dataclass
@@ -341,3 +344,94 @@ class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
     num_repeat = self.microbatch_size
     return jnp.repeat(tensor, num_repeat, axis=0).reshape(
         (shape[0], num_repeat, *shape[1:]))
+
+
+class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
+  """DP-SGD stochastic gradient function with Ghost Norm Clipping.
+
+  This class implements DP-SGD without materializing the per-example gradients.
+  This reduces memory cost for DP-SGD training and allows large batch training
+  without needing to do (sequential) gradient accumulation.
+
+  To use this method, all the parametric layers (layers with trainable
+  parameters) in the model need to implement the ghost norm protocol. Please
+  see `paxml.ghostnorm` for more details.
+
+  This class computes the clipped gradients in two passes. In the first pass,
+  the ghost norm protocol is used to estimate the per-example gradient norms
+  from each layers. The norms are aggregated, and then used to calculate
+  per-example scaling coefficients. The ghost norm protocol is used again to
+  compute the weighted average gradients according to the coefficients. The cost
+  of each ghost norm protocol pass should be approximately equal to the cost
+  of a standard back-propagation.
+  """
+
+  def grad_fn(self, loss_fn: Callable[..., Any],
+              mdl_vars_grad: NestedJTensor,
+              mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+              prng_key: PRNGKey) -> Tuple[Any, Any]:
+    assert self.hparams.inner_batch_size is None, (
+        'inner_batch_size is not supported yet by GhostClipping.')
+
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+    batch_size = jax.tree_util.tree_flatten(
+        mdl_vars_nograd_and_inputs[1])[0][0].shape[0]
+
+    # Pass 1: get per-example gradient norms
+    scales = jnp.ones(batch_size)
+    params_with_sq_norms = jax.tree_map(
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS])
+    (loss, aux), grad_with_sq_norms = grad_fn(
+        {**mdl_vars_grad, PARAMS: params_with_sq_norms},
+        mdl_vars_nograd_and_inputs, prng_key)
+
+    is_leaf = lambda node: isinstance(node, ghostnorm_base.ParamWithAux)
+    grad_norms = jnp.sqrt(sum(
+        x.aux for x in
+        jax.tree_util.tree_flatten(
+            grad_with_sq_norms[PARAMS], is_leaf=is_leaf)[0]))
+
+    # PAX scales the loss by global batch size under pmap, specifically:
+    # - under pmap:
+    #   - loss = local_loss_sum / (local_batch_size * n_dev)
+    #   - loss_weight = 1 / n_dev
+    # - not under pmap:
+    #   - loss = local_loss_sum / local_batch_size
+    #   - loss_weight depends on specific models, sometimes it's
+    #     local_batch_size, sometimes it's just 1
+    n_devs = 1
+    if base_layer.is_running_under_pmap():
+      # correct grad norm calculation
+      n_devs = 1 / aux.loss_weight
+      grad_norms *= n_devs
+
+    frac_clipped = 0.0
+    if self.hparams.l2_norm_clip is not None:
+      scales = jnp.minimum(1.0, self.hparams.l2_norm_clip / grad_norms)
+      frac_clipped = jnp.mean(scales < 1.0)
+
+    # Pass 2: get average of clipped gradients
+    params_with_sq_norms = jax.tree_map(
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS])
+    (loss, aux), clipped_grads = grad_fn(
+        {**mdl_vars_grad, PARAMS: params_with_sq_norms},
+        mdl_vars_nograd_and_inputs, prng_key)
+    clipped_grads[PARAMS] = jax.tree_map(
+        lambda x: x.param, clipped_grads[PARAMS], is_leaf=is_leaf)
+
+    # note here noise std is divided by n_devs because in PAX the loss is
+    # scaled by global batch size when pmap is used (see above)
+    noised_grads = self._add_noise(
+        clipped_grads,
+        self.hparams.noise_multiplier
+        * self.hparams.l2_norm_clip
+        / batch_size / n_devs,
+        prng_key,
+    )
+
+    aux = DPGradAuxInfo(
+        dp_aux_info={'frac_clipped': frac_clipped},
+        aux_info=aux.aux_info,
+        loss_weight=aux.loss_weight,
+    )
+    return (loss, aux), noised_grads

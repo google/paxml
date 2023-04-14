@@ -21,9 +21,9 @@ load("//paxml:paxml.bzl", "py_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 
-licenses(["notice"])
-
 package(default_visibility = JAX_VISIBILITY)
+
+licenses(["notice"])
 
 exports_files(
     [
@@ -419,7 +419,9 @@ pytype_strict_library(
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit optax dependency.
+        "//paxml/ghostnorm:base",
         "//praxis:base_hyperparams",
+        "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
     ],
