@@ -29,6 +29,7 @@ from praxis import py_utils
 from praxis import pytypes
 
 JTensor = pytypes.JTensor
+NestedJTensor = pytypes.NestedJTensor
 NestedMap = py_utils.NestedMap
 PRNGKey = pytypes.PRNGKey
 
@@ -64,8 +65,8 @@ class BaseStochasticGradient(
   def grad_fn(
       self,
       loss_fn: Callable[..., Any],
-      mdl_vars: Any,
-      inputs: NestedMap,
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> Tuple[Any, Any]:
     """Main gradients function.
@@ -76,8 +77,10 @@ class BaseStochasticGradient(
 
     Args:
       loss_fn: Loss function.
-      mdl_vars: Model variables.
-      inputs: Input examples on which to call `loss_fn`.
+      mdl_vars_grad: Model variables for which to compute gradient.
+      mdl_vars_nograd_and_inputs: Tuple containing model variables for which
+        gradients should not be computed, and input examples on which to call
+        `loss_fn`.
       prng_key: A pseudorandom key.
 
     Returns:
@@ -91,12 +94,13 @@ class StandardGradient(BaseStochasticGradient):
   def grad_fn(
       self,
       loss_fn: Callable[..., Any],
-      mdl_vars: Any,
-      inputs: NestedMap,
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> Tuple[Any, Any]:
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
-    (values, aux), grads = grad_fn(mdl_vars, inputs, prng_key)
+    (values, aux), grads = grad_fn(mdl_vars_grad, mdl_vars_nograd_and_inputs,
+                                   prng_key)
     aux = self.process_aux_info(aux)
     return (values, aux), grads
 
@@ -190,10 +194,13 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     aux_info = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), aux_info)
     return aux_info
 
-  def grad_fn(self, loss_fn: Callable[..., Any], mdl_vars: Any,
-              inputs: NestedMap, prng_key: PRNGKey) -> Tuple[Any, Any]:
+  def grad_fn(self, loss_fn: Callable[..., Any],
+              mdl_vars_grad: NestedJTensor,
+              mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+              prng_key: PRNGKey) -> Tuple[Any, Any]:
     p = self.hparams
 
+    mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
     inputs = self._prepare_inputs(inputs)
 
     # Get batch size.
@@ -211,7 +218,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
     grad_fn = jax.vmap(
         jax.value_and_grad(loss_fn, has_aux=True, allow_int=True),
-        in_axes=(None, 0, None),
+        in_axes=(None, (None, 0), None),
         out_axes=0,
     )
 
@@ -227,7 +234,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
       # Compute loss and gradients.
       (values, aux), grads = grad_fn(
-          mdl_vars, new_inputs, inner_prng_keys[index]
+          mdl_vars_grad, (mdl_vars_nograd, new_inputs), inner_prng_keys[index]
       )
 
       # Clip and aggregate gradients.
