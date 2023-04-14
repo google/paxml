@@ -7,7 +7,7 @@
 * **Flax Interoperability** - Through Praxis, Pax now supports shape inference, `__call__` for forward propagation, and has adopted Linen’s AxisMetadata for its mid-level sharding APIs.  These changes improve interoperability with other Flax-based libraries such as T5X.
 * **Custom Training Loop Support** - Pax now provides limited support for customized training pipelines. Users can define a custom "train program" to encapsulate their training logic and use it in BaseExperiment. Customizable training loops pave the path for features such as multi-task support.
 * **SeqIO** - Pax has adopted [SeqIO](https://github.com/google/seqio). Supporting SeqIO allows users with existing SeqIO Tasks, input pipelines and evaluation workflows to use them directly in Pax. We are working to make the Pax-SeqIO evaluation setup more flexible and robust.
-* **Documentation** - We have added documentation and Jupyter Notebook tutorials to our [docs](https://github.com/google/paxml/tree/main/paxml/docs) folder. (Although you may notice some empty links in the doc, they are placeholders for upcoming docs.)
+* **Documentation** - We have added [documentation](https://github.com/google/paxml/tree/main/paxml/docs) and Jupyter Notebook [tutorials](https://github.com/google/paxml/tree/main/paxml/docs/hands-on-tutorials.md). (Although you may notice some empty links in the doc, they are placeholders for upcoming docs.)
 ## Note
 *   Version: 1.0.0
 *   Build Date: 20230329
