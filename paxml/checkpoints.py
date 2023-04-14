@@ -339,6 +339,7 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
+    logging.info('Checkpoint dir \'%s\' does not exist.', checkpoint_dir)
     return None
   checkpoint_assets = [
       v
@@ -346,6 +347,8 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
       if is_checkpoint_asset(v) and not is_tmp_checkpoint_asset(v)
   ]
   if not checkpoint_assets:
+    logging.info(
+        'No non-temporary checkpoints found in dir: \'%s\'', checkpoint_dir)
     return None
   checkpoint_assets = sorted(
       checkpoint_assets, key=get_step_from_checkpoint_asset
@@ -368,6 +371,7 @@ def retrieve_latest_checkpoint_step(
     The latest checkpoint step as an integer or None if no checkpoint is found.
   """
   if not checkpoint_dir.exists():
+    logging.info('Checkpoint dir \'%s\' does not exist.', checkpoint_dir)
     checkpoint_step = -1
   else:
     latest_checkpoint_path = latest_checkpoint(checkpoint_dir)
@@ -375,6 +379,7 @@ def retrieve_latest_checkpoint_step(
       checkpoint_step = -1
     else:
       checkpoint_step = get_step_from_checkpoint_asset(latest_checkpoint_path)
+      logging.info('Latest checkpoint step is %d', checkpoint_step)
   np_checkpoint_step = multihost_utils.broadcast_one_to_all(
       np.array(checkpoint_step)
   )
