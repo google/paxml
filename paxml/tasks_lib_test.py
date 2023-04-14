@@ -105,7 +105,10 @@ class TestModel01(base_model.BaseModel):
     )
 
   def compute_predictions(self, input_batch: NestedMap) -> JTensor:
-    return jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01)
+    ret = jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01)
+    self.add_summary('debug', ret, verbosity=4)
+    self.add_summary('info', ret, verbosity=3)
+    return ret
 
   def compute_loss(self, predictions: JTensor,
                    input_batch: NestedMap) -> Tuple[NestedMap, NestedMap]:
@@ -214,7 +217,11 @@ class BaseTaskTest(test_utils.TestCase):
     self.assertEqual(task_p.vn.vn_scale, 0.075)
     self.assertEqual(task_p.vn.vn_regex, 'dec_embedding/emb_var|decoder/cell')
 
-  def test_model_linear_regression_vn(self):
+  @parameterized.named_parameters(
+      ('summary_verbosity_default', 3),
+      ('summary_verbosity_more_verbose', 4),
+  )
+  def test_model_linear_regression_vn(self, summary_verbosity):
     # Set up the model.
     input_dims = 52
     output_dims = 32
@@ -239,6 +246,7 @@ class BaseTaskTest(test_utils.TestCase):
 
     # Create the mdl.
     jax_task = instantiate(task_p)
+    jax_task.summary_verbosity = summary_verbosity
     prng_key = jax.random.PRNGKey(12345)
     prng_key, init_key = jax.random.split(prng_key)
     sample_inputs = NestedMap(
@@ -269,8 +277,9 @@ class BaseTaskTest(test_utils.TestCase):
 
     # Train the model for one single step.
     for step in range(10):
-      (replicated_mdl_states, _, metrics, _,
-       _) = p_train_step(replicated_mdl_states, train_prng_key, mdl_inputs)
+      (replicated_mdl_states, _, metrics, _, summary_tensors) = p_train_step(
+          replicated_mdl_states, train_prng_key, mdl_inputs
+      )
       if step >= vn_start_step:
         # The VN is applied for training
         self.assertGreater(np.array(metrics['loss02'])[0], 0.0)
@@ -281,6 +290,12 @@ class BaseTaskTest(test_utils.TestCase):
       # The parameter is not changed by VN when lr = 0.0
       param = replicated_mdl_states.mdl_vars[PARAMS]['var01'][0]
       self.assertAllClose(param, np.zeros((input_dims, output_dims)), atol=1e-5)
+
+      # Assert summaries logged at summary_verbosity levels are present:
+      self.assertEqual(bool(summary_tensors), True)
+      self.assertIn('info_scalar', summary_tensors)
+      if summary_verbosity == 4:
+        self.assertIn('debug_scalar', summary_tensors)
 
     _, mean_metrics, _, _ = p_eval_step(replicated_mdl_states, eval_prng_key,
                                         mdl_inputs)

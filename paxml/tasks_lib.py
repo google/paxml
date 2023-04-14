@@ -1051,6 +1051,12 @@ class SingleTask(base_task.BaseTask):
     early_stopping_fn: Function to control whether to stop the training loop
       early; the instantiated class should be callable with signature matching
       trainer_lib.EarlyStoppingFn.
+    summary_verbsosity: Summary verbosity to be used for logging summaries. The
+      following are some notes on summary verbosity levels: * The larger the
+      verbosity value, the more verbose. * The convention is to use non-negative
+      integers. * The default verbosity level at the context level is 3, meaning
+      that we'll log any summary written with verbosity <= 3 by default. *
+      Summaries are written if context_verbosity >= callsite_verbosity.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -1288,6 +1294,7 @@ class SingleTask(base_task.BaseTask):
   _metrics_aggregator: Any = dataclasses.field(init=False, repr=False)
   _loss_aggregator_inst: Any = dataclasses.field(init=False, repr=False)
   _inference_runner: Any = dataclasses.field(init=False, repr=False)
+  summary_verbosity: int = 3
 
   def __post_init__(self):
     super().__post_init__()

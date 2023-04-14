@@ -360,24 +360,30 @@ def initialize_model_state(
   # migrating to shape inference.
   @jax.jit
   def init_fn(init_key):
-    context_p = base_layer.JaxContext.HParams(do_eval=is_eval_for_init)
+    context_p = base_layer.JaxContext.HParams(
+        do_eval=is_eval_for_init,
+        summary_verbosity=jax_task.summary_verbosity,
+    )
     with base_layer.JaxContext.new_context(hparams=context_p):
-      inputs = jax.tree_map(lambda x: jnp.zeros(x.shape, x.dtype),
-                            inputs_shape_dtype)
+      inputs = jax.tree_map(
+          lambda x: jnp.zeros(x.shape, x.dtype), inputs_shape_dtype
+      )
       if model.hparams.fprop_dtype == jnp.bfloat16:
         inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
 
   initial_vars = init_fn(init_key)
-  logging.info('initial_vars: %s', jax.tree_map(lambda x: x.shape,
-                                                initial_vars))
+  logging.info(
+      'initial_vars: %s', jax.tree_map(lambda x: x.shape, initial_vars)
+  )
 
   # In case jax_task.model wraps a t5x model, let's remove the params_axes
   # variable collection.
   if 'params_axes' in initial_vars:
     del initial_vars['params_axes']
-  train_state = jax_task.create_train_state(initial_vars, var_weight_hparams,
-                                            discard_opt_states)
+  train_state = jax_task.create_train_state(
+      initial_vars, var_weight_hparams, discard_opt_states
+  )
   train_state_provenance = train_states.build_train_state_provenance(
       train_state
   )
@@ -652,7 +658,10 @@ def train_step_single_learner(
   assert len(jax_task.learners) == 1
   learner = jax_task.learners[0]
 
-  context_p = base_layer.JaxContext.HParams(do_eval=False)
+  context_p = base_layer.JaxContext.HParams(
+      do_eval=False,
+      summary_verbosity=jax_task.summary_verbosity,
+  )
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   #
@@ -884,7 +893,10 @@ def eval_step_single_learner(
       forward as well as backward pass.
   """
   model = jax_task.model
-  context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
+  context_p = base_layer.JaxContext.HParams(
+      do_eval=True,
+      summary_verbosity=jax_task.summary_verbosity,
+  )
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
   prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
