@@ -22,6 +22,7 @@ to a specific ML experiment.
 import abc
 from typing import Dict, List, Optional, Type, TypeVar
 from paxml import automl
+from paxml import base_executor
 from paxml import base_task
 from paxml import partitioning
 from paxml import programs
@@ -129,6 +130,17 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   def train_program(self) -> programs.BaseTrainProgram:
     """Returns the train program to use for training the model."""
     return programs.SingleTaskTrainProgram()
+
+  def executor(self) -> Optional[base_executor.BaseExecutor]:
+    """Returns the executor to use to run the programs.
+
+    Returns:
+      A BaseExecutor instance or None, in which case a default executor will be
+      used.
+    """
+    # TODO(laigd): return the default executor instead of None to make it
+    # consistent with e.g. train_program.
+    return None
 
   def __init_subclass__(cls):
     """Modifications to the subclasses."""

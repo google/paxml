@@ -94,6 +94,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":automl",
+        ":base_executor",
         ":base_task",
         ":partitioning",
         ":programs",
@@ -492,6 +493,7 @@ pytype_strict_library(
     srcs = ["train.py"],
     srcs_version = "PY3",
     deps = [
+        ":base_executor",
         ":base_experiment",
         ":checkpoint_managers",
         ":eval_lib",
@@ -653,6 +655,19 @@ pytype_strict_library(
     ],
 )
 
+py_strict_test(
+    name = "partitioning_test",
+    srcs = ["partitioning_test.py"],
+    deps = [
+        ":partitioning",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        "//praxis:py_utils",
+        "//praxis:test_utils",
+    ],
+)
+
 pytype_strict_library(
     name = "parameterized_experiment",
     srcs = ["parameterized_experiment.py"],
@@ -664,16 +679,16 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
-    name = "partitioning_test",
-    srcs = ["partitioning_test.py"],
+pytype_strict_library(
+    name = "base_executor",
+    srcs = ["base_executor.py"],
     deps = [
         ":partitioning",
-        # Implicit absl.testing.absltest.absltest dependency.
-        # Implicit absl.testing.parameterized dependency.
-        # Implicit jax dependency.
-        "//praxis:py_utils",
-        "//praxis:test_utils",
+        ":programs",
+        ":tasks_lib",
+        ":trainer_lib",
+        # Implicit etils dependency.
+        "//praxis:base_input",
     ],
 )
 

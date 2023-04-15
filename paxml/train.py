@@ -30,6 +30,7 @@ import jax
 from jax import monitoring
 import jax.numpy as jnp
 import numpy as np
+from paxml import base_executor
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import eval_lib
@@ -941,176 +942,179 @@ def train_and_evaluate(
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
     )
 
-  # Creates the train program.
+  # Creates the train and eval programs.
   train_program = experiment_config.train_program()
+  # TODO(laigd): make eval programs configurable.
+  eval_programs = [
+      programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
+      for input_p in eval_input_p
+  ]
+  trainer_lib.check_unique_names([prog.eval_input for prog in eval_programs])
 
-  if task_p.model.ici_mesh_shape is not None:
-    with partitioner.global_mesh:
-      train_and_evaluate_spmd_model(
-          jax_task,
-          train_input_p,
-          train_program,
-          job_log_dir,
-          checkpointer,
-          partitioner,
-          eval_input_p,
-          decode_input_p,
-          early_stopping_fn,
-          enable_auto_sharding,
-      )
-  else:
-    train_and_evaluate_pmap(
+  # Creates the executor and run the training pipeline.
+  executor = experiment_config.executor()
+  if not executor:
+    executor = DefaultExecutor()
+  with partitioner.global_mesh or contextlib.nullcontext():
+    executor.setup(
         jax_task,
-        train_input_p,
-        train_program,
         job_log_dir,
         checkpointer,
         partitioner,
-        eval_input_p,
+        train_input_p,
         decode_input_p,
+        train_program,
+        eval_programs,
         early_stopping_fn,
     )
-  checkpointer.wait_until_finished()  # No-op if not async.
+    executor.start()
 
 
-def train_and_evaluate_pmap(
-    task: tasks_lib.SingleTask,
-    train_input_p: base_input.BaseInput.HParams,
-    train_program: programs.BaseTrainProgram,
-    job_log_dir: epath.Path,
-    checkpointer: _TrainingCheckpointer,
-    partitioner: partitioning.Partitioner,
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    decode_input_p: Sequence[base_input.BaseInput.HParams],
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-) -> None:
-  """Runs the training and evaluation loop with PMAP.
+class DefaultExecutor(base_executor.BaseExecutor):
+  """The default executor for running programs."""
 
-  Args:
-    task: The task encapsulating the data parallel model.
-    train_input_p: HParams for the train data input pipeline.
-    train_program: The program used for model training.
-    job_log_dir: Directory for the job logs.
-    checkpointer: Callbacks for checkpointing.
-    partitioner: Used for partitioning model functions.
-    eval_input_p: list of hparams for the eval input pipelines.
-    decode_input_p: list of hparams for the decode input pipelines.
-    early_stopping_fn: An optional callable object for reporting eval metrics
-      and determining whether to early stop current training. The callable
-      object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-  """
+  def __init__(self):
+    super().__init__()
 
-  logging.info('Using pmap for data parallelism.')
-  (
-      train_input,
-      test_eval_programs,
-      partitioned_train_state,
-      train_state_provenance,
-      total_num_params,
-      prng_key,
-      train_prng_seed,
-      eval_prng_seed,
-  ) = _create_program_and_states(
-      task,
-      train_input_p,
-      eval_input_p,
-      job_log_dir,
-      checkpointer,
-      partitioner,
-  )
+    # States to set in .setup().
+    self._job_log_dir = None
+    self._early_stopping_fn = None
+    self._task = None
+    self._checkpointer = None
+    self._partitioner = None
+    self._decode_input_ps = None
+    self._train_program = None
+    self._eval_programs = None
 
-  def partition_decode_once_fns(prng_key, decode_input_p):
+    # States to lazily initialize in .setup().
+    self._train_input_pipeline = None
+    self._partitioned_train_state = None
+    self._train_state_provenance = None
+    self._total_num_params = None
+    self._prng_key = None
+    self._train_prng_seed = None
+    self._eval_prng_seed = None
+
+  def setup(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      job_log_dir: epath.Path,
+      checkpointer: Any,
+      partitioner: partitioning.Partitioner,
+      train_input_p: base_input.BaseInput.HParams,
+      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+      train_program: programs.BaseTrainProgram,
+      eval_programs: Sequence[programs.BaseEvalProgram],
+      early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+  ):
+    self._task = jax_task
+    self._job_log_dir = job_log_dir
+    self._checkpointer = checkpointer
+    self._partitioner = partitioner
+    self._decode_input_ps = decode_input_ps
+    self._train_program = train_program
+    self._eval_programs = eval_programs
+    self._early_stopping_fn = early_stopping_fn
+    task_p = jax_task.hparams
+
+    # Creates the root prng key and train input pipeline.
+    root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
+    train_input_p = partitioner.preprocess_input_params(train_input_p)
+    train_input_pipeline = instantiate(train_input_p)
+
+    # Sets up the partitioner. Note it only needs shape/dtype information of the
+    # prng key.
+    # TODO(laigd): let it take ShapeDtypeStruct of prng key instead.
+    partitioner.setup(
+        jax_task,
+        root_prng_key,
+        train_inputs_shape_dtype=None,
+        train_input_pipeline=train_input_pipeline,
+        job_log_dir=job_log_dir,
+    )
+    train_state_metadata = partitioner.get_train_state_metadata()
+
+    # JaxContext needed for shared layer lookup from global scope.
+    with base_layer.JaxContext.new_context():
+      # Dump out model meta info for debugging.
+      trainer_lib.write_post_init_model_hparams_file(
+          jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
+      )
+
+    # Restore TrainState from checkpoint or initialize it.
+    train_input_for_checkpoint = (
+        train_input_pipeline
+        if task_p.train.enable_input_checkpointing
+        else None
+    )
+    (
+        partitioned_train_state,
+        train_state_provenance,
+        total_num_params,
+        root_prng_key,
+    ) = checkpointer.get_model_states(
+        partitioner,
+        train_state_metadata,
+        root_prng_key,
+        train_input_for_checkpoint,
+    )
+    if train_state_provenance:
+      trainer_lib.write_train_provenance_file(
+          train_state_provenance, job_log_dir
+      )
+
+    # Restore the train input states for deterministic inputs.
+    initial_global_step = int(
+        py_utils.maybe_unreplicate_for_fully_replicated(
+            partitioned_train_state.step
+        )
+    )
+    logging.info('Model initial global_step=%d', initial_global_step)
+    if not task_p.train.enable_input_checkpointing:
+      train_input_pipeline = _maybe_update_latest_model_step(
+          train_input_pipeline, train_input_p, initial_global_step
+      )
+
+    # Splits the key.
+    prng_key, train_prng_seed, eval_prng_seed = jax.random.split(
+        root_prng_key, 3
+    )
+    logging.info('train prng seed: %s', train_prng_seed)
+    logging.info('eval prng seed: %s', eval_prng_seed)
+    train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
+    eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
+
+    # Sets the lazily initialized states.
+    self._train_input_pipeline = train_input_pipeline
+    self._partitioned_train_state = partitioned_train_state
+    self._train_state_provenance = train_state_provenance
+    self._total_num_params = total_num_params
+    self._prng_key = prng_key
+    self._train_prng_seed = train_prng_seed
+    self._eval_prng_seed = eval_prng_seed
+
+  def _partition_decode_once_fns_pmap(self, prng_key, decode_input_p):
     decode_input_pipelines = [
         instantiate(input_p) for input_p in decode_input_p
     ]
     trainer_lib.check_unique_names(decode_input_pipelines)
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_seed: %s', decode_key)
-    decode_key = partitioner.preprocess_prng_key(decode_key)
+    decode_key = self._partitioner.preprocess_prng_key(decode_key)
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        task,
-        partitioner,
-        task.hparams,
-        partitioner.get_train_state_metadata().var_weight_hparams,
+        self._task,
+        self._partitioner,
+        self._task.hparams,
+        self._partitioner.get_train_state_metadata().var_weight_hparams,
         decode_input_pipelines,
         decode_key,
-        job_log_dir,
+        self._job_log_dir,
     )
     decode_input_names = [inp.name for inp in decode_input_pipelines]
     return decode_once_fn, prng_key, decode_input_names
 
-  _train_and_evaluate_common(
-      task,
-      partitioner,
-      train_program,
-      train_input,
-      partitioned_train_state,
-      train_state_provenance,
-      prng_key,
-      test_eval_programs,
-      decode_input_p,
-      total_num_params,
-      early_stopping_fn,
-      checkpointer,
-      partition_decode_once_fns,
-      job_log_dir,
-      eval_prng_seed,
-      is_vars_replicated=True,
-      train_prng_seed=train_prng_seed,
-  )
-
-
-def train_and_evaluate_spmd_model(
-    task: tasks_lib.SingleTask,
-    train_input_p: base_input.BaseInput.HParams,
-    train_program: programs.BaseTrainProgram,
-    job_log_dir: epath.Path,
-    checkpointer: _TrainingCheckpointer,
-    partitioner: partitioning.Partitioner,
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    decode_input_p: Sequence[base_input.BaseInput.HParams],
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    enable_auto_sharding: bool = False,
-) -> None:
-  """Runs the training and evaluation loop with PJIT.
-
-  Args:
-    task: The task encapsulating the SPMD model.
-    train_input_p: Params for the train data pipeline.
-    train_program: The program used for model training.
-    job_log_dir: Directory for the job logs.
-    checkpointer: Callbacks for checkpointing.
-    partitioner: Used for partitioning model functions.
-    eval_input_p: list of params for the eval input pipelines.
-    decode_input_p: list of hparams for the decode input pipelines.
-    early_stopping_fn: An optional callable object for reporting eval metrics
-      and determining whether to early stop current training. The callable
-      object has signature: (metrics_by_dataset, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-    enable_auto_sharding: Enables the XLA Auto SPMD partitioner.
-  """
-  logging.info('Using SPMD sharding for model parallelism.')
-  (
-      train_input,
-      test_eval_programs,
-      partitioned_train_state,
-      train_state_provenance,
-      total_num_params,
-      prng_key,
-      train_prng_seed,
-      eval_prng_seed,
-  ) = _create_program_and_states(
-      task,
-      train_input_p,
-      eval_input_p,
-      job_log_dir,
-      checkpointer,
-      partitioner,
-      enable_auto_sharding,
-  )
-
-  def partition_decode_once_fns(
+  def _partition_decode_once_fns_spmd(
+      self,
       prng_key: jax.random.KeyArray,
       decode_input_ps: Sequence[base_input.BaseInput.HParams],
   ) -> Tuple[
@@ -1121,11 +1125,11 @@ def train_and_evaluate_spmd_model(
     assert decode_input_ps, 'decode_input_p must not be empty'
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_key: %s', decode_key)
-    decode_key = partitioner.preprocess_prng_key(decode_key)
+    decode_key = self._partitioner.preprocess_prng_key(decode_key)
 
     padded_decode_input_ps = [
         trainer_lib.adjust_input_params_for_small_batch(
-            input_p, partitioner.global_mesh
+            input_p, self._partitioner.global_mesh
         )
         for input_p in decode_input_ps
     ]
@@ -1140,16 +1144,16 @@ def train_and_evaluate_spmd_model(
     # TODO(pax-dev): Support auto-sharding for decoder step.
     step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
     assert is_eval
-    decode_step_fn, decode_input_partition_spec = partitioner.partition(
+    decode_step_fn, decode_input_partition_spec = self._partitioner.partition(
         step_fn, decode_inputs_shape_dtype, is_eval
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
-        task,
-        partitioner,
-        task.hparams,
+        self._task,
+        self._partitioner,
+        self._task.hparams,
         padded_decode_input_pipelines,
-        job_log_dir,
+        self._job_log_dir,
         decode_key,
         decode_step_fn,
         decode_input_partition_spec,
@@ -1158,123 +1162,35 @@ def train_and_evaluate_spmd_model(
     decode_input_names = [inp.name for inp in padded_decode_input_pipelines]
     return decode_once_fn, prng_key, decode_input_names
 
-  _train_and_evaluate_common(
-      task,
-      partitioner,
-      train_program,
-      train_input,
-      partitioned_train_state,
-      train_state_provenance,
-      prng_key,
-      test_eval_programs,
-      decode_input_p,
-      total_num_params,
-      early_stopping_fn,
-      checkpointer,
-      partition_decode_once_fns,
-      job_log_dir,
-      eval_prng_seed,
-      is_vars_replicated=False,
-      train_prng_seed=train_prng_seed,
-  )
+  @property
+  def partition_decode_once_fns(self):
+    if self._task.hparams.model.ici_mesh_shape is not None:
+      return self._partition_decode_once_fns_spmd
+    else:
+      return self._partition_decode_once_fns_pmap
 
-
-def _create_program_and_states(
-    jax_task: tasks_lib.SingleTask,
-    train_input_p: base_input.BaseInput.HParams,
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
-    job_log_dir: epath.Path,
-    checkpointer: _TrainingCheckpointer,
-    partitioner: partitioning.Partitioner,
-    enable_auto_sharding: bool = False,
-) -> Tuple[
-    base_input.BaseInput,
-    Sequence[programs.BaseEvalProgram],
-    TrainState,
-    TrainStateProvenance,
-    int,
-    PRNGKey,
-    PRNGKey,
-    PRNGKey,
-]:
-  task_p = jax_task.hparams
-  reshard_inputs = checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
-  root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
-
-  # The partitioner only needs shape/dtype information of the prng key.
-  # TODO(laigd): let the partitioner take ShapeDtypeStruct of prng key instead.
-  train_input_p = partitioner.preprocess_input_params(train_input_p)
-  train_input_pipeline = instantiate(train_input_p)
-  partitioner.setup(
-      jax_task,
-      root_prng_key,
-      train_inputs_shape_dtype=None,
-      train_input_pipeline=train_input_pipeline,
-      job_log_dir=job_log_dir,
-  )
-  train_state_metadata = partitioner.get_train_state_metadata()
-
-  # JaxContext needed for shared layer lookup from global scope.
-  with base_layer.JaxContext.new_context():
-    # Dump out model meta info for debugging.
-    trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
+  def start(self):
+    is_vars_replicated = self._task.hparams.model.ici_mesh_shape is None
+    _train_and_evaluate_common(
+        self._task,
+        self._partitioner,
+        self._train_program,
+        self._train_input_pipeline,
+        self._partitioned_train_state,
+        self._train_state_provenance,
+        self._prng_key,
+        self._eval_programs,
+        self._decode_input_ps,
+        self._total_num_params,
+        self._early_stopping_fn,
+        self._checkpointer,
+        self.partition_decode_once_fns,
+        self._job_log_dir,
+        self._eval_prng_seed,
+        is_vars_replicated,
+        self._train_prng_seed,
     )
-
-  # Restore TrainState from checkpoint or initialize it.
-  train_input_for_checkpoint = (
-      train_input_pipeline if task_p.train.enable_input_checkpointing else None
-  )
-  (
-      partitioned_train_state,
-      train_state_provenance,
-      total_num_params,
-      root_prng_key,
-  ) = checkpointer.get_model_states(
-      partitioner,
-      train_state_metadata,
-      root_prng_key,
-      train_input_for_checkpoint,
-  )
-  if train_state_provenance:
-    trainer_lib.write_train_provenance_file(train_state_provenance, job_log_dir)
-
-  initial_global_step = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(
-          partitioned_train_state.step
-      )
-  )
-  logging.info('Model initial global_step=%d', initial_global_step)
-  if not task_p.train.enable_input_checkpointing:
-    train_input_pipeline = _maybe_update_latest_model_step(
-        train_input_pipeline, train_input_p, initial_global_step
-    )
-
-  prng_key, train_prng_seed, eval_prng_seed = jax.random.split(root_prng_key, 3)
-  logging.info('train prng seed: %s', train_prng_seed)
-  logging.info('eval prng seed: %s', eval_prng_seed)
-  train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
-  eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
-
-  # Construct a list of Eval programs on test data.
-  test_eval_programs = [
-      programs.SingleTaskEvalProgram(jax_task, e_input_p, partitioner)
-      for e_input_p in eval_input_p
-  ]
-  trainer_lib.check_unique_names(
-      [eval_program.eval_input for eval_program in test_eval_programs]
-  )
-
-  return (
-      train_input_pipeline,
-      test_eval_programs,
-      partitioned_train_state,
-      train_state_provenance,
-      total_num_params,
-      prng_key,
-      train_prng_seed,
-      eval_prng_seed,
-  )
+    self._checkpointer.wait_until_finished()  # No-op if not async.
 
 
 def _train_and_evaluate_common(
