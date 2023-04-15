@@ -260,18 +260,40 @@ class Partitioner(metaclass=abc.ABCMeta):
         shape/dtype information for model.init. If None,
         train_inputs_shape_dtype must be set.
       job_log_dir: Directory for the job logs.
+
+    Raises:
+      ValueError if the both train_inputs_shape_dtype and train_input_pipeline
+      are specified, or it can't infer the actual shape/dtype information from
+      them.
     """
     self._jax_task = jax_task
     self._init_key = init_key
     self._job_log_dir = job_log_dir
     if train_inputs_shape_dtype is not None:
-      assert train_input_pipeline is None
+      if not train_inputs_shape_dtype:
+        raise ValueError(
+            f'train_inputs_shape_dtype is empty: {train_inputs_shape_dtype}'
+        )
+      if train_input_pipeline:
+        raise ValueError(
+            'Expect one of train_inputs_shape_dtype and train_input_pipeline is'
+            ' specified, got both.'
+        )
       self._train_inputs_shape_dtype = train_inputs_shape_dtype
     else:
-      assert train_input_pipeline
+      if not train_input_pipeline:
+        raise ValueError(
+            'Expect one of train_inputs_shape_dtype and train_input_pipeline is'
+            ' specified, got none.'
+        )
       self._train_inputs_shape_dtype = self._get_train_inputs_shape_dtype(
           train_input_pipeline
       )
+      if not self._train_inputs_shape_dtype:
+        raise ValueError(
+            'Not able to get shape/dtype information of train input from'
+            f' train_input_pipeline: {self._train_inputs_shape_dtype}'
+        )
 
   @abc.abstractmethod
   def _get_train_inputs_shape_dtype(
