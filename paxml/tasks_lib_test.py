@@ -394,8 +394,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
+    )
 
     opt_state_shape = ext_train_state.opt_states[0][2]['m']['params'][
         'var01'].shape
@@ -410,7 +415,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     ext_train_state.mdl_vars['params']['var01'] = random_var
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
 
     # Create task with warm-start
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -491,12 +502,22 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
     )
+    ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
     )
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
 
     # Create task with warm-start
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -628,8 +649,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
+    )
 
     # Modify var01 to be random
     var_shape = ext_train_state.mdl_vars['params']['var01'].shape
@@ -637,7 +663,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     ext_train_state.mdl_vars['params']['var01'] = random_var
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
 
     # Create task with incorrect load_rules and safe_load=True.
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -691,8 +723,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     lp.optimizer.lr_schedule = schedules.Constant.HParams()
 
     sample_inputs = get_model_inputs()
+    ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs)
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
+    )
 
     ext_opt_states_flat, treedef = jax.tree_util.tree_flatten(
         flax.serialization.to_state_dict(ext_train_state.opt_states))
@@ -704,7 +741,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     ext_train_state = ext_train_state.replace(opt_states=randomized_opt_states)
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
 
     # Create task with warm-start
     task_p = ext_task_p.clone()
@@ -788,8 +831,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     lp.optimizer.ema_decay = 0.9999
 
     sample_inputs = get_model_inputs()
+    ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
     )
 
     ext_opt_states_flat, treedef = jax.tree_util.tree_flatten(
@@ -807,7 +854,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     ext_train_state = ext_train_state.replace(opt_states=randomized_opt_states)
 
     tempdir = self.create_tempdir()
-    checkpoints.save_checkpoint(ext_train_state, tempdir.full_path)
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
 
     # Create task with warm-start
     task_p = ext_task_p.clone()
@@ -882,8 +935,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.PRNGKey(1245), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
     )
 
     tempdir = self.create_tempdir()
@@ -891,6 +948,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ext_train_state,
         tempdir.full_path,
         checkpoint_type=checkpoints.CheckpointType.GDA,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
     )
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -977,8 +1037,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
     )
+    ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.PRNGKey(1245), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
     )
 
     tempdir = self.create_tempdir()
@@ -986,6 +1050,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ext_train_state,
         tempdir.full_path,
         checkpoint_type=checkpoints.CheckpointType.GDA,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
     )
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
@@ -1064,8 +1131,12 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        instantiate(ext_task_p), jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.PRNGKey(1245), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
     )
 
     tempdir = self.create_tempdir()
@@ -1073,6 +1144,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ext_train_state,
         tempdir.full_path,
         checkpoint_type=checkpoints.CheckpointType.GDA,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
     )
 
     task_p = tasks_lib.SingleTask.HParams(name='task')
