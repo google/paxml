@@ -426,8 +426,6 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax==0.1.7
-    # via flax
 orbax-checkpoint==0.2.0
     # via -r paxml-requirements.in
 packaging==23.1
