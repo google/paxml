@@ -34,12 +34,8 @@ def setup_jax(globally_use_hardware_rng: bool,
               jax_enable_checks: bool,
               jax_traceback_filtering_option: str = 'auto',
               should_initialize_jax_distributed: bool = False,
-              should_log_compiles: bool = False,
               jax_distributed_options: Optional[JaxDistributedOptions] = None,) -> None:
   """Setups JAX and logs information about this job."""
-
-  if should_log_compiles:
-    jax.config.update('jax_log_compiles', True)
 
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
   # it unavailable to JAX.

@@ -172,9 +172,6 @@ flags.DEFINE_integer(
     'Port for hosting Pythia service when non-Vizier built-in algorithms '
     'is used')
 flags.DEFINE_string(
-    'should_log_compiles', None,
-    'Whether to log compile time')
-flags.DEFINE_string(
     'tfds_data_dir', None,
     'If set, directory used to store datasets prepared by '
     'TensorFlow Datasets that are not available in the public TFDS GCS '
@@ -411,7 +408,6 @@ def main(argv: Sequence[str]) -> None:
                       FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
                       FLAGS.jax_traceback_filtering_option,
                       should_initialize_jax_distributed,
-                      FLAGS.should_log_compiles,
                       setup_jax.JaxDistributedOptions(FLAGS.server_addr,
                                                       FLAGS.num_hosts,
                                                       FLAGS.host_idx)

@@ -21,11 +21,10 @@ LOG_DIR=${3:-"test_logdir"}
 
 export VOCAB_PATH=$VOCAB_PATH
 
-mkdir -p ${PWD}/${LOG_DIR}
+mkdir -p ${LOG_DIR}
 python3 /pax/paxml/paxml/main.py \
-    --job_log_dir=${PWD}/${LOG_DIR} \
+    --job_log_dir=${LOG_DIR} \
     --exp=paxml.contrib.gpu.scripts_gpu.configs.SmallPileTest \
     --tfds_data_dir=$TFDS_DATA_DIR \
-    --should_log_compiles=True \
     --alsologtostderr &> ${PWD}/${LOG_DIR}/output.log
 
