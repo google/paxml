@@ -27,7 +27,7 @@ See `scripts_gpu/run_lambada_singlenode` for an example of running zero-shot eva
 ``` 
 bash paxml/contrib/gpu/scripts_gpu/run_lambada_singlenode.sh <TFDS_DATA_DIR> <VOCAB_PATH> <LOGDIR>
 ```
-`TFDS_DATA_DIR` should contain the path to the Lambada dataset and `<LOGDIR>` should match the `<LOGDIR>` from the pretraining run.
+`TFDS_DATA_DIR` should contain the path to the Lambada dataset and `LOGDIR` should match the `LOGDIR` from the pretraining run.
 
 #### Multi Node
 See `scripts_gpu/example_slurm_pile.sub` for an example slurm submit file that launches an 8 node run with a 126 million parameter GPT model. Note that this script must be edited with your slurm account information. 
@@ -47,9 +47,9 @@ The table below describes current performance of the given configs. Experiments 
 
 | Size | #GPUs | BS / GPU | Sequences/Sec | Estimated Walltime (days) | Lambada Accuracy | Convergence Log |
 | ---- | ----- | -------- | ------------- | ------------------------- | ---------------- | --------------- |
-| 126M |  8    | 4        |   1689.6      |   1.1                     |        0.397 (± 0.012)     | [log](https://tensorboard.dev/experiment/RCroDLAUQzGUoudzqD1NmQ/) |
-| 5B   | 32    | 16       |     426       |     4.2                   |       N/A        | N/A             |
-| 175B | 96    | 24       |    33.6       |      39.7                 |    N/A           |  N/A           |
+| 126M |  64    | 4        |   1689.6      |   1.1                     |        0.397 (± 0.012)     | [log](https://tensorboard.dev/experiment/RCroDLAUQzGUoudzqD1NmQ/) |
+| 5B   | 256    | 16       |     426       |     4.2                   |       N/A        | N/A             |
+| 175B | 768    | 24       |    33.6       |      39.7                 |    N/A           |  N/A           |
 
 Note: Estimated walltime is computed assuming full throughput continuously. In practice, true walltime may be greater due to compilation overheads and checkpointing. Linked convergence logs were not necessarily done with the topology described in `configs.py` and may have different walltimes, but the configs provided are the most performant configs tested. The throughput for these performant configs is reported in the table above. 
 
