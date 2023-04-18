@@ -19,6 +19,7 @@ import abc
 import dataclasses
 import functools
 import json
+import typing
 from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
