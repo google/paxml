@@ -175,7 +175,7 @@ def main(argv) -> None:
       params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
-    params_file.write(task_p.to_text())
+    params_file.write(base_hyperparams.nested_struct_to_text(task_p))
     # TODO(b/236417790): Dump input specs for model weight initialization.
 
   if FLAGS.post_init_params_ofile:

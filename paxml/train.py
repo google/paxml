@@ -689,11 +689,13 @@ def write_hparams_file(
     params_fpath = job_log_dir / f'{filename_prefix}model_params.txt'
     with params_fpath.open('w') as hparams_file:
       for dataset in model_config.datasets():
-        hparams_file.write(dataset.to_text())
+        hparams_file.write(base_hyperparams.nested_struct_to_text(dataset))
         hparams_file.write('\n\n')
       for decoder_dataset in model_config.decoder_datasets():
         hparams_file.write('decoder dataset hparams\n')
-        hparams_file.write(decoder_dataset.to_text())
+        hparams_file.write(
+            base_hyperparams.nested_struct_to_text(decoder_dataset)
+        )
         hparams_file.write('\n\n')
       hparams_file.write(model_config.task().to_text())
 
@@ -871,10 +873,12 @@ def train_and_evaluate(
   train_input_p = train_input_p[0]
 
   logging.info('train_input_p:')
-  for line in train_input_p.to_text().splitlines():
+  for line in base_hyperparams.nested_struct_to_text(
+      train_input_p
+  ).splitlines():  # pytype: disable=attribute-error
     logging.info('  %s', line)
   logging.info('task_p:')
-  for line in task_p.to_text().splitlines():
+  for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():  # pytype: disable=attribute-error
     logging.info('  %s', line)
 
   eval_input_p = []

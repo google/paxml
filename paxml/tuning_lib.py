@@ -280,10 +280,15 @@ def _record_experiment_config(
         # TODO(daiyip): We shall have more machine parse-able format such as
         # JSON or Fiddle config. But we start with raw texts to collect data
         # as early as possible.
-        'datasets': [ds.to_text() for ds in subexp.datasets()],
+        'datasets': [
+            base_hyperparams.nested_struct_to_text(ds)
+            for ds in subexp.datasets()
+        ],
         'decoder_datasets': [
-            ds.to_text() for ds in subexp.decoder_datasets()],
-        'task': subexp.task().to_text()
+            base_hyperparams.nested_struct_to_text(ds)
+            for ds in subexp.decoder_datasets()
+        ],
+        'task': subexp.task().to_text(),
     }
 
   feedback.set_metadata(
