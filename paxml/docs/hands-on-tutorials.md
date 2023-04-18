@@ -113,7 +113,7 @@ you as you move on to deeper topics.
 [ipynb_jax_primer]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax101_jax_primer.ipynb
 [ipynb_model_and_task]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax101_model_and_task.ipynb
 [ipynb_pax_e2e]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax101_e2e_tutorial.ipynb
-[ipynb_pax_inputs_train]: https://github.com/google/paxml/blob/main/paxml/docs/tutorials/inputs_in_Pax_ipynb-train.ipynb
-[ipynb_pax_inputs_eval]: https://github.com/google/paxml/blob/main/paxml/docs/tutorials/inputs_in_Pax_ipynb-eval.ipynb
+[ipynb_pax_inputs_train]: https://github.com/google/paxml/blob/main/paxml/docs/tutorials/inputs_in_Pax-train.ipynb
+[ipynb_pax_inputs_eval]: https://github.com/google/paxml/blob/main/paxml/docs/tutorials/inputs_in_Pax-eval.ipynb
 [ipynb_pax_layer]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax_layer_basics.ipynb
 [ipynb_rnn_decode]: https://github.com/google/paxml/tree/main/paxml/docs/tutorials/pax_rnn_decode.ipynb
