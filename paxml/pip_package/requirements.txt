@@ -43,7 +43,7 @@ asttokens==2.2.1
     # via stack-data
 astunparse==1.6.3
     # via tensorflow
-attrs==22.2.0
+attrs==23.1.0
     # via
     #   jsonschema
     #   lingvo
@@ -175,7 +175,7 @@ idna==3.4
     #   requests
 immutabledict==2.2.4
     # via t5
-importlib-metadata==6.3.0
+importlib-metadata==6.4.1
     # via
     #   jupyter-client
     #   markdown
@@ -255,7 +255,7 @@ jsonschema[format-nongpl]==4.17.3
     #   nbformat
 jupyter==1.0.0
     # via lingvo
-jupyter-client==8.1.0
+jupyter-client==8.2.0
     # via
     #   ipykernel
     #   jupyter-console
@@ -426,7 +426,7 @@ optax==0.1.4
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax-checkpoint==0.2.0
+orbax-checkpoint==0.2.1
     # via -r paxml-requirements.in
 packaging==23.1
     # via
@@ -486,7 +486,7 @@ protobuf==3.19.6
     #   tensorflow-hub
     #   tensorflow-metadata
     #   tfds-nightly
-psutil==5.9.4
+psutil==5.9.5
     # via
     #   ipykernel
     #   tensorflow-datasets
@@ -610,7 +610,7 @@ sentencepiece==0.1.98
     #   t5
 seqio @ git+https://github.com/google/seqio
     # via -r paxml-requirements.in
-seqio-nightly==0.0.15.dev20230413
+seqio-nightly==0.0.15.dev20230417
     # via t5
 six==1.16.0
     # via
@@ -631,7 +631,7 @@ six==1.16.0
     #   tensorflow
 sniffio==1.3.0
     # via anyio
-soupsieve==2.4
+soupsieve==2.4.1
     # via beautifulsoup4
 stack-data==0.6.2
     # via ipython
@@ -716,7 +716,7 @@ toml==0.10.2
     #   tfds-nightly
 toolz==0.12.0
     # via chex
-tornado==6.2
+tornado==6.3
     # via
     #   ipykernel
     #   jupyter-client
@@ -750,7 +750,7 @@ traitlets==5.9.0
     #   nbformat
     #   notebook
     #   qtconsole
-transformers==4.28.0
+transformers==4.28.1
     # via t5
 typing-extensions==4.5.0
     # via
