@@ -20,7 +20,6 @@ import contextlib
 import datetime
 import gc
 import re
-import time
 import typing
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
 
@@ -33,9 +32,9 @@ import numpy as np
 from paxml import base_executor
 from paxml import base_experiment
 from paxml import checkpoint_managers
+from paxml import checkpoint_types
 from paxml import eval_lib
 from paxml import experiment_utils
-from paxml import metric_utils
 from paxml import partitioning
 from paxml import programs
 from paxml import summary_utils
@@ -899,7 +898,7 @@ def train_and_evaluate(
       inp.num_infeed_hosts = jax.process_count()
     inp.infeed_host_index = jax.process_index()
 
-  checkpoint_type = checkpoints.retrieve_checkpoint_type(
+  checkpoint_type = checkpoint_types.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task_p
   )
 

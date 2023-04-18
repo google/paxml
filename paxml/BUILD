@@ -74,11 +74,13 @@ pytype_strict_library(
     name = "checkpoint_managers",
     srcs = ["checkpoint_managers.py"],
     deps = [
-        ":checkpoints",
+        ":checkpoint_metadata",
+        ":checkpoint_paths",
+        ":checkpoint_types",
+        ":checkpoint_version",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
-        # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//paxml:preemption",
         "//praxis:base_input",
@@ -143,14 +145,14 @@ pytype_strict_library(
     srcs = ["checkpoints.py"],
     srcs_version = "PY3",
     deps = [
-        ":base_task",
-        ":checkpoint_version",
+        ":checkpoint_managers",
+        ":checkpoint_paths",
+        ":checkpoint_types",
         ":train_states",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
-        # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:py_utils",
@@ -162,6 +164,9 @@ pytype_strict_test(
     name = "checkpoints_test",
     srcs = ["checkpoints_test.py"],
     deps = [
+        ":checkpoint_metadata",
+        ":checkpoint_paths",
+        ":checkpoint_types",
         ":checkpoints",
         ":train_states",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -496,9 +501,9 @@ pytype_strict_library(
         ":base_executor",
         ":base_experiment",
         ":checkpoint_managers",
+        ":checkpoint_types",
         ":eval_lib",
         ":experiment_utils",
-        ":metric_utils",
         ":partitioning",
         ":programs",
         ":summary_utils",
@@ -692,6 +697,46 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "checkpoint_metadata",
+    srcs = ["checkpoint_metadata.py"],
+    deps = [
+        ":checkpoint_version",
+        ":train_states",
+        # Implicit absl.logging dependency.
+        # Implicit etils dependency.
+        # Implicit jax dependency.
+        # Implicit orbax.checkpoint dependency.
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+    ],
+)
+
+pytype_strict_library(
+    name = "checkpoint_paths",
+    srcs = ["checkpoint_paths.py"],
+    deps = [
+        ":checkpoint_types",
+        ":checkpoint_version",
+        # Implicit absl.logging dependency.
+        # Implicit etils dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        # Implicit orbax.checkpoint dependency.
+        "//praxis:pytypes",
+    ],
+)
+
+pytype_strict_library(
+    name = "checkpoint_types",
+    srcs = ["checkpoint_types.py"],
+    deps = [
+        ":base_task",
+        # Implicit etils dependency.
+        "//praxis:py_utils",
+    ],
+)
+
 py_strict_test(
     name = "automl_test",
     srcs = ["automl_test.py"],
@@ -748,6 +793,8 @@ py_strict_test(
     srcs = ["checkpoint_managers_test.py"],
     deps = [
         ":checkpoint_managers",
+        ":checkpoint_paths",
+        ":checkpoint_types",
         ":checkpoints",
         ":train_states",
         # Implicit absl.flags dependency.

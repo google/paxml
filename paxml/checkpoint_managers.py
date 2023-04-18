@@ -21,11 +21,14 @@ import functools
 import typing
 from typing import Any, Mapping, Optional, Sequence, Union
 
-from etils import epath
 from absl import logging
+from etils import epath
 import jax
 import orbax.checkpoint
-from paxml import checkpoints
+from paxml import checkpoint_metadata
+from paxml import checkpoint_paths
+from paxml import checkpoint_types
+from paxml import checkpoint_version
 from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
@@ -34,7 +37,6 @@ import tensorflow.compat.v2 as tf
 from paxml import preemption  # mapped to internal
 
 
-CheckpointType = checkpoints.CheckpointType
 Nested = pytypes.Nested
 # TODO(pax-dev): pytyping doesn't like either
 # Optional[pytypes.NestedShapeDtypeStruct]
@@ -42,35 +44,33 @@ Nested = pytypes.Nested
 # Switch to the right type hint once pytyping versions are in sync.
 OptionalNestedShapeDtypeStruct = Any
 
-
-CHECKPOINT_PREFIX = 'checkpoint_'
-STATE_ITEM_NAME = checkpoints.STATE_ITEM_NAME
-METADATA_ITEM_NAME = checkpoints.METADATA_ITEM_NAME
-INPUT_ITEM_NAME = checkpoints.INPUT_ITEM_NAME
-
+STATE_ITEM_NAME = checkpoint_paths.STATE_ITEM_NAME
+METADATA_ITEM_NAME = checkpoint_metadata.METADATA_ITEM_NAME
+INPUT_ITEM_NAME = checkpoint_paths.INPUT_ITEM_NAME
 _SUPPORTED_ITEMS = frozenset({STATE_ITEM_NAME, METADATA_ITEM_NAME})
+CheckpointType = checkpoint_types.CheckpointType
 
 
 def _get_checkpoint_version(
     checkpoint_type: CheckpointType, directory: epath.Path, step: int
 ) -> float:
   """Gets checkpoint version from saved metadata."""
-  checkpoint_step_dir = checkpoints.make_checkpoint_step_dir(
+  checkpoint_step_dir = checkpoint_paths.make_checkpoint_step_dir(
       directory, step, checkpoint_type=checkpoint_type
   )
   version = 0.0
   # Necessary because some checkpoints do not conform to Orbax directory
   # structure. Could rely exclusively on actual version if all checkpoints
   # conformed.
-  if checkpoints.metadata_exists(checkpoint_step_dir):
-    version = checkpoints.restore_metadata(checkpoint_step_dir)[
-        checkpoints.get_version_key()
+  if checkpoint_metadata.metadata_exists(checkpoint_step_dir):
+    version = checkpoint_metadata.restore_metadata(checkpoint_step_dir)[
+        checkpoint_version.get_version_key()
     ]
   return version
 
 
 def _update_args_with_version(item_kwargs, version):
-  kwargs = {STATE_ITEM_NAME: {checkpoints.get_version_key(): version}}
+  kwargs = {STATE_ITEM_NAME: {checkpoint_version.get_version_key(): version}}
   if item_kwargs is not None:
     kwargs[STATE_ITEM_NAME].update(item_kwargs)
   return kwargs
@@ -87,11 +87,11 @@ def _create_items_dict_with_metadata(
   items = {STATE_ITEM_NAME: train_state}
 
   if version > 0:
-    metadata = checkpoints.make_metadata(
+    metadata = checkpoint_metadata.make_metadata(
         version,
         train_state,
         train_state_unpadded_shape_dtype_struct,
-        tensorstore_use_ocdbt=tensorstore_use_ocdbt
+        tensorstore_use_ocdbt=tensorstore_use_ocdbt,
     )
     items.update({METADATA_ITEM_NAME: metadata})
 
@@ -140,7 +140,7 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       raise ValueError('Must specify checkpoint type.')
     self._checkpoint_type = checkpoint_type
 
-    self._version = checkpoints.get_version(tensorstore_use_ocdbt)
+    self._version = checkpoint_version.get_version(tensorstore_use_ocdbt)
     # Check for existing checkpoints and retrieve version information. The
     # specific version may impact the checkpoint format, so it must be known in
     # advance of any operations.
@@ -173,8 +173,26 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
   def version(self) -> float:
     return self._version
 
+  def all_steps(self, read: bool = False) -> Sequence[int]:
+    steps = list(super().all_steps(read=read))
+    if read:
+      for path in self.directory.iterdir():
+        # Old-format Flax checkpoint conforming to
+        # 'path/to/dir/checkpoints/checkpoint_100'.
+        # Contrast with 'standard' old-format Flax checkpoint conforming to
+        # 'path/to/dir/checkpoints/checkpoint_100/checkpoint'.
+        # The former is not considered a valid checkpoint by Orbax because it is
+        # not a directory. It thus requires special handling.
+        if (
+            checkpoint_paths.is_checkpoint_asset(path)
+            and not checkpoint_paths.is_tmp_checkpoint_asset(path)
+            and path.is_file()
+        ):
+          steps.append(checkpoint_paths.get_step_from_checkpoint_asset(path))
+    return steps
+
   def _checkpoint_name(self, step: int) -> str:
-    return checkpoints.checkpoint_name(
+    return checkpoint_paths.checkpoint_name(
         step, checkpoint_type=self._checkpoint_type
     )
 
@@ -206,7 +224,7 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
   ) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
     if tmp_directory is None:
-      step_dir = checkpoints.make_checkpoint_step_dir(
+      step_dir = checkpoint_paths.make_checkpoint_step_dir(
           directory, step, checkpoint_type=self._checkpoint_type
       )
     else:
@@ -352,13 +370,6 @@ class OrbaxCheckpointManager:
       restore_kwargs: Optional[Any] = None,
   ) -> Any:
     """See superclass documentation."""
-    if self.version > 1.0 and train_state_unpadded_shape_dtype_struct is None:
-      raise ValueError(
-          """For checkpoint version > 1.0, we require users to provide
-          `train_state_unpadded_shape_dtype_struct` during checkpoint
-          saving/restoring, to avoid potential silent bugs when loading
-          checkpoints to incompatible unpadded shapes of TrainState.""")
-
     uses_transformations = (
         restore_kwargs
         and 'transforms' in restore_kwargs
@@ -386,15 +397,27 @@ class OrbaxCheckpointManager:
     # Skip metadata checks if using transformations, since the TrainState may be
     # completely altered.
     if self.version > 1.0 and not uses_transformations:
-      restored_metadata = checkpoints.PaxMetadata.from_dict(
-          restored[METADATA_ITEM_NAME]
-      )
-      metadata = checkpoints.PaxMetadata.from_dict(items[METADATA_ITEM_NAME])
-      if not metadata.is_compatible(restored_metadata):
-        raise ValueError(
-            'PaxMetadata is not compatible with the restored PaxMetadata. '
-            f'expected PaxMetadata = {restored_metadata}. '
-            f'actual PaxMetadata = {metadata}.'
+      # If unpadded shapes were not provided, skip the shape check for now, as
+      # there are many callers that need to be changed.
+      if train_state_unpadded_shape_dtype_struct is None:
+        logging.error(
+            """For checkpoint version > 1.0, we require users to provide
+          `train_state_unpadded_shape_dtype_struct` during checkpoint
+          saving/restoring, to avoid potential silent bugs when loading
+          checkpoints to incompatible unpadded shapes of TrainState."""
         )
+      else:
+        restored_metadata = checkpoint_metadata.PaxMetadata.from_dict(
+            restored[METADATA_ITEM_NAME]
+        )
+        metadata = checkpoint_metadata.PaxMetadata.from_dict(
+            items[METADATA_ITEM_NAME]
+        )
+        if not metadata.is_compatible(restored_metadata):
+          raise ValueError(
+              'PaxMetadata is not compatible with the restored PaxMetadata. '
+              f'expected PaxMetadata = {restored_metadata}. '
+              f'actual PaxMetadata = {metadata}.'
+          )
 
     return restored[STATE_ITEM_NAME]

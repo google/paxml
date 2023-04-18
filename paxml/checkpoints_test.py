@@ -26,13 +26,16 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import orbax.checkpoint
+from paxml import checkpoint_metadata
+from paxml import checkpoint_paths
+from paxml import checkpoint_types
 from paxml import checkpoints
 from paxml import train_states
 from praxis import pytypes
 
 
 orbax_utils = orbax.checkpoint.utils
-ArrayMetadata = checkpoints.ArrayMetadata
+ArrayMetadata = checkpoint_metadata.ArrayMetadata
 TrainState = train_states.TrainState
 
 
@@ -73,12 +76,14 @@ class CheckpointsTest(parameterized.TestCase):
   )
   def test_is_tmp_checkpoint_asset_legacy(self, name, expected_result):
     ckpt = self.directory / name
-    self.assertEqual(checkpoints.is_tmp_checkpoint_asset(ckpt), expected_result)
+    self.assertEqual(
+        checkpoint_paths.is_tmp_checkpoint_asset(ckpt), expected_result
+    )
 
   def test_is_tmp_checkpoint_asset_legacy_flax(self):
     ckpt = self.directory / 'checkpoint'
     ckpt.write_text('some data')
-    self.assertFalse(checkpoints.is_tmp_checkpoint_asset(ckpt))
+    self.assertFalse(checkpoint_paths.is_tmp_checkpoint_asset(ckpt))
 
   @parameterized.parameters(
       (
@@ -92,31 +97,31 @@ class CheckpointsTest(parameterized.TestCase):
   )
   def test_get_step_from_checkpoint_asset(self, path, expected_step):
     self.assertEqual(
-        checkpoints.get_step_from_checkpoint_asset(path), expected_step
+        checkpoint_paths.get_step_from_checkpoint_asset(path), expected_step
     )
 
   @parameterized.parameters(
       (
-          checkpoints.CheckpointType.UNSPECIFIED,
+          checkpoint_types.CheckpointType.UNSPECIFIED,
           epath.Path('/tmp/checkpoints/1234'),
-          checkpoints.CheckpointType.UNSPECIFIED,
+          checkpoint_types.CheckpointType.UNSPECIFIED,
       ),
       (
-          checkpoints.CheckpointType.GDA,
+          checkpoint_types.CheckpointType.GDA,
           epath.Path('/tmp/checkpoint_1234'),
-          checkpoints.CheckpointType.GDA,
+          checkpoint_types.CheckpointType.GDA,
       ),
       (
-          checkpoints.CheckpointType.GDA,
+          checkpoint_types.CheckpointType.GDA,
           epath.Path('/tmp/checkpoints/1234'),
-          checkpoints.CheckpointType.GDA_VERSION_SUBDIR,
+          checkpoint_types.CheckpointType.GDA_VERSION_SUBDIR,
       ),
   )
   def test_maybe_update_checkpoint_type(
       self, specified_format, path, expected_format
   ):
     self.assertEqual(
-        checkpoints.maybe_update_checkpoint_type(specified_format, path),
+        checkpoint_types.maybe_update_checkpoint_type(specified_format, path),
         expected_format,
     )
 
@@ -159,8 +164,8 @@ class PaxMetadataTest(parameterized.TestCase):
         },
     )
 
-    d_restored = checkpoints.PaxMetadata.from_dict(d).to_dict()
-    self.assertTrue(checkpoints._trees_are_equal(d, d_restored))
+    d_restored = checkpoint_metadata.PaxMetadata.from_dict(d).to_dict()
+    self.assertTrue(checkpoint_metadata._trees_are_equal(d, d_restored))
 
   def test_from_padded_and_unpadded(self):
     padded = TrainState(
@@ -186,7 +191,7 @@ class PaxMetadataTest(parameterized.TestCase):
         },
     )
 
-    d_restored = checkpoints.PaxMetadata.from_padded_and_unpadded(
+    d_restored = checkpoint_metadata.PaxMetadata.from_padded_and_unpadded(
         padded,
         unpadded,
         version=1.0,
@@ -219,11 +224,13 @@ class PaxMetadataTest(parameterized.TestCase):
             },
         ),
     )
-    self.assertTrue(checkpoints._trees_are_equal(d_expected, d_restored))
+    self.assertTrue(
+        checkpoint_metadata._trees_are_equal(d_expected, d_restored)
+    )
 
   def test_equals(self):
     def _get_metadata(version, shape, dtype, is_masked):
-      return checkpoints.PaxMetadata(
+      return checkpoint_metadata.PaxMetadata(
           version=version,
           train_state_metadata={
               'a': ArrayMetadata(
@@ -255,7 +262,7 @@ class PaxMetadataTest(parameterized.TestCase):
 
   def test_is_compatible(self):
     def _get_metadata(version, shape, dtype, is_masked):
-      return checkpoints.PaxMetadata(
+      return checkpoint_metadata.PaxMetadata(
           version=version,
           train_state_metadata={
               'a': ArrayMetadata(
@@ -281,7 +288,7 @@ class PaxMetadataTest(parameterized.TestCase):
 
   @parameterized.parameters(
       (
-          checkpoints.PaxMetadata(
+          checkpoint_metadata.PaxMetadata(
               version=1.1,
               train_state_metadata={
                   'mdl_vars': {
@@ -297,7 +304,7 @@ class PaxMetadataTest(parameterized.TestCase):
           ),
       ),
       (
-          checkpoints.PaxMetadata(
+          checkpoint_metadata.PaxMetadata(
               version=1.1,
               train_state_metadata={
                   'mdl_vars': _CustomPyTreeNode(
@@ -313,7 +320,7 @@ class PaxMetadataTest(parameterized.TestCase):
           ),
       ),
       (
-          checkpoints.PaxMetadata(
+          checkpoint_metadata.PaxMetadata(
               version=1.1,
               train_state_metadata={
                   'mdl_vars': _CustomFlaxDataclass(

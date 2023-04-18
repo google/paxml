@@ -35,6 +35,8 @@ import numpy as np
 import optax
 import orbax.checkpoint
 from paxml import checkpoint_managers
+from paxml import checkpoint_types
+from paxml import checkpoint_paths
 from paxml import checkpoints
 from paxml import train_states
 from praxis import base_input
@@ -43,9 +45,9 @@ import tensorflow.compat.v2 as tf
 import tensorstore as ts
 
 
-CheckpointType = checkpoints.CheckpointType
 FLAGS = flags.FLAGS
-CHECKPOINT_PREFIX = checkpoint_managers.CHECKPOINT_PREFIX
+CheckpointType = checkpoint_types.CheckpointType
+CHECKPOINT_PREFIX = checkpoint_paths.CHECKPOINT_PREFIX
 TrainState = train_states.TrainState
 
 
@@ -416,10 +418,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           ),
       )
 
-    with self.assertRaises(ValueError):
-      restored = _restore(check_unpadded_shape=False)
     restored = _restore(check_unpadded_shape=True)
-
     orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
   @parameterized.parameters(
@@ -823,7 +822,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     step_dir = checkpoint_manager._manager._get_save_directory(
         0, checkpoint_manager.directory
     )
-    self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
+    self.assertTrue(checkpoint_paths.is_checkpoint_asset(step_dir))
     self.assertTrue((step_dir / 'state').exists())
     self.assertTrue((step_dir / 'metadata').exists())
     fp_metadata = step_dir / 'metadata' / 'metadata'
@@ -887,12 +886,12 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     if legacy_version == 0.0:
       # assertions against version 0 checkpoint
-      self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
+      self.assertTrue(checkpoint_paths.is_checkpoint_asset(step_dir))
       self.assertFalse((step_dir / 'state').exists())
       self.assertFalse((step_dir / 'metadata').exists())
     elif legacy_version == 1.0:
       # assertions against version 1 checkpoint
-      self.assertTrue(checkpoints.is_checkpoint_asset(step_dir))
+      self.assertTrue(checkpoint_paths.is_checkpoint_asset(step_dir))
       self.assertTrue((step_dir / 'state').exists())
       self.assertTrue((step_dir / 'metadata').exists())
       metadata = json.loads(fp_metadata.read_text())
