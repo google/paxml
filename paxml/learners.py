@@ -112,6 +112,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       the variable should be updated during model training.
     repeat_prefix_sep: Repeat prefix separator character, for use in filename
       separator during checkpointing.
+    keep_optimizer_state_for_excluded_vars: If True, optimizer states will be
+      kept for bprop-excluded vars. This is to support some legacy use cases
+      with custom trainers.
   """
 
   # TODO(pax): loss_name is not used anywhere anymore other than to
@@ -136,6 +139,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       pax_fiddle.instance_field(default_factory=list)
   )
   repeat_prefix_sep: str = '#'
+  keep_optimizer_state_for_excluded_vars: bool = False
   _get_grad_tx: Any = dataclasses.field(init=False, repr=False)
 
   def __post_init__(self):

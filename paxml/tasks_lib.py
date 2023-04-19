@@ -742,6 +742,8 @@ def get_excluded_var_mask_for_grad_or_opt(
     mask_all_non_trainable: bool,
 ) -> NestedMap:
   """Returns whether each var should be excluded for grad/optimizer."""
+  if learner.hparams.keep_optimizer_state_for_excluded_vars:
+    return jax.tree_map(lambda _: False, var_weight_hparams)
   # Skip variables for gradients.
   if learner.hparams.bprop_variable_inclusion:
     assert not learner.hparams.bprop_variable_exclusion
