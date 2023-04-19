@@ -677,7 +677,8 @@ def write_hparams_file(
             base_hyperparams.nested_struct_to_text(decoder_dataset)
         )
         hparams_file.write('\n\n')
-      hparams_file.write(model_config.task().to_text())
+      hparams_file.write(
+          base_hyperparams.nested_struct_to_text(model_config.task()))
 
 
 def write_experiment_class_vars_file(

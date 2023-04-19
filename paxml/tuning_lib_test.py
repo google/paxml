@@ -225,7 +225,7 @@ class TuningWithTreatingEarlyStoppedTrailsAsDone(TuningExperiment):
 
 
 class TuningWithPerTrialEarlyStoppingAndRewardReplacement(TuningExperiment):
-  """A faked experiemnt with per-trial early stopping and reward replacement."""
+  """A faked experiment with per-trial early stopping and reward replacement."""
 
   def search(self):
     search_hparams = super().search()
@@ -238,7 +238,7 @@ class TuningWithPerTrialEarlyStoppingAndRewardReplacement(TuningExperiment):
 
 
 class TuningWithPerTrialEarlyStoppingAndMetricsReplacement(TuningExperiment):
-  """A faked experiemnt with per-trial early stopping and reward replacement."""
+  """A faked experiment with per-trial early stopping and reward replacement."""
 
   def search(self):
     search_hparams = super().search()
@@ -448,6 +448,7 @@ class TuneTest(absltest.TestCase):
     actual = result.trials[0].metadata.get('experiment_config')
     actual['config']['']['datasets'][0] = 'MOCK_DATASET_CONFIG'
     actual['config']['']['decoder_datasets'][0] = 'MOCK_DATASET_CONFIG'
+    actual['config']['']['task'] = 'MOCK_TASK_CONFIG'
     self.assertEqual(
         actual,
         {

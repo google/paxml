@@ -289,7 +289,7 @@ def _record_experiment_config(
             base_hyperparams.nested_struct_to_text(ds)
             for ds in subexp.decoder_datasets()
         ],
-        'task': subexp.task().to_text(),
+        'task': base_hyperparams.nested_struct_to_text(subexp.task()),
     }
 
   feedback.set_metadata(
