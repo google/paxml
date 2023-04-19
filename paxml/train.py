@@ -577,6 +577,7 @@ def _create_checkpointer(
       save_interval_steps=save_interval_steps,
       keep_time_interval=keep_interval_timedelta,
       todelete_subdir=todelete_subdir,
+      cleanup_tmp_directories=True,
   )
 
   if checkpoint_type == CheckpointType.FLAX:

@@ -108,10 +108,14 @@ class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
     todelete_subdir: If set, checkpoints to be deleted will be only renamed into
       a subdirectory with the provided string. Otherwise, they will be directly
       deleted from the file system. Useful if checkpoint deletion is time
-      consuming. By default, delete the checkpoint assets.
+      consuming. By default, delete the checkpoint assets. TODO(b/278901950):
+      Remove this option when it is available in Orbax OSS.
+    cleanup_tmp_directories: if True, cleans up any existing temporary
+      directories on CheckpointManager creation.
   """
 
   todelete_subdir: Optional[str] = None
+  cleanup_tmp_directories: bool = True
 
 
 class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
@@ -239,11 +243,6 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
       # be allowed to create the path. Only needed for legacy compatibility.
       return orbax.checkpoint.utils.get_tmp_directory(directory)
     return super()._create_tmp_directory(directory)
-
-  def _cleanup_tmp_directories(self):
-    if py_utils.is_mock_tpu_backend():
-      return
-    super()._cleanup_tmp_directories()
 
   def _delete_directory(self, step: int):
     if jax.process_index() != 0:
