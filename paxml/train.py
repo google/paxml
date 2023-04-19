@@ -1413,6 +1413,8 @@ def _train_and_evaluate_common(
                 task_p.train.eval_interval_steps,
                 task_p.train.decode_interval_steps,
                 task_p.train.save_interval_steps,
+                train_to_end=getattr(
+                    early_stopping_fn, 'train_to_end', False)
             ),
             train_weighted_scalars=train_weighted_scalars,
             eval_train_metrics=eval_train_metrics,

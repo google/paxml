@@ -137,6 +137,9 @@ class SearchHParams(BaseHyperParams):
     treats_early_stopped_trials_as_done: If True, early stopped trials will
       be treated as done, whose rewards will be fed back to the controller,
       except for those trials who haven't added any measurements.
+    train_to_end: If True, training will not be stopped until it reaches
+      `num_train_steps`. If False, training will be stopped when there is no
+      further eval/decode steps.
   """
   search_algorithm: Optional[BaseAlgorithm.HParams] = None
   search_reward: Optional[BaseReward.HParams] = None
@@ -150,6 +153,7 @@ class SearchHParams(BaseHyperParams):
   add_prior_trials: bool = False
   add_experiment_config_to_metadata: bool = True
   treats_early_stopped_trials_as_done: bool = False
+  train_to_end: bool = False
 
 
 class MetricType(enum.Enum):

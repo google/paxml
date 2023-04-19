@@ -834,6 +834,7 @@ class ParameterSweepDecoratorTest(absltest.TestCase):
     search_hparams = ParameterSweepingExperiment().search()
     self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
     self.assertIsNone(search_hparams.search_reward)
+    self.assertTrue(search_hparams.train_to_end)
     self.assertEqual(
         ParameterSweepingExperiment.__name__, 'ParameterSweepingExperiment')
     self.assertEqual(

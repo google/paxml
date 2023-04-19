@@ -719,6 +719,17 @@ class TuneTest(absltest.TestCase):
             eval_interval_steps=10,
             decode_interval_steps=10,
             save_interval_steps=400))
+    # Training step has not reached, but there is not a next checkpoint and
+    # `train_to_end` is set to True.
+    self.assertFalse(
+        tuning_lib.is_last_checkpoint(
+            trainer_lib.RunningMode.DECODE,
+            global_step=900,
+            num_train_steps=1000,
+            eval_interval_steps=10,
+            decode_interval_steps=10,
+            save_interval_steps=400,
+            train_to_end=True))
 
 
 def get_trial_dirname(search_space_fun,

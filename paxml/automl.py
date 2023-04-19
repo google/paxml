@@ -788,7 +788,8 @@ def parameter_sweep(
         return SearchHParams(
             search_algorithm=Sweeping.HParams(),
             search_reward=search_reward,
-            treats_early_stopped_trials_as_done=True)
+            treats_early_stopped_trials_as_done=True,
+            train_to_end=True)
 
     new_cls = _ParameterSweeping
     # Create a COMBINATION property and use it to set HP attributes' values.

@@ -251,7 +251,8 @@ def tune(trial_fn: TrialFn,
             is_last_experiment=(i == len(sub_experiments) - 1),
             tuning_step_start=i * automl.SUB_EXPERIMENT_STEP_OFFSET,
             treats_early_stopped_trials_as_done=(
-                search_hparams.treats_early_stopped_trials_as_done))
+                search_hparams.treats_early_stopped_trials_as_done),
+            train_to_end=search_hparams.train_to_end)
 
         # Mark trial as infeasible on NaN. PAX user can add more error
         # through `SearchHParams.errors_to_skip`.
@@ -358,7 +359,8 @@ class EarlyStoppingFn:
       is_metric_reporting_role: bool,
       is_last_experiment: bool,
       tuning_step_start: int,
-      treats_early_stopped_trials_as_done: bool):
+      treats_early_stopped_trials_as_done: bool,
+      train_to_end: bool):
     self._feedback = feedback
     self._sub_experiment_id = sub_experiment_id
     self._reward_fn = reward_fn
@@ -368,6 +370,7 @@ class EarlyStoppingFn:
     self._tuning_step_start = tuning_step_start
     self._treats_early_stopped_trials_as_done = (
         treats_early_stopped_trials_as_done)
+    self._train_to_end = train_to_end
     if reward_fn is None:
       self._needs_train = False
       self._needs_eval = False
@@ -376,6 +379,10 @@ class EarlyStoppingFn:
       self._needs_train = reward_fn.needs_train
       self._needs_eval = reward_fn.needs_eval
       self._needs_decode = reward_fn.needs_decode
+
+  @property
+  def train_to_end(self) -> bool:
+    return self._train_to_end
 
   def __call__(self,
                metrics: Dict[str, float],
@@ -419,6 +426,9 @@ class EarlyStoppingFn:
               self._feedback.skip(
                   f'No eval/decode has taken place before training ended. '
                   f'(trial={self._feedback.id}, step={global_step})')
+            elif self._is_last_experiment:
+              self._complete_trial(
+                  aggregate_metrics=True, global_step=tuning_step + 1)
         else:
           try:
             if jax.process_index() == 0:
@@ -709,7 +719,8 @@ def is_last_checkpoint(
     num_train_steps: int,
     eval_interval_steps: int,
     decode_interval_steps: int,
-    save_interval_steps: int) -> bool:
+    save_interval_steps: int,
+    train_to_end: bool = False) -> bool:
   """Returns True if current step should be treated as last evaluation."""
   if running_mode.has_train:
     # When training and evaluation/decoding are done within the same process,
@@ -720,7 +731,7 @@ def is_last_checkpoint(
     save_interval_steps = 0
   remaining = num_train_steps - global_step
   is_last = remaining == 0
-  if not is_last:
+  if not train_to_end and not is_last:
     last_eval = False
     if running_mode.has_eval:
       last_eval = remaining < max(eval_interval_steps, save_interval_steps)
