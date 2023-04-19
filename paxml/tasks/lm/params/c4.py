@@ -155,29 +155,38 @@ TaskRegistry.add_versioned_tfds_task(
 class C4UnsupervisedDataset(base_experiment.BaseExperiment):
   """Used for training Baseline ULM."""
   PERCORE_BATCH_SIZE = 1
+  PERCORE_EVAL_BATCH_SIZE = None
   MAX_SEQ_LEN = 1024
   TRAINING_SEED = 9876
   TRAINING_NUM_BATCHES_TO_SKIP = None
 
   def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
-    num_local_devices = jax.local_device_count()
-    if self.PERCORE_BATCH_SIZE >= 1:
-      batch_size_per_process = int(
-          self.PERCORE_BATCH_SIZE * num_local_devices + 1e-6
-      )
-      num_infeed_hosts = jax.process_count()
+    if is_training:
+      percore_batch_size = self.PERCORE_BATCH_SIZE
     else:
-      global_batch_size = int(
-          self.PERCORE_BATCH_SIZE * num_local_devices * jax.process_count()
-          + 1e-6
+      if self.PERCORE_EVAL_BATCH_SIZE is not None:
+        percore_batch_size = self.PERCORE_EVAL_BATCH_SIZE
+      else:
+        percore_batch_size = self.PERCORE_BATCH_SIZE
+
+    num_local_devices = jax.local_device_count()
+    global_batch_size = int(
+        percore_batch_size * num_local_devices * jax.process_count() + 1e-6
+    )
+    if percore_batch_size >= 1:
+      assert global_batch_size % num_local_devices == 0
+      batch_size_per_process = int(
+          math.ceil(percore_batch_size) * num_local_devices + 1e-6
       )
+      num_infeed_hosts = global_batch_size // batch_size_per_process
+    else:
       if jax.process_count() > 1:
         assert global_batch_size % num_local_devices == 0
         batch_size_per_process = num_local_devices
         num_infeed_hosts = global_batch_size // batch_size_per_process
       else:
         batch_size_per_process = int(
-            self.PERCORE_BATCH_SIZE * num_local_devices + 1e-6
+            percore_batch_size * num_local_devices + 1e-6
         )
         num_infeed_hosts = 1
     seed = None
