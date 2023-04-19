@@ -4,7 +4,7 @@ This folder contains scripts that optimize Pax for GPUs.
 ## Building the Container
 The Dockerfile in this folder contains all relevant dataset/gpu dependencies. Run the following command to build a container using this Dockerfile: `bash paxml/contrib/gpu/docker/build.sh <container_name>`. Be sure to run this command from the top-level `paxml` directory in the cloned repository.
 
-The scripts in `scripts_gpu` have been validated with the following paxml commit: [644ca45173c58bd537374c911da375b70634263e](https://github.com/google/paxml/commit/644ca45173c58bd537374c911da375b70634263e). Note that this container is built to run paxml at the tested commit.
+The scripts in `scripts_gpu` have been validated with the following paxml commit: [7b1d736fa96fd10c6205c323b2ea467741cd4638](https://github.com/google/paxml/commit/7b1d736fa96fd10c6205c323b2ea467741cd4638). Note that this container is built to run paxml at the tested commit.
 
 ## Running the Container (single node)
 Run the following command to launch a container interactively: `bash paxml/contrib/gpu/docker/interactive_pull_and_launch.sh <container_URL> <dataset_path> <vocab_path> <workspace_path>`, where `<workspace_path>` refers to the directory to be mounted to the container. This is where your experiment configs and run scripts should reside. Again, make sure this command is run from the top-level directory of the cloned paxml repository. 
@@ -51,7 +51,9 @@ The table below describes current performance of the given configs. Experiments 
 | 5B   | 256    | 16       |     426       |     4.2                   |       N/A        | N/A             |
 | 175B | 768    | 24       |    33.6       |      39.7                 |    N/A           |  N/A           |
 
-Note: Estimated walltime is computed assuming full throughput continuously. In practice, true walltime may be greater due to compilation overheads and checkpointing. Linked convergence logs were not necessarily done with the topology described in `configs.py` and may have different walltimes, but the configs provided are the most performant configs tested. The throughput for these performant configs is reported in the table above. 
+Note: Estimated walltime is computed assuming full throughput continuously. In practice, true walltime may be greater due to compilation overheads and checkpointing. Linked convergence logs were not necessarily done with the topology described in `configs.py` and may have different walltimes, but the configs provided are the most performant configs tested. The throughput for these performant configs is reported in the table above.
+
+**NOTE**: Current versions of Paxml are known to cause training instability and NaN loss with some configs. We are actively working on fixing this and will update this page once the issue is resolved.
 
 ## Downloading the SentencePiece Model
 First, make sure you have the [Google Clould SDK](https://cloud.google.com/sdk/docs/install) installed. Next, log in to the Cloud using the following command: `gcloud auth login` and following the prompts. Once logged in, use the following command to download the vocab file to your current working directory: 
