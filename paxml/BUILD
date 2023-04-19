@@ -498,28 +498,23 @@ pytype_strict_library(
     srcs = ["train.py"],
     srcs_version = "PY3",
     deps = [
-        ":base_executor",
         ":base_experiment",
         ":checkpoint_managers",
         ":checkpoint_types",
-        ":eval_lib",
+        ":executors",
         ":experiment_utils",
         ":partitioning",
         ":programs",
-        ":summary_utils",
         ":tasks_lib",
         ":train_states",
         ":trainer_lib",
-        ":tuning_lib",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
-        "//paxml:profiling",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
-        "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
@@ -734,6 +729,31 @@ pytype_strict_library(
         ":base_task",
         # Implicit etils dependency.
         "//praxis:py_utils",
+    ],
+)
+
+pytype_strict_library(
+    name = "executors",
+    srcs = ["executors.py"],
+    deps = [
+        ":base_executor",
+        ":eval_lib",
+        ":partitioning",
+        ":programs",
+        ":summary_utils",
+        ":tasks_lib",
+        ":train_states",
+        ":trainer_lib",
+        ":tuning_lib",
+        # Implicit absl.logging dependency.
+        # Implicit etils dependency.
+        # Implicit jax dependency.
+        "//praxis:base_hyperparams",
+        "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
