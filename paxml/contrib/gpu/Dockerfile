@@ -19,6 +19,6 @@ RUN git clone https://github.com/google/paxml \
 COPY paxml/contrib/gpu/ paxml/paxml/contrib/gpu/
 RUN pip install -r paxml/paxml/contrib/gpu/scripts_gpu/requirements.txt
 
-ENV XLA_FLAGS="--xla_gpu_enable_triton_gemm=false ${XLA_FLAGS}"
+ENV XLA_FLAGS="--xla_gpu_enable_triton_gemm=false --xla_gpu_enable_latency_hiding_scheduler=true ${XLA_FLAGS}"
 
 WORKDIR /pax/paxml

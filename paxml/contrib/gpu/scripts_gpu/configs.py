@@ -21,8 +21,8 @@ from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
-from paxml.tasks.lm.params.c4 import C4SpmdPipelineGpt3AdamOrgHP
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
+from paxml.tasks.lm.params.c4 import TransformerLmSpmdPipelineAdam
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -217,36 +217,60 @@ class GPT5B(Pile126M):
 
 ## 96 node
 @experiment_registry.register
-class GPT175B(C4SpmdPipelineGpt3AdamOrgHP):
+class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
 
+  NUM_LAYERS = 96
+  NUM_HEADS = 96
+  MODEL_DIMS = 12288
+  # Known as MLP_DIM in t5x
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  # Defaults to MODEL_DIMS // NUM_HEADS.
+  DIMS_PER_HEAD = None
+  # Known as NUM_EMBEDDINGS in t5x
+  VOCAB_SIZE = 50257
   USE_REPEATED_LAYER = False
+
+  # Model configs
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
+  SEPARATE_EMBEDDING = False
+  TRAINABLE_POSITION_EMB = True
+  ATTEN_LOGIT_CAP = -1.0  # Disable logits cap in atten
+
+  # HPs
+  WEIGHT_DECAY = 0.1
+  ADAM_BETA1 = 0.9
+  ADAM_BETA2 = 0.95
+  ADAM_EPSILON = 1e-8
+  ADAM_CLIP_THRESHOLD = -1.0  # Disable Adam clip_threshold
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+  LAYERNORM_EPSILON = 1e-5
+
+  # In units of steps for BS1.5k
+  LEARNING_RATE = 2e-5
+  LR_SCHEDULE = 'linear_rampup_cosine_decay'
+  LR_COS_WARMUP = 265
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 108600
+  LR_COS_MAX = 1.0
+  LR_COS_MIN_RATIO = 0.1
+
+  # Checkpoint
+  EVAL_INTERVAL_STEPS = 100
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_EVERY_N_STEPS = 100
+  CHECKPOINT_MAX_TO_KEEP = 10
+
+  ## GPU-specific configs
   ICI_MESH_SHAPE = [2,1,1,4]
   DCN_MESH_SHAPE = [8,12,1,1]
   NUM_STAGES = 16
   PERCORE_BATCH_SIZE = 2
-  MICROBATCH_SIZE = 24
+  MICROBATCH_SIZE = 12
   MAX_STEPS = 75000
-
-  LEARNING_RATE = 2e-5
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     task_p = super().task()
-    model_p = task_p.model
-
-    ### compute layernorm reductions in fp32. Needed for stable training on GPUs
-    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
-    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
-      stacked_p = stacked_p.pipeline_stage
-    if issubclass(
-        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
-    ):
-      stacked_p = stacked_p.block
-    transformer_layer_p = stacked_p.transformer_layer_params_tpl
-
-    transformer_layer_p.ln_tpl.reductions_in_fp32 = True
-    transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
-    task_p.model.lm_tpl.final_ln_tpl.reductions_in_fp32 = True
-
     return task_p
 
 ## single node training
