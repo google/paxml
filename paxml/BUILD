@@ -559,6 +559,7 @@ py_strict_test(
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_input",

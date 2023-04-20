@@ -19,6 +19,7 @@ from typing import Any, Dict, Tuple, Union
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from etils import epath
 import jax
 from jax import numpy as jnp
 import numpy as np
@@ -136,11 +137,10 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
         self.task,
         self.train_input,
         partitioner,
+        epath.Path('/tmp'),
         prng_key,
         prng_key,
         0,
-        None,
-        None,
     )
     self.assertEqual(2, train_pg.train_unpadded_global_batch_size)
 

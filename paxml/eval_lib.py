@@ -557,22 +557,12 @@ class _EvalRunner:
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
 
-  def setup_eval_programs(
-      self, summary_base_dir: epath.Path, exit_stack: contextlib.ExitStack
-  ):
-    summary_eval_dirs = [
-        summary_base_dir / f'eval_test_{program.eval_input.name}'
-        for program in self._eval_programs
-    ]
-    eval_summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_eval_dirs
-    ]
-    for program, writer in zip(self._eval_programs, eval_summary_writers):
+  def setup_eval_programs(self, summary_base_dir: epath.Path):
+    for program in self._eval_programs:
       program.setup(
           self._job_log_dir,
           self._eval_key,
-          writer,
+          summary_base_dir=summary_base_dir,
       )
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
@@ -1755,7 +1745,7 @@ def _common_eval_or_decode_loop(
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
       ]
-    eval_runner.setup_eval_programs(summary_base_dir, exit_stack)
+    eval_runner.setup_eval_programs(summary_base_dir)
 
     # Collect then freeze GC, so that GC in the eval loop will not touch the
     # python objects used to initialize the model. Unfreeze at the end of the

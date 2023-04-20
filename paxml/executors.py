@@ -46,16 +46,6 @@ TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
 
 
-def _train_log_interval_steps(
-    train_p: tasks_lib.SingleTask.TrainHParams,
-) -> int:
-  """Returns the interval to log train outputs."""
-  if train_p.log_train_output_interval_steps is not None:
-    return train_p.log_train_output_interval_steps
-  else:
-    return train_p.summary_interval_steps
-
-
 def _maybe_update_latest_model_step(
     train_input: base_input.BaseInput,
     train_input_p: base_input.BaseInput.HParams,
@@ -72,74 +62,32 @@ def _maybe_update_latest_model_step(
   return instantiate(train_input_p)
 
 
-class _SummaryContextManager(contextlib.ExitStack):
-  """Manage summary writers."""
+class _DecodeSummaryWriters(contextlib.ExitStack):
+  """Manage decode summary writers."""
 
   _exit_callbacks = []
 
   def __init__(
-      self,
-      job_log_dir: epath.Path,
-      eval_input_names: Sequence[str],
-      decode_input_names: Sequence[str],
-      eval_skip_train: bool = False,
+      self, job_log_dir: epath.Path, decode_input_names: Sequence[str]
   ):
     """Initialize context manager.
 
     Args:
       job_log_dir: Directory for the job logs.
-      eval_input_names: list of names for the eval input pipelines.
       decode_input_names: list of names for the decode input pipelines.
-      eval_skip_train: By default, we also run eval on the training data input
-        (`eval_train`), specifically on a batch not yet used for training. When
-        set to True, this is skipped.
     """
     super().__init__()
-    self.summary_base_dir = job_log_dir / 'summaries'
-    self.summary_train_dir = self.summary_base_dir / 'train'
-    self.summary_eval_dir = self.summary_base_dir / 'eval_train'
-    self.summary_writer = summary_utils.get_summary_writer
-    if eval_input_names:
-      self.summary_eval_test_dirs = [
-          self.summary_base_dir / f'eval_test_{name}'
-          for name in eval_input_names
-      ]
-    else:
-      self.summary_eval_test_dirs = []
-    if decode_input_names:
-      self.summary_decode_dirs = [
-          self.summary_base_dir / f'decode_test_{name}'
-          for name in decode_input_names
-      ]
-    else:
-      self.summary_decode_dirs = []
-    self.eval_skip_train = eval_skip_train
-
-  def __enter__(
-      self,
-  ) -> Tuple[SummaryWriter, SummaryWriter, SummaryWriter, SummaryWriter]:
-    self.train_summary_writer = self.enter_context(
-        self.summary_writer(self.summary_train_dir)
-    )
-    self.eval_summary_writer = None
-    if not self.eval_skip_train:
-      self.eval_summary_writer = self.enter_context(
-          self.summary_writer(self.summary_eval_dir)
-      )
-    self.eval_test_summary_writers = [
-        self.enter_context(self.summary_writer(d))
-        for d in self.summary_eval_test_dirs
+    self.summary_decode_dirs = [
+        job_log_dir / 'summaries' / f'decode_test_{name}'
+        for name in decode_input_names
     ]
+
+  def __enter__(self) -> Sequence[SummaryWriter]:
     self.decode_summary_writers = [
-        self.enter_context(self.summary_writer(d))
+        self.enter_context(summary_utils.get_summary_writer(d))
         for d in self.summary_decode_dirs
     ]
-    return (
-        self.train_summary_writer,
-        self.eval_summary_writer,
-        self.eval_test_summary_writers,
-        self.decode_summary_writers,
-    )
+    return self.decode_summary_writers
 
 
 class _Checkpointer(Protocol):
@@ -192,8 +140,8 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._checkpointer: _Checkpointer = None
     self._partitioner: partitioning.Partitioner = None
     self._decode_input_ps = None
-    self._train_program = None
-    self._eval_programs = None
+    self._train_program: programs.BaseTrainProgram = None
+    self._eval_programs: Sequence[programs.BaseEvalProgram] = None
 
     # States to lazily initialize in .setup().
     self._train_input_pipeline = None
@@ -399,7 +347,11 @@ class DefaultExecutor(base_executor.BaseExecutor):
         is_vars_replicated,
         self._train_prng_seed,
     )
-    self._checkpointer.wait_until_finished()  # No-op if not async.
+
+    # Shutdown the programs and run necessary cleanup.
+    self._train_program.shutdown()
+    for program in self._eval_programs:
+      program.shutdown()
 
 
 def _train_and_evaluate_common(
@@ -437,46 +389,11 @@ def _train_and_evaluate_common(
   else:
     decode_input_names = []
 
-  eval_input_names = [program.eval_input.name for program in eval_programs]
-
   logging.info('Training loop starting...')
 
-  with _SummaryContextManager(
-      job_log_dir, eval_input_names, decode_input_names, train_p.eval_skip_train
-  ) as (
-      train_summary_writer,
-      eval_summary_writer,
-      eval_test_summary_writers,
-      decode_summary_writers,
-  ):
-    # This only prints the view from the first host machine.
-    summary_utils.write_model_structure(
-        train_summary_writer,
-        partitioned_train_state,
-        is_vars_replicated=is_vars_replicated,
-    )
-    # train_state_provenance is None when model restored from checkpoint
-    if train_state_provenance:
-      summary_utils.write_model_provenance(
-          train_summary_writer, train_state_provenance
-      )
-
-    # TODO(laigd): consider moving this into train program.
-    train_summary_handler = summary_utils.SummaryHandler(
-        train_summary_writer,
-        train_p.summary_interval_steps,
-        accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
-        log_interval_steps=_train_log_interval_steps(train_p),
-        is_async=bool(train_p.device_sync_interval_steps),
-        name='training',
-    )
-    eval_summary_handler = summary_utils.SummaryHandler(
-        eval_summary_writer,
-        train_p.summary_interval_steps,
-        accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
-        name='eval',
-    )
-
+  with _DecodeSummaryWriters(
+      job_log_dir, decode_input_names
+  ) as decode_summary_writers:
     step_i = int(
         py_utils.maybe_unreplicate_for_fully_replicated(
             partitioned_train_state.step
@@ -488,17 +405,24 @@ def _train_and_evaluate_common(
         task,
         train_input,
         partitioner,
+        job_log_dir,
         train_prng_seed,
         eval_prng_seed,
         step_i,
-        train_summary_handler,
-        eval_summary_handler,
     )
-    for program, writer in zip(eval_programs, eval_test_summary_writers):
-      program.setup(job_log_dir, eval_prng_seed, writer)
+    for program in eval_programs:
+      program.setup(job_log_dir, eval_prng_seed)
 
-    # Note: we need to access train_unpadded_global_batch_size after train
-    # program is setup.
+    train_summary_writer = train_program.summary_writer
+    # This only prints the view from the first host machine.
+    summary_utils.write_model_structure(
+        train_summary_writer, partitioned_train_state, is_vars_replicated
+    )
+    # train_state_provenance is None when model restored from checkpoint
+    if train_state_provenance:
+      summary_utils.write_model_provenance(
+          train_summary_writer, train_state_provenance
+      )
     summary_utils.write_total_num_params(train_summary_writer, total_num_params)
     summary_utils.write_global_batch_size(
         train_summary_writer, train_program.train_unpadded_global_batch_size
@@ -570,7 +494,7 @@ def _train_and_evaluate_common(
               metrics_list=eval_metrics_list,
               scoring_metrics_list=eval_scoring_metrics_list,
               steps_per_sec=eval_steps_per_sec,
-              input_names=eval_input_names,
+              input_names=[prog.eval_input.name for prog in eval_programs],
           )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
@@ -646,5 +570,3 @@ def _train_and_evaluate_common(
     )
 
     checkpointer.wait_until_finished()
-    train_summary_handler.close()
-    eval_summary_handler.close()

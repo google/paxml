@@ -16,6 +16,7 @@
 """The basic program concept that encapsulates a per-step runnable."""
 import abc
 import collections
+import contextlib
 import dataclasses
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
@@ -25,9 +26,9 @@ from jax.experimental import multihost_utils
 from jax import monitoring
 import numpy as np
 
-from etils import epath
 from absl import flags
 from absl import logging
+from etils import epath
 from paxml import io_utils
 from paxml import metric_utils
 from paxml import partitioning
@@ -53,6 +54,7 @@ PRNGKey = pytypes.PRNGKey
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 EvaluationMode = io_utils.EvaluationMode
+SummaryWriter = tf.summary.SummaryWriter
 
 NestedMap = py_utils.NestedMap
 TrainState = train_states.TrainState
@@ -74,6 +76,20 @@ def get_eval_train_state(task: tasks_lib.SingleTask, state: TrainState):
   else:
     eval_state = state.to_eval_state()
   return eval_state
+
+
+def _summary_base_dir(job_log_dir: epath.Path) -> epath.Path:
+  return job_log_dir / 'summaries'
+
+
+def _train_log_interval_steps(
+    train_p: tasks_lib.SingleTask.TrainHParams,
+) -> int:
+  """Returns the interval to log train outputs."""
+  if train_p.log_train_output_interval_steps is not None:
+    return train_p.log_train_output_interval_steps
+  else:
+    return train_p.summary_interval_steps
 
 
 @dataclasses.dataclass
@@ -100,6 +116,10 @@ class Program(metaclass=abc.ABCMeta):
   def run(self, state: TrainState, train_step: int) -> ProgramOutput:
     """Returns the program on given state and train step."""
 
+  @abc.abstractmethod
+  def shutdown(self) -> None:
+    """Runs any necessary cleanup."""
+
 
 class BaseTrainProgram(Program):
   """A lean interface of a basic train program.
@@ -118,12 +138,13 @@ class BaseTrainProgram(Program):
     self._train_prng_seed = None
     self._eval_prng_seed = None
     self._initial_step = -1
-    self._train_summary_handler = None
-    self._eval_train_summary_handler = None
 
     # States to initialize lazily in self.setup().
     self._train_unpadded_global_batch_size = None
     self._profiler = None
+    self._train_summary_writer = None
+    self._train_summary_handler = None
+    self._eval_train_summary_handler = None
     self._train_summary_last_time = None
     self._train_summary_last_step = None
 
@@ -131,21 +152,29 @@ class BaseTrainProgram(Program):
     self._first_step_completion_time = None
     self._init_duration_set = False
 
+    # Used to enter context of various summary writer at .setup().
+    self._exitstack = contextlib.ExitStack()
+
   @property
   def train_input(self) -> base_input.BaseInput:
+    assert self._train_input
     return self._train_input
+
+  @property
+  def summary_writer(self) -> SummaryWriter:
+    assert self._train_summary_writer
+    return self._train_summary_writer
 
   def setup(
       self,
       task: tasks_lib.SingleTask,
       train_input: base_input.BaseInput,
       partitioner: partitioning.Partitioner,
+      job_log_dir: epath.Path,
       # TODO(laigd): it should take a root prng key and split it.
       train_prng_seed: pytypes.PRNGKey,
       eval_prng_seed: pytypes.PRNGKey,
       init_step: int,
-      train_summary_handler: Any,
-      eval_summary_handler: Any,
   ) -> None:
     self._task = task
     self._train_input = train_input
@@ -153,14 +182,40 @@ class BaseTrainProgram(Program):
     self._train_prng_seed = train_prng_seed
     self._eval_prng_seed = eval_prng_seed
     self._initial_step = init_step
-    self._train_summary_handler = train_summary_handler
-    self._eval_train_summary_handler = eval_summary_handler
+
+    # Creates the train summary writer and handler.
+    summary_base_dir = _summary_base_dir(job_log_dir)
+    summary_train_dir = summary_base_dir / 'train'
+    self._train_summary_writer = self._exitstack.enter_context(
+        summary_utils.get_summary_writer(summary_train_dir)
+    )
+    train_p = self._task.hparams.train
+    self._train_summary_handler = summary_utils.SummaryHandler(
+        self._train_summary_writer,
+        train_p.summary_interval_steps,
+        accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
+        log_interval_steps=_train_log_interval_steps(train_p),
+        is_async=bool(train_p.device_sync_interval_steps),
+        name='training',
+    )
+
+    # Creates the summary writer and handler for eval on train input.
+    if not train_p.eval_skip_train:
+      summary_eval_train_dir = summary_base_dir / 'eval_train'
+      eval_train_summary_writer = self._exitstack.enter_context(
+          summary_utils.get_summary_writer(summary_eval_train_dir)
+      )
+      self._eval_train_summary_handler = summary_utils.SummaryHandler(
+          eval_train_summary_writer,
+          train_p.summary_interval_steps,
+          accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
+          name='eval',
+      )
 
     # Initializes other states.
     self._train_unpadded_global_batch_size = (
         train_input.hparams.cls.get_global_batch_size(train_input.hparams)
     )
-    train_p = self._task.hparams.train
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
         min_duration_sec=train_p.profiler_min_duration_sec,
@@ -388,6 +443,12 @@ class BaseTrainProgram(Program):
   def train_unpadded_global_batch_size(self) -> int:
     return self._train_unpadded_global_batch_size
 
+  def shutdown(self) -> None:
+    self._train_summary_handler.close()
+    if self._eval_train_summary_handler:
+      self._eval_train_summary_handler.close()
+    self._exitstack.close()
+
 
 class SingleTaskTrainProgram(BaseTrainProgram):
   """Train program that assumes a single task on a single dataset."""
@@ -556,19 +617,30 @@ class BaseEvalProgram(Program):
     self._eval_prng_seed = None
     self._eval_summary_writer = None
 
+    # Used to enter context of the summary writer at .setup().
+    self._exitstack = contextlib.ExitStack()
+
   @property
   def eval_input(self) -> base_input.BaseInput:
+    assert self._eval_input_pipeline
     return self._eval_input_pipeline
 
   def setup(
       self,
       job_log_dir: epath.Path,
       eval_prng_seed: pytypes.PRNGKey,
-      eval_summary_writer: Any,
+      summary_base_dir: Optional[epath.Path] = None,
   ) -> None:
     self._job_log_dir = job_log_dir
     self._eval_prng_seed = eval_prng_seed
-    self._eval_summary_writer = eval_summary_writer
+
+    # Creates the eval summary writer.
+    if not summary_base_dir:
+      summary_base_dir = _summary_base_dir(job_log_dir)
+    summary_dir = summary_base_dir / f'eval_test_{self.eval_input.name}'
+    self._eval_summary_writer = self._exitstack.enter_context(
+        summary_utils.get_summary_writer(summary_dir)
+    )
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     # TODO(laigd): implement and use this.
@@ -711,6 +783,9 @@ class BaseEvalProgram(Program):
   @abc.abstractmethod
   def eval_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
     """The partition spec for the eval inputs."""
+
+  def shutdown(self) -> None:
+    self._exitstack.close()
 
 
 class SingleTaskEvalProgram(BaseEvalProgram):
