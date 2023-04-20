@@ -393,7 +393,6 @@ def run_eval_loop_over_test_splits(
     test_eval_programs: Sequence[programs.BaseEvalProgram],
     eval_partitioned_train_state: TrainState,
     eval_prng_seed: jax.random.KeyArray,
-    summary_writers: List[SummaryWriter],
     step: int,
     job_log_dir: epath.Path,
 ) -> Tuple[
@@ -407,7 +406,6 @@ def run_eval_loop_over_test_splits(
     test_eval_programs: A list of EvalPrograms to conduct eval.
     eval_partitioned_train_state: Train State to use for eval.
     eval_prng_seed: RNG seed for eval programs.
-    summary_writers: The summary writer objects to log summaries.
     step: The step at which we are evaling the model.
     job_log_dir: Job's log directory in which scoring outputs will be written.
 
@@ -420,10 +418,7 @@ def run_eval_loop_over_test_splits(
   eval_metrics_list = []
   eval_scoring_metrics_list = []
   num_eval_steps = []
-  assert len(summary_writers) == len(test_eval_programs)
-  for writer, eval_program in zip(summary_writers, test_eval_programs):
-    # TODO(laigd): call setup in eval runner.
-    eval_program.setup(job_log_dir, eval_prng_seed, writer)
+  for eval_program in test_eval_programs:
     program_out = eval_program.run(eval_partitioned_train_state, step)
     eval_metrics_list.append(program_out.aux.eval_metrics)
     eval_scoring_metrics_list.append(program_out.aux.eval_scoring_metrics)
@@ -518,10 +513,10 @@ def evaluate(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
   prng_key, eval_key = jax.random.split(prng_key)
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
-  eval_programs = eval_runner.eval_programs
+  eval_runner = _EvalRunner(
+      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+  )
 
   decode_once_fn = None
   decode_inputs = None
@@ -531,13 +526,12 @@ def evaluate(
       checkpointer,
       jax_task.hparams,
       job_log_dir,
-      eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
-      eval_programs,
+      eval_runner,
       decode_inputs,
   )
 
@@ -551,6 +545,7 @@ class _EvalRunner:
       partitioner: partitioning.Partitioner,
       eval_input_ps: Sequence[base_input.BaseInput.HParams],
       job_log_dir: epath.Path,
+      eval_key: PRNGKey,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -559,51 +554,60 @@ class _EvalRunner:
         programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
         for input_p in eval_input_ps
     ]
+    logging.info('eval prng_key: %s', eval_key)
+    self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
+
+  def setup_eval_programs(
+      self, summary_base_dir: epath.Path, exit_stack: contextlib.ExitStack
+  ):
+    summary_eval_dirs = [
+        summary_base_dir / f'eval_test_{program.eval_input.name}'
+        for program in self._eval_programs
+    ]
+    eval_summary_writers = [
+        exit_stack.enter_context(summary_utils.get_summary_writer(d))
+        for d in summary_eval_dirs
+    ]
+    for program, writer in zip(self._eval_programs, eval_summary_writers):
+      program.setup(
+          self._job_log_dir,
+          self._eval_key,
+          writer,
+      )
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
     )
 
-  @property
-  def eval_programs(self):
-    return self._eval_programs
-
-  def get_partition_run_one_step_fn(self, eval_key):
-    logging.info('eval prng_key: %s', eval_key)
-    eval_key = self._partitioner.preprocess_prng_key(eval_key)
-
-    def eval_one_step_fn(train_state, eval_summary_writers):
-      if not self._eval_programs:
-        return tuning_lib.EvalMetrics(
-            metrics_list=[],
-            scoring_metrics_list=[],
-            steps_per_sec=0,
-            input_names=[],
-        )
-
-      with py_utils.timeit() as eval_period:
-        step_i = int(
-            py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-        )
-        eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-            run_eval_loop_over_test_splits(
-                self._eval_programs,
-                train_state.to_eval_state(),
-                eval_key,
-                eval_summary_writers,
-                step_i,
-                self._job_log_dir,
-            )
-        )
+  def run_one_step(self, train_state):
+    if not self._eval_programs:
       return tuning_lib.EvalMetrics(
-          metrics_list=eval_metrics_list,
-          scoring_metrics_list=eval_scoring_metrics_list,
-          steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-          input_names=[
-              program.eval_input.name for program in self._eval_programs
-          ],
+          metrics_list=[],
+          scoring_metrics_list=[],
+          steps_per_sec=0,
+          input_names=[],
       )
 
-    return eval_one_step_fn
+    with py_utils.timeit() as eval_period:
+      step_i = int(
+          py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+      )
+      eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
+          run_eval_loop_over_test_splits(
+              self._eval_programs,
+              train_state.to_eval_state(),
+              self._eval_key,
+              step_i,
+              self._job_log_dir,
+          )
+      )
+    return tuning_lib.EvalMetrics(
+        metrics_list=eval_metrics_list,
+        scoring_metrics_list=eval_scoring_metrics_list,
+        steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
+        input_names=[
+            program.eval_input.name for program in self._eval_programs
+        ],
+    )
 
 
 def decode(
@@ -810,11 +814,10 @@ def decode_pmap_model(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-
-  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
   prng_key, eval_key = jax.random.split(prng_key)
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
-  eval_programs = eval_runner.eval_programs
+  eval_runner = _EvalRunner(
+      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+  )
 
   # JaxContext needed for parameter sharing.
   context_p = base_layer.JaxContext.HParams(do_eval=True)
@@ -850,13 +853,12 @@ def decode_pmap_model(
       checkpointer,
       task_p,
       job_log_dir,
-      eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
-      eval_programs,
+      eval_runner,
       decode_inputs,
   )
 
@@ -1276,11 +1278,10 @@ def decode_spmd_model(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-
-  eval_runner = _EvalRunner(jax_task, partitioner, eval_input_p, job_log_dir)
-  prng_key, eval_key = jax.random.split(prng_key, 2)
-  eval_one_step_fn = eval_runner.get_partition_run_one_step_fn(eval_key)
-  eval_programs = eval_runner.eval_programs
+  prng_key, eval_key = jax.random.split(prng_key)
+  eval_runner = _EvalRunner(
+      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+  )
 
   if inputs:
     # Peek to avoid exhausting the input pipeline.
@@ -1325,13 +1326,12 @@ def decode_spmd_model(
       checkpointer,
       task_p,
       job_log_dir,
-      eval_one_step_fn,
       decode_once_fn,
       partitioned_train_state,
       train_state_metadata,
       early_stopping_fn,
       continuous_decode,
-      eval_programs,
+      eval_runner,
       decode_inputs,
   )
 
@@ -1734,13 +1734,12 @@ def _common_eval_or_decode_loop(
     checkpointer: _EvalCheckpointer,
     task_p: tasks_lib.SingleTask.HParams,
     job_log_dir: epath.Path,
-    eval_one_step_fn: Callable[..., tuning_lib.EvalMetrics],
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: TrainState,
     train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
-    eval_programs: Sequence[programs.BaseEvalProgram],
+    eval_runner: _EvalRunner,
     decode_inputs: Optional[Sequence[base_input.BaseInput]],
 ):
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
@@ -1750,20 +1749,13 @@ def _common_eval_or_decode_loop(
     summary_decode_dirs = [
         summary_base_dir / f'decode_test_{inp.name}' for inp in decode_inputs
     ]
-  summary_eval_dirs = [
-      summary_base_dir / f'eval_test_{prg.eval_input.name}'
-      for prg in eval_programs
-  ]
   with contextlib.ExitStack() as exit_stack:
     if decode_inputs:
       summary_writers = [
           exit_stack.enter_context(summary_utils.get_summary_writer(d))
           for d in summary_decode_dirs
       ]
-    eval_summary_writers = [
-        exit_stack.enter_context(summary_utils.get_summary_writer(d))
-        for d in summary_eval_dirs
-    ]
+    eval_runner.setup_eval_programs(summary_base_dir, exit_stack)
 
     # Collect then freeze GC, so that GC in the eval loop will not touch the
     # python objects used to initialize the model. Unfreeze at the end of the
@@ -1782,9 +1774,7 @@ def _common_eval_or_decode_loop(
           )
 
         logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
-        eval_metrics = eval_one_step_fn(
-            partitioned_train_state, eval_summary_writers
-        )
+        eval_metrics = eval_runner.run_one_step(partitioned_train_state)
 
       if not continuous_decode:
         last_checkpoint_step = last_checkpoint_step or 1

@@ -411,7 +411,7 @@ def _train_and_evaluate_common(
     train_state_provenance: TrainStateProvenance,
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
-    test_eval_programs: Sequence[programs.BaseEvalProgram],
+    eval_programs: Sequence[programs.BaseEvalProgram],
     decode_input_p,
     total_num_params,
     early_stopping_fn,
@@ -437,15 +437,12 @@ def _train_and_evaluate_common(
   else:
     decode_input_names = []
 
-  eval_input_names = [prg.eval_input.name for prg in test_eval_programs]
+  eval_input_names = [program.eval_input.name for program in eval_programs]
 
   logging.info('Training loop starting...')
 
   with _SummaryContextManager(
-      job_log_dir,
-      eval_input_names,
-      decode_input_names,
-      train_p.eval_skip_train,
+      job_log_dir, eval_input_names, decode_input_names, train_p.eval_skip_train
   ) as (
       train_summary_writer,
       eval_summary_writer,
@@ -485,6 +482,8 @@ def _train_and_evaluate_common(
             partitioned_train_state.step
         )
     )
+
+    # Sets up the programs.
     train_program.setup(
         task,
         train_input,
@@ -495,6 +494,8 @@ def _train_and_evaluate_common(
         train_summary_handler,
         eval_summary_handler,
     )
+    for program, writer in zip(eval_programs, eval_test_summary_writers):
+      program.setup(job_log_dir, eval_prng_seed, writer)
 
     # Note: we need to access train_unpadded_global_batch_size after train
     # program is setup.
@@ -552,15 +553,14 @@ def _train_and_evaluate_common(
             task, partitioned_train_state
         )
         # If we have eval test then also evaluate on test.
-        if test_eval_programs:
+        if eval_programs:
           logging.debug('  Performing eval_step() runs on test splits.')
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
-                    test_eval_programs,
+                    eval_programs,
                     eval_partitioned_train_state,
                     eval_prng_seed,
-                    eval_test_summary_writers,
                     step_i,
                     job_log_dir,
                 )
@@ -570,10 +570,7 @@ def _train_and_evaluate_common(
               metrics_list=eval_metrics_list,
               scoring_metrics_list=eval_scoring_metrics_list,
               steps_per_sec=eval_steps_per_sec,
-              input_names=[
-                  eval_program.eval_input.name
-                  for eval_program in test_eval_programs
-              ],
+              input_names=eval_input_names,
           )
           logging.debug(
               '  Completed eval_step() runs on test splits in %f seconds.',
