@@ -52,6 +52,7 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
+import orbax.checkpoint
 
 from paxml import checkpoints  # mapped to internal
 
@@ -1180,6 +1181,11 @@ class SingleTask(base_task.BaseTask):
         `enforce_restore_shape_check` to counteract this, though this may not
         necessarily be suitable for all cases, particularly when
         padding/truncating is involved.
+      external_checkpoint_path: A path from which to restore an external
+        checkpoint. The checkpoint is used for restoration if there are no
+        checkpoints present in the main directory.
+      external_checkpoint_handler: An orbax.checkpoint.CheckpointHandler
+        defining logic for loading the checkpoint.
     """
 
     learner: pax_fiddle.Config[learners_lib.Learner] = (
@@ -1217,6 +1223,11 @@ class SingleTask(base_task.BaseTask):
     tensorstore_metadata_key: Optional[str] = None
     enable_input_checkpointing: Optional[bool] = False
     restore_transformations: Optional[Dict[str, Any]] = None
+    external_checkpoint_path: Optional[epath.Path] = None
+    external_checkpoint_handler: Optional[
+        orbax.checkpoint.CheckpointHandler
+    ] = None
+
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
   @dataclasses.dataclass(frozen=True)

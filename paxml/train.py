@@ -42,6 +42,7 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
+import orbax.checkpoint
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -119,6 +120,30 @@ def _parse_duration(
   return datetime.timedelta(seconds=int_value)
 
 
+def _restore_from_external_checkpoint(
+    path: epath.Path,
+    checkpoint_handler: Optional[orbax.checkpoint.CheckpointHandler],
+    train_state_metadata: trainer_lib.TrainStateMetadata,
+    partitioner: partitioning.Partitioner,
+    train_input_pipeline: Optional[base_input.BaseInput] = None,
+    transformations: Optional[Dict[str, Any]] = None,
+):
+  """Restores a checkpoint from an external, possibly non-Pax, location."""
+  if checkpoint_handler is None:
+    raise ValueError(
+        'Must provide CheckpointHandler to load external checkpoint.'
+    )
+  # TODO(b/278628399): Also support customized loading of train_input.
+  del train_input_pipeline
+  checkpointer = Checkpointer(checkpoint_handler)
+  return checkpointer.restore(
+      path,
+      item=train_state_metadata,
+      partitioner=partitioner,
+      transformations=transformations,
+  )
+
+
 class _TrainingCheckpointer(metaclass=abc.ABCMeta):
   """Adapts particular implementations of checkpointing into a common API."""
 
@@ -186,6 +211,10 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       enable_checkpoint_saving: bool = True,
       ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
+      external_checkpoint_path: Optional[epath.Path] = None,
+      external_checkpoint_handler: Optional[
+          orbax.checkpoint.CheckpointHandler
+      ] = None,
   ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
@@ -194,6 +223,10 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     self._enable_checkpoint_saving = enable_checkpoint_saving
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
+
+    self._external_checkpoint_path = external_checkpoint_path
+    # TODO(b/278628399) Consider providing default implementation.
+    self._external_checkpoint_handler = external_checkpoint_handler
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -299,10 +332,20 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     step = self.checkpoint_manager.latest_step()
-    if step is None:
-      partitioned_train_state = None
-    else:
-      with py_utils.timeit() as restore_period:
+    with py_utils.timeit() as restore_period:
+      if step is None:
+        if self._external_checkpoint_path is None:
+          partitioned_train_state = None
+        else:
+          partitioned_train_state = _restore_from_external_checkpoint(
+              self._external_checkpoint_path,
+              self._external_checkpoint_handler,
+              metadata,
+              partitioner,
+              train_input_pipeline=train_input_pipeline,
+              transformations=self._restore_transformations,
+          )
+      else:
         partitioned_train_state = self._restore_with_args(
             step,
             metadata.padded_global_shapes,
@@ -311,9 +354,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
             metadata.partition_specs,
             train_input_pipeline,
         )
-      monitoring.record_event_duration_secs(
-          _READ_CHECKPOINT_EVENT, restore_period.elapsed
-      )
+    monitoring.record_event_duration_secs(
+        _READ_CHECKPOINT_EVENT, restore_period.elapsed
+    )
 
     root_prng_key, partitioned_train_state, train_state_provenance = (
         partitioner.initialize_prng_key_and_train_state(
@@ -346,6 +389,10 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       enable_checkpoint_saving: bool = True,
       ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
+      external_checkpoint_path: Optional[epath.Path] = None,
+      external_checkpoint_handler: Optional[
+          orbax.checkpoint.CheckpointHandler
+      ] = None,
   ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
@@ -354,6 +401,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._enable_checkpoint_saving = enable_checkpoint_saving
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
+    self._external_checkpoint_path = external_checkpoint_path
+    self._external_checkpoint_handler = external_checkpoint_handler
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -411,10 +460,20 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
+    step = self.checkpoint_manager.latest_step()
     with py_utils.timeit() as restore_period:
-      step = self.checkpoint_manager.latest_step()
       if step is None:
-        train_state = None
+        if self._external_checkpoint_path is None:
+          train_state = None
+        else:
+          train_state = _restore_from_external_checkpoint(
+              self._external_checkpoint_path,
+              self._external_checkpoint_handler,
+              metadata,
+              partitioner,
+              train_input_pipeline=train_input_pipeline,
+              transformations=self._restore_transformations,
+          )
       else:
         train_state = self._restore_with_args(
             step,
@@ -645,6 +704,8 @@ def _create_checkpointer(
         enable_checkpoint_saving=enable_checkpoint_saving,
         ocdbt_coordinator_server=ocdbt_coordinator_server,
         restore_transformations=restore_transformations,
+        external_checkpoint_path=task_p.train.external_checkpoint_path,
+        external_checkpoint_handler=task_p.train.external_checkpoint_handler,
     )
   else:
     checkpointer = _OrbaxPmapTrainingCheckpointer(
@@ -654,6 +715,8 @@ def _create_checkpointer(
         enable_checkpoint_saving=enable_checkpoint_saving,
         ocdbt_coordinator_server=ocdbt_coordinator_server,
         restore_transformations=restore_transformations,
+        external_checkpoint_path=task_p.train.external_checkpoint_path,
+        external_checkpoint_handler=task_p.train.external_checkpoint_handler,
     )
 
   return checkpointer

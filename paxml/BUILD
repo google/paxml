@@ -470,6 +470,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
+        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
         "//praxis:asserts",
         "//praxis:base_hyperparams",
@@ -512,6 +513,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
