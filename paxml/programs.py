@@ -586,16 +586,44 @@ def _maybe_write_scoring_outputs(
 
 class BaseEvalProgram(Program):
 
-  def __init__(
+  def __init__(self, input_p: base_input.BaseInput.HParams):
+    self._input_p = input_p
+
+    # States to set in self.setup()
+    self._task = None
+    self._partitioner: partitioning.Partitioner = None
+    self._job_log_dir = None
+    self._eval_prng_seed = None
+
+    # States to initialize lazily in self.setup()
+    self._eval_input_pipeline = None
+    self._name = None
+    self._eval_unpadded_global_batch_size: int = None
+    self._eval_num_steps: int = None
+    self._eval_summary_writer = None
+
+    # Used to enter context of the summary writer at .setup().
+    self._exitstack = contextlib.ExitStack()
+
+  @property
+  def eval_input(self) -> base_input.BaseInput:
+    assert self._eval_input_pipeline
+    return self._eval_input_pipeline
+
+  def setup(
       self,
       task: tasks_lib.SingleTask,
-      input_p: base_input.BaseInput.HParams,
       partitioner: partitioning.Partitioner,
-  ):
+      job_log_dir: epath.Path,
+      eval_prng_seed: pytypes.PRNGKey,
+      summary_base_dir: Optional[epath.Path] = None,
+  ) -> None:
     self._task = task
-    self._input_p = input_p
     self._partitioner = partitioner
+    self._job_log_dir = job_log_dir
+    self._eval_prng_seed = eval_prng_seed
 
+    # Creates the eval input pipeline.
     logging.debug('Initializing eval_input pipeline : %s', self._input_p)
     self._eval_input_pipeline = instantiate(
         self._partitioner.preprocess_input_params(self._input_p)
@@ -611,28 +639,6 @@ class BaseEvalProgram(Program):
         if self._input_p.reset_for_eval
         else self._input_p.eval_loop_num_batches
     )
-
-    # States to initialize lazily by self.setup()
-    self._job_log_dir = None
-    self._eval_prng_seed = None
-    self._eval_summary_writer = None
-
-    # Used to enter context of the summary writer at .setup().
-    self._exitstack = contextlib.ExitStack()
-
-  @property
-  def eval_input(self) -> base_input.BaseInput:
-    assert self._eval_input_pipeline
-    return self._eval_input_pipeline
-
-  def setup(
-      self,
-      job_log_dir: epath.Path,
-      eval_prng_seed: pytypes.PRNGKey,
-      summary_base_dir: Optional[epath.Path] = None,
-  ) -> None:
-    self._job_log_dir = job_log_dir
-    self._eval_prng_seed = eval_prng_seed
 
     # Creates the eval summary writer.
     if not summary_base_dir:
@@ -793,11 +799,9 @@ class SingleTaskEvalProgram(BaseEvalProgram):
 
   def __init__(
       self,
-      task: tasks_lib.SingleTask,
       input_p: base_input.BaseInput.HParams,
-      partitioner: partitioning.Partitioner,
   ):
-    super().__init__(task, input_p, partitioner)
+    super().__init__(input_p)
 
     # Eval step function information.
     self._eval_step_created = False

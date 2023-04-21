@@ -551,8 +551,7 @@ class _EvalRunner:
     self._partitioner = partitioner
     self._job_log_dir = job_log_dir
     self._eval_programs = [
-        programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
-        for input_p in eval_input_ps
+        programs.SingleTaskEvalProgram(input_p) for input_p in eval_input_ps
     ]
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
@@ -560,6 +559,8 @@ class _EvalRunner:
   def setup_eval_programs(self, summary_base_dir: epath.Path):
     for program in self._eval_programs:
       program.setup(
+          self._jax_task,
+          self._partitioner,
           self._job_log_dir,
           self._eval_key,
           summary_base_dir=summary_base_dir,

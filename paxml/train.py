@@ -840,14 +840,6 @@ def train_and_evaluate(
   for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():  # pytype: disable=attribute-error
     logging.info('  %s', line)
 
-  eval_input_p = []
-  if (
-      eval_on_test
-      and task_p.train.eval_interval_steps is not None
-      and task_p.train.eval_interval_steps > 0
-  ):
-    eval_input_p = [v for v in input_p if not v.is_training]
-
   if (
       run_decode
       and task_p.train.decode_interval_steps is not None
@@ -906,12 +898,13 @@ def train_and_evaluate(
 
   # Creates the train and eval programs.
   train_program = experiment_config.train_program()
-  # TODO(laigd): make eval programs configurable.
-  eval_programs = [
-      programs.SingleTaskEvalProgram(jax_task, input_p, partitioner)
-      for input_p in eval_input_p
-  ]
-  trainer_lib.check_unique_names([prog.eval_input for prog in eval_programs])
+  eval_programs = []
+  if (
+      eval_on_test
+      and task_p.train.eval_interval_steps is not None
+      and task_p.train.eval_interval_steps > 0
+  ):
+    eval_programs = experiment_config.eval_programs()
 
   # Creates the executor and run the training pipeline.
   executor = experiment_config.executor()

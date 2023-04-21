@@ -411,7 +411,8 @@ def _train_and_evaluate_common(
         step_i,
     )
     for program in eval_programs:
-      program.setup(job_log_dir, eval_prng_seed)
+      program.setup(task, partitioner, job_log_dir, eval_prng_seed)
+    trainer_lib.check_unique_names([prog.eval_input for prog in eval_programs])
 
     train_summary_writer = train_program.summary_writer
     # This only prints the view from the first host machine.

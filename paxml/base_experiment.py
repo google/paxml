@@ -134,6 +134,15 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the train program to use for training the model."""
     return programs.SingleTaskTrainProgram()
 
+  def eval_programs(self) -> List[programs.BaseEvalProgram]:
+    """Returns the list of eval programs to use for model evaluation."""
+    eval_programs = [
+        programs.SingleTaskEvalProgram(input_p)
+        for input_p in self.datasets()
+        if not input_p.is_training
+    ]
+    return eval_programs
+
   def executor(self) -> Optional[base_executor.BaseExecutor]:
     """Returns the executor to use to run the programs.
 
