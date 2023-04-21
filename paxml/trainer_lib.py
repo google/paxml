@@ -850,8 +850,14 @@ def train_step_single_learner(
     if isinstance(
         learner.stochastic_gradient, sgf.DpSgdStochasticGradient
     ):
-      base_layer.add_global_summary('frac_clipped',
-                                    aux_info.dp_aux_info['frac_clipped'])
+      if base_layer.is_running_under_pmap():
+        frac_clipped = jax.lax.pmean(
+            aux_info.dp_aux_info['frac_clipped'],
+            axis_name=PMAP_PARALLEL_AXIS_NAME,
+        )
+      else:
+        frac_clipped = aux_info.dp_aux_info['frac_clipped']
+      base_layer.add_global_summary('frac_clipped', frac_clipped)
     bwd_summary_tensors = base_layer.all_global_summaries()
 
   summary_tensors = NestedMap()
