@@ -81,6 +81,7 @@ py_strict_test(
         # Implicit numpy dependency.
         "//paxml:test_helper",
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         "//praxis:test_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],

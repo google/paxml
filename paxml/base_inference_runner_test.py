@@ -27,6 +27,7 @@ from paxml import train_states
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import base_model
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import test_utils
@@ -62,8 +63,9 @@ class BaseInferenceRunnerTest(test_utils.TestCase):
         tensor=tfds.features.Tensor(shape=(8,), dtype=tf.float32),
         nested=NestedMap(text=tfds.features.Text()))
 
-    infer_runner_p = DummyInference.HParams(
-        output=dummy_output, output_schema=dummy_schema)
+    infer_runner_p = pax_fiddle.Config(
+        DummyInference, output=dummy_output, output_schema=dummy_schema
+    )
     infer_runner = infer_runner_p.Instantiate(model=None)
 
     serialized_outputs = infer_runner.serialize_outputs(

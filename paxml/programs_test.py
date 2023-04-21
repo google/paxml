@@ -101,22 +101,22 @@ class ProgramTestBase(test_utils.TestCase):
     cls.mesh = jax.sharding.Mesh(devices, 'x')
 
     # Set up input data
-    train_input_p = TestInput.HParams(batch_size=2)
+    train_input_p = pax_fiddle.Config(TestInput, batch_size=2)
     train_input_p = trainer_lib.adjust_input_params_for_small_batch(
         train_input_p, cls.mesh
     )
     cls.train_input = instantiate(train_input_p)
 
     # Set up the task.
-    task_p = tasks_lib.SingleTask.HParams(name='test_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='test_task')
     task_p.model = pax_fiddle.Config(TestModel, name='test_ffn')
     task_p.model.ici_mesh_shape = [2]
     task_p.model.mesh_axis_names = cls.mesh.axis_names
     lp = task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     lp.optimizer.learning_rate = 0.0
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     cls.task = instantiate(task_p)
 
 

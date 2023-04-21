@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 from paxml import base_metrics
 from praxis import base_layer
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import test_utils
 
@@ -56,9 +57,15 @@ class BaseMetricsTest(test_utils.TestCase):
   def test_reshard_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [8, 10, 100, 128])
 
-    mean_metrics_p = base_metrics.MeanMetrics.HParams(metric_keys=['mean'])
-    max_metrics_p = base_metrics.MaxMetrics.HParams(metric_keys=['max'])
-    hist_metrics_p = base_metrics.HistogramMetrics.HParams(histogram_key='hist')
+    mean_metrics_p = pax_fiddle.Config(
+        base_metrics.MeanMetrics, metric_keys=['mean']
+    )
+    max_metrics_p = pax_fiddle.Config(
+        base_metrics.MaxMetrics, metric_keys=['max']
+    )
+    hist_metrics_p = pax_fiddle.Config(
+        base_metrics.HistogramMetrics, histogram_key='hist'
+    )
     composite_p = base_metrics.CompositeMetrics.config(
         metrics_p=[mean_metrics_p, max_metrics_p, hist_metrics_p])
     composite = instantiate(composite_p)
@@ -75,8 +82,12 @@ class BaseMetricsTest(test_utils.TestCase):
   def test_aggregate_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
 
-    mean_metrics_p = base_metrics.MeanMetrics.HParams(metric_keys=['mean'])
-    max_metrics_p = base_metrics.MaxMetrics.HParams(metric_keys=['max'])
+    mean_metrics_p = pax_fiddle.Config(
+        base_metrics.MeanMetrics, metric_keys=['mean']
+    )
+    max_metrics_p = pax_fiddle.Config(
+        base_metrics.MaxMetrics, metric_keys=['max']
+    )
     composite_p = base_metrics.CompositeMetrics.config(
         metrics_p=[mean_metrics_p, max_metrics_p])
     composite = instantiate(composite_p)
@@ -97,8 +108,9 @@ class LossAggregatorTest(test_utils.TestCase):
   def test_loss_aggregate_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
 
-    loss_metrics_p = base_metrics.LossAggregator.HParams(
-        name='basic_loss', loss_key='loss')
+    loss_metrics_p = pax_fiddle.Config(
+        base_metrics.LossAggregator, name='basic_loss', loss_key='loss'
+    )
     loss_aggregator = instantiate(loss_metrics_p)
 
     def _decode_step(feats):
@@ -117,12 +129,18 @@ class LossAggregatorTest(test_utils.TestCase):
   def test_multiloss_aggregate_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
 
-    loss_metrics_p = base_metrics.MultiLossAggregator.HParams(
-        name='multiloss', loss_keys=['loss_a', 'loss_b'])
+    loss_metrics_p = pax_fiddle.Config(
+        base_metrics.MultiLossAggregator,
+        name='multiloss',
+        loss_keys=['loss_a', 'loss_b'],
+    )
     loss_aggregator = instantiate(loss_metrics_p)
 
-    metrics_p = base_metrics.MeanMetrics.HParams(
-        name='metrics', metric_keys=['loss_a', 'loss_b'])
+    metrics_p = pax_fiddle.Config(
+        base_metrics.MeanMetrics,
+        name='metrics',
+        metric_keys=['loss_a', 'loss_b'],
+    )
     metrics_aggregator = instantiate(metrics_p)
 
     def _decode_step(feats):

@@ -197,9 +197,11 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
       # seed = jnp.int32(multihost_utils.broadcast_one_to_all(seed))
       logging.info('Train input seed: %s',
                    'None' if seed is None else seed)
-    p = seqio_input.SeqIOInput.HParams(
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput,
         name='C4Train' if is_training else 'C4Validation',
-        mixture_name='c4_lm_v301_gpt' if is_training
+        mixture_name='c4_lm_v301_gpt'
+        if is_training
         else 'c4_lm_v301_gpt_eval_tokenized',
         split_name='train2' if is_training else 'validation_tokenized_5662seqs',
         task_feature_lengths={'targets': self.MAX_SEQ_LEN},
@@ -238,7 +240,8 @@ def set_adam_and_learning_rate_schedule(
   """Sets the Adam optimizer and the learning rate schedule."""
   lp = task_p.train.learner
   lp.loss_name = 'total_loss'
-  lp.optimizer = optimizers.Adam.HParams(
+  lp.optimizer = pax_fiddle.Config(
+      optimizers.Adam,
       beta1=cls.ADAM_BETA1 if cls.ADAM_BETA1 else 0.9,
       beta2=cls.ADAM_BETA2 if cls.ADAM_BETA2 else 0.999,
       weight_decay=cls.WEIGHT_DECAY if cls.WEIGHT_DECAY else 0.0,
@@ -269,7 +272,8 @@ def set_adam_and_learning_rate_schedule(
       lp.optimizer.learning_rate = 3e-5
 
   if cls.LR_SCHEDULE == 'linear_rampup_exponential_decay':
-    lp.optimizer.lr_schedule = schedules.LinearRampupExponentialDecay.HParams(
+    lp.optimizer.lr_schedule = pax_fiddle.Config(
+        schedules.LinearRampupExponentialDecay,
         warmup_steps=cls.LR_LRED_WARMUP,
         decay_start=cls.LR_LRED_DECAY_START,
         decay_end=cls.LR_LRED_DECAY_END,
@@ -296,7 +300,8 @@ def set_adam_and_learning_rate_schedule(
       decay_end_step = math.ceil(108600.0 * 1536 / global_batch_size - 1e-6)
       assert decay_end_step > 0
 
-    lp.optimizer.lr_schedule = schedules.LinearRampupCosineDecay.HParams(
+    lp.optimizer.lr_schedule = pax_fiddle.Config(
+        schedules.LinearRampupCosineDecay,
         warmup_steps=warmup_steps,
         decay_start=decay_start_step,
         decay_end=decay_end_step,

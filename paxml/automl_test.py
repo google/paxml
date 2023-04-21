@@ -22,6 +22,7 @@ from paxml import automl
 from paxml import base_experiment
 from paxml import base_task
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 import pyglove as pg
 
 
@@ -345,17 +346,19 @@ class SearchAlgorithmsTest(absltest.TestCase):
   """Tests for search algorithms."""
 
   def test_random_search(self):
-    algorithm = instantiate(automl.RandomSearch.HParams(seed=1))
+    algorithm = instantiate(pax_fiddle.Config(automl.RandomSearch, seed=1))
     self.assertTrue(pg.eq(algorithm(), pg.geno.Random(seed=1)))
 
   def test_sweeping(self):
-    algorithm = instantiate(automl.Sweeping.HParams())
+    algorithm = instantiate(pax_fiddle.Config(automl.Sweeping))
     self.assertTrue(pg.eq(algorithm(), pg.geno.Sweeping()))
 
   def test_regularized_evolution(self):
     algorithm = instantiate(
-        automl.RegularizedEvolution.HParams(
-            population_size=10, tournament_size=5))
+        pax_fiddle.Config(
+            automl.RegularizedEvolution, population_size=10, tournament_size=5
+        )
+    )
     self.assertTrue(
         pg.eq(
             algorithm(),
@@ -369,17 +372,27 @@ class EarlyStoppingPoliciesTest(absltest.TestCase):
   """Tests for early stopping policies."""
 
   def test_early_stop_by_value(self):
-    policy = instantiate(automl.EarlyStoppingByValue.HParams(step_values=[
-        (100, 0.5),
-        (200, 0.7),
-    ]))()
+    policy = instantiate(
+        pax_fiddle.Config(
+            automl.EarlyStoppingByValue,
+            step_values=[
+                (100, 0.5),
+                (200, 0.7),
+            ],
+        )
+    )()
     self.assertIsInstance(policy, pg.early_stopping.StepWise)
 
   def test_early_stop_by_rank(self):
-    policy = instantiate(automl.EarlyStoppingByRank.HParams(step_ranks=[
-        (100, 0.5, 32),
-        (200, 5, 0),
-    ]))()
+    policy = instantiate(
+        pax_fiddle.Config(
+            automl.EarlyStoppingByRank,
+            step_ranks=[
+                (100, 0.5, 32),
+                (200, 5, 0),
+            ],
+        )
+    )()
     self.assertIsInstance(policy, pg.early_stopping.StepWise)
 
 
@@ -387,8 +400,11 @@ class RewardsTest(absltest.TestCase):
   """Tests for common reward functions."""
 
   def test_single_objective(self):
-    reward_fn = instantiate(automl.SingleObjective.HParams(
-        metric=automl.Metric.eval('accuracy')))
+    reward_fn = instantiate(
+        pax_fiddle.Config(
+            automl.SingleObjective, metric=automl.Metric.eval('accuracy')
+        )
+    )
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
     self.assertEqual(reward_fn.used_metrics, [automl.Metric.eval('accuracy')])
@@ -398,10 +414,13 @@ class RewardsTest(absltest.TestCase):
         reward_fn({'eval_test_abc/metrics/accuracy': math.nan}, 0)))
 
     reward_fn = instantiate(
-        automl.SingleObjective.HParams(
+        pax_fiddle.Config(
+            automl.SingleObjective,
             metric=automl.Metric.eval('accuracy'),
             goal='minimize',
-            reward_for_nan=-1.0))
+            reward_for_nan=-1.0,
+        )
+    )
     self.assertIsInstance(reward_fn, automl.SingleObjective)
     self.assertEqual(
         reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), -0.9)
@@ -410,13 +429,15 @@ class RewardsTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metric` should not be None'):
-      _ = instantiate(automl.SingleObjective.HParams())
+      _ = instantiate(pax_fiddle.Config(automl.SingleObjective))
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `goal` should be either .*'):
       _ = instantiate(
-          automl.SingleObjective.HParams(
-              metric=automl.Metric.eval('accuracy'), goal='abc'
+          pax_fiddle.Config(
+              automl.SingleObjective,
+              metric=automl.Metric.eval('accuracy'),
+              goal='abc',
           )
       )
 
@@ -425,20 +446,29 @@ class RewardsTest(absltest.TestCase):
       _ = reward_fn({'eval_test_abc/log_pplx': 0.1}, 0)
 
   def test_multi_objective(self):
-    reward_fn = instantiate(automl.MultiObjective.HParams(
-        metrics=[automl.Metric.eval('accuracy')]))
+    reward_fn = instantiate(
+        pax_fiddle.Config(
+            automl.MultiObjective, metrics=[automl.Metric.eval('accuracy')]
+        )
+    )
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(reward_fn({'eval_test_abc/metrics/accuracy': 0.9}, 0), 0.9)
     self.assertEqual(reward_fn.used_metrics, [automl.Metric.eval('accuracy')])
 
-    reward_fn = instantiate(automl.MultiObjective.HParams(
-        metrics=[
-            automl.Metric.decode('f1'),
-            automl.Metric.train_steps_per_second()
-        ],
-        aggregator_tpl=automl.MnasHard.HParams(cost_objective=150),
-        goal='minimize',
-        reward_for_nan=-1.0))
+    reward_fn = instantiate(
+        pax_fiddle.Config(
+            automl.MultiObjective,
+            metrics=[
+                automl.Metric.decode('f1'),
+                automl.Metric.train_steps_per_second(),
+            ],
+            aggregator_tpl=pax_fiddle.Config(
+                automl.MnasHard, cost_objective=150
+            ),
+            goal='minimize',
+            reward_for_nan=-1.0,
+        )
+    )
     self.assertIsInstance(reward_fn, automl.MultiObjective)
     self.assertEqual(reward_fn.used_metrics, [
         automl.Metric.decode('f1'),
@@ -461,16 +491,17 @@ class RewardsTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `metrics` must be provided.'):
-      _ = instantiate(automl.MultiObjective.HParams())
+      _ = instantiate(pax_fiddle.Config(automl.MultiObjective))
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `aggregator` must be provided.'):
       _ = instantiate(
-          automl.MultiObjective.HParams(
+          pax_fiddle.Config(
+              automl.MultiObjective,
               metrics=[
                   automl.Metric.eval('accuracy'),
                   automl.Metric.train_steps_per_second(),
-              ]
+              ],
           )
       )
 
@@ -512,7 +543,9 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
   """Tests for multi-objective aggregators."""
 
   def test_tunas_abs(self):
-    aggregator = instantiate(automl.TunasAbsolute.HParams(cost_objective=1))
+    aggregator = instantiate(
+        pax_fiddle.Config(automl.TunasAbsolute, cost_objective=1)
+    )
     self.assertEqual(aggregator([2., 2.]), 1.93)
 
     with self.assertRaisesRegex(ValueError,
@@ -521,19 +554,24 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
 
     with self.assertRaisesRegex(ValueError,
                                 'Param `cost_objective` must be provided.'):
-      _ = instantiate(automl.TunasAbsolute.HParams())
+      _ = instantiate(pax_fiddle.Config(automl.TunasAbsolute))
 
   def test_mnas_hard(self):
-    aggregator = instantiate(automl.MnasHard.HParams(cost_objective=1))
+    aggregator = instantiate(
+        pax_fiddle.Config(automl.MnasHard, cost_objective=1)
+    )
     self.assertEqual(aggregator([2., 2.]), 1.9052759960878747)
 
   def test_mnas_soft(self):
-    aggregator = instantiate(automl.MnasSoft.HParams(cost_objective=2.))
+    aggregator = instantiate(
+        pax_fiddle.Config(automl.MnasSoft, cost_objective=2.0)
+    )
     self.assertEqual(aggregator([2., 1.]), 2.0994333672461347)
 
   def test_weighted_sum(self):
     aggregator = instantiate(
-        automl.WeightedSumAggregator.HParams(weights=[1.0, 1.0]))
+        pax_fiddle.Config(automl.WeightedSumAggregator, weights=[1.0, 1.0])
+    )
     self.assertEqual(aggregator([1.0, 3.0]), 2.0)
 
     with self.assertRaisesRegex(
@@ -542,17 +580,19 @@ class MultiObjectiveAggregatorTest(absltest.TestCase):
       aggregator([1.0, 3.0, 5.0])
 
     with self.assertRaisesRegex(ValueError, 'Invalid value for `weights`'):
-      instantiate(automl.WeightedSumAggregator.HParams())
+      instantiate(pax_fiddle.Config(automl.WeightedSumAggregator))
 
     with self.assertRaisesRegex(ValueError, 'Invalid value for `weights`'):
-      instantiate(automl.WeightedSumAggregator.HParams(weights=[0.]))
+      instantiate(
+          pax_fiddle.Config(automl.WeightedSumAggregator, weights=[0.0])
+      )
 
 
 class CrossStepMetricAggregatorTest(absltest.TestCase):
   """Tests for cross-step metric aggregators."""
 
   def test_last_reported_metric_values(self):
-    aggregator = instantiate(automl.LastReportedMetricValues.HParams())
+    aggregator = instantiate(pax_fiddle.Config(automl.LastReportedMetricValues))
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
@@ -577,7 +617,7 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         })
 
   def test_average_metric_values(self):
-    aggregator = instantiate(automl.AverageMetricValues.HParams())
+    aggregator = instantiate(pax_fiddle.Config(automl.AverageMetricValues))
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
@@ -601,7 +641,9 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         })
 
   def test_average_metric_values_last_n(self):
-    aggregator = instantiate(automl.AverageMetricValues.HParams(last_n=2))
+    aggregator = instantiate(
+        pax_fiddle.Config(automl.AverageMetricValues, last_n=2)
+    )
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.2, 'eval_test_abc/metrics/total_loss': 0.2}),
@@ -629,7 +671,7 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         })
 
   def test_metrics_with_max_value(self):
-    aggregator = instantiate(automl.MetricsWithMaxValue.HParams())
+    aggregator = instantiate(pax_fiddle.Config(automl.MetricsWithMaxValue))
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
@@ -638,8 +680,11 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         ]),
         {'reward': 0.3, 'eval_test_abc/metrics/total_loss': 0.2})
 
-    aggregator = instantiate(automl.MetricsWithMaxValue.HParams(
-        metric=automl.Metric.eval('total_loss')))
+    aggregator = instantiate(
+        pax_fiddle.Config(
+            automl.MetricsWithMaxValue, metric=automl.Metric.eval('total_loss')
+        )
+    )
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
@@ -649,7 +694,7 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
 
   def test_metrics_with_min_value(self):
-    aggregator = instantiate(automl.MetricsWithMinValue.HParams())
+    aggregator = instantiate(pax_fiddle.Config(automl.MetricsWithMinValue))
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
@@ -658,8 +703,11 @@ class CrossStepMetricAggregatorTest(absltest.TestCase):
         ]),
         {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3})
 
-    aggregator = instantiate(automl.MetricsWithMinValue.HParams(
-        metric=automl.Metric.eval('total_loss')))
+    aggregator = instantiate(
+        pax_fiddle.Config(
+            automl.MetricsWithMinValue, metric=automl.Metric.eval('total_loss')
+        )
+    )
     self.assertEqual(
         aggregator([
             (100, {'reward': 0.1, 'eval_test_abc/metrics/total_loss': 0.3}),
@@ -726,10 +774,12 @@ class RegularExperiment(base_experiment.BaseExperiment):
   PROGRAM_STR = 'foo'
 
   def task(self):
-    return MyTask.HParams(
+    return pax_fiddle.Config(
+        MyTask,
         learning_rate=self.LEARNING_RATE,
         batch_size=self.BATCH_SIZE,
-        program_str=self.PROGRAM_STR)
+        program_str=self.PROGRAM_STR,
+    )
 
   def datasets(self):
     return []
@@ -832,7 +882,9 @@ class ParameterSweepDecoratorTest(absltest.TestCase):
 
   def test_basics(self):
     search_hparams = ParameterSweepingExperiment().search()
-    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertEqual(
+        search_hparams.search_algorithm, pax_fiddle.Config(automl.Sweeping)
+    )
     self.assertIsNone(search_hparams.search_reward)
     self.assertTrue(search_hparams.train_to_end)
     self.assertEqual(
@@ -842,15 +894,21 @@ class ParameterSweepDecoratorTest(absltest.TestCase):
 
   def test_specifying_metric(self):
     search_hparams = ParameterSweepingWithReportingTrainLoss().search()
-    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertEqual(
+        search_hparams.search_algorithm, pax_fiddle.Config(automl.Sweeping)
+    )
     self.assertEqual(
         search_hparams.search_reward,
-        automl.SingleObjective.HParams(
-            metric=automl.Metric.train('total_loss')))
+        pax_fiddle.Config(
+            automl.SingleObjective, metric=automl.Metric.train('total_loss')
+        ),
+    )
 
   def test_combinations(self):
     search_hparams = SparseParameterSweepingExperiment().search()
-    self.assertEqual(search_hparams.search_algorithm, automl.Sweeping.HParams())
+    self.assertEqual(
+        search_hparams.search_algorithm, pax_fiddle.Config(automl.Sweeping)
+    )
     self.assertIsNone(search_hparams.search_reward)
 
     exp = SparseParameterSweepingExperiment()

@@ -18,8 +18,7 @@
 import inspect
 import math
 import re
-
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union, Text, Type
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Text, Tuple, Type, Union
 from absl import logging
 from clu import platform
 from etils import epath
@@ -29,9 +28,9 @@ from paxml import base_experiment
 from paxml import metric_utils
 from paxml import trainer_lib
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
-
 import pyglove as pg  # mapped to internal
 import tensorflow.compat.v2 as tf
 
@@ -163,7 +162,8 @@ def tune(trial_fn: TrialFn,
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
       search_hparams.cross_step_metric_aggregator
-      or automl.LastReportedMetricValues.HParams())
+      or pax_fiddle.Config(automl.LastReportedMetricValues)
+  )
   early_stopping_policy = None
   if search_hparams.early_stopping is not None:
     early_stopping_policy = instantiate(search_hparams.early_stopping)()

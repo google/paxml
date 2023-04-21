@@ -105,14 +105,19 @@ def hyperparameter_tuning(
   """
   return SearchHParams(
       # Use Sweeping for hyperparameter tuning.
-      search_algorithm=Sweeping.HParams(),
-      search_reward=SingleObjective.HParams(
-          metric=metric, goal=goal, reward_for_nan=reward_for_nan),
+      search_algorithm=pax_fiddle.Config(Sweeping),
+      search_reward=pax_fiddle.Config(
+          SingleObjective,
+          metric=metric,
+          goal=goal,
+          reward_for_nan=reward_for_nan,
+      ),
       early_stopping=early_stopping,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
       cross_step_metric_aggregator=cross_step_metric_aggregator,
-      treats_early_stopped_trials_as_done=True)
+      treats_early_stopped_trials_as_done=True,
+  )
 
 
 def neural_architecture_search(
@@ -135,8 +140,9 @@ def neural_architecture_search(
     metrics = [metrics]
 
   if len(metrics) == 1:
-    reward = SingleObjective.HParams(
-        metric=metrics[0], reward_for_nan=reward_for_nan)
+    reward = pax_fiddle.Config(
+        SingleObjective, metric=metrics[0], reward_for_nan=reward_for_nan
+    )
   elif len(metrics) == 2:
     if cost_objective is None:
       raise ValueError('cost objective must be provided.')
@@ -149,21 +155,25 @@ def neural_architecture_search(
     else:
       raise ValueError('Unsupported reward type %r.' % reward_type)
 
-    reward = MultiObjective.HParams(
+    reward = pax_fiddle.Config(
+        MultiObjective,
         metrics=metrics,
         aggregator_tpl=aggregator_cls.HParams(
-            cost_objective=cost_objective, exponent=exponent),
-        reward_for_nan=reward_for_nan)
+            cost_objective=cost_objective, exponent=exponent
+        ),
+        reward_for_nan=reward_for_nan,
+    )
   else:
     raise ValueError('Only 1 or 2 metrics are supported.')
 
   return SearchHParams(
-      search_algorithm=RegularizedEvolution.HParams(),
+      search_algorithm=pax_fiddle.Config(RegularizedEvolution),
       search_reward=reward,
       early_stopping=early_stopping,
       max_num_trials=max_num_trials,
       errors_to_skip=errors_to_skip,
-      cross_step_metric_aggregator=cross_step_metric_aggregator)
+      cross_step_metric_aggregator=cross_step_metric_aggregator,
+  )
 
 
 #
@@ -371,11 +381,13 @@ def weighted_sum_reward(
   """Returns a reward by weighted summing multiple metrics."""
   metrics = [m for m, _ in metrics_and_weights]
   weights = [w for _, w in metrics_and_weights]
-  return MultiObjective.HParams(
+  return pax_fiddle.Config(
+      MultiObjective,
       metrics=metrics,
       goal=goal,
-      aggregator_tpl=WeightedSumAggregator.HParams(weights=weights),
-      reward_for_nan=reward_for_nan)
+      aggregator_tpl=pax_fiddle.Config(WeightedSumAggregator, weights=weights),
+      reward_for_nan=reward_for_nan,
+  )
 
 
 class TwoObjectiveAggregator(MultiObjectiveAggregator):
@@ -778,7 +790,7 @@ def parameter_sweep(
   if metric is None:
     search_reward = None
   else:
-    search_reward = SingleObjective.HParams(metric=metric, goal=goal)
+    search_reward = pax_fiddle.Config(SingleObjective, metric=metric, goal=goal)
   def decorator(cls):
 
     class _ParameterSweeping(cls):
@@ -786,7 +798,7 @@ def parameter_sweep(
       def search(self):
         del self
         return SearchHParams(
-            search_algorithm=Sweeping.HParams(),
+            search_algorithm=pax_fiddle.Config(Sweeping),
             search_reward=search_reward,
             treats_early_stopped_trials_as_done=True,
             train_to_end=True)

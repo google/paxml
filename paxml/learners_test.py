@@ -27,6 +27,7 @@ from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import optimizer_prefix_vectorization as opt_vec
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import schedules
 from praxis import test_utils
@@ -45,13 +46,13 @@ class LearnersTest(test_utils.TestCase):
   )
   def test_learner_clip_gradients(self, g1a, g1b, g2, global_clip_norm,
                                   single_clip_norm):
-    learner_p = learners.Learner.HParams()
+    learner_p = pax_fiddle.Config(learners.Learner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
     learner_p.grad_norm_individual_vars = True
-    learner_p.optimizer = optimizers.Sgd.HParams()
+    learner_p.optimizer = pax_fiddle.Config(optimizers.Sgd)
     learner_p.optimizer.learning_rate = 1.
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     if global_clip_norm:
       learner_p.optimizer.clip_gradient_norm_to_value = global_clip_norm
     elif single_clip_norm:
@@ -89,13 +90,13 @@ class LearnersTest(test_utils.TestCase):
       (0.9, True),
   )
   def test_sharded_sgd(self, momentum, nesterov):
-    learner_p = learners.Learner.HParams()
+    learner_p = pax_fiddle.Config(learners.Learner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
-    learner_p.optimizer = optimizers.ShardedSgd.HParams()
+    learner_p.optimizer = pax_fiddle.Config(optimizers.ShardedSgd)
     lr = 0.1
     learner_p.optimizer.learning_rate = lr
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     learner_p.optimizer.momentum = momentum
     learner_p.optimizer.nesterov = nesterov
 
@@ -175,17 +176,17 @@ class LearnersTest(test_utils.TestCase):
   )
   def test_multioptimizer_learner(self, lr_multiplier1, lr_multiplier2,
                                   use_vq_ngrams):
-    learner_p = learners.MultiOptimizerLearner.HParams()
+    learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
-    learner_p.optimizer = optimizers.Sgd.HParams()
+    learner_p.optimizer = pax_fiddle.Config(optimizers.Sgd)
     learner_p.optimizer.learning_rate = 1.
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
-    aux_p1 = optimizers.Sgd.HParams()
-    aux_p1.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    aux_p1 = pax_fiddle.Config(optimizers.Sgd)
+    aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = lr_multiplier1
-    aux_p2 = optimizers.Sgd.HParams()
-    aux_p2.lr_schedule = schedules.Constant.HParams()
+    aux_p2 = pax_fiddle.Config(optimizers.Sgd)
+    aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = lr_multiplier2
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
@@ -258,17 +259,17 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(new_grad_ffn, expected_grad_ffn)
 
   def test_multioptimizer_learner_adam_adagrad(self):
-    learner_p = learners.MultiOptimizerLearner.HParams()
+    learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
     learner_p.optimizer = optimizers.Adam.HParamsA()
     learner_p.optimizer.learning_rate = 1.
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1 = optimizers.Adam.HParamsA()
-    aux_p1.lr_schedule = schedules.Constant.HParams()
+    aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
-    aux_p2 = optimizers.Adagrad.HParams()
-    aux_p2.lr_schedule = schedules.Constant.HParams()
+    aux_p2 = pax_fiddle.Config(optimizers.Adagrad)
+    aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = 3.0
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
@@ -308,17 +309,17 @@ class LearnersTest(test_utils.TestCase):
     logging.info('opt_states: %s', opt_states)
 
   def test_multioptimizer_learner_value_error(self):
-    learner_p = learners.MultiOptimizerLearner.HParams()
+    learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
     learner_p.optimizer = optimizers.Adam.HParamsA()
     learner_p.optimizer.learning_rate = 1.
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1 = optimizers.Adam.HParamsA()
-    aux_p1.lr_schedule = schedules.Constant.HParams()
+    aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
-    aux_p2 = optimizers.Adagrad.HParams()
-    aux_p2.lr_schedule = schedules.Constant.HParams()
+    aux_p2 = pax_fiddle.Config(optimizers.Adagrad)
+    aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = 3.0
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
@@ -357,19 +358,19 @@ class LearnersTest(test_utils.TestCase):
       learner_instance.get_grad_tx(var_weight_hparams)
 
   def test_multioptimizer_learner_sharding(self):
-    learner_p = learners.MultiOptimizerLearner.HParams()
+    learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
-    learner_p.optimizer = optimizers.ShardedAdafactor.HParams()
+    learner_p.optimizer = pax_fiddle.Config(optimizers.ShardedAdafactor)
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.decay_method = 'pow'
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
-    aux_p1 = optimizers.ShardedAdafactor.HParams()
-    aux_p1.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    aux_p1 = pax_fiddle.Config(optimizers.ShardedAdafactor)
+    aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
     aux_p1.decay_method = 'pow'
-    aux_p2 = optimizers.ShardedAdafactor.HParams()
-    aux_p2.lr_schedule = schedules.Constant.HParams()
+    aux_p2 = pax_fiddle.Config(optimizers.ShardedAdafactor)
+    aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.decay_method = 'adam'
     aux_p2.learning_rate = 3.0
 
@@ -380,13 +381,13 @@ class LearnersTest(test_utils.TestCase):
     learner_instance = instantiate(learner_p)
 
     # Add a single instance optimizer.
-    learner_p = learners.Learner.HParams()
+    learner_p = pax_fiddle.Config(learners.Learner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
-    learner_p.optimizer = optimizers.ShardedAdafactor.HParams()
+    learner_p.optimizer = pax_fiddle.Config(optimizers.ShardedAdafactor)
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.decay_method = 'pow'
-    learner_p.optimizer.lr_schedule = schedules.Constant.HParams()
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     learner_instance_single = instantiate(learner_p)
 
     # Define device mesh.
@@ -481,10 +482,17 @@ class LearnersTest(test_utils.TestCase):
             update=_opt_update,
             init_partition_spec=_init_partition_spec)
 
-    learner_p = learners.Learner.HParams(
-        name='learner', loss_name='loss', grad_norm_individual_vars=True)
-    learner_p.optimizer = TestOptimizer.HParams(
-        learning_rate=1., lr_schedule=schedules.Constant.HParams())
+    learner_p = pax_fiddle.Config(
+        learners.Learner,
+        name='learner',
+        loss_name='loss',
+        grad_norm_individual_vars=True,
+    )
+    learner_p.optimizer = pax_fiddle.Config(
+        TestOptimizer,
+        learning_rate=1.0,
+        lr_schedule=pax_fiddle.Config(schedules.Constant),
+    )
 
     learner_instance = instantiate(learner_p)
 
@@ -570,10 +578,17 @@ class LearnersTest(test_utils.TestCase):
             update=_opt_update,
             init_partition_spec=_init_partition_spec)
 
-    learner_p = learners.Learner.HParams(
-        name='learner', loss_name='loss', grad_norm_individual_vars=True)
-    learner_p.optimizer = TestOptimizer.HParams(
-        learning_rate=1., lr_schedule=schedules.Constant.HParams())
+    learner_p = pax_fiddle.Config(
+        learners.Learner,
+        name='learner',
+        loss_name='loss',
+        grad_norm_individual_vars=True,
+    )
+    learner_p.optimizer = pax_fiddle.Config(
+        TestOptimizer,
+        learning_rate=1.0,
+        lr_schedule=pax_fiddle.Config(schedules.Constant),
+    )
 
     learner_instance = instantiate(learner_p)
 

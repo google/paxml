@@ -16,7 +16,6 @@
 """Decoder-only language model configurations."""
 
 from typing import List
-
 import jax
 from jax import numpy as jnp
 from paxml import base_experiment
@@ -26,6 +25,7 @@ from paxml.tasks.lm import input_generator
 from paxml.tasks.lm import model_params
 from praxis import base_input
 from praxis import layers
+from praxis import pax_fiddle
 
 
 class SyntheticDataset(base_experiment.BaseExperiment):
@@ -43,8 +43,9 @@ class SyntheticDataset(base_experiment.BaseExperiment):
       # TODO(zhangqiaorjc): Is this batch size too big for test?
       input_p.batch_size = batch_size
     input_p.seq_len = self.MAX_SEQ_LEN
-    p = base_input.LingvoInputAdaptor.HParams(
-        input=input_p, is_training=is_training)
+    p = pax_fiddle.Config(
+        base_input.LingvoInputAdaptor, input=input_p, is_training=is_training
+    )
     return p
 
   def datasets(self) -> List[base_input.BaseInput.HParams]:

@@ -23,7 +23,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Callable, cast, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union, cast
 
 from absl import logging
 from etils import epath
@@ -1854,7 +1854,8 @@ def get_eval_hparams_for_seqio(
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
     feature_converter = LanguageModelFeatures(
         pack=False, weights_on_targets_only=weights_on_targets_only)
-  p = SeqIOInput.HParams(
+  p = pax_fiddle.Config(
+      SeqIOInput,
       name=task_or_mixture_name,
       mixture_name=task_or_mixture_name,
       feature_converter=feature_converter,
@@ -1864,7 +1865,8 @@ def get_eval_hparams_for_seqio(
       shuffle=shuffle,
       batch_size=batch_size,
       num_infeed_hosts=num_infeed_hosts,
-      input_random_seed=seed)
+      input_random_seed=seed,
+  )
 
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
   if metric_type is MetricType.PREDICT:

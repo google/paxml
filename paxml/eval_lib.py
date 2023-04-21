@@ -968,7 +968,7 @@ def _decode_once_common(
     metrics_p = task_p.metrics
   work_unit = platform.work_unit()
   if not metrics_p:
-    metrics_p = base_metrics.MeanMetrics.HParams()
+    metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
 
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)

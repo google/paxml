@@ -27,6 +27,7 @@ from paxml import base_experiment
 from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 import pyglove as pg
 
 
@@ -109,27 +110,40 @@ class TuningExperiment(base_experiment.BaseExperiment):
     # NOTE(daiyip): `dataset_param2` shall appear in the search
     # space: though its evaluation is delayed until instantiation,
     # datasets will be instantiated during search space inspection.
-    return [MockDataset.HParams(
-        dataset_param1=self.DATASET_PARAM1,
-        dataset_param2=lambda: pg.oneof(range(3), name='dataset_param2'),
-        is_training=True)]
+    return [
+        pax_fiddle.Config(
+            MockDataset,
+            dataset_param1=self.DATASET_PARAM1,
+            dataset_param2=lambda: pg.oneof(range(3), name='dataset_param2'),
+            is_training=True,
+        )
+    ]
 
   def decoder_datasets(self):
     # NOTE(daiyip): `decoder_dataset_param2` shall NOT appear in the search
     # space: its evaluation is delayed until instantiation, and decoder
     # datasets are not instantiated during search space inspection.
-    return [MockDataset.HParams(
-        dataset_param1=self.DECODER_DATASET_PARAM1,
-        dataset_param2=(
-            lambda: pg.oneof(range(3), name='decoder_dataset_param2')))]
+    return [
+        pax_fiddle.Config(
+            MockDataset,
+            dataset_param1=self.DECODER_DATASET_PARAM1,
+            dataset_param2=(
+                lambda: pg.oneof(range(3), name='decoder_dataset_param2')
+            ),
+        )
+    ]
 
   def search(self):
     return automl.SearchHParams(
-        search_algorithm=automl.RandomSearch.HParams(seed=1),
-        search_reward=automl.SingleObjective.HParams(
-            metric=automl.Metric.eval('reward')),
-        cross_step_metric_aggregator=automl.AverageMetricValues.HParams(),
-        max_num_trials=10)
+        search_algorithm=pax_fiddle.Config(automl.RandomSearch, seed=1),
+        search_reward=pax_fiddle.Config(
+            automl.SingleObjective, metric=automl.Metric.eval('reward')
+        ),
+        cross_step_metric_aggregator=pax_fiddle.Config(
+            automl.AverageMetricValues
+        ),
+        max_num_trials=10,
+    )
 
 
 class TuningWithTrainMetricsOnly(TuningExperiment):
@@ -163,7 +177,7 @@ class ParameterSweepingWithCartesianProduct(base_experiment.BaseExperiment):
         batch_size=pg.oneof([16, 32, 64], name='batch_size'))
 
   def datasets(self):
-    return [MockDataset.HParams(dataset_param1=self.DATASET_PARAM1)]
+    return [pax_fiddle.Config(MockDataset, dataset_param1=self.DATASET_PARAM1)]
 
 
 @automl.parameter_sweep([
@@ -204,10 +218,12 @@ class TuningWithPerTrialEarlyStopping(TuningExperiment):
 
   def search(self):
     search_hparams = super().search()
-    search_hparams.search_reward = StopWithLowerMetric.HParams(
+    search_hparams.search_reward = pax_fiddle.Config(
+        StopWithLowerMetric,
         metric=automl.Metric.eval('reward'),
         threshold=1.0,
-        skip=True)
+        skip=True,
+    )
     return search_hparams
 
 
@@ -216,10 +232,12 @@ class TuningWithTreatingEarlyStoppedTrailsAsDone(TuningExperiment):
 
   def search(self):
     search_hparams = super().search()
-    search_hparams.search_reward = StopWithLowerMetric.HParams(
+    search_hparams.search_reward = pax_fiddle.Config(
+        StopWithLowerMetric,
         metric=automl.Metric.eval('reward'),
         threshold=[(10, 0.5), (20, 2.0)],
-        skip=True)
+        skip=True,
+    )
     search_hparams.treats_early_stopped_trials_as_done = True
     return search_hparams
 
@@ -229,11 +247,13 @@ class TuningWithPerTrialEarlyStoppingAndRewardReplacement(TuningExperiment):
 
   def search(self):
     search_hparams = super().search()
-    search_hparams.search_reward = StopWithLowerMetric.HParams(
+    search_hparams.search_reward = pax_fiddle.Config(
+        StopWithLowerMetric,
         metric=automl.Metric.eval('reward'),
         threshold=1.0,
         skip=False,
-        reward_replacement=-1.0)
+        reward_replacement=-1.0,
+    )
     return search_hparams
 
 
@@ -242,11 +262,13 @@ class TuningWithPerTrialEarlyStoppingAndMetricsReplacement(TuningExperiment):
 
   def search(self):
     search_hparams = super().search()
-    search_hparams.search_reward = StopWithLowerMetric.HParams(
+    search_hparams.search_reward = pax_fiddle.Config(
+        StopWithLowerMetric,
         metric=automl.Metric.eval('reward'),
         threshold=1.0,
         skip=False,
-        metrics_replacement={'eval_test_dev/metrics/reward': 100.0})
+        metrics_replacement={'eval_test_dev/metrics/reward': 100.0},
+    )
     return search_hparams
 
 
@@ -255,13 +277,15 @@ class TuningWithPopulationWiseEarlyStopping(TuningExperiment):
 
   def search(self):
     search_hparams = super().search()
-    search_hparams.early_stopping = automl.EarlyStoppingByValue.HParams(
+    search_hparams.early_stopping = pax_fiddle.Config(
+        automl.EarlyStoppingByValue,
         step_values=[
             # Watch metrics at step 10, values below 1.0 will be set as
             # infeasible.
             (10, 1.0)
         ],
-        metric=automl.Metric.eval('reward'))
+        metric=automl.Metric.eval('reward'),
+    )
     return search_hparams
 
 

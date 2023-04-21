@@ -1344,7 +1344,7 @@ class SingleTask(base_task.BaseTask):
     if self.metrics:
       self._metrics_aggregator = instantiate(self.metrics)
     else:
-      metrics_p = base_metrics.MeanMetrics.HParams()
+      metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
       self._metrics_aggregator = instantiate(metrics_p)
 
     # instantiate the loss aggregation helper
@@ -1356,8 +1356,9 @@ class SingleTask(base_task.BaseTask):
     else:
       if self._learners[0].loss_name is None:
         raise ValueError('`loss_name` on the learner is None. Must be set.')
-      loss_p = base_metrics.LossAggregator.HParams(
-          loss_key=self._learners[0].loss_name)
+      loss_p = pax_fiddle.Config(
+          base_metrics.LossAggregator, loss_key=self._learners[0].loss_name
+      )
       self._loss_aggregator_inst = instantiate(loss_p)
 
     if self.infer_writer:

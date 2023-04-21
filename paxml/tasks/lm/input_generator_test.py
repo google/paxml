@@ -21,6 +21,7 @@ import numpy as np
 from paxml import test_helper
 from paxml.tasks.lm import input_generator
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 from praxis import test_utils
 import tensorflow.compat.v2 as tf
 
@@ -35,7 +36,7 @@ class InputTest(test_utils.TestCase):
     return batch.labels[:, 1], np.sum(batch.segment_ids, axis=1, dtype=np.int32)
 
   def test_full(self):
-    p = input_generator.TFRecordBertInput.HParams()
+    p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     # There are 10 examples in this test data file.
     p.input_file = test_helper.test_src_dir_path('tasks/lm/testdata/tfrecords')
     p.batch_size = 10
@@ -52,7 +53,7 @@ class InputTest(test_utils.TestCase):
     self.assertArraysEqual(lengths, expected_lengths)
 
   def test_remask(self):
-    p = input_generator.TFRecordBertInput.HParams()
+    p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     # There are 10 examples in this test data file.
     p.input_file = test_helper.test_src_dir_path('tasks/lm/testdata/tfrecords')
     p.batch_size = 10
@@ -68,7 +69,7 @@ class InputTest(test_utils.TestCase):
 
   @parameterized.parameters(True, False)
   def test_sharded(self, provide_data_size):
-    p = input_generator.TFRecordBertInput.HParams()
+    p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     # There are 10 examples in this test data file.
     p.input_file = test_helper.test_src_dir_path('tasks/lm/testdata/tfrecords')
     p.batch_size = 4

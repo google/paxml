@@ -202,7 +202,7 @@ class TestModel03(base_model.BaseModel):
 class BaseTaskTest(test_utils.TestCase):
 
   def test_dataclass_params(self):
-    dataclass_params = tasks_lib.SingleTask.HParams(name='foo_task')
+    dataclass_params = pax_fiddle.Config(tasks_lib.SingleTask, name='foo_task')
     self.assertIsInstance(dataclass_params, tasks_lib.SingleTask.HParams)
     self.assertIsInstance(dataclass_params.train,
                           tasks_lib.SingleTask.TrainHParams)
@@ -211,7 +211,7 @@ class BaseTaskTest(test_utils.TestCase):
 
   def test_mutate_nested_dataclass_params(self):
     """Tests that nested dataclass settings are copied to Lingvo params."""
-    task_p = tasks_lib.SingleTask.HParams(name='foo_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='foo_task')
     task_p.vn.vn_scale = 0.075
     task_p.vn.vn_regex = 'dec_embedding/emb_var|decoder/cell'
     self.assertEqual(task_p.vn.vn_scale, 0.075)
@@ -226,7 +226,7 @@ class BaseTaskTest(test_utils.TestCase):
     input_dims = 52
     output_dims = 32
     vn_start_step = 5
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
@@ -239,10 +239,10 @@ class BaseTaskTest(test_utils.TestCase):
 
     lp = task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     # we set learning rate to 0.0 to check if it is changed by VN
     lp.optimizer.learning_rate = 0.0
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     # Create the mdl.
     jax_task = instantiate(task_p)
@@ -309,16 +309,16 @@ class BaseTaskTest(test_utils.TestCase):
     output_dims = 32
     decay = 0.9999
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
 
     lp = task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     lp.optimizer.learning_rate = 5.0
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     lp.optimizer.ema_decay = decay
 
@@ -377,7 +377,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 5
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel01,
         name='mdl_ext',
@@ -386,8 +386,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
@@ -424,7 +424,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
 
     # Create task with warm-start
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
@@ -434,14 +434,15 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
       load_rules.extend([(r'(.*)m/params/(.*)', '{}m/params/{}'),
                          (r'(.*)v/params/(.*)', '{}v/params/{}')])
     task_p.train.init_from_checkpoint_rules = {
-        tempdir.full_path:
-            tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p,
-                load_rules=load_rules,
-                input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                    input_dims=input_dims),
-                load_opt_states=load_opt_states,
-                partial_load_opt_states=partial_load_opt_states),
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
+            ),
+            load_opt_states=load_opt_states,
+            partial_load_opt_states=partial_load_opt_states,
+        ),
     }
     task = instantiate(task_p)
 
@@ -484,7 +485,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 5
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel01,
         name='mdl_ext',
@@ -493,8 +494,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
@@ -520,7 +521,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
 
     # Create task with warm-start
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
@@ -532,8 +533,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         tempdir.full_path: tasks_lib.CheckpointLoadingRules(
             task_p=ext_task_p,
             load_rules=load_rules,
-            input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                input_dims=input_dims
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
             ),
             load_opt_states=load_opt_states,
             partial_load_opt_states=partial_load_opt_states,
@@ -632,7 +633,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 5
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel01,
         name='mdl_ext',
@@ -641,8 +642,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
@@ -672,19 +673,20 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
 
     # Create task with incorrect load_rules and safe_load=True.
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
     task_p.train.learner = lp.clone()
     task_p.train.init_from_checkpoint_rules = {
-        tempdir.full_path:
-            tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p,
-                load_rules=[(r'params/_(.*)', 'params/{}')],
-                safe_load=True,
-                input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                    input_dims=input_dims)),
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=[(r'params/_(.*)', 'params/{}')],
+            safe_load=True,
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
+            ),
+        ),
     }
     task = instantiate(task_p)
 
@@ -702,7 +704,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     model_dims = 128
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(layers.LanguageModel, name='lm')
     model_p = ext_task_p.model
     model_p.lm_tpl.model_dims = model_dims
@@ -719,8 +721,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     sample_inputs = get_model_inputs()
     ext_task = instantiate(ext_task_p)
@@ -756,13 +758,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     ignore_rules = ['.*softmax.*', 'params/lm/final_ln/bias.*',
                     'params/lm/transformer/repeat/.*/query/b']
     task_p.train.init_from_checkpoint_rules = {
-        tempdir.full_path:
-            tasks_lib.CheckpointLoadingRules(
-                task_p=ext_task_p,
-                load_rules=load_rules,
-                ignore_rules=ignore_rules,
-                input_specs_provider_p=LMInputSpecsProvider.HParams(),
-                partial_load_opt_states=True),
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            ignore_rules=ignore_rules,
+            input_specs_provider_p=pax_fiddle.Config(LMInputSpecsProvider),
+            partial_load_opt_states=True,
+        ),
     }
     task = instantiate(task_p)
 
@@ -808,7 +810,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     model_dims = 128
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(layers.LanguageModel, name='lm')
     model_p = ext_task_p.model
     model_p.lm_tpl.model_dims = model_dims
@@ -825,8 +827,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     # Enable ema
     lp.optimizer.ema_decay = 0.9999
 
@@ -872,7 +874,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
             task_p=ext_task_p,
             load_rules=load_rules,
             ignore_rules=ignore_rules,
-            input_specs_provider_p=LMInputSpecsProvider.HParams(),
+            input_specs_provider_p=pax_fiddle.Config(LMInputSpecsProvider),
             load_ema_states=True,
         ),
     }
@@ -910,23 +912,25 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 2
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel02,
         name='mdl_ext',
         input_dims=input_dims,
         output_dims=output_dims,
     )
-    ext_task_p.train.learner = learners.MultiOptimizerLearner.HParams().set(
+    ext_task_p.train.learner = pax_fiddle.Config(
+        learners.MultiOptimizerLearner
+    ).set(
         loss_name='loss',
-        optimizer=optimizers.ShardedSgd.HParams().set(
+        optimizer=pax_fiddle.Config(optimizers.ShardedSgd).set(
             learning_rate=0.0,
-            lr_schedule=schedules.Constant.HParams(value=0.0),
+            lr_schedule=pax_fiddle.Config(schedules.Constant, value=0.0),
             ema_decay=0.9999,
         ),
         auxiliary_optimizers=[
             optimizers.ShardedAdafactor.HParamsAdamB().set(
-                lr_schedule=schedules.Constant.HParams()
+                lr_schedule=pax_fiddle.Config(schedules.Constant)
             )
         ],
         auxiliary_regex=(['.*var01']),
@@ -953,7 +957,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ),
     )
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
@@ -968,8 +972,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
                 ),
                 (r'params/var01', 'ema/params/var01'),
             ],
-            input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                input_dims=input_dims
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
             ),
             partial_load_opt_states=partial_load_opt_states,
         ),
@@ -1017,18 +1021,18 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 2
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel03,
         name='mdl_ext',
         input_dims=input_dims,
         output_dims=output_dims,
     )
-    ext_task_p.train.learner = learners.Learner.HParams().set(
+    ext_task_p.train.learner = pax_fiddle.Config(learners.Learner).set(
         loss_name='loss',
-        optimizer=optimizers.ShardedSgd.HParams().set(
+        optimizer=pax_fiddle.Config(optimizers.ShardedSgd).set(
             learning_rate=0.0,
-            lr_schedule=schedules.Constant.HParams(value=0.0),
+            lr_schedule=pax_fiddle.Config(schedules.Constant, value=0.0),
             ema_decay=0.9999,
         ),
         bprop_variable_exclusion='.*var01',
@@ -1055,15 +1059,15 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ),
     )
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel03, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
-    task_p.train.learner = learners.Learner.HParams().set(
+    task_p.train.learner = pax_fiddle.Config(learners.Learner).set(
         loss_name='loss',
-        optimizer=optimizers.ShardedSgd.HParams().set(
+        optimizer=pax_fiddle.Config(optimizers.ShardedSgd).set(
             learning_rate=0.0,
-            lr_schedule=schedules.Constant.HParams(value=0.0),
+            lr_schedule=pax_fiddle.Config(schedules.Constant, value=0.0),
         ),
     )
     load_rules = [
@@ -1075,8 +1079,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         tempdir.full_path: tasks_lib.CheckpointLoadingRules(
             task_p=ext_task_p,
             load_rules=load_rules,
-            input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                input_dims=input_dims
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
             ),
         ),
     }
@@ -1112,18 +1116,18 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     output_dims = 2
 
     # Initialize external task and save checkpoint
-    ext_task_p = tasks_lib.SingleTask.HParams(name='task')
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     ext_task_p.model = pax_fiddle.Config(
         TestModel02,
         name='mdl_ext',
         input_dims=input_dims,
         output_dims=output_dims,
     )
-    ext_task_p.train.learner = learners.Learner.HParams().set(
+    ext_task_p.train.learner = pax_fiddle.Config(learners.Learner).set(
         loss_name='loss',
-        optimizer=optimizers.ShardedSgd.HParams().set(
+        optimizer=pax_fiddle.Config(optimizers.ShardedSgd).set(
             learning_rate=0.0,
-            lr_schedule=schedules.Constant.HParams(value=0.0),
+            lr_schedule=pax_fiddle.Config(schedules.Constant, value=0.0),
             ema_decay=0.9999,
         ),
         bprop_variable_exclusion='.*var01',
@@ -1149,15 +1153,15 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         ),
     )
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
-    task_p.train.learner = learners.Learner.HParams().set(
+    task_p.train.learner = pax_fiddle.Config(learners.Learner).set(
         loss_name='loss',
-        optimizer=optimizers.ShardedSgd.HParams().set(
+        optimizer=pax_fiddle.Config(optimizers.ShardedSgd).set(
             learning_rate=0.0,
-            lr_schedule=schedules.Constant.HParams(value=0.0),
+            lr_schedule=pax_fiddle.Config(schedules.Constant, value=0.0),
         ),
     )
     load_rules = [(
@@ -1170,8 +1174,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         tempdir.full_path: tasks_lib.CheckpointLoadingRules(
             task_p=ext_task_p,
             load_rules=load_rules,
-            input_specs_provider_p=CustomInputSpecsProvider.HParams(
-                input_dims=input_dims
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
             ),
         ),
     }
@@ -1203,16 +1207,16 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     input_dims = 2
     output_dims = 2
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel02, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
 
     lp = task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     lp.optimizer.learning_rate = 5.0
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
     task_p_exclusion = task_p.clone()
     task_p_exclusion.train.learner.bprop_variable_exclusion = '.*var01'
@@ -1256,7 +1260,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     input_dims = 2
     output_dims = 2
 
-    task_p = tasks_lib.SingleTask.HParams(name='task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
         TestModel02,
         name='mdl',
@@ -1265,9 +1269,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     lp = task_p.train.learner
     lp.loss_name = 'loss'
-    lp.optimizer = optimizers.Adam.HParams()
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     lp.optimizer.learning_rate = 5.0
-    lp.optimizer.lr_schedule = schedules.Constant.HParams()
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     lp.optimizer.ema_decay = 0.9999
     lp.bprop_variable_exclusion = '.*var01'
 

@@ -101,6 +101,7 @@ pytype_strict_library(
         ":partitioning",
         ":programs",
         "//praxis:base_input",
+        "//praxis:pax_fiddle",
     ],
 )
 
@@ -630,6 +631,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit internal pyglove dependency.
@@ -770,6 +772,7 @@ py_strict_test(
         ":base_task",
         # Implicit absl.testing.absltest.absltest dependency.
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         # Implicit pyglove dependency.
     ],
 )
@@ -788,6 +791,7 @@ py_strict_test(
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:test_utils",
@@ -806,6 +810,7 @@ py_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit jax dependency.
         "//praxis:base_layer",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:test_utils",
     ],
@@ -882,6 +887,7 @@ py_strict_test(
         "//praxis:base_layer",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:optimizers",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:schedules",
         "//praxis:test_utils",
@@ -931,6 +937,7 @@ py_strict_test(
         # Implicit absl.testing.parameterized dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:test_utils",
         # Implicit seqio dependency.
@@ -995,6 +1002,7 @@ py_strict_test(
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         # Implicit pyglove dependency.
     ],
 )

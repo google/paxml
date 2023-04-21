@@ -128,24 +128,27 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     Returns:
       An InputSpecsProvider instance.
     """
-    return ImageClassificationInputSpecsProvider.HParams().set(
-        batch_size=self.TRAIN_BATCH_SIZE)
+    return pax_fiddle.Config(ImageClassificationInputSpecsProvider).set(
+        batch_size=self.TRAIN_BATCH_SIZE
+    )
 
   def _dataset_train(self) -> base_input.LingvoInputAdaptor.HParams:
     """Returns training data input configs."""
     input_obj = input_generator.ImageNetTrain
     input_p = input_obj.Params()
     input_p.batch_size = self.TRAIN_BATCH_SIZE
-    return base_input.LingvoInputAdaptor.HParams(
-        input=input_p, is_training=True)
+    return pax_fiddle.Config(
+        base_input.LingvoInputAdaptor, input=input_p, is_training=True
+    )
 
   def _dataset_test(self) -> base_input.LingvoInputAdaptor.HParams:
     """Returns test / validation data input configs."""
     input_obj = input_generator.ImageNetValidation
     input_p = input_obj.Params()
     input_p.batch_size = self.EVAL_BATCH_SIZE
-    return base_input.LingvoInputAdaptor.HParams(
-        input=input_p, is_training=False)
+    return pax_fiddle.Config(
+        base_input.LingvoInputAdaptor, input=input_p, is_training=False
+    )
 
   def datasets(self) -> List[base_input.BaseInput.HParams]:
     """Returns a list of dataset configs."""
@@ -163,18 +166,21 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     return net
 
   def _optimizer(self) -> optimizers.BaseOptimizer.HParams:
-    return optimizers.ShardedSgd.HParams(momentum=0.9, nesterov=True)
+    return pax_fiddle.Config(optimizers.ShardedSgd, momentum=0.9, nesterov=True)
 
   def _lr_schedule(self) -> schedules.BaseSchedule.HParams:
     lrs = [1, 0.1, 0.01, 0.001, 0.0]
     epoch_boundaries = [5, 30, 60, 80, 90]
     iters = input_generator.TRAIN_EXAMPLES // self.TRAIN_BATCH_SIZE
     boundaries = [iters * e for e in epoch_boundaries]
-    return schedules.LinearRampupPiecewiseConstant.HParams(
-        boundaries=boundaries, values=lrs)
+    return pax_fiddle.Config(
+        schedules.LinearRampupPiecewiseConstant,
+        boundaries=boundaries,
+        values=lrs,
+    )
 
   def _learner(self) -> learners.Learner.HParams:
-    lp = learners.Learner.HParams()
+    lp = pax_fiddle.Config(learners.Learner)
     lp.loss_name = self.LOSS_NAME
     lp.bprop_variable_exclusion = self.BPROP_VARIABLE_EXCLUSION
 
@@ -234,7 +240,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task configs."""
     resnet = self._network()
-    task_p = tasks_lib.SingleTask.HParams(name='classifier_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classifier_task')
     task_p.model = pax_fiddle.Config(
         layers.ClassificationModel,
         name='classifier',

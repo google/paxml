@@ -17,7 +17,7 @@
 
 import math
 import typing
-from typing import Optional, Sequence, cast, Type
+from typing import Optional, Sequence, Type, cast
 
 import fiddle as fdl
 from jax import numpy as jnp
@@ -104,19 +104,22 @@ def set_default_adam(task_p: tasks_lib.SingleTask.HParams,
   """
   lp = task_p.train.learner
   lp.loss_name = 'total_loss'
-  lp.optimizer = optimizers.Adam.HParams(
+  lp.optimizer = pax_fiddle.Config(
+      optimizers.Adam,
       beta1=0.9,
       beta2=0.99,
       weight_decay=weight_decay,
-      clip_gradient_norm_to_value=5.0)
+      clip_gradient_norm_to_value=5.0,
+  )
   lp.optimizer.learning_rate = learning_rate
-  lp.optimizer.lr_schedule = (
-      schedules.LinearRampupExponentialDecay.HParams(
-          warmup_steps=warmup_steps,
-          decay_start=decay_start,
-          decay_end=decay_end,
-          min_ratio=0.1,
-          max=1.0))
+  lp.optimizer.lr_schedule = pax_fiddle.Config(
+      schedules.LinearRampupExponentialDecay,
+      warmup_steps=warmup_steps,
+      decay_start=decay_start,
+      decay_end=decay_end,
+      min_ratio=0.1,
+      max=1.0,
+  )
 
 
 def set_default_adafactor(task_p: tasks_lib.SingleTask.HParams,
@@ -140,20 +143,23 @@ def set_default_adafactor(task_p: tasks_lib.SingleTask.HParams,
   """
   lp = task_p.train.learner
   lp.loss_name = 'total_loss'
-  lp.optimizer = optimizers.ShardedAdafactor.HParams(
+  lp.optimizer = pax_fiddle.Config(
+      optimizers.ShardedAdafactor,
       decay_method='adam',
       beta1=0.9,
       decay_adam=0.99,
       weight_decay=weight_decay,
-      clip_gradient_norm_to_value=clip_gradient_norm_to_value)
+      clip_gradient_norm_to_value=clip_gradient_norm_to_value,
+  )
   lp.optimizer.learning_rate = learning_rate
-  lp.optimizer.lr_schedule = (
-      schedules.LinearRampupExponentialDecay.HParams(
-          warmup_steps=warmup_steps,
-          decay_start=decay_start,
-          decay_end=decay_end,
-          min_ratio=0.1,
-          max=1.0))
+  lp.optimizer.lr_schedule = pax_fiddle.Config(
+      schedules.LinearRampupExponentialDecay,
+      warmup_steps=warmup_steps,
+      decay_start=decay_start,
+      decay_end=decay_end,
+      min_ratio=0.1,
+      max=1.0,
+  )
 
 
 def maybe_setup_moe_params(
@@ -215,7 +221,7 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
   TRAINING_OPTIMIZED_SHARDING = True
 
   def task(self) -> tasks_lib.SingleTask.HParams:
-    task_p = tasks_lib.SingleTask.HParams(name='classification_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classification_task')
     task_p.model = pax_fiddle.Config(
         models.ClassificationMLPModel, name='classification_model'
     )
@@ -265,7 +271,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
-    task_p = tasks_lib.SingleTask.HParams(name='bert_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(
         models.BertModel, name='bert_lm',
         force_mask_generation=self.FORCE_MASK_GENERATION)
@@ -353,7 +359,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
-    task_p = tasks_lib.SingleTask.HParams(name='bert_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
     model_p = task_p.model
     model_p.mask_token_id = self.MASK_TOKEN_ID
@@ -438,7 +444,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
 
   def task(self) -> tasks_lib.SingleTask.HParams:
     """Returns the task parameters."""
-    task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
     task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
@@ -559,7 +565,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
       assert self.NUM_HEADS is not None
       num_heads = self.NUM_HEADS
 
-    task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
     task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
@@ -744,7 +750,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) == 4
     assert self.ICI_MESH_SHAPE[0] * self.DCN_MESH_SHAPE[0] == self.NUM_STAGES
 
-    task_p = tasks_lib.SingleTask.HParams(name='xformer_task')
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
     task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = True

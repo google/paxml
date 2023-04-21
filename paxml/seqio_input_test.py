@@ -22,10 +22,12 @@ from absl.testing import parameterized
 import numpy as np
 from paxml import seqio_input
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import test_utils as flax_test_utils
 import seqio
 import tensorflow.compat.v2 as tf
+
 instantiate = base_hyperparams.instantiate
 NestedMap = py_utils.NestedMap
 
@@ -132,7 +134,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x)
     _register_task(name, ds)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 7, 'targets': 5}
@@ -200,7 +202,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
                                   [0., 0., 0., 0., 0., 0., 0., 0., 0.]],
                                  dtype=np.float32)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 5, 'targets': 4}
@@ -265,7 +267,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         [[1, 1, 1, 1, 1, 1, 0, 0, 0], [1, 1, 1, 1, 1, 1, 0, 0, 0]],
         dtype=np.int32)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 5, 'targets': 4}
@@ -287,7 +289,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'train'
     p.task_feature_lengths = {'targets': 6}
@@ -332,7 +334,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'train'
     p.task_feature_lengths = {'targets': 6}
@@ -374,7 +376,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'train'
     p.task_feature_lengths = {'targets': 6}
@@ -412,7 +414,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'train'
     p.task_feature_lengths = {'targets': 12}
@@ -444,7 +446,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     x = [{'targets': [5, 6, 7]}]
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.deterministic_input = True
     p.use_cached = True
@@ -470,7 +472,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x)
     _register_task(name, ds)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 6, 'targets': 3}
@@ -551,7 +553,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, feature_names=feature_names)
     _register_task(name, ds, output_feature_names=feature_names)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     task_feature_lengths = {'inputs': 6, 'targets': 3, 'task_ids': 6}
@@ -652,7 +654,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     })
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 4, 'targets': 1}
@@ -686,7 +688,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     }).repeat(6)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 4, 'targets': 1}
@@ -753,7 +755,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 4, 'targets': 2}
@@ -782,7 +784,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 2, 'targets': 2}
@@ -924,16 +926,15 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
   def test_repeat_on_full_eval_fails(self):
     self._setup_seqio_test_registry()
-    p = seqio_input.SeqIOInput.HParams(
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput,
         mixture_name='pred_and_score_task',
         is_training=False,
         split_name='eval',
-        task_feature_lengths={
-            'inputs': 1024,
-            'targets': 256
-        },
+        task_feature_lengths={'inputs': 1024, 'targets': 256},
         feature_converter=seqio_input.LanguageModelFeatures(
-            pack=False, weights_on_targets_only=True),
+            pack=False, weights_on_targets_only=True
+        ),
         batch_size=4,
         reset_for_eval=True,
         eval_loop_num_batches=None,
@@ -967,12 +968,14 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
     # simulate multi-host setup by iterating on multiple input generators
     for host_index in range(num_hosts):
-      p = seqio_input.SeqIOInput.HParams(
+      p = pax_fiddle.Config(
+          seqio_input.SeqIOInput,
           mixture_name='pred_and_score_task',
           split_name='validation',
           task_feature_lengths=task_feature_lengths,
           feature_converter=seqio_input.LanguageModelFeatures(
-              pack=False, weights_on_targets_only=True),
+              pack=False, weights_on_targets_only=True
+          ),
           is_training=False,
           batch_size=batch_size,
           use_enumeration=True,
@@ -1069,16 +1072,15 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
   def test_weights_not_on_targets_only_raises(self):
     self._setup_seqio_test_registry()
-    p = seqio_input.SeqIOInput.HParams(
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput,
         mixture_name='score_task',
         split_name='validation',
-        task_feature_lengths={
-            'inputs': 1024,
-            'targets': 1
-        },
+        task_feature_lengths={'inputs': 1024, 'targets': 1},
         feature_converter=seqio_input.LanguageModelFeatures(pack=False),
         is_training=False,
-        batch_size=1)
+        batch_size=1,
+    )
 
     with self.assertRaisesRegex(
         ValueError,
@@ -1115,7 +1117,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         [[1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0]],
         dtype=np.int32)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 10, 'targets': 4, 'suffixes': 3}
@@ -1160,7 +1162,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         [[1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0]],
         dtype=np.int32)
 
-    p = seqio_input.SeqIOInput.HParams()
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
     p.split_name = 'validation'
     p.task_feature_lengths = {'inputs': 10, 'targets': 4, 'suffixes': 3}

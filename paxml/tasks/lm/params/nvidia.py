@@ -119,7 +119,8 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 
     lp = task_p.train.learner
     lp.loss_name = 'total_loss'
-    lp.optimizer = optimizers.Adam.HParams(
+    lp.optimizer = pax_fiddle.Config(
+        optimizers.Adam,
         beta1=self.ADAM_BETA1,
         beta2=self.ADAM_BETA2,
         weight_decay=self.WEIGHT_DECAY,
@@ -130,7 +131,8 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
     )
     lp.optimizer.learning_rate = self.LEARNING_RATE
 
-    lp.optimizer.lr_schedule = schedules.LinearRampupCosineDecay.HParams(
+    lp.optimizer.lr_schedule = pax_fiddle.Config(
+        schedules.LinearRampupCosineDecay,
         warmup_steps=self.LR_COS_WARMUP,
         decay_start=self.LR_COS_DECAY_START,
         decay_end=self.LR_COS_DECAY_END,

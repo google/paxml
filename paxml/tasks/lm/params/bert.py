@@ -16,7 +16,6 @@
 """BERT masked language model configurations."""
 
 from typing import List
-
 import jax
 from paxml import base_experiment
 from paxml import experiment_registry
@@ -25,6 +24,7 @@ from paxml.tasks.lm import input_generator
 from paxml.tasks.lm import model_params
 from praxis import base_input
 from praxis import layers
+from praxis import pax_fiddle
 
 
 class BertDataset(base_experiment.BaseExperiment):
@@ -35,7 +35,7 @@ class BertDataset(base_experiment.BaseExperiment):
 
   def _datasetTrain(self) -> base_input.BaseInput.HParams:
     """Parameters for using the original ML Perf training data."""
-    p = input_generator.TFRecordBertInput.HParams()
+    p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     p.name = 'train'
     p.input_file = '/PATH/TO/BERT/TRAIN/TF_RECORDS'
     p.enable_packing = True
@@ -50,7 +50,7 @@ class BertDataset(base_experiment.BaseExperiment):
 
   def _datasetTest(self) -> base_input.BaseInput.HParams:
     """Parameters for using the original ML Perf eval data."""
-    p = input_generator.TFRecordBertInput.HParams()
+    p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     p.name = 'test'
     p.input_file = '/PATH/TO/BERT/EVAL/TF_RECORDS'
     p.enable_packing = False

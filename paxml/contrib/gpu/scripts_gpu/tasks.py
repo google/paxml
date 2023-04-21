@@ -14,18 +14,19 @@
 # limitations under the License.
 
 import functools
-import jax
 import os
+from typing import List, Optional
+import jax
 from paxml import base_experiment
 from paxml import seqio_input
+from paxml.contrib.gpu.scripts_gpu import tfds_lambada
+from paxml.contrib.gpu.scripts_gpu import tfds_pile
 from paxml.tasks.lm.params.c4 import TaskRegistry
 from praxis import base_input
-from paxml.contrib.gpu.scripts_gpu import tfds_pile
-from paxml.contrib.gpu.scripts_gpu import tfds_lambada
+from praxis import pax_fiddle
 import seqio
 import t5.data
 from t5.data import preprocessors as t5_preprocessors
-from typing import List, Optional
 
 ### for now, make sure to set 'VOCAB_PATH' as an environment variable in your bash script
 vocab_path = os.getenv('VOCAB_PATH', None)
@@ -97,7 +98,8 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
       batch_size_per_process = math.ceil(self.PERCORE_BATCH_SIZE * num_local_devices)
       num_infeed_hosts = global_batch_size // batch_size_per_process
 
-    p = seqio_input.SeqIOInput.HParams(
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput,
         name='PileTrain' if is_training else 'PileValidation',
         mixture_name='the_pile_lm',
         split_name='train' if is_training else 'validation',
@@ -105,14 +107,17 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
         use_cached=False,
         repeat=True if is_training else False,
         feature_converter=seqio_input.LanguageModelFeatures(
-            pack=True if is_training else False,
-            use_custom_packing_ops=False),
+            pack=True if is_training else False, use_custom_packing_ops=False
+        ),
         is_training=is_training,
-        input_random_seed=(self.TRAIN_INPUT_RANDOM_SEED if is_training else 4321),
+        input_random_seed=(
+            self.TRAIN_INPUT_RANDOM_SEED if is_training else 4321
+        ),
         batch_size=batch_size_per_process,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
-        shuffle=True)
+        shuffle=True,
+    )
     return p
 
   def datasets(self) -> List[base_input.BaseInput.HParams]:
@@ -137,27 +142,30 @@ class LambadaDataset(base_experiment.BaseExperiment):
     else:
       global_batch_size = int(self.PERCORE_BATCH_SIZE * num_local_devices *
                               jax.process_count())
-      #batch_size_per_process = num_local_devices
+      # batch_size_per_process = num_local_devices
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
       num_infeed_hosts = global_batch_size // batch_size_per_process
-    p = seqio_input.SeqIOInput.HParams(
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput,
         name='LambadaValidation',
         mixture_name='lambada_eval',
         split_name='test',
         ## 'targets' is only one word
-        task_feature_lengths={'targets': 64, 'inputs': self.MAX_SEQ_LEN-64},
+        task_feature_lengths={'targets': 64, 'inputs': self.MAX_SEQ_LEN - 64},
         use_cached=False,
         repeat=True if is_training else False,
         feature_converter=seqio_input.LanguageModelFeatures(
             pack=False,
             use_custom_packing_ops=False,
-            weights_on_targets_only=True),
+            weights_on_targets_only=True,
+        ),
         is_training=is_training,
         input_random_seed=4321,
         batch_size=batch_size_per_process,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
-        shuffle=False)
+        shuffle=False,
+    )
     return p
 
   def datasets(self) -> List[base_input.BaseInput.HParams]:

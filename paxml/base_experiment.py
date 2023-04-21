@@ -27,6 +27,7 @@ from paxml import base_task
 from paxml import partitioning
 from paxml import programs
 from praxis import base_input
+from praxis import pax_fiddle
 
 _BaseExperimentT = TypeVar('_BaseExperimentT', bound='BaseExperiment')
 BaseExperimentT = Type[_BaseExperimentT]
@@ -89,7 +90,9 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     # TODO(b/236417790): Make this method fully abstract and enforce users to
     # provide input specs.
     input_p = self.training_dataset()
-    return base_input.DatasetInputSpecsProvider.HParams(input_p=input_p)
+    return pax_fiddle.Config(
+        base_input.DatasetInputSpecsProvider, input_p=input_p
+    )
 
   def validate(self) -> None:
     """Validates the experiment config but raises if misconfigured."""
