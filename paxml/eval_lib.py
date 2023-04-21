@@ -896,154 +896,195 @@ def partition_decode_once_pmap_model(
   return decode_once_fn
 
 
-def decode_once_pmap_model(
-    jax_task: tasks_lib.SingleTask,
+def _decode_once_common(
+    model: base_model.BaseModel,
     partitioner: partitioning.Partitioner,
-    task_p: tasks_lib.SingleTask.HParams,
-    var_weight_hparams: NestedWeightHParams,
     inputs: List[base_input.BaseInput],
-    prng_seed: JTensor,
+    prng_key: JTensor,
     job_log_dir: epath.Path,
-    replicated_model_states: TrainState,
+    train_state: TrainState,
     summary_writers: List[SummaryWriter],
+    use_pmap: bool,
+    *,
+    task_p: Optional[tasks_lib.SingleTask.HParams] = None,
+    var_weight_hparams: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
+    decode_step_fn: Optional[
+        Callable[
+            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+        ]
+    ] = None,
+    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
+    metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
 ) -> Tuple[
-    List[Optional[Dict[str, float]]],  # decode metrics.
-    List[Optional[Dict[str, float]]],  # processed decode metrics.
-    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-    List[int],  # performed decode steps.
+    Tuple[
+        List[Optional[Dict[str, float]]],  # decode metrics.
+        List[Optional[Dict[str, float]]],  # processed decode metrics.
+        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+        List[int],  # performed decode steps.
+    ],
+    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
 ]:
-  """Runs the decoding on the entire decoder datasets for a PMAP model.
+  """Runs the decoding once on the entire decoder datasets for a PMAP or SPMD model.
 
   Args:
-    jax_task: instantiated model from task_p.
-    partitioner: The Partitioner used to partition the computations.
+    model: The model being evaluated.
+    partitioner: The partitioner used for the model and the data.
+    inputs: Instantiated inputs.
+    prng_key: The prng key used for decoding.
+    job_log_dir: Directory for the job logs.
+    train_state: A `TrainState` object.
+    summary_writers: The summary writer objects to log summaries.
+    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+      `task_p`, `var_weight_hparams`, `output_pickle` and
+      `enable_checkpoint_saving` should be set; otherwise, `decode_step_fn`,
+      `inputs_partition_spec` and `metrics_p` should be set.
     task_p: Params for the task encapsulating a data parallel model.
     var_weight_hparams: Nested structure of HParams for the model weights.
-    inputs: instantiated inputs.
-    prng_seed: The prng seed used for decoding.
-    job_log_dir: Directory for the job logs.
-    replicated_model_states: A TrainState object.
-    summary_writers: The summary writer objects to log summaries.
+    output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    decode_step_fn: pjit'ed decode functions.
+    inputs_partition_spec: Partition specs for inputs.
+    metrics_p: Parameters to configure how to aggregate the metrics.
 
   Returns:
-    A tuple of (a list of decode metrics,
-                a list of processed decode metrics,
-                a list of optional decoder (seqio) metrics.
-                 list of integers as performed decode steps for each input).
+    A tuple of(
+        tuple of (a list of decode metrics,
+                  a list of processed decode metrics,
+                  a list of optional decoder (seqio) metrics.
+                  list of integers as performed decode steps for each input).
+        raw clu metrics).
       Items from each list are aligned with each input from inputs.
   """
-  if not inputs:
-    return [], [], [], []
+  # TODO(wangpeng): Remove unnecessary `use_pmap` branchings.
+
+  if use_pmap:
+    if not inputs:
+      return ([], [], [], []), []
+    assert task_p is not None
+    model_p = task_p.model
+    metrics_p = task_p.metrics
   work_unit = platform.work_unit()
-  model = jax_task.model
-  model_p = task_p.model
-  metrics_p = task_p.metrics
   if not metrics_p:
     metrics_p = base_metrics.MeanMetrics.HParams()
 
   step_i = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(
-          replicated_model_states.step
-      )
+      py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
   )
 
-  logging.info('step=%d', step_i)
-
-  def decode_step(mdl_states, prng_key, inputs, batch_idx):
-    if task_p.decode.prng_key_fold_with_batch_index:
-      prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
-    else:
-      prng_seed_decode = prng_key
-    mdl_states = mdl_states.to_eval_state()
-    (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
-        trainer_lib.decode_step(
-            model,
-            mdl_states,
-            prng_seed_decode,
-            var_weight_hparams,
-            inputs,
-            model_p.fprop_dtype,
-            task_p.decode.prng_key_fold_with_global_step,
-        )
-    )
-
-    weighted_scalars = decode_metrics.aggregate(weighted_scalars)
-    aggregated_per_example_out = jax.lax.all_gather(
-        per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
-    )
-
-    summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
-    summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-    aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
-        summary_tensors
-    )
-
-    # We want to aggregate metrics across workers.
-    # In pmap we do an all gather of the metric state across workers, and then
-    # call reduce() on the metric which by default calls merge across workers.
-    aggregated_metrics = {}
-    for metric_name, metric in updated_metrics.items():
-      aggregated_metrics[metric_name] = jax.lax.all_gather(
-          metric, axis_name=PMAP_PARALLEL_AXIS_NAME
-      ).reduce()
-
-    return (
-        weighted_scalars,
-        aggregated_per_example_out,
-        aggregated_summaries,
-        aggregated_metrics,
-    )
-
-  # As an example, suppose the output leaf from trainer_lib.decoder_step()
-  # for each core has shape: [per_core_batch_size, decoding_length].
-  # In the all_gather we set tiled=True, so the output chunks are all
-  # concatenated into the existing batch axis, so we get shape
-  # [num_cores x per_core_batch_size, decoding_length].
-  # In the pmap call we set out_axes=None to not have to manually unreplicate,
-  # so the output of pmap_decode_step() will have the same shape.
-  #
-  # Example code snippet showing this:
-  #   # shape (8, 3, 2)
-  #   x = jnp.tile(jnp.arange(8)[:, None, None],[1, 3, 2])
-  #   # shape (24, 2)
-  #   z = jax.pmap(
-  #       lambda y: jax.lax.all_gather(y+1, axis_name='i', tiled=True),
-  #       axis_name='i', out_axes=None)(x)
-  #
-  # We aggregate all outputs from decode_step.
-  pmap_decode_step = jax.pmap(
-      decode_step,
-      axis_name=PMAP_PARALLEL_AXIS_NAME,
-      out_axes=(None, None, None, None),
+  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
+  dirnames = _get_dir_names(inputs)
+  filename = programs.get_filename(
+      train_state.step if use_pmap else step_i, EvaluationMode.DECODE.value
   )
-
-  def decode_step_func(inputs, batch_idx):
-    # TODO(pax): shall we eval all sub-models during eval?
-    return pmap_decode_step(
-        replicated_model_states,
-        prng_seed,
-        inputs,
-        batch_idx * jnp.ones((jax.local_device_count(),)),
-    )
+  filenames = [basedir / s / filename for s in dirnames]
 
   num_steps_per_input = [
       -1 if input.reset_for_eval else input.eval_loop_num_batches
       for input in inputs
   ]
-  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
-  dirnames = _get_dir_names(inputs)
-  filename = programs.get_filename(
-      replicated_model_states.step, EvaluationMode.DECODE.value
-  )
-  filenames = [basedir / s / filename for s in dirnames]
+
+  if use_pmap:
+    logging.info('step=%d', step_i)
+
+    def decode_step(mdl_states, prng_key, inputs, batch_idx):
+      if task_p.decode.prng_key_fold_with_batch_index:
+        prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
+      else:
+        prng_seed_decode = prng_key
+      mdl_states = mdl_states.to_eval_state()
+      (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
+          trainer_lib.decode_step(
+              model,
+              mdl_states,
+              prng_seed_decode,
+              var_weight_hparams,
+              inputs,
+              model_p.fprop_dtype,
+              task_p.decode.prng_key_fold_with_global_step,
+          )
+      )
+
+      weighted_scalars = decode_metrics.aggregate(weighted_scalars)
+      aggregated_per_example_out = jax.lax.all_gather(
+          per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
+      )
+
+      summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
+      aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
+          summary_tensors
+      )
+
+      # We want to aggregate metrics across workers.
+      # In pmap we do an all gather of the metric state across workers, and then
+      # call reduce() on the metric which by default calls merge across workers.
+      aggregated_metrics = {}
+      for metric_name, metric in updated_metrics.items():
+        aggregated_metrics[metric_name] = jax.lax.all_gather(
+            metric, axis_name=PMAP_PARALLEL_AXIS_NAME
+        ).reduce()
+
+      return (
+          weighted_scalars,
+          aggregated_per_example_out,
+          aggregated_summaries,
+          aggregated_metrics,
+      )
+
+    # As an example, suppose the output leaf from trainer_lib.decoder_step()
+    # for each core has shape: [per_core_batch_size, decoding_length].
+    # In the all_gather we set tiled=True, so the output chunks are all
+    # concatenated into the existing batch axis, so we get shape
+    # [num_cores x per_core_batch_size, decoding_length].
+    # In the pmap call we set out_axes=None to not have to manually unreplicate,
+    # so the output of pmap_decode_step() will have the same shape.
+    #
+    # Example code snippet showing this:
+    #   # shape (8, 3, 2)
+    #   x = jnp.tile(jnp.arange(8)[:, None, None],[1, 3, 2])
+    #   # shape (24, 2)
+    #   z = jax.pmap(
+    #       lambda y: jax.lax.all_gather(y+1, axis_name='i', tiled=True),
+    #       axis_name='i', out_axes=None)(x)
+    #
+    # We aggregate all outputs from decode_step.
+    pmap_decode_step = jax.pmap(
+        decode_step,
+        axis_name=PMAP_PARALLEL_AXIS_NAME,
+        out_axes=(None, None, None, None),
+    )
+
+    def decode_step_func(inputs, batch_idx):
+      # TODO(pax): shall we eval all sub-models during eval?
+      return pmap_decode_step(
+          train_state,
+          prng_key,
+          inputs,
+          batch_idx * jnp.ones((jax.local_device_count(),)),
+      )
+
+  else:
+    logging.info(
+        'partitioned_train_state: %s',
+        jax.tree_map(lambda x: x.shape, train_state),
+    )
+
+    # We do not fold in jax.process_index in contrast to the pmap version and
+    # use a single global key instead to rely on pjit to split for different
+    # replicas.
+    logging.info('decode prng_key: %s', prng_key)
+    spmd_decode_step_fn = functools.partial(
+        decode_step_fn, train_state.to_eval_state(), prng_key
+    )
 
   decode_metrics_list = []
   processed_decode_metrics_list = []
   seqio_metrics_list = []
   num_decode_steps = []
+  raw_metrics_list = []
 
   for split, num_split_steps in enumerate(num_steps_per_input):
     input_name = inputs[split].name
@@ -1059,6 +1100,7 @@ def decode_once_pmap_model(
       processed_decode_metrics_list.append(None)
       seqio_metrics_list.append(None)
       num_decode_steps.append(0)
+      raw_metrics_list.append(None)
       continue
     logging.info('Start decoding on input %s', input_name)
     step_num = 0
@@ -1078,42 +1120,89 @@ def decode_once_pmap_model(
     while num_split_steps < 0 or step_num < num_split_steps:
       step_num += 1
       try:
-        batch = inputs[split].get_next()
+        if use_pmap:
+          batch = inputs[split].get_next()
+        else:
+          batch = inputs[split].get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         inputs[split].reset()
         break
-      batch = partitioner.preprocess_inputs(inputs[split], batch, None)
-      (batch_metrics, out, summary_tensors, updated_metrics) = decode_step_func(
-          batch, batch_idx=step_num
+      batch = partitioner.preprocess_inputs(
+          inputs[split], batch, None if use_pmap else inputs_partition_spec
       )
-      for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
-        all_summary_tensors[key].append(tensor)
-      # we store the metric directly as it has already been aggregated in
-      # side decode_step_fun
-      decode_metrics.store(batch_metrics)
-      logging.info(
-          'Finished decoding input batch %d for %s', step_num, input_name
-      )
+      if use_pmap:
+        (weighted_scalars, out, summary_tensors, updated_metrics) = (
+            decode_step_func(batch, batch_idx=step_num)
+        )
+      else:
+        (weighted_scalars, out, updated_metrics), updated_vars = (
+            spmd_decode_step_fn(
+                batch,
+                inputs[split].get_global_batch_size(inputs[split].hparams),
+            )
+        )
+
+        # Cross host synchronization happens at this point.
+        py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')
+        # Output is fully replicated now, so it's ok to unreplicate it by
+        # retrieving from device 0 only.
+        out = py_utils.maybe_unreplicate_for_fully_replicated(out)
+        weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+            weighted_scalars
+        )
+
+        # Because outputs of the decode step in pjit are annotated to
+        # be Jax Arrays, they are already fully replicated across
+        # shards and we can just unreplicate.
+        # This also means we don't need to call an all_gather and a reduce()
+        # on each clu.metric like we do in pmap mode.
+        updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
+            updated_metrics
+        )
+
+        summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+        summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
+        del updated_vars  # release Jax Arrays memory allocations
+
+        summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
+            summary_tensors
+        )
 
       # Merge clu.metrics to update for each minibatch.
       metrics = _merge_clu_metrics(metrics, updated_metrics)
 
-      # Run `process_decode_out` on CPU device as its implementation is not
-      # expected to be JIT friendly. Since we keep track of its outputs, we also
-      # don't want on-device allocation as would eventually lead to HBM OOM.
+      for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
+        all_summary_tensors[key].append(tensor)
+
+      logging.info(
+          'Finished decoding input batch %d for %s', step_num, input_name
+      )
+
+      if use_pmap:
+        # we store the metric directly as it has already been aggregated in
+        # side decode_step_fun
+        decode_metrics.store(weighted_scalars)
+      elif jax.process_index() == 0:
+        weighted_scalars = jax.tree_map(np.array, weighted_scalars)
+        decode_metrics.store(weighted_scalars)
+
       if jax.process_index() == 0:
+        # Run `process_decode_out` on CPU device as its implementation
+        # is not expected to be JIT friendly. Since we keep track of
+        # its outputs, we also don't want on-device allocation as
+        # would eventually lead to HBM OOM.
         with jax.default_device(jax.devices('cpu')[0]):
           out = jax.tree_map(np.asarray, out)
           process_decode_output = model.process_decode_out(inputs[split], out)
 
-        (processed_scalars, processed_out, processed_metric_updates) = (
+        (process_weighted_scalars, processed_out, processed_metric_updates) = (
             process_decode_output
         )
         processed_out = seqio_input.maybe_update_decode_output_keys(
             processed_out, out
         )
 
-        process_decode_metrics.store(processed_scalars)
+        process_decode_metrics.store(process_weighted_scalars)
         processed_decodes.extend(processed_out)
         if processed_metric_updates:
           processed_metrics = _merge_clu_metrics(
@@ -1122,9 +1211,11 @@ def decode_once_pmap_model(
 
         logging.info('Finished processing decoded input batch %d', step_num)
 
-      work_unit.set_task_status(
-          f'Finished decoding on {input_name} (batches={step_num})'
-      )
+      if use_pmap:
+        work_unit.set_task_status(
+            f'Finished decoding on {input_name} (batches={step_num})'
+        )
+
       logging.info('Finished decoding on %s (batches=%s)', input_name, step_num)
 
     # Now the decode loop of multiple batches on current dataset is done,
@@ -1165,9 +1256,8 @@ def decode_once_pmap_model(
       metric_utils.write_clu_metric_summaries(metric_values, step_i)
       metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
 
-    if (
-        jax.process_index() == 0
-        and not flags.FLAGS.pax_only_aggregate_summaries
+    if jax.process_index() == 0 and not (
+        use_pmap and flags.FLAGS.pax_only_aggregate_summaries
     ):
       dir_path = basedir / dirnames[split]
       dir_path.mkdir(parents=True, exist_ok=True)
@@ -1178,7 +1268,14 @@ def decode_once_pmap_model(
           len(processed_decodes),
       )
       programs.safe_write_key_value_pairs(
-          output_file, processed_decodes, write_pickle=output_pickle
+          output_file,
+          processed_decodes,
+          write_pickle=output_pickle if use_pmap else True,
+      )
+
+    if not use_pmap:
+      work_unit.set_task_status(
+          f'Finished processing decoded input batch for {input_name}'
       )
 
     merged_decode_metrics = metric_utils.update_float_dict(
@@ -1194,9 +1291,10 @@ def decode_once_pmap_model(
     processed_decode_metrics_list.append(merged_processed_decode_metrics)
     seqio_metrics_list.append(seqio_metric_values)
     num_decode_steps.append(step_num)
+    raw_metrics_list.append(metrics)
 
-    # Track metric specified by task_p.track_decoder_metric.
-    if task_p.track_decoder_metric:
+    if use_pmap and task_p.track_decoder_metric:
+      # Track metric specified by task_p.track_decoder_metric.
       input_names = [inp.name for inp in inputs]
       _find_and_maybe_update_tracked_metric(
           basedir,
@@ -1204,7 +1302,7 @@ def decode_once_pmap_model(
           dirnames,
           step_i,
           input_names,
-          replicated_model_states,
+          train_state,
           task_p,
           [merged_decode_metrics, merged_processed_decode_metrics],
           enable_checkpoint_saving=enable_checkpoint_saving,
@@ -1215,7 +1313,63 @@ def decode_once_pmap_model(
       processed_decode_metrics_list,
       seqio_metrics_list,
       num_decode_steps,
-  )
+  ), raw_metrics_list
+
+
+def decode_once_pmap_model(
+    jax_task: tasks_lib.SingleTask,
+    partitioner: partitioning.Partitioner,
+    task_p: tasks_lib.SingleTask.HParams,
+    var_weight_hparams: NestedWeightHParams,
+    inputs: List[base_input.BaseInput],
+    prng_seed: JTensor,
+    job_log_dir: epath.Path,
+    replicated_model_states: TrainState,
+    summary_writers: List[SummaryWriter],
+    output_pickle: bool = True,
+    enable_checkpoint_saving: bool = True,
+) -> Tuple[
+    List[Optional[Dict[str, float]]],  # decode metrics.
+    List[Optional[Dict[str, float]]],  # processed decode metrics.
+    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+    List[int],  # performed decode steps.
+]:
+  """Runs the decoding on the entire decoder datasets for a PMAP model.
+
+  Args:
+    jax_task: instantiated model from task_p.
+    partitioner: The Partitioner used to partition the computations.
+    task_p: Params for the task encapsulating a data parallel model.
+    var_weight_hparams: Nested structure of HParams for the model weights.
+    inputs: instantiated inputs.
+    prng_seed: The prng seed used for decoding.
+    job_log_dir: Directory for the job logs.
+    replicated_model_states: A TrainState object.
+    summary_writers: The summary writer objects to log summaries.
+    output_pickle: Whether to write decoding results to a pickle file.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+
+  Returns:
+    A tuple of (a list of decode metrics,
+                a list of processed decode metrics,
+                a list of optional decoder (seqio) metrics.
+                 list of integers as performed decode steps for each input).
+      Items from each list are aligned with each input from inputs.
+  """
+  return _decode_once_common(
+      model=jax_task.model,
+      partitioner=partitioner,
+      inputs=inputs,
+      prng_key=prng_seed,
+      job_log_dir=job_log_dir,
+      train_state=replicated_model_states,
+      summary_writers=summary_writers,
+      use_pmap=True,
+      task_p=task_p,
+      var_weight_hparams=var_weight_hparams,
+      output_pickle=output_pickle,
+      enable_checkpoint_saving=enable_checkpoint_saving,
+  )[0]
 
 
 def decode_spmd_model(
@@ -1396,10 +1550,10 @@ def _decode_once_spmd_model(
         List[Optional[Dict[str, float]]],  # decode metrics.
         List[Optional[Dict[str, float]]],  # processed decode metrics.
         List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-        List[int],
+        List[int],  # performed decode steps.
     ],
     List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
-]:  # performed decode steps.
+]:
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
@@ -1423,226 +1577,19 @@ def _decode_once_spmd_model(
         raw clu metrics).
       Items from each list are aligned with each input from inputs.
   """
-  work_unit = platform.work_unit()
-  if not metrics_p:
-    metrics_p = base_metrics.MeanMetrics.HParams()
-
-  step_i = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+  return _decode_once_common(
+      model=model,
+      partitioner=partitioner,
+      inputs=inputs,
+      prng_key=prng_key,
+      job_log_dir=job_log_dir,
+      train_state=train_state,
+      summary_writers=summary_writers,
+      use_pmap=False,
+      decode_step_fn=decode_step_fn,
+      inputs_partition_spec=inputs_partition_spec,
+      metrics_p=metrics_p,
   )
-  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
-  dirnames = _get_dir_names(inputs)
-  filenames = [
-      basedir / s / programs.get_filename(step_i, EvaluationMode.DECODE.value)
-      for s in dirnames
-  ]
-
-  logging.info(
-      'partitioned_train_state: %s',
-      jax.tree_map(lambda x: x.shape, train_state),
-  )
-  # We do not fold in jax.process_index in contrast to the pmap version and
-  # use a single global key instead to rely on pjit to split for different
-  # replicas.
-  logging.info('decode prng_key: %s', prng_key)
-  spmd_decode_step_fn = functools.partial(
-      decode_step_fn, train_state.to_eval_state(), prng_key
-  )
-
-  num_steps_per_input = [
-      -1 if input.reset_for_eval else input.eval_loop_num_batches
-      for input in inputs
-  ]
-  decode_metrics_list = []
-  processed_decode_metrics_list = []
-  seqio_metrics_list = []
-  num_decode_steps = []
-  raw_metrics_list = []
-
-  for split, num_split_steps in enumerate(num_steps_per_input):
-    input_name = inputs[split].name
-    if programs.can_load_written_outputs(
-        job_log_dir, input_name, EvaluationMode.DECODE, step_i
-    ):
-      logging.info(
-          'Decoding on input %s at step %d already done, skipping.',
-          input_name,
-          step_i,
-      )
-      decode_metrics_list.append(None)
-      processed_decode_metrics_list.append(None)
-      seqio_metrics_list.append(None)
-      num_decode_steps.append(0)
-      raw_metrics_list.append(None)
-      continue
-    logging.info('Start decoding on input %s', input_name)
-    step_num = 0
-    # decode_metrics and process_decode_metrics work on WeightedScalars
-    # which are string -> (value, weight) pairs where value and weight
-    # scalars. These metrics are configured on the task.
-    decode_metrics = instantiate(metrics_p)
-    process_decode_metrics = instantiate(metrics_p)
-
-    # metrics and processed_metrics are dictionaries of
-    # strings -> clu_metrics.Metric objects. metrics is returned from decode()
-    # and processed_metrics is returned from process_decode_out.
-    metrics = {}
-    processed_metrics = {}
-    processed_decodes = []
-    all_summary_tensors = collections.defaultdict(list)
-    while num_split_steps < 0 or step_num < num_split_steps:
-      step_num += 1
-      try:
-        batch = inputs[split].get_next_padded()
-      except (tf.errors.OutOfRangeError, StopIteration):
-        inputs[split].reset()
-        break
-      batch = partitioner.preprocess_inputs(
-          inputs[split], batch, inputs_partition_spec
-      )
-      (weighted_scalars, out, updated_metrics), updated_vars = (
-          spmd_decode_step_fn(
-              batch, inputs[split].get_global_batch_size(inputs[split].hparams)
-          )
-      )
-
-      # Cross host synchronization happens at this point.
-      py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')
-      # Output is fully replicated now, so it's ok to unreplicate it by
-      # retrieving from device 0 only.
-      out = py_utils.maybe_unreplicate_for_fully_replicated(out)
-      weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-          weighted_scalars
-      )
-
-      # Because outputs of the decode step in pjit are annotated to be Jax
-      # Arrays, they are already fully replicated across shards and we can just
-      # unreplicate.
-      # This also means we don't need to call an all_gather and a reduce()
-      # on each clu.metric like we do in pmap mode.
-      updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-          updated_metrics
-      )
-
-      # Merge clu.metrics to update for each minibatch.
-      metrics = _merge_clu_metrics(metrics, updated_metrics)
-
-      summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
-      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-      del updated_vars  # release Jax Arrays memory allocations
-
-      summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-          summary_tensors
-      )
-      for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
-        all_summary_tensors[key].append(tensor)
-
-      logging.info(
-          'Finished decoding input batch %d for %s', step_num, input_name
-      )
-      if jax.process_index() != 0:
-        continue
-      weighted_scalars = jax.tree_map(np.array, weighted_scalars)
-      decode_metrics.store(weighted_scalars)
-
-      # Run `process_decode_out` on CPU device as its implementation is not
-      # expected to be JIT friendly. Since we keep track of its outputs, we also
-      # don't want on-device allocation as would eventually lead to HBM OOM.
-      with jax.default_device(jax.devices('cpu')[0]):
-        out = jax.tree_map(np.asarray, out)
-        process_decode_output = model.process_decode_out(inputs[split], out)
-
-      (process_weighted_scalars, processed, processed_metric_updates) = (
-          process_decode_output
-      )
-      processed = seqio_input.maybe_update_decode_output_keys(processed, out)
-
-      process_decode_metrics.store(process_weighted_scalars)
-      processed_decodes.extend(processed)
-      if processed_metric_updates:
-        processed_metrics = _merge_clu_metrics(
-            processed_metrics, processed_metric_updates
-        )
-
-      logging.info('Finished processing decoded input batch %d', step_num)
-
-    logging.info('Finished decoding on %s (batches=%s)', input_name, step_num)
-
-    # Now the decode loop of multiple batches on current dataset is done,
-    # we start to aggregate copmuted metrics and put them in summary.
-    seqio_metric_values = None
-    if seqio_input.should_process_outputs(inputs[split]):
-      logging.info(
-          'Finished processing all %d examples.', len(processed_decodes)
-      )
-      seqio_metric_values = seqio_input.process_outputs(
-          inputs[split],
-          processed_decodes,
-          summary_writers[split],
-          seqio_input.MetricType.PREDICT,
-          step_i,
-          basedir / dirnames[split],
-          plain_text_output_fname=f'{filenames[split]}.txt',
-      )
-
-    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
-    metric_values = metric_utils.compute_metric_values(metrics)
-    process_metric_values = metric_utils.compute_metric_values(
-        processed_metrics
-    )
-
-    with summary_writers[split].as_default():
-      logging.info('Summarizing of decode_metrics.')
-      decode_metric_dict = decode_metrics.summarize(step_i, 'decode_metrics')
-      logging.info('Summarizing of process_decode_metrics.')
-      processed_metric_dict = process_decode_metrics.summarize(
-          step_i, 'process_decode_metrics'
-      )
-      for key, tensor in all_summary_tensors.items():
-        summary_type = base_layer.get_summary_type_from_key(key)
-        summary_utils.write_summary_tensor(
-            step_i, key, np.array(tensor), summary_type
-        )
-      metric_utils.write_clu_metric_summaries(metric_values, step_i)
-      metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
-
-    if jax.process_index() == 0:
-      dir_path = basedir / dirnames[split]
-      dir_path.mkdir(parents=True, exist_ok=True)
-      output_file = filenames[split]
-      logging.info(
-          'Writing decoder output to %s with %d entries',
-          output_file,
-          len(processed_decodes),
-      )
-      programs.safe_write_key_value_pairs(output_file, processed_decodes)
-
-    work_unit.set_task_status(
-        f'Finished processing decoded input batch for {input_name}'
-    )
-
-    decode_metrics_list.append(
-        metric_utils.update_float_dict(
-            metric_utils.as_float_dict(decode_metric_dict),
-            metric_utils.as_float_dict(metric_values),
-        )
-    )
-    processed_decode_metrics_list.append(
-        metric_utils.update_float_dict(
-            metric_utils.as_float_dict(processed_metric_dict),
-            metric_utils.as_float_dict(process_metric_values),
-        )
-    )
-    seqio_metrics_list.append(seqio_metric_values)
-    num_decode_steps.append(step_num)
-    raw_metrics_list.append(metrics)
-
-  return (
-      decode_metrics_list,
-      processed_decode_metrics_list,
-      seqio_metrics_list,
-      num_decode_steps,
-  ), raw_metrics_list
 
 
 def decode_once_spmd_model(
