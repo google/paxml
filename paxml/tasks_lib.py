@@ -1118,6 +1118,8 @@ class SingleTask(base_task.BaseTask):
         90 minutes. This is performed in addition to keeping the most recent
         `max_to_keep` checkpoint files.
       save_max_to_keep: The maximum number of recent checkpoints to keep.
+      max_inflight_steps: Maximum number of inflight train steps. If <= 0, no
+        limit.
       summary_interval_steps: How frequently to generate summaries in terms of
         the number of training steps.
       device_sync_interval_steps: How many train steps to dispatch before
@@ -1195,6 +1197,7 @@ class SingleTask(base_task.BaseTask):
     save_interval_steps: int = 5000
     save_keep_interval_duration: str = '12h'
     save_max_to_keep: int = 10
+    max_inflight_steps: int = 2
     summary_interval_steps: int = 100
     device_sync_interval_steps: Optional[int] = None
     log_train_output_interval_steps: Optional[int] = None

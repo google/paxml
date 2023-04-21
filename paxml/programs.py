@@ -18,6 +18,7 @@ import abc
 import collections
 import contextlib
 import dataclasses
+import queue
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
@@ -121,6 +122,31 @@ class Program(metaclass=abc.ABCMeta):
     """Runs any necessary cleanup."""
 
 
+class _InflightQueue:
+  """Tracks and limits the number of inflight computations."""
+
+  def __init__(self, max_inflight: int):
+    self._inflight_queue = None
+    if max_inflight > 0:
+      self._inflight_queue = queue.Queue(maxsize=max_inflight)
+
+  def add_computation(self, computation: JTensor):
+    """Adds a pending on-device computation."""
+    if self._inflight_queue:
+      self._inflight_queue.put(computation)
+
+  def wait_for_next(self):
+    """If the queue is full, wait for the next computation to finish."""
+    if self._inflight_queue and self._inflight_queue.full():
+      self._inflight_queue.get().block_until_ready()
+
+  def wait_for_all(self):
+    """Wait for all inflight computations to finish."""
+    if self._inflight_queue:
+      while not self._inflight_queue.empty():
+        self._inflight_queue.get().block_until_ready()
+
+
 class BaseTrainProgram(Program):
   """A lean interface of a basic train program.
 
@@ -147,6 +173,8 @@ class BaseTrainProgram(Program):
     self._eval_train_summary_handler = None
     self._train_summary_last_time = None
     self._train_summary_last_step = None
+    # Used to limit the number of inflight training steps.
+    self._pending_train_losses: _InflightQueue = None
 
     # Other states used during training.
     self._first_step_completion_time = None
@@ -223,6 +251,7 @@ class BaseTrainProgram(Program):
     )
     self._train_summary_last_time = time.time()
     self._train_summary_last_step = init_step - 1
+    self._pending_train_losses = _InflightQueue(train_p.max_inflight_steps)
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     return train_step < self._task.hparams.train.num_train_steps
@@ -239,6 +268,10 @@ class BaseTrainProgram(Program):
         self.train_input_partition_spec,
     )
     logging.debug('  Retrieved inputs.')
+
+    # Waits if it reaches max inflight steps. We do this after retrieving the
+    # inputs to maximize efficiency.
+    self._pending_train_losses.wait_for_next()
 
     profiler_capture_step = train_p.profiler_capture_step
     do_profile = profiler_capture_step is not None
@@ -264,6 +297,7 @@ class BaseTrainProgram(Program):
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
+    self._pending_train_losses.add_computation(loss)
     if train_step == self._initial_step:
       self._first_step_completion_time = time.time()
 
@@ -444,6 +478,7 @@ class BaseTrainProgram(Program):
     return self._train_unpadded_global_batch_size
 
   def shutdown(self) -> None:
+    self._pending_train_losses.wait_for_all()
     self._train_summary_handler.close()
     if self._eval_train_summary_handler:
       self._eval_train_summary_handler.close()
