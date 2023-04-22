@@ -658,6 +658,11 @@ class BaseEvalProgram(Program):
     self._job_log_dir = job_log_dir
     self._eval_prng_seed = eval_prng_seed
 
+    # Updates the input config with runtime information.
+    if self._input_p.num_infeed_hosts == 0:
+      self._input_p.num_infeed_hosts = jax.process_count()
+    self._input_p.infeed_host_index = jax.process_index()
+
     # Creates the eval input pipeline.
     logging.debug('Initializing eval_input pipeline : %s', self._input_p)
     self._eval_input_pipeline = instantiate(
