@@ -1941,7 +1941,6 @@ def get_eval_hparams_for_seqio(
               task.name,
           )
     else:
-      if not task.score_metric_fns and not task.predict_metric_fns:
-        # Show PPLX
-        hparams.append(hp)
+      # Show PPLX
+      hparams.append(hp)
   return hparams
