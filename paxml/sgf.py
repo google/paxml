@@ -109,42 +109,7 @@ class StandardGradient(BaseStochasticGradient):
 
 
 class DpSgdStochasticGradient(BaseStochasticGradient):
-  """DP-SGD stochastic gradient function.
-
-  **NOTE** on setting `noise_multiplier` when training with multiple devices:
-  when `pmap` is used, the `grad_fn` method is run *inside* `pmap`. As a result,
-  the Gaussian noise std is scaled with `1 / local_batch_size`. The correct
-  scaling should be done with the *global* batch size instead. Currently the
-  library does **not** make the adjustment automatically, and the users should
-  make the adjustment according to the training setup.
-
-  For data parallelism training with multiple devices, the user should divide
-  the `noise_multiplier` by `sqrt(num_devices)`.
-
-  Rationale: assume the total batch size is `K*B`. Let
-  `s = noise_multiplier * l2_norm_clip`. Then when training on a single device
-  (without pmap), the amount of noise added to the gradient of each parameter
-  is:
-
-    `s / (K*B) * G`
-
-  where `G` represents a standard Gaussian random variable. In comparison, when
-  training with K devices using `pmap` with per-device batch size B, the amount
-  of noise added to the gradient of each parameter by each device is
-  `s / B * G`. After taking `pmean` across K devices, the total noise is:
-
-    `1/K (s/B * G_1 + ... + s/B * G_K) = s / (K*B) (G_1 + ... + G_K)`
-
-  where `G_1, ..., G_K` are K independent standard Gaussian random variables.
-
-  Note the summation of `K` independent standard Gaussian random variables is
-  Gaussian with zero mean and standard deviation `sqrt(K)`. So in order for the
-  multi-device case to add the correct amount of noise, we can pass in a
-  `noise_multiplier` parameter that is pre-divided by the square root of the
-  number of devices when training with multiple devices. And the privacy
-  accounting should be carried out with the original (unscaled) noise
-  multiplier.
-  """
+  """DP-SGD stochastic gradient function."""
   # Standard DP-SGD hyperparameters.
   l2_norm_clip: Optional[float] = None
   noise_multiplier: float = 0.0
@@ -181,12 +146,25 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       self,
       grads: NestedMap,
       noise_stddev: float,
+      loss_weight: JTensor,
       prng_key: PRNGKey = None) -> NestedMap:
     prng_keys = jax.random.split(prng_key, len(jax.tree_leaves(grads)))
     prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
-    final_grads = jax.tree_map(
-        lambda x, prng: x + noise_stddev * jax.random.normal(
-            prng, shape=x.shape), grads, prng_tree)
+
+    if base_layer.is_running_under_pmap():
+      # Note: when running under pmap, loss_weight is set to 1/num_devices.
+      # In this case, the *global* batch size is batch_size / loss_weight.
+      # Moreover, each device adds independent Gaussian noises, and then the
+      # noisy gradients are added with `psum``. Because the sum of num_devices
+      # copies of independent Gaussian noises is equivalent to a single Gaussian
+      # with std scaled by `sqrt(num_devices)``, we need to further scale the
+      # noise_std on each device to correct this.
+      noise_stddev *= loss_weight * jnp.sqrt(loss_weight)
+
+    def _add_noise_to_array(x, prng):
+      return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
+
+    final_grads = jax.tree_map(_add_noise_to_array, grads, prng_tree)
     return final_grads
 
   def _prepare_inputs(self, inputs):
@@ -201,7 +179,6 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
               mdl_vars_grad: NestedJTensor,
               mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
               prng_key: PRNGKey) -> Tuple[Any, Any]:
-    p = self.hparams
 
     mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
     inputs = self._prepare_inputs(inputs)
@@ -242,7 +219,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
       # Clip and aggregate gradients.
       grads, frac_clipped, _ = self._clip_and_mean_gradients(
-          grads, aux.loss_weight * p.l2_norm_clip
+          grads, aux.loss_weight * self.l2_norm_clip
       )
       # Aggregate values and aux.
       values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
@@ -281,14 +258,8 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     )
 
     # Add noise to normalized gradients.
-    grads = self._add_noise(
-        grads,
-        self.noise_multiplier
-        * aux.loss_weight
-        * self.l2_norm_clip
-        / batch_size,
-        prng_key,
-    )
+    noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+    grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
     return (values, aux), grads
 
 
@@ -370,7 +341,7 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
               mdl_vars_grad: NestedJTensor,
               mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
               prng_key: PRNGKey) -> Tuple[Any, Any]:
-    assert self.hparams.inner_batch_size is None, (
+    assert self.inner_batch_size is None, (
         'inner_batch_size is not supported yet by GhostClipping.')
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
@@ -393,21 +364,21 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # PAX scales the loss by global batch size under pmap, specifically:
     # - under pmap:
-    #   - loss = local_loss_sum / (local_batch_size * n_dev)
-    #   - loss_weight = 1 / n_dev
+    #   - loss = local_loss_sum / (local_batch_size * num_devices)
+    #   - loss_weight = 1 / num_devices
     # - not under pmap:
     #   - loss = local_loss_sum / local_batch_size
     #   - loss_weight depends on specific models, sometimes it's
     #     local_batch_size, sometimes it's just 1
-    n_devs = 1
+    num_devices = 1
     if base_layer.is_running_under_pmap():
       # correct grad norm calculation
-      n_devs = 1 / aux.loss_weight
-      grad_norms *= n_devs
+      num_devices = 1 / aux.loss_weight
+      grad_norms *= num_devices
 
     frac_clipped = 0.0
-    if self.hparams.l2_norm_clip is not None:
-      scales = jnp.minimum(1.0, self.hparams.l2_norm_clip / grad_norms)
+    if self.l2_norm_clip is not None:
+      scales = jnp.minimum(1.0, self.l2_norm_clip / grad_norms)
       frac_clipped = jnp.mean(scales < 1.0)
 
     # Pass 2: get average of clipped gradients
@@ -419,15 +390,11 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     clipped_grads[PARAMS] = jax.tree_map(
         lambda x: x.param, clipped_grads[PARAMS], is_leaf=is_leaf)
 
-    # note here noise std is divided by n_devs because in PAX the loss is
-    # scaled by global batch size when pmap is used (see above)
+    # Note here noise stddev is divided by num_devices because in PAX the loss
+    # is scaled by global batch size when pmap is used (see above)
+    noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
     noised_grads = self._add_noise(
-        clipped_grads,
-        self.hparams.noise_multiplier
-        * self.hparams.l2_norm_clip
-        / batch_size / n_devs,
-        prng_key,
-    )
+        clipped_grads, noise_stddev, aux.loss_weight, prng_key)
 
     aux = DPGradAuxInfo(
         dp_aux_info={'frac_clipped': frac_clipped},
