@@ -782,7 +782,7 @@ class SeqIOInput(base_input.BaseInput):
       lengths = [ids.shape[1]] * ids.shape[0]
     ret = []
     for i in range(ids.shape[0]):
-      length = lengths[i]
+      length = int(lengths[i])
       row = ids[i, :length].tolist()
       ret.append(vocab.decode(row))
     return ret
