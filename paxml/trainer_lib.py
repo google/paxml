@@ -15,18 +15,14 @@
 
 """Shared trainer lib utilities."""
 
-import abc
 import dataclasses
 import enum
 import functools
-import json
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
-from clu import platform
 from etils import epath
 import fiddle as fdl
-from flax.core import frozen_dict
 import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
