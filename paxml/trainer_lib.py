@@ -319,6 +319,7 @@ def initialize_model_state(
     do_init_checkpoint_rules: bool = True,
     is_eval: bool = False,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+    var_weight_hparams: Optional[NestedWeightHParams] = None,
 ) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes the model states.
 
@@ -337,6 +338,7 @@ def initialize_model_state(
       legacy model initialization flow.
     checkpoint_type: The checkpoint type to use when restoring weights based on
       the init_checkpoint_rules.
+    var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
     Training state and train state provenance.
@@ -348,8 +350,10 @@ def initialize_model_state(
     is_eval_for_init = False
   else:
     is_eval_for_init = is_eval
-  var_weight_hparams = model.abstract_init_with_metadata(
-      inputs_shape_dtype, do_eval=is_eval_for_init)
+  if not var_weight_hparams:
+    var_weight_hparams = model.abstract_init_with_metadata(
+        inputs_shape_dtype, do_eval=is_eval_for_init
+    )
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('var_weight_hparams: %s', var_weight_hparams)
 
@@ -420,6 +424,7 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
   return jax.tree_map(_replicate, model_states)
 
 
+# TODO(laigd): remove this since it's used only by tests.
 def initialize_replicate_model_state(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
@@ -1052,6 +1057,7 @@ def initialize_partitioned_model_states(
     global_mesh: Optional[jax.sharding.Mesh] = None,
     checkpoint_type: CheckpointType = CheckpointType.GDA,
     do_init_checkpoint_rules: bool = True,
+    var_weight_hparams: Optional[NestedWeightHParams] = None,
 ) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
@@ -1073,12 +1079,14 @@ def initialize_partitioned_model_states(
     checkpoint_type: The checkpoint type to use when restoring weights based on
       the init_checkpoint_rules.
     do_init_checkpoint_rules: If apply init_checkpoint_rules.
+    var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
     The partitioned vars themselves.
   """
   model = jax_task.model
-  var_weight_hparams = model.abstract_init_with_metadata(global_input_shapes)
+  if not var_weight_hparams:
+    var_weight_hparams = model.abstract_init_with_metadata(global_input_shapes)
 
   train_state_partition_specs = (
       state_specs.to_eval_state() if discard_opt_states else state_specs
@@ -1096,6 +1104,7 @@ def initialize_partitioned_model_states(
         global_input_shapes,
         discard_opt_states,
         do_init_checkpoint_rules=False,
+        var_weight_hparams=var_weight_hparams,
     )
     return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
                                               train_state_unpadded_shapes,

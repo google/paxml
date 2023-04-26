@@ -565,6 +565,7 @@ class PmapPartitioner(Partitioner):
           discard_opt_states=discard_opt_states,
           is_eval=self._init_do_eval,
           checkpoint_type=checkpoint_type,
+          var_weight_hparams=metadata.var_weight_hparams,
       )
 
     logging.info(
@@ -744,6 +745,7 @@ class PjitPartitioner(Partitioner):
               # solution used by the experiment.
               checkpoint_type=checkpoint_type,
               discard_opt_states=discard_opt_states,
+              var_weight_hparams=metadata.var_weight_hparams,
           )
       )
     logging.info(
