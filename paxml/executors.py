@@ -16,6 +16,7 @@
 """Implementations of program executors."""
 
 import contextlib
+import functools
 import gc
 from typing import Any, Callable, Optional, Protocol, Sequence, Tuple
 
@@ -313,24 +314,34 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._train_prng_seed = train_prng_seed
     self._eval_prng_seed = eval_prng_seed
 
-  def _partition_decode_once_fns_pmap(self, prng_key, decode_input_p):
-    decode_input_pipelines = [
-        instantiate(input_p) for input_p in decode_input_p
+  def _create_decode_programs(self, decode_input_params):
+    # TODO(wangpeng): Make decode programs configurable.
+    create_decode_program = functools.partial(
+        eval_lib.SingleTaskDecodeProgram,
+        model=self._task.model,
+        partitioner=self._partitioner,
+    )
+    decode_programs = [
+        create_decode_program(decode_input=instantiate(p), input_index=i)
+        for i, p in enumerate(decode_input_params)
     ]
-    trainer_lib.check_unique_names(decode_input_pipelines)
+    trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
+    return decode_programs
+
+  def _partition_decode_once_fns_pmap(self, prng_key, decode_input_p):
+    decode_programs = self._create_decode_programs(decode_input_p)
+
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info('decode prng_seed: %s', decode_key)
     decode_key = self._partitioner.preprocess_prng_key(decode_key)
     decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        self._task,
-        self._partitioner,
-        self._task.hparams,
-        self._partitioner.get_train_state_metadata().var_weight_hparams,
-        decode_input_pipelines,
-        decode_key,
-        self._job_log_dir,
+        decode_programs=decode_programs,
+        task_p=self._task.hparams,
+        var_weight_params=self._partitioner.get_train_state_metadata().var_weight_hparams,
+        prng_seed=decode_key,
+        job_log_dir=self._job_log_dir,
     )
-    decode_input_names = [inp.name for inp in decode_input_pipelines]
+    decode_input_names = [p.decode_input.name for p in decode_programs]
     return decode_once_fn, prng_key, decode_input_names
 
   def _partition_decode_once_fns_spmd(
@@ -353,10 +364,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
         )
         for input_p in decode_input_ps
     ]
-    padded_decode_input_pipelines = [
-        instantiate(input_p) for input_p in padded_decode_input_ps
-    ]
-    trainer_lib.check_unique_names(padded_decode_input_pipelines)
+
+    decode_programs = self._create_decode_programs(padded_decode_input_ps)
+
     _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
         padded_decode_input_ps[0]
     )
@@ -369,21 +379,20 @@ class DefaultExecutor(base_executor.BaseExecutor):
     )
 
     decode_once_fn = eval_lib.partition_decode_once_spmd_model(
-        self._task,
-        self._partitioner,
-        self._task.hparams,
-        padded_decode_input_pipelines,
-        self._job_log_dir,
-        decode_key,
-        decode_step_fn,
-        decode_input_partition_spec,
+        decode_programs=decode_programs,
+        task_p=self._task.hparams,
+        job_log_dir=self._job_log_dir,
+        prng_key=decode_key,
+        decode_step_fn=decode_step_fn,
+        inputs_partition_spec=decode_input_partition_spec,
     )
 
-    decode_input_names = [inp.name for inp in padded_decode_input_pipelines]
+    decode_input_names = [p.decode_input.name for p in decode_programs]
     return decode_once_fn, prng_key, decode_input_names
 
   @property
   def partition_decode_once_fns(self):
+    # TODO(wangpeng): Merge the two branches by extracting common code.
     if self._task.hparams.model.ici_mesh_shape is not None:
       return self._partition_decode_once_fns_spmd
     else:

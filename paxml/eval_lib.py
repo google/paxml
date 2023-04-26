@@ -509,7 +509,12 @@ def evaluate(
   )
   prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
-      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+      jax_task=jax_task,
+      partitioner=partitioner,
+      eval_input_ps=eval_input_p,
+      decode_input_ps=[],
+      job_log_dir=job_log_dir,
+      eval_key=eval_key,
   )
 
   decode_once_fn = None
@@ -531,13 +536,15 @@ def evaluate(
 
 
 class _EvalRunner:
-  """A runner class that runs evaluate with spmd."""
+  """A runner class that runs evaluate with pmap or spmd."""
 
   def __init__(
       self,
+      *,
       jax_task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
       eval_input_ps: Sequence[base_input.BaseInput.HParams],
+      decode_input_ps: Sequence[base_input.BaseInput.HParams],
       job_log_dir: epath.Path,
       eval_key: PRNGKey,
   ):
@@ -549,6 +556,20 @@ class _EvalRunner:
     ]
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
+
+    # TODO(wangpeng): Make decode programs configurable.
+    create_decode_program = functools.partial(
+        SingleTaskDecodeProgram,
+        model=jax_task.model,
+        partitioner=partitioner,
+    )
+    self._decode_programs = [
+        create_decode_program(decode_input=instantiate(p), input_index=i)
+        for i, p in enumerate(decode_input_ps)
+    ]
+    trainer_lib.check_unique_names(
+        [p.decode_input for p in self._decode_programs]
+    )
 
   def setup_eval_programs(self, summary_base_dir: epath.Path):
     for program in self._eval_programs:
@@ -562,6 +583,10 @@ class _EvalRunner:
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
     )
+
+  @property
+  def decode_programs(self):
+    return self._decode_programs
 
   def run_one_step(self, train_state):
     if not self._eval_programs:
@@ -760,6 +785,7 @@ def decode_pmap_model(
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
+    # TODO(wangpeng): Rename to `decode_input_params`
     input_p: Sequence[base_input.BaseInput.HParams],
     eval_input_p: Sequence[base_input.BaseInput.HParams],
     job_log_dir: epath.Path,
@@ -801,7 +827,12 @@ def decode_pmap_model(
   )
   prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
-      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+      jax_task=jax_task,
+      partitioner=partitioner,
+      eval_input_ps=eval_input_p,
+      decode_input_ps=input_p,
+      job_log_dir=job_log_dir,
+      eval_key=eval_key,
   )
 
   # JaxContext needed for parameter sharing.
@@ -818,21 +849,18 @@ def decode_pmap_model(
   prng_seed = jax.random.split(decode_key, num=jax.local_device_count())
   logging.info('decoder prng_seed: %s', prng_seed)
 
-  inputs = [instantiate(p) for p in input_p]
-  trainer_lib.check_unique_names(inputs)
+  decode_programs = eval_runner.decode_programs
   decode_once_fn = partition_decode_once_pmap_model(
-      jax_task,
-      partitioner,
-      task_p,
-      train_state_metadata.var_weight_hparams,
-      inputs,
-      prng_seed,
-      job_log_dir,
-      output_pickle,
+      decode_programs=decode_programs,
+      task_p=task_p,
+      var_weight_params=train_state_metadata.var_weight_hparams,
+      prng_seed=prng_seed,
+      job_log_dir=job_log_dir,
+      output_pickle=output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving,
   )
 
-  decode_inputs = inputs
+  decode_inputs = [p.decode_input for p in decode_programs]
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
@@ -848,241 +876,250 @@ def decode_pmap_model(
   )
 
 
-def partition_decode_once_pmap_model(
-    jax_task: tasks_lib.SingleTask,
-    partitioner: partitioning.Partitioner,
-    task_p: tasks_lib.SingleTask.HParams,
-    var_weight_hparams: NestedWeightHParams,
-    inputs: List[base_input.BaseInput],
-    prng_seed: JTensor,
-    job_log_dir: epath.Path,
-    output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
-) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
-  def decode_once_fn(partitioned_train_state, summary_writers):
-    with py_utils.timeit() as decode_period:
-      (
-          decode_metrics_list,
-          processed_decode_metrics_list,
-          decode_seqio_metrics_list,
-          num_decode_steps,
-      ) = decode_once_pmap_model(
-          jax_task,
-          partitioner,
-          task_p,
-          var_weight_hparams,
-          inputs,
-          prng_seed,
-          job_log_dir,
-          partitioned_train_state,
-          summary_writers,
-          output_pickle,
+class DecodeOutput(NestedMap):
+  """The output of a decode program."""
+
+  def __init__(
+      self,
+      *,
+      decode_metrics: Optional[Dict[str, float]],
+      processed_decode_metrics: Optional[Dict[str, float]],
+      seqio_metrics: Optional[Dict[str, float]],
+      num_decode_steps: int,
+      raw_decode_metrics: Optional[Mapping[str, clu_metrics.Metric]],
+  ):
+    """The constructor.
+
+    Args:
+      decode_metrics: Decode metrics.
+      processed_decode_metrics: Processed decode metrics.
+      seqio_metrics: Decode (seqio) metrics.
+      num_decode_steps: The number of performed decode steps.
+      raw_decode_metrics: Raw decode metrics.
+    """
+    super().__init__()
+    self.decode_metrics = decode_metrics
+    self.processed_decode_metrics = processed_decode_metrics
+    self.seqio_metrics = seqio_metrics
+    self.num_decode_steps = num_decode_steps
+    self.raw_decode_metrics = raw_decode_metrics
+
+
+# TODO(wangpeng): Move it to programs.py .
+class SingleTaskDecodeProgram(programs.Program):
+  """Decode program that assumes a single task on a single dataset."""
+
+  def __init__(
+      self,
+      *,
+      model: base_model.BaseModel,
+      partitioner: partitioning.Partitioner,
+      decode_input: base_input.BaseInput,
+      # This argument is used for `sync_global_devices`.
+      # TODO(wangpeng): Try removing this argument.
+      input_index: Optional[int] = None,
+  ):
+    """The constructor.
+
+    Args:
+      model: The model to be used for decoding.
+      partitioner: The partitioner used to partition the decode function.
+      decode_input: The instantiated input to be decoded.
+      input_index: The index of this input among a list of inputs.
+    """
+    self._model = model
+    self._partitioner = partitioner
+    self._input = decode_input
+    self._input_index = input_index
+    self._num_steps = (
+        -1 if self._input.reset_for_eval else self._input.eval_loop_num_batches
+    )
+    self._dirname = epath.Path(self._input.name)
+
+    self._prng_key = None
+    self._job_log_dir = None
+    self._basedir = None
+    self._summary_writer = None
+    self._use_pmap = None
+
+    self._pmap_decode_step = None
+    self._task_p = None
+    self._output_pickle = None
+    self._enable_checkpoint_saving = None
+
+    self._spmd_decode_step = None
+    self._inputs_partition_spec = None
+    self._metrics_p = None
+
+  def setup(
+      self,
+      *,
+      prng_key: JTensor,
+      job_log_dir: epath.Path,
+      summary_writer: SummaryWriter,
+      use_pmap: bool,
+      pmap_decode_step: Optional[
+          Callable[
+              [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+              Tuple[NestedMap, NestedMap, NestedMap],
+          ]
+      ] = None,
+      task_p: Optional[tasks_lib.SingleTask.HParams] = None,
+      output_pickle: bool = True,
+      enable_checkpoint_saving: bool = True,
+      spmd_decode_step: Optional[
+          Callable[
+              [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+              Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+          ]
+      ] = None,
+      inputs_partition_spec: Optional[NestedPartitionSpec] = None,
+      metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
+  ) -> None:
+    """Sets up the program.
+
+    Args:
+      prng_key: The prng key used for decoding.
+      job_log_dir: Directory for the job logs.
+      summary_writer: The summary writer to log summaries.
+      use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+        `task_p`, `var_weight_params`, `output_pickle` and
+        `enable_checkpoint_saving` should be set; otherwise, `spmd_decode_step`,
+        `inputs_partition_spec` and `metrics_p` should be set.
+      pmap_decode_step: pmap'ed decode function.
+      task_p: Params for the task encapsulating a data parallel model.
+      output_pickle: Whether to write decoding results to a pickle file.
+      enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+      spmd_decode_step: pjit'ed decode function.
+      inputs_partition_spec: Partition specs for inputs.
+      metrics_p: Parameters to configure how to aggregate the metrics.
+    """
+    self._prng_key = prng_key
+    self._job_log_dir = job_log_dir
+    self._basedir = self._job_log_dir / f'{EvaluationMode.DECODE.value}_out'
+    self._summary_writer = summary_writer
+    self._use_pmap = use_pmap
+
+    self._pmap_decode_step = pmap_decode_step
+    self._task_p = task_p
+    self._output_pickle = output_pickle
+    self._enable_checkpoint_saving = enable_checkpoint_saving
+
+    self._spmd_decode_step = spmd_decode_step
+    self._inputs_partition_spec = inputs_partition_spec
+    self._metrics_p = metrics_p
+
+  def should_run(self, state: TrainState, train_step: int) -> bool:
+    # TODO(wangpeng): Implement and use it.
+    raise NotImplementedError()
+
+  def shutdown(self) -> None:
+    pass
+
+  @property
+  def model(self):
+    return self._model
+
+  @property
+  def decode_input(self):
+    return self._input
+
+  def _find_and_maybe_update_tracked_metric(
+      self,
+      step_i: int,
+      replicated_model_states: TrainState,
+      task_p: tasks_lib.SingleTask.HParams,
+      decode_metrics_list: List[Dict[str, float]],
+  ) -> None:
+    basedir = self._basedir
+    dirname = self._dirname
+    input_name = self._input.name
+    enable_checkpoint_saving = self._enable_checkpoint_saving
+
+    tracked_metric = task_p.track_decoder_metric
+    track_min_or_max = task_p.track_decoder_metric_min_or_max
+    if not track_min_or_max:
+      raise ValueError(
+          'Must also set track_decoder_metric_min_or_max when '
+          f'enabling metric tracking: {task_p}'
+      )
+    m_value = None
+    for d in decode_metrics_list:
+      if tracked_metric in d:
+        m_value = d[tracked_metric]
+        break
+
+    if m_value:
+      # Filesystem friendly name for the tracked metric.
+      tracked_metric_name = tracked_metric.replace('/', '-')
+      tracker_dir_path = (
+          basedir
+          / dirname
+          / f'{tracked_metric_name}_{track_min_or_max}_tracker'
+      )
+      _maybe_update_tracked_metric(
+          m_value,
+          step_i,
+          tracker_dir_path,
+          tracked_metric_name,
+          track_min_or_max,
+          input_name,
+          replicated_model_states,
           enable_checkpoint_saving=enable_checkpoint_saving,
       )
-    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
-    return tuning_lib.DecodeMetrics(
-        metrics_list=decode_metrics_list,
-        processed_metrics_list=processed_decode_metrics_list,
-        seqio_metrics_list=decode_seqio_metrics_list,
-        steps_per_sec=decode_steps_per_sec,
-        input_names=[inp.name for inp in inputs],
+    else:
+      logging.info(
+          'Cannot track metric %s on input %s.',
+          tracked_metric,
+          input_name,
+      )
+
+  def run(self, state: TrainState, train_step: int) -> programs.ProgramOutput:
+    work_unit = platform.work_unit()
+    use_pmap = self._use_pmap
+    train_state = state
+    step_i = train_step
+    partitioner = self._partitioner
+    model = self._model
+    job_log_dir = self._job_log_dir
+    decode_input = self._input
+    input_name = self._input.name
+    num_steps = self._num_steps
+    summary_writer = self._summary_writer
+    prng_key = self._prng_key
+    basedir = self._basedir
+    dirname = self._dirname
+    raw_filename = programs.get_filename(
+        train_state.step if use_pmap else step_i, EvaluationMode.DECODE.value
     )
+    filename = basedir / dirname / raw_filename
+    metrics_p = self._metrics_p
 
-  return decode_once_fn
+    if use_pmap:
+      pmap_decode_step = self._pmap_decode_step
+      output_pickle = self._output_pickle
 
+      def decode_step_func(inputs, batch_idx):
+        # TODO(pax): shall we eval all sub-models during eval?
+        return pmap_decode_step(
+            train_state,
+            prng_key,
+            inputs,
+            batch_idx * jnp.ones((jax.local_device_count(),)),
+        )
 
-def _decode_once_common(
-    model: base_model.BaseModel,
-    partitioner: partitioning.Partitioner,
-    inputs: List[base_input.BaseInput],
-    prng_key: JTensor,
-    job_log_dir: epath.Path,
-    train_state: TrainState,
-    summary_writers: List[SummaryWriter],
-    use_pmap: bool,
-    *,
-    task_p: Optional[tasks_lib.SingleTask.HParams] = None,
-    var_weight_hparams: Optional[NestedWeightHParams] = None,
-    output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
-    decode_step_fn: Optional[
-        Callable[
-            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-        ]
-    ] = None,
-    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
-    metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
-) -> Tuple[
-    Tuple[
-        List[Optional[Dict[str, float]]],  # decode metrics.
-        List[Optional[Dict[str, float]]],  # processed decode metrics.
-        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-        List[int],  # performed decode steps.
-    ],
-    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
-]:
-  """Runs the decoding once on the entire decoder datasets for a PMAP or SPMD model.
+    else:
+      spmd_decode_step = self._spmd_decode_step
+      inputs_partition_spec = self._inputs_partition_spec
+      split = self._input_index
 
-  Args:
-    model: The model being evaluated.
-    partitioner: The partitioner used for the model and the data.
-    inputs: Instantiated inputs.
-    prng_key: The prng key used for decoding.
-    job_log_dir: Directory for the job logs.
-    train_state: A `TrainState` object.
-    summary_writers: The summary writer objects to log summaries.
-    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
-      `task_p`, `var_weight_hparams`, `output_pickle` and
-      `enable_checkpoint_saving` should be set; otherwise, `decode_step_fn`,
-      `inputs_partition_spec` and `metrics_p` should be set.
-    task_p: Params for the task encapsulating a data parallel model.
-    var_weight_hparams: Nested structure of HParams for the model weights.
-    output_pickle: Whether to write decoding results to a pickle file.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-    decode_step_fn: pjit'ed decode functions.
-    inputs_partition_spec: Partition specs for inputs.
-    metrics_p: Parameters to configure how to aggregate the metrics.
-
-  Returns:
-    A tuple of(
-        tuple of (a list of decode metrics,
-                  a list of processed decode metrics,
-                  a list of optional decoder (seqio) metrics.
-                  list of integers as performed decode steps for each input).
-        raw clu metrics).
-      Items from each list are aligned with each input from inputs.
-  """
-  # TODO(wangpeng): Remove unnecessary `use_pmap` branchings.
-
-  if use_pmap:
-    if not inputs:
-      return ([], [], [], []), []
-    assert task_p is not None
-    model_p = task_p.model
-    metrics_p = task_p.metrics
-  work_unit = platform.work_unit()
-  if not metrics_p:
-    metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
-
-  step_i = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-  )
-
-  basedir = job_log_dir / f'{EvaluationMode.DECODE.value}_out'
-  dirnames = _get_dir_names(inputs)
-  filename = programs.get_filename(
-      train_state.step if use_pmap else step_i, EvaluationMode.DECODE.value
-  )
-  filenames = [basedir / s / filename for s in dirnames]
-
-  num_steps_per_input = [
-      -1 if input.reset_for_eval else input.eval_loop_num_batches
-      for input in inputs
-  ]
-
-  if use_pmap:
-    logging.info('step=%d', step_i)
-
-    def decode_step(mdl_states, prng_key, inputs, batch_idx):
-      if task_p.decode.prng_key_fold_with_batch_index:
-        prng_seed_decode = jax.random.fold_in(prng_key, batch_idx)
-      else:
-        prng_seed_decode = prng_key
-      mdl_states = mdl_states.to_eval_state()
-      (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
-          trainer_lib.decode_step(
-              model,
-              mdl_states,
-              prng_seed_decode,
-              var_weight_hparams,
-              inputs,
-              model_p.fprop_dtype,
-              task_p.decode.prng_key_fold_with_global_step,
-          )
+      # We do not fold in jax.process_index in contrast to the pmap version and
+      # use a single global key instead to rely on pjit to split for different
+      # replicas.
+      spmd_decode_step_fn = functools.partial(
+          spmd_decode_step, train_state.to_eval_state(), prng_key
       )
 
-      weighted_scalars = decode_metrics.aggregate(weighted_scalars)
-      aggregated_per_example_out = jax.lax.all_gather(
-          per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
-      )
-
-      summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
-      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-      aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
-          summary_tensors
-      )
-
-      # We want to aggregate metrics across workers.
-      # In pmap we do an all gather of the metric state across workers, and then
-      # call reduce() on the metric which by default calls merge across workers.
-      aggregated_metrics = {}
-      for metric_name, metric in updated_metrics.items():
-        aggregated_metrics[metric_name] = jax.lax.all_gather(
-            metric, axis_name=PMAP_PARALLEL_AXIS_NAME
-        ).reduce()
-
-      return (
-          weighted_scalars,
-          aggregated_per_example_out,
-          aggregated_summaries,
-          aggregated_metrics,
-      )
-
-    # As an example, suppose the output leaf from trainer_lib.decoder_step()
-    # for each core has shape: [per_core_batch_size, decoding_length].
-    # In the all_gather we set tiled=True, so the output chunks are all
-    # concatenated into the existing batch axis, so we get shape
-    # [num_cores x per_core_batch_size, decoding_length].
-    # In the pmap call we set out_axes=None to not have to manually unreplicate,
-    # so the output of pmap_decode_step() will have the same shape.
-    #
-    # Example code snippet showing this:
-    #   # shape (8, 3, 2)
-    #   x = jnp.tile(jnp.arange(8)[:, None, None],[1, 3, 2])
-    #   # shape (24, 2)
-    #   z = jax.pmap(
-    #       lambda y: jax.lax.all_gather(y+1, axis_name='i', tiled=True),
-    #       axis_name='i', out_axes=None)(x)
-    #
-    # We aggregate all outputs from decode_step.
-    pmap_decode_step = jax.pmap(
-        decode_step,
-        axis_name=PMAP_PARALLEL_AXIS_NAME,
-        out_axes=(None, None, None, None),
-    )
-
-    def decode_step_func(inputs, batch_idx):
-      # TODO(pax): shall we eval all sub-models during eval?
-      return pmap_decode_step(
-          train_state,
-          prng_key,
-          inputs,
-          batch_idx * jnp.ones((jax.local_device_count(),)),
-      )
-
-  else:
-    logging.info(
-        'partitioned_train_state: %s',
-        jax.tree_map(lambda x: x.shape, train_state),
-    )
-
-    # We do not fold in jax.process_index in contrast to the pmap version and
-    # use a single global key instead to rely on pjit to split for different
-    # replicas.
-    logging.info('decode prng_key: %s', prng_key)
-    spmd_decode_step_fn = functools.partial(
-        decode_step_fn, train_state.to_eval_state(), prng_key
-    )
-
-  decode_metrics_list = []
-  processed_decode_metrics_list = []
-  seqio_metrics_list = []
-  num_decode_steps = []
-  raw_metrics_list = []
-
-  for split, num_split_steps in enumerate(num_steps_per_input):
-    input_name = inputs[split].name
     if programs.can_load_written_outputs(
         job_log_dir, input_name, EvaluationMode.DECODE, step_i
     ):
@@ -1091,12 +1128,16 @@ def _decode_once_common(
           input_name,
           step_i,
       )
-      decode_metrics_list.append(None)
-      processed_decode_metrics_list.append(None)
-      seqio_metrics_list.append(None)
-      num_decode_steps.append(0)
-      raw_metrics_list.append(None)
-      continue
+      return programs.ProgramOutput(
+          state=state,
+          aux=DecodeOutput(
+              decode_metrics=None,
+              processed_decode_metrics=None,
+              seqio_metrics=None,
+              num_decode_steps=0,
+              raw_decode_metrics=None,
+          ),
+      )
     logging.info('Start decoding on input %s', input_name)
     step_num = 0
     # decode_metrics and process_decode_metrics work on WeightedScalars
@@ -1112,18 +1153,18 @@ def _decode_once_common(
     processed_metrics = {}
     processed_decodes = []
     all_summary_tensors = collections.defaultdict(list)
-    while num_split_steps < 0 or step_num < num_split_steps:
+    while num_steps < 0 or step_num < num_steps:
       step_num += 1
       try:
         if use_pmap:
-          batch = inputs[split].get_next()
+          batch = decode_input.get_next()
         else:
-          batch = inputs[split].get_next_padded()
+          batch = decode_input.get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
-        inputs[split].reset()
+        decode_input.reset()
         break
       batch = partitioner.preprocess_inputs(
-          inputs[split], batch, None if use_pmap else inputs_partition_spec
+          decode_input, batch, None if use_pmap else inputs_partition_spec
       )
       if use_pmap:
         (weighted_scalars, out, summary_tensors, updated_metrics) = (
@@ -1133,7 +1174,7 @@ def _decode_once_common(
         (weighted_scalars, out, updated_metrics), updated_vars = (
             spmd_decode_step_fn(
                 batch,
-                inputs[split].get_global_batch_size(inputs[split].hparams),
+                decode_input.get_global_batch_size(decode_input.hparams),
             )
         )
 
@@ -1188,7 +1229,7 @@ def _decode_once_common(
         # would eventually lead to HBM OOM.
         with jax.default_device(jax.devices('cpu')[0]):
           out = jax.tree_map(np.asarray, out)
-          process_decode_output = model.process_decode_out(inputs[split], out)
+          process_decode_output = model.process_decode_out(decode_input, out)
 
         (process_weighted_scalars, processed_out, processed_metric_updates) = (
             process_decode_output
@@ -1216,18 +1257,18 @@ def _decode_once_common(
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
     seqio_metric_values = None
-    if seqio_input.should_process_outputs(inputs[split]):
+    if seqio_input.should_process_outputs(decode_input):
       logging.info(
           'Finished processing all %d examples.', len(processed_decodes)
       )
       seqio_metric_values = seqio_input.process_outputs(
-          inputs[split],
+          decode_input,
           processed_decodes,
-          summary_writers[split],
+          summary_writer,
           seqio_input.MetricType.PREDICT,
           step_i,
-          basedir / dirnames[split],
-          plain_text_output_fname=f'{filenames[split]}.txt',
+          basedir / dirname,
+          plain_text_output_fname=f'{filename}.txt',
       )
 
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
@@ -1236,7 +1277,7 @@ def _decode_once_common(
         processed_metrics
     )
 
-    with summary_writers[split].as_default():
+    with summary_writer.as_default():
       logging.info('Summarizing of decode_metrics.')
       decode_metric_dict = decode_metrics.summarize(step_i, 'decode_metrics')
       logging.info('Summarizing of process_decode_metrics.')
@@ -1254,9 +1295,9 @@ def _decode_once_common(
     if jax.process_index() == 0 and not (
         use_pmap and flags.FLAGS.pax_only_aggregate_summaries
     ):
-      dir_path = basedir / dirnames[split]
+      dir_path = basedir / dirname
       dir_path.mkdir(parents=True, exist_ok=True)
-      output_file = filenames[split]
+      output_file = filename
       logging.info(
           'Writing decoder output to %s with %d entries',
           output_file,
@@ -1277,31 +1318,260 @@ def _decode_once_common(
         metric_utils.as_float_dict(decode_metric_dict),
         metric_utils.as_float_dict(metric_values),
     )
-    decode_metrics_list.append(merged_decode_metrics)
 
     merged_processed_decode_metrics = metric_utils.update_float_dict(
         metric_utils.as_float_dict(processed_metric_dict),
         metric_utils.as_float_dict(process_metric_values),
     )
-    processed_decode_metrics_list.append(merged_processed_decode_metrics)
-    seqio_metrics_list.append(seqio_metric_values)
-    num_decode_steps.append(step_num)
-    raw_metrics_list.append(metrics)
 
-    if use_pmap and task_p.track_decoder_metric:
-      # Track metric specified by task_p.track_decoder_metric.
-      input_names = [inp.name for inp in inputs]
-      _find_and_maybe_update_tracked_metric(
-          basedir,
-          split,
-          dirnames,
-          step_i,
-          input_names,
-          train_state,
-          task_p,
-          [merged_decode_metrics, merged_processed_decode_metrics],
+    if use_pmap:
+      task_p = self._task_p
+      assert task_p is not None
+      if task_p.track_decoder_metric:
+        # Track metric specified by task_p.track_decoder_metric.
+        self._find_and_maybe_update_tracked_metric(
+            step_i,
+            train_state,
+            task_p,
+            [merged_decode_metrics, merged_processed_decode_metrics],
+        )
+
+    decode_output = DecodeOutput(
+        decode_metrics=merged_decode_metrics,
+        processed_decode_metrics=merged_processed_decode_metrics,
+        seqio_metrics=seqio_metric_values,
+        num_decode_steps=step_num,
+        raw_decode_metrics=metrics,
+    )
+    return programs.ProgramOutput(state=state, aux=decode_output)
+
+
+def partition_decode_once_pmap_model(  # pylint: disable=missing-function-docstring
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
+    task_p: tasks_lib.SingleTask.HParams,
+    var_weight_params: NestedWeightHParams,
+    prng_seed: JTensor,
+    job_log_dir: epath.Path,
+    output_pickle: bool = True,
+    enable_checkpoint_saving: bool = True,
+) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
+  def decode_once_fn(partitioned_train_state, summary_writers):
+    with py_utils.timeit() as decode_period:
+      (
+          decode_metrics_list,
+          processed_decode_metrics_list,
+          decode_seqio_metrics_list,
+          num_decode_steps,
+      ) = decode_once_pmap_model(
+          decode_programs=decode_programs,
+          task_p=task_p,
+          var_weight_params=var_weight_params,
+          prng_seed=prng_seed,
+          job_log_dir=job_log_dir,
+          replicated_model_states=partitioned_train_state,
+          summary_writers=summary_writers,
+          output_pickle=output_pickle,
           enable_checkpoint_saving=enable_checkpoint_saving,
       )
+    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+    return tuning_lib.DecodeMetrics(
+        metrics_list=decode_metrics_list,
+        processed_metrics_list=processed_decode_metrics_list,
+        seqio_metrics_list=decode_seqio_metrics_list,
+        steps_per_sec=decode_steps_per_sec,
+        input_names=[p.decode_input.name for p in decode_programs],
+    )
+
+  return decode_once_fn
+
+
+def _decode_once_common(
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
+    prng_key: JTensor,
+    job_log_dir: epath.Path,
+    train_state: TrainState,
+    summary_writers: List[SummaryWriter],
+    use_pmap: bool,
+    task_p: Optional[tasks_lib.SingleTask.HParams] = None,
+    var_weight_params: Optional[NestedWeightHParams] = None,
+    output_pickle: bool = True,
+    enable_checkpoint_saving: bool = True,
+    spmd_decode_step: Optional[
+        Callable[
+            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+        ]
+    ] = None,
+    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
+    metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
+) -> Tuple[
+    Tuple[
+        List[Optional[Dict[str, float]]],  # decode metrics.
+        List[Optional[Dict[str, float]]],  # processed decode metrics.
+        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+        List[int],  # performed decode steps.
+    ],
+    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
+]:
+  """Runs the decoding once on the entire decoder datasets for a PMAP or SPMD model.
+
+  Args:
+    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
+    prng_key: The prng key used for decoding.
+    job_log_dir: Directory for the job logs.
+    train_state: A `TrainState` object.
+    summary_writers: The summary writer objects to log summaries.
+    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+      `task_p`, `var_weight_params`, `output_pickle` and
+      `enable_checkpoint_saving` should be set; otherwise, `spmd_decode_step`,
+      `inputs_partition_spec` and `metrics_p` should be set.
+    task_p: Params for the task encapsulating a data parallel model.
+    var_weight_params: Nested structure of HParams for the model weights.
+    output_pickle: Whether to write decoding results to a pickle file.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    spmd_decode_step: pjit'ed decode function.
+    inputs_partition_spec: Partition specs for inputs.
+    metrics_p: Parameters to configure how to aggregate the metrics.
+
+  Returns:
+    A tuple of(
+        tuple of (a list of decode metrics,
+                  a list of processed decode metrics,
+                  a list of optional decoder (seqio) metrics.
+                  list of integers as performed decode steps for each input).
+        raw clu metrics).
+      Items from each list are aligned with each input from inputs.
+  """
+  # TODO(wangpeng): Remove unnecessary `use_pmap` branchings.
+
+  if use_pmap and not decode_programs:
+    return ([], [], [], []), []
+
+  if use_pmap:
+    assert task_p is not None
+    metrics_p = task_p.metrics
+    model_p = task_p.model
+  if not metrics_p:
+    metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
+
+  step_i = int(
+      py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+  )
+
+  if use_pmap:
+    logging.info('step=%d', step_i)
+  else:
+    logging.info(
+        'partitioned_train_state: %s',
+        jax.tree_map(lambda x: x.shape, train_state),
+    )
+    logging.info('decode prng_key: %s', prng_key)
+
+  if use_pmap:
+    aggregate_fn = instantiate(metrics_p).aggregate
+    model = decode_programs[0].model
+
+    def decode_step(mdl_states, prng_key, inputs, batch_idx):
+      if task_p.decode.prng_key_fold_with_batch_index:
+        prng_key_decode = jax.random.fold_in(prng_key, batch_idx)
+      else:
+        prng_key_decode = prng_key
+      mdl_states = mdl_states.to_eval_state()
+      (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
+          # TODO(wangpeng): Move `decode_step` out of `trainer_lib.py`.
+          trainer_lib.decode_step(
+              model,
+              mdl_states,
+              prng_key_decode,
+              var_weight_params,
+              inputs,
+              model_p.fprop_dtype,
+              task_p.decode.prng_key_fold_with_global_step,
+          )
+      )
+
+      weighted_scalars = aggregate_fn(weighted_scalars)
+      aggregated_per_example_out = jax.lax.all_gather(
+          per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
+      )
+
+      summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
+      aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
+          summary_tensors
+      )
+
+      # We want to aggregate metrics across workers.
+      # In pmap we do an all gather of the metric state across workers, and then
+      # call reduce() on the metric which by default calls merge across workers.
+      aggregated_metrics = {}
+      for metric_name, metric in updated_metrics.items():
+        aggregated_metrics[metric_name] = jax.lax.all_gather(
+            metric, axis_name=PMAP_PARALLEL_AXIS_NAME
+        ).reduce()
+
+      return (
+          weighted_scalars,
+          aggregated_per_example_out,
+          aggregated_summaries,
+          aggregated_metrics,
+      )
+
+    # As an example, suppose the output leaf from trainer_lib.decoder_step()
+    # for each core has shape: [per_core_batch_size, decoding_length].
+    # In the all_gather we set tiled=True, so the output chunks are all
+    # concatenated into the existing batch axis, so we get shape
+    # [num_cores x per_core_batch_size, decoding_length].
+    # In the pmap call we set out_axes=None to not have to manually unreplicate,
+    # so the output of pmap_decode_step() will have the same shape.
+    #
+    # Example code snippet showing this:
+    #   # shape (8, 3, 2)
+    #   x = jnp.tile(jnp.arange(8)[:, None, None],[1, 3, 2])
+    #   # shape (24, 2)
+    #   z = jax.pmap(
+    #       lambda y: jax.lax.all_gather(y+1, axis_name='i', tiled=True),
+    #       axis_name='i', out_axes=None)(x)
+    #
+    # We aggregate all outputs from decode_step.
+    # TODO(wangpeng): Make this a class attribute of `SingleTaskDecodeProgram`
+    pmap_decode_step = jax.pmap(
+        decode_step,
+        axis_name=PMAP_PARALLEL_AXIS_NAME,
+        out_axes=(None, None, None, None),
+    )
+  else:
+    pmap_decode_step = None
+
+  decode_metrics_list = []
+  processed_decode_metrics_list = []
+  seqio_metrics_list = []
+  num_decode_steps = []
+  raw_metrics_list = []
+
+  for i, decode_program in enumerate(decode_programs):
+    decode_program.setup(
+        prng_key=prng_key,
+        job_log_dir=job_log_dir,
+        summary_writer=summary_writers[i],
+        use_pmap=use_pmap,
+        pmap_decode_step=pmap_decode_step,
+        task_p=task_p,
+        output_pickle=output_pickle,
+        enable_checkpoint_saving=enable_checkpoint_saving,
+        spmd_decode_step=spmd_decode_step,
+        inputs_partition_spec=inputs_partition_spec,
+        metrics_p=metrics_p,
+    )
+    decode_output = decode_program.run(train_state, step_i).aux
+
+    decode_metrics_list.append(decode_output.decode_metrics)
+    processed_decode_metrics_list.append(decode_output.processed_decode_metrics)
+    seqio_metrics_list.append(decode_output.seqio_metrics)
+    num_decode_steps.append(decode_output.num_decode_steps)
+    raw_metrics_list.append(decode_output.raw_decode_metrics)
 
   return (
       decode_metrics_list,
@@ -1312,11 +1582,10 @@ def _decode_once_common(
 
 
 def decode_once_pmap_model(
-    jax_task: tasks_lib.SingleTask,
-    partitioner: partitioning.Partitioner,
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
     task_p: tasks_lib.SingleTask.HParams,
-    var_weight_hparams: NestedWeightHParams,
-    inputs: List[base_input.BaseInput],
+    var_weight_params: NestedWeightHParams,
     prng_seed: JTensor,
     job_log_dir: epath.Path,
     replicated_model_states: TrainState,
@@ -1332,11 +1601,9 @@ def decode_once_pmap_model(
   """Runs the decoding on the entire decoder datasets for a PMAP model.
 
   Args:
-    jax_task: instantiated model from task_p.
-    partitioner: The Partitioner used to partition the computations.
+    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
     task_p: Params for the task encapsulating a data parallel model.
-    var_weight_hparams: Nested structure of HParams for the model weights.
-    inputs: instantiated inputs.
+    var_weight_params: Nested structure of HParams for the model weights.
     prng_seed: The prng seed used for decoding.
     job_log_dir: Directory for the job logs.
     replicated_model_states: A TrainState object.
@@ -1352,16 +1619,14 @@ def decode_once_pmap_model(
       Items from each list are aligned with each input from inputs.
   """
   return _decode_once_common(
-      model=jax_task.model,
-      partitioner=partitioner,
-      inputs=inputs,
+      decode_programs=decode_programs,
       prng_key=prng_seed,
       job_log_dir=job_log_dir,
       train_state=replicated_model_states,
       summary_writers=summary_writers,
       use_pmap=True,
       task_p=task_p,
-      var_weight_hparams=var_weight_hparams,
+      var_weight_params=var_weight_params,
       output_pickle=output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving,
   )[0]
@@ -1401,8 +1666,6 @@ def decode_spmd_model(
       )
       for inp in input_p
   ]
-  inputs = [instantiate(p) for p in padded_input_p]
-  trainer_lib.check_unique_names(inputs)
 
   # TODO(hthu): Remove eval_input_p as it basically isn't effective.
   # Either decoder or eval inputs is not empty.
@@ -1419,12 +1682,18 @@ def decode_spmd_model(
   )
   prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
-      jax_task, partitioner, eval_input_p, job_log_dir, eval_key
+      jax_task=jax_task,
+      partitioner=partitioner,
+      eval_input_ps=eval_input_p,
+      decode_input_ps=padded_input_p,
+      job_log_dir=job_log_dir,
+      eval_key=eval_key,
   )
+  decode_programs = eval_runner.decode_programs
 
-  if inputs:
+  if decode_programs:
     # Peek to avoid exhausting the input pipeline.
-    sample_inputs = inputs[0].peek_padded()
+    sample_inputs = decode_programs[0].decode_input.peek_padded()
     inputs_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
@@ -1443,14 +1712,12 @@ def decode_spmd_model(
       decode_step_fn, inputs_shape_dtype, is_eval
   )
   decode_once_fn = partition_decode_once_spmd_model(
-      jax_task,
-      partitioner,
-      task_p,
-      inputs,
-      job_log_dir,
-      prng_key,
-      decode_step_fn,
-      inputs_partition_spec,
+      decode_programs=decode_programs,
+      task_p=task_p,
+      job_log_dir=job_log_dir,
+      prng_key=prng_key,
+      decode_step_fn=decode_step_fn,
+      inputs_partition_spec=inputs_partition_spec,
   )
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,
@@ -1459,7 +1726,7 @@ def decode_spmd_model(
       do_eval=True,
   )
 
-  decode_inputs = inputs
+  decode_inputs = [p.decode_input for p in decode_programs]
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
@@ -1476,12 +1743,12 @@ def decode_spmd_model(
 
 
 def partition_decode_once_spmd_model(
-    jax_task: tasks_lib.SingleTask,
-    partitioner: partitioning.Partitioner,
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
     task_p: tasks_lib.SingleTask.HParams,
-    inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
     prng_key: JTensor,
+    # TODO(wangpeng): Remove this argument.
     decode_step_fn: Callable[
         [TrainState, PRNGKey, NestedJTensor, Optional[int]],
         Tuple[Tuple[NestedMap, NestedMap], NestedMap],
@@ -1498,16 +1765,14 @@ def partition_decode_once_spmd_model(
           decode_seqio_metrics_list,
           num_decode_steps,
       ) = decode_once_spmd_model(
-          jax_task,
-          partitioner,
-          task_p,
-          inputs,
-          job_log_dir,
-          partitioned_train_state,
-          summary_writers,
-          prng_key,
-          decode_step_fn,
-          inputs_partition_spec,
+          decode_programs=decode_programs,
+          task_p=task_p,
+          job_log_dir=job_log_dir,
+          train_state=partitioned_train_state,
+          summary_writers=summary_writers,
+          prng_key=prng_key,
+          decode_step_fn=decode_step_fn,
+          inputs_partition_spec=inputs_partition_spec,
       )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
@@ -1515,7 +1780,7 @@ def partition_decode_once_spmd_model(
         processed_metrics_list=processed_decode_metrics_list,
         seqio_metrics_list=decode_seqio_metrics_list,
         steps_per_sec=decode_steps_per_sec,
-        input_names=[inp.name for inp in inputs],
+        input_names=[p.decode_input.name for p in decode_programs],
     )
 
   return decode_once_fn
@@ -1527,9 +1792,8 @@ def _is_shape_dtype_struct(x):
 
 
 def _decode_once_spmd_model(
-    model: base_model.BaseModel,
-    partitioner: partitioning.Partitioner,
-    inputs: List[base_input.BaseInput],
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
     job_log_dir: epath.Path,
     train_state: TrainState,
     summary_writers: List[SummaryWriter],
@@ -1552,9 +1816,7 @@ def _decode_once_spmd_model(
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
-    model: model being evaluated.
-    partitioner: partitioner used for the model and the data.
-    inputs: instantiated inputs.
+    decode_programs: List[SingleTaskDecodeProgram],
     job_log_dir: Directory for the job logs.
     train_state: A TrainState object.
     summary_writers: List[eval_lib.SummaryWriter],
@@ -1573,25 +1835,22 @@ def _decode_once_spmd_model(
       Items from each list are aligned with each input from inputs.
   """
   return _decode_once_common(
-      model=model,
-      partitioner=partitioner,
-      inputs=inputs,
+      decode_programs=decode_programs,
       prng_key=prng_key,
       job_log_dir=job_log_dir,
       train_state=train_state,
       summary_writers=summary_writers,
       use_pmap=False,
-      decode_step_fn=decode_step_fn,
+      spmd_decode_step=decode_step_fn,
       inputs_partition_spec=inputs_partition_spec,
       metrics_p=metrics_p,
   )
 
 
 def decode_once_spmd_model(
-    jax_task: tasks_lib.SingleTask,
-    partitioner: partitioning.Partitioner,
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
     task_p: tasks_lib.SingleTask.HParams,
-    inputs: List[base_input.BaseInput],
     job_log_dir: epath.Path,
     train_state: TrainState,
     summary_writers: List[SummaryWriter],
@@ -1605,14 +1864,13 @@ def decode_once_spmd_model(
     List[Optional[Dict[str, float]]],  # decode metrics.
     List[Optional[Dict[str, float]]],  # processed decode metrics.
     List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-    List[int],
-]:  # performed decode steps.
+    List[int],  # performed decode steps.
+]:
   """Runs the decoding once on the entire decoder datasets for an SPMD model.
 
   Args:
-    jax_task: instantiated model from task_p.
+    decode_programs: List[SingleTaskDecodeProgram],
     task_p: Params for the task that encapsulates an SPMD model.
-    inputs: instantiated inputs.
     job_log_dir: Directory for the job logs.
     train_state: A TrainState object.
     summary_writers: The summary writer objects to log summaries.
@@ -1642,16 +1900,14 @@ def decode_once_spmd_model(
       ),
       _,
   ) = _decode_once_spmd_model(
-      jax_task.model,
-      partitioner,
-      inputs,
-      job_log_dir,
-      train_state,
-      summary_writers,
-      prng_key,
-      decode_step_fn,
-      inputs_partition_spec,
-      task_p.metrics,
+      decode_programs=decode_programs,
+      job_log_dir=job_log_dir,
+      train_state=train_state,
+      summary_writers=summary_writers,
+      prng_key=prng_key,
+      decode_step_fn=decode_step_fn,
+      inputs_partition_spec=inputs_partition_spec,
+      metrics_p=task_p.metrics,
   )
   return (
       decode_metrics_list,
@@ -1810,56 +2066,6 @@ def _maybe_update_tracked_metric(
             lambda x: x[0], replicated_model_states
         )
         checkpoints.save_checkpoint(unreplicated_model_states, tracker_dir_path)
-
-
-def _find_and_maybe_update_tracked_metric(
-    basedir: epath.Path,
-    split: int,
-    dirnames: Sequence[epath.Path],
-    step_i: int,
-    input_names: Sequence[str],
-    replicated_model_states: TrainState,
-    task_p: tasks_lib.SingleTask.HParams,
-    decode_metrics_list: List[Dict[str, float]],
-    enable_checkpoint_saving: bool = True,
-) -> None:
-  tracked_metric = task_p.track_decoder_metric
-  track_min_or_max = task_p.track_decoder_metric_min_or_max
-  if not track_min_or_max:
-    raise ValueError(
-        'Must also set track_decoder_metric_min_or_max when '
-        f'enabling metric tracking: {task_p}'
-    )
-  m_value = None
-  for d in decode_metrics_list:
-    if tracked_metric in d:
-      m_value = d[tracked_metric]
-      break
-
-  if m_value:
-    # Filesystem friendly name for the tracked metric.
-    tracked_metric_name = tracked_metric.replace('/', '-')
-    tracker_dir_path = (
-        basedir
-        / dirnames[split]
-        / f'{tracked_metric_name}_{track_min_or_max}_tracker'
-    )
-    _maybe_update_tracked_metric(
-        m_value,
-        step_i,
-        tracker_dir_path,
-        tracked_metric_name,
-        track_min_or_max,
-        input_names[split],
-        replicated_model_states,
-        enable_checkpoint_saving=enable_checkpoint_saving,
-    )
-  else:
-    logging.info(
-        'Cannot track metric %s on input %s.',
-        tracked_metric,
-        input_names[split],
-    )
 
 
 def infer_and_write(
