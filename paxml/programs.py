@@ -110,12 +110,12 @@ class Program(metaclass=abc.ABCMeta):
   # TODO(laigd): add a unified setup() method here.
 
   @abc.abstractmethod
-  def should_run(self, state: TrainState, train_step: int) -> bool:
-    """Whether .run() should be called at `state` and `train_step`."""
+  def should_run(self, state: TrainState, step: int) -> bool:
+    """Whether .run() should be called at `state` and train step `step`."""
 
   @abc.abstractmethod
-  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
-    """Returns the program on given state and train step."""
+  def run(self, state: TrainState, step: int) -> ProgramOutput:
+    """Runs the program on given state and train step `step`."""
 
   @abc.abstractmethod
   def shutdown(self) -> None:
@@ -253,16 +253,16 @@ class BaseTrainProgram(Program):
     self._train_summary_last_step = init_step - 1
     self._pending_train_losses = _InflightQueue(train_p.max_inflight_steps)
 
-  def should_run(self, state: TrainState, train_step: int) -> bool:
-    return train_step < self._task.hparams.train.num_train_steps
+  def should_run(self, state: TrainState, step: int) -> bool:
+    return step < self._task.hparams.train.num_train_steps
 
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
-  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
+  def run(self, state: TrainState, step: int) -> ProgramOutput:
     train_p = self._task.hparams.train
     logging.debug('  Retrieving inputs.')
     model_inputs = self._train_input.get_next_padded()
-    if train_p.enforce_input_specs and train_step == self._initial_step:
+    if train_p.enforce_input_specs and step == self._initial_step:
       # At the first step, checks that the input specs provided by the input
       # specs provider matches the shape/dtype of the actual input.
       inputs_shape_dtype = jax.tree_map(
@@ -291,11 +291,11 @@ class BaseTrainProgram(Program):
 
     profiler_capture_step = train_p.profiler_capture_step
     do_profile = profiler_capture_step is not None
-    if do_profile and train_step - self._initial_step == profiler_capture_step:
+    if do_profile and step - self._initial_step == profiler_capture_step:
       self._profiler.capture_async()
 
     logging.debug('  Performing train_step().')
-    with jax.profiler.StepTraceAnnotation('train', step_num=train_step):
+    with jax.profiler.StepTraceAnnotation('train', step_num=step):
       with py_utils.timeit() as train_period:
         (
             new_state,
@@ -314,15 +314,15 @@ class BaseTrainProgram(Program):
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
     self._pending_train_losses.add_computation(loss)
-    if train_step == self._initial_step:
+    if step == self._initial_step:
       self._first_step_completion_time = time.time()
 
-    if do_profile and train_step - self._initial_step < profiler_capture_step:
+    if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
 
-    new_train_step, steps_per_sec = self._maybe_write_summaries(
+    new_step, steps_per_sec = self._maybe_write_summaries(
         new_state,
-        train_step,
+        step,
         loss,
         weighted_scalars,
         summary_tensors,
@@ -332,20 +332,20 @@ class BaseTrainProgram(Program):
 
     # Run eval at regular step interval.
     # While the eval ones below are post-model weight updates, hence we use the
-    # new step counter new_train_step.
+    # new step counter new_step.
     eval_train_metrics = None
     if (
         train_p.eval_interval_steps
-        and new_train_step % train_p.eval_interval_steps == 0
+        and new_step % train_p.eval_interval_steps == 0
     ):
-      eval_train_metrics = self._maybe_run_eval_train(new_state, new_train_step)
+      eval_train_metrics = self._maybe_run_eval_train(new_state, new_step)
 
     return ProgramOutput(
         new_state,
         aux=NestedMap(
             loss=loss,
             weighted_scalars=weighted_scalars,
-            new_train_step=new_train_step,
+            new_train_step=new_step,
             steps_per_sec=steps_per_sec,
             eval_train_metrics=eval_train_metrics,
         ),
@@ -379,32 +379,32 @@ class BaseTrainProgram(Program):
   def _maybe_write_summaries(
       self,
       new_state: TrainState,
-      train_step: int,
+      step: int,
       loss,
       weighted_scalars,
       summary_tensors,
       per_example_out,
   ):
-    new_train_step = train_step + 1
+    new_step = step + 1
     steps_per_sec = None
 
     train_p = self._task.hparams.train
     if train_p.device_sync_interval_steps:
       should_sync_device = (
-          new_train_step % train_p.device_sync_interval_steps
+          new_step % train_p.device_sync_interval_steps
       ) == 0
     else:
       should_sync_device = self._train_summary_handler.should_write(
-          new_train_step
+          new_step
       )
     if should_sync_device:
-      new_train_step, steps_per_sec = self._sync_device(new_state, train_step)
+      new_step, steps_per_sec = self._sync_device(new_state, step)
 
-    # Note: Train metrics are currently reported at train_step + 1, while these
+    # Note: Train metrics are currently reported at step + 1, while these
     # training metrics/summaries are pre-model weight updates.
-    # TODO(b/264635784): Update the logic to pass train_step instead.
+    # TODO(b/264635784): Update the logic to pass step instead.
     self._train_summary_handler.process(
-        new_train_step,
+        new_step,
         loss,
         weighted_scalars,
         summary_tensors,
@@ -413,20 +413,20 @@ class BaseTrainProgram(Program):
     )
     logging.debug('  Wrote summaries (attempted).')
 
-    return new_train_step, steps_per_sec
+    return new_step, steps_per_sec
 
-  def _sync_device(self, new_state: TrainState, train_step: int):
-    # Synchronize train_step. This is performed at a fixed interval to avoid
+  def _sync_device(self, new_state: TrainState, step: int):
+    # Synchronize step. This is performed at a fixed interval to avoid
     # a gap between steps.
-    new_train_step = int(
+    new_step = int(
         py_utils.maybe_unreplicate_for_fully_replicated(new_state.step)
     )
     steps_per_sec = self._compute_steps_per_sec(
-        train_step, self._train_summary_last_time, self._train_summary_last_step
+        step, self._train_summary_last_time, self._train_summary_last_step
     )
     logging.info('steps/sec: %f', steps_per_sec)
     self._train_summary_last_time = time.time()
-    self._train_summary_last_step = train_step
+    self._train_summary_last_step = step
 
     if not self._init_duration_set:
       # Find estimated timestamp before the first execution call.
@@ -441,21 +441,21 @@ class BaseTrainProgram(Program):
           '/jax/pax/init/time_before_first_step_secs', init_duration
       )
       self._init_duration_set = True
-    return new_train_step, steps_per_sec
+    return new_step, steps_per_sec
 
   def _compute_steps_per_sec(
-      self, train_step, summary_last_time, summary_last_step
+      self, step, summary_last_time, summary_last_step
   ):
     """Computes the number of training steps per second."""
     # Note: This function doesn't account for the time spent on running
     # interleaved evaluation (if any) and/or evaluation on the training batch.
     # It's, hence, merely a raw underestimate.
     duration_sec = time.time() - summary_last_time
-    num_steps = train_step - summary_last_step
+    num_steps = step - summary_last_step
     steps_per_sec = num_steps / duration_sec
     return steps_per_sec
 
-  def _maybe_run_eval_train(self, new_state: TrainState, new_train_step: int):
+  def _maybe_run_eval_train(self, new_state: TrainState, new_step: int):
     train_p = self._task.hparams.train
     eval_train_metrics = None
 
@@ -482,7 +482,7 @@ class BaseTrainProgram(Program):
         )
         logging.debug('  Completed eval_step() runs on training split.')
         if self._eval_train_summary_handler.process(
-            new_train_step, loss, weighted_scalars, summary_tensors
+            new_step, loss, weighted_scalars, summary_tensors
         ):
           logging.debug('  Wrote eval summaries.')
         eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
@@ -704,18 +704,18 @@ class BaseEvalProgram(Program):
         summary_utils.get_summary_writer(summary_dir)
     )
 
-  def should_run(self, state: TrainState, train_step: int) -> bool:
+  def should_run(self, state: TrainState, step: int) -> bool:
     # TODO(laigd): implement and use this.
     raise NotImplementedError()
 
-  def run(self, state: TrainState, train_step: int) -> ProgramOutput:
+  def run(self, state: TrainState, step: int) -> ProgramOutput:
     if can_load_written_outputs(
-        self._job_log_dir, self._name, EvaluationMode.EVAL, train_step
+        self._job_log_dir, self._name, EvaluationMode.EVAL, step
     ):
       logging.info(
           'Eval on %s at train step %d already done, skipping.',
           self._name,
-          train_step,
+          step,
       )
       return ProgramOutput(
           state,
@@ -751,7 +751,7 @@ class BaseEvalProgram(Program):
           flat_scoring_outputs,
           self._eval_summary_writer,
           seqio_input.MetricType.SCORE,
-          train_step,
+          step,
           output_dir,
       )
 
@@ -760,7 +760,7 @@ class BaseEvalProgram(Program):
       summary_tensors[k] = np.array([np.asarray(t) for t in summary_tensors[k]])
     loss = np.mean(loss, axis=0)
     logging.info(
-        'train_step: %d, eval test %s loss: %s', train_step, self._name, loss
+        'step: %d, eval test %s loss: %s', step, self._name, loss
     )
 
     for key, values in metrics.items():
@@ -772,9 +772,9 @@ class BaseEvalProgram(Program):
           '  %s=%f (weight=%f)', key, weighted_average, sum_metric_weights
       )
     summary_utils.write_summary_entry(
-        self._eval_summary_writer, train_step, loss, metrics, summary_tensors
+        self._eval_summary_writer, step, loss, metrics, summary_tensors
     )
-    _maybe_write_scoring_outputs(output_dir, train_step, flat_scoring_outputs)
+    _maybe_write_scoring_outputs(output_dir, step, flat_scoring_outputs)
 
     return ProgramOutput(
         state,
