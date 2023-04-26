@@ -359,9 +359,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     decode_key = self._partitioner.preprocess_prng_key(decode_key)
 
     padded_decode_input_ps = [
-        trainer_lib.adjust_input_params_for_small_batch(
-            input_p, self._partitioner.global_mesh
-        )
+        self._partitioner.preprocess_input_params(input_p)
         for input_p in decode_input_ps
     ]
 

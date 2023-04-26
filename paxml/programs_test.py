@@ -102,9 +102,6 @@ class ProgramTestBase(test_utils.TestCase):
 
     # Set up input data
     train_input_p = pax_fiddle.Config(TestInput, batch_size=2)
-    train_input_p = trainer_lib.adjust_input_params_for_small_batch(
-        train_input_p, cls.mesh
-    )
     cls.train_input = instantiate(train_input_p)
 
     # Set up the task.

@@ -1660,12 +1660,7 @@ def decode_spmd_model(
       should_stop_early.
   """
   task_p = jax_task.hparams
-  padded_input_p = [
-      trainer_lib.adjust_input_params_for_small_batch(
-          inp, partitioner.global_mesh
-      )
-      for inp in input_p
-  ]
+  padded_input_p = [partitioner.preprocess_input_params(inp) for inp in input_p]
 
   # TODO(hthu): Remove eval_input_p as it basically isn't effective.
   # Either decoder or eval inputs is not empty.
