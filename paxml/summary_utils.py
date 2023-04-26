@@ -427,9 +427,9 @@ def write_summary_entry(summary_writer: SummaryWriter,
                    sum_metric_weights)
       status_msg += f', {key}={weighted_average}'
       write_summary_tensor(step_i, f'Metrics/{key}', weighted_average,
-                           SummaryType.SCALAR)
+                           SummaryType.AGGREGATE_SCALAR)
       write_summary_tensor(step_i, f'Metrics/{key}-weight', sum_metric_weights,
-                           SummaryType.SCALAR)
+                           SummaryType.AGGREGATE_SCALAR)
 
     work_unit.set_task_status(status_msg)
     summaries = flatten_summary_dict(summary_tensors)
