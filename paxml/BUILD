@@ -589,10 +589,8 @@ pytype_strict_library(
         ":tasks_lib",
         ":train_states",
         # Implicit absl.logging dependency.
-        # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit fiddle dependency.
-        # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//praxis:asserts",
@@ -756,6 +754,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.

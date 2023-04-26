@@ -35,6 +35,7 @@ class BaseExecutor(metaclass=abc.ABCMeta):
       job_log_dir: epath.Path,
       checkpointer: Any,
       partitioner: partitioning.Partitioner,
+      input_specs_provider: base_input.BaseInputSpecsProvider,
       # TODO(laigd): there is inconsistency between how we pass
       # train/eval/decode inputs and programs.
       # 1) Encapsulate train_input_p in train_program and don't pass it here.

@@ -1261,3 +1261,16 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
 
   call.lower = lower
   return call
+
+
+def get_train_input_specs(
+    task_p: tasks_lib.SingleTask.HParams,
+    input_specs_provider: base_input.BaseInputSpecsProvider,
+):
+  """Gets the shape/dtype of the inputs to the model."""
+  train_input_specs = input_specs_provider.get_input_specs()
+  if task_p.model.mesh_shape is not None:
+    train_input_specs = jax.tree_map(
+        py_utils.get_global_input_shape_dtype, train_input_specs
+    )
+  return train_input_specs

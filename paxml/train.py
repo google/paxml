@@ -916,6 +916,7 @@ def train_and_evaluate(
         job_log_dir,
         checkpointer,
         partitioner,
+        instantiate(experiment_config.get_input_specs_provider_params()),
         train_input_p,
         decode_input_p,
         train_program,

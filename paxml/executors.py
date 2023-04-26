@@ -34,6 +34,7 @@ from paxml import tuning_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
@@ -46,14 +47,17 @@ TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
 
 
-def _maybe_update_latest_model_step(
-    train_input: base_input.BaseInput,
+def _maybe_init_or_update_latest_model_step(
+    train_input: Optional[base_input.BaseInput],
     train_input_p: base_input.BaseInput.HParams,
     initial_global_step: int,
 ) -> base_input.BaseInput:
   """Updates `train_input_p` in place its latest model step."""
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
-    return train_input
+    if train_input:
+      return train_input
+    else:
+      return instantiate(train_input_p)
   dp = train_input_p.deterministic_input_start_index
   dp._latest_model_step = (
       initial_global_step  # pylint: disable=protected-access
@@ -152,12 +156,61 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._train_prng_seed = None
     self._eval_prng_seed = None
 
+  def _maybe_create_train_input(
+      self,
+      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      train_input_p: pax_fiddle.Config[base_input.BaseInput],
+  ) -> Tuple[
+      Optional[base_input.BaseInput],
+      Optional[base_input.BaseInput],
+      Optional[base_input.BaseInput],
+  ]:
+    """Optionally creates the train input for partitioner and checkpointing.
+
+    Args:
+      task_p: The task config.
+      train_input_p: The config for the train input pipeline.
+
+    Returns:
+      A 3-tuple (train_input, train_input_for_partitioner,
+      train_input_for_checkpoint), where:
+
+      - train_input: represents the train input pipeline. It can be created here
+        or later in _maybe_init_or_update_latest_model_step.
+      - train_input_for_partitioner: represents the train_input_pipeline arg
+        passed to partitioner.setup(). If set, the partitioner will use it to
+        get the shape/dtype information for model.init.
+      - train_input_for_checkpoint: represents the train_input_pipeline arg
+        passed to checkpointer.get_model_states(). If set, the checkpointer will
+        restore its states from checkpoint.
+    """
+
+    if not task_p.train.enforce_input_specs:
+      train_input = instantiate(train_input_p)
+      train_input_for_partitioner = train_input
+      if not task_p.train.enable_input_checkpointing:
+        train_input_for_checkpoint = None
+      else:
+        train_input_for_checkpoint = train_input
+    else:
+      train_input_for_partitioner = None
+      if not task_p.train.enable_input_checkpointing:
+        # In this case, train_input will be created in
+        # _maybe_init_or_update_latest_model_step() later.
+        train_input = None
+        train_input_for_checkpoint = None
+      else:
+        train_input = instantiate(train_input_p)
+        train_input_for_checkpoint = train_input
+    return train_input, train_input_for_partitioner, train_input_for_checkpoint
+
   def setup(
       self,
       jax_task: tasks_lib.SingleTask,
       job_log_dir: epath.Path,
       checkpointer: Any,
       partitioner: partitioning.Partitioner,
+      input_specs_provider: base_input.BaseInputSpecsProvider,
       train_input_p: base_input.BaseInput.HParams,
       decode_input_ps: Sequence[base_input.BaseInput.HParams],
       train_program: programs.BaseTrainProgram,
@@ -177,16 +230,30 @@ class DefaultExecutor(base_executor.BaseExecutor):
     # Creates the root prng key and train input pipeline.
     root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
     train_input_p = partitioner.preprocess_input_params(train_input_p)
-    train_input_pipeline = instantiate(train_input_p)
+    train_input, train_input_for_partitioner, train_input_for_checkpoint = (
+        self._maybe_create_train_input(task_p, train_input_p)
+    )
 
     # Sets up the partitioner. Note it only needs shape/dtype information of the
     # prng key.
     # TODO(laigd): let it take ShapeDtypeStruct of prng key instead.
+    train_input_specs = None
+    if task_p.train.enforce_input_specs:
+      # TODO(laigd): the batch size used in the spec is inconsistent with
+      # BaseInput.get_next_padded(), fix it.
+      train_input_specs = trainer_lib.get_train_input_specs(
+          task_p, input_specs_provider
+      )
+      if not train_input_specs:
+        raise ValueError(
+            'No training input specs available, while enabling '
+            '`task_p.train.enforce_input_specs` requires it.'
+        )
     partitioner.setup(
         jax_task,
         root_prng_key,
-        train_inputs_shape_dtype=None,
-        train_input_pipeline=train_input_pipeline,
+        train_inputs_shape_dtype=train_input_specs,
+        train_input_pipeline=train_input_for_partitioner,
         job_log_dir=job_log_dir,
     )
     train_state_metadata = partitioner.get_train_state_metadata()
@@ -199,11 +266,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
       )
 
     # Restore TrainState from checkpoint or initialize it.
-    train_input_for_checkpoint = (
-        train_input_pipeline
-        if task_p.train.enable_input_checkpointing
-        else None
-    )
     (
         partitioned_train_state,
         train_state_provenance,
@@ -228,9 +290,10 @@ class DefaultExecutor(base_executor.BaseExecutor):
     )
     logging.info('Model initial global_step=%d', initial_global_step)
     if not task_p.train.enable_input_checkpointing:
-      train_input_pipeline = _maybe_update_latest_model_step(
-          train_input_pipeline, train_input_p, initial_global_step
+      train_input = _maybe_init_or_update_latest_model_step(
+          train_input, train_input_p, initial_global_step
       )
+    assert train_input  # The real train input should be created by now.
 
     # Splits the key.
     prng_key, train_prng_seed, eval_prng_seed = jax.random.split(
@@ -242,7 +305,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
 
     # Sets the lazily initialized states.
-    self._train_input_pipeline = train_input_pipeline
+    self._train_input_pipeline = train_input
     self._partitioned_train_state = partitioned_train_state
     self._train_state_provenance = train_state_provenance
     self._total_num_params = total_num_params

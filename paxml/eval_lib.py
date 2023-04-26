@@ -109,15 +109,9 @@ def _get_train_input_specs(
   """Gets the shape/dtype of the inputs to the model."""
   if not task_p.train.always_use_train_for_model_init:
     return None
-
-  input_specs_provider = instantiate(
-      experiment_config.get_input_specs_provider_params()
+  train_input_specs = trainer_lib.get_train_input_specs(
+      task_p, instantiate(experiment_config.get_input_specs_provider_params())
   )
-  train_input_specs = input_specs_provider.get_input_specs()
-  if task_p.model.mesh_shape is not None:
-    train_input_specs = jax.tree_map(
-        py_utils.get_global_input_shape_dtype, train_input_specs
-    )
   if train_input_specs is None:
     raise ValueError(
         'No training input specs available, while enabling '
