@@ -204,7 +204,8 @@ def write_post_init_model_hparams_file(
               mutable=True,
           )[1]
 
-      variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
+      with py_utils.logging_verbosity_level('FATAL'):
+        variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
       assert base_layer.HYPER_PARAMS in variables_abstract
 
       hyper_params = jax.tree_map(
