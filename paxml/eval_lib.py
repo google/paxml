@@ -1162,6 +1162,12 @@ class SingleTaskDecodeProgram(programs.Program):
           batch = decode_input.get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         decode_input.reset()
+        logging.log_if(
+            logging.ERROR,
+            'Input %s yields zero batch.',
+            step_num == 1,
+            input_name,
+        )
         break
       batch = partitioner.preprocess_inputs(
           decode_input, batch, None if use_pmap else inputs_partition_spec
