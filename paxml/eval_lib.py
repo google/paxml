@@ -780,6 +780,7 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
   return metrics
 
 
+# TODO(wangpeng): Merge decode_pmap_model and decode_spmd_model.
 def decode_pmap_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
@@ -850,12 +851,13 @@ def decode_pmap_model(
   logging.info('decoder prng_seed: %s', prng_seed)
 
   decode_programs = eval_runner.decode_programs
-  decode_once_fn = partition_decode_once_pmap_model(
+  decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
-      var_weight_params=train_state_metadata.var_weight_hparams,
-      prng_seed=prng_seed,
+      prng_key=prng_seed,
       job_log_dir=job_log_dir,
+      use_pmap=True,
+      var_weight_params=train_state_metadata.var_weight_hparams,
       output_pickle=output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving,
   )
@@ -1352,33 +1354,70 @@ class SingleTaskDecodeProgram(programs.Program):
     return programs.ProgramOutput(state=state, aux=decode_output)
 
 
-def partition_decode_once_pmap_model(  # pylint: disable=missing-function-docstring
+def partitioned_decode_once(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
     task_p: tasks_lib.SingleTask.HParams,
-    var_weight_params: NestedWeightHParams,
-    prng_seed: JTensor,
+    prng_key: JTensor,
     job_log_dir: epath.Path,
+    use_pmap: bool,
+    var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
+    # TODO(wangpeng): Remove this argument.
+    spmd_decode_step: Optional[
+        Callable[
+            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+        ]
+    ] = None,
+    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
 ) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
+  """Returns a function that runs decode over all decoder datasets.
+
+  Args:
+    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
+    task_p: Params for the task encapsulating a data parallel model.
+    prng_key: The prng key used for decoding.
+    job_log_dir: Directory for the job logs.
+    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+      `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
+      be set; otherwise, `spmd_decode_step`, `inputs_partition_spec` and
+      `metrics_p` should be set.
+    var_weight_params: Nested structure of HParams for the model weights.
+    output_pickle: Whether to write decoding results to a pickle file.
+    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
+    spmd_decode_step: pjit'ed decode function.
+    inputs_partition_spec: Partition specs for inputs.
+  """
+
   def decode_once_fn(partitioned_train_state, summary_writers):
     with py_utils.timeit() as decode_period:
+      if not use_pmap and task_p.track_decoder_metric:
+        logging.warn(
+            'Decoder metric tracking is not implemented yet for pjit '
+            'models. Ignoring metric tracking.'
+        )
+
       (
           decode_metrics_list,
           processed_decode_metrics_list,
           decode_seqio_metrics_list,
           num_decode_steps,
-      ) = decode_once_pmap_model(
+      ), _ = _decode_once_common(
           decode_programs=decode_programs,
+          prng_key=prng_key,
+          job_log_dir=job_log_dir,
+          train_state=partitioned_train_state,
+          summary_writers=summary_writers,
+          use_pmap=use_pmap,
           task_p=task_p,
           var_weight_params=var_weight_params,
-          prng_seed=prng_seed,
-          job_log_dir=job_log_dir,
-          replicated_model_states=partitioned_train_state,
-          summary_writers=summary_writers,
           output_pickle=output_pickle,
           enable_checkpoint_saving=enable_checkpoint_saving,
+          spmd_decode_step=spmd_decode_step,
+          inputs_partition_spec=inputs_partition_spec,
+          metrics_p=task_p.metrics,
       )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
@@ -1390,6 +1429,29 @@ def partition_decode_once_pmap_model(  # pylint: disable=missing-function-docstr
     )
 
   return decode_once_fn
+
+
+# TODO(wangpeng): Remove this function.
+def partition_decode_once_pmap_model(  # pylint: disable=missing-function-docstring
+    *,
+    decode_programs: List[SingleTaskDecodeProgram],
+    task_p: tasks_lib.SingleTask.HParams,
+    var_weight_params: NestedWeightHParams,
+    prng_seed: JTensor,
+    job_log_dir: epath.Path,
+    output_pickle: bool = True,
+    enable_checkpoint_saving: bool = True,
+) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
+  return partitioned_decode_once(
+      decode_programs=decode_programs,
+      task_p=task_p,
+      prng_key=prng_seed,
+      job_log_dir=job_log_dir,
+      use_pmap=True,
+      var_weight_params=var_weight_params,
+      output_pickle=output_pickle,
+      enable_checkpoint_saving=enable_checkpoint_saving,
+  )
 
 
 def _decode_once_common(
@@ -1587,6 +1649,7 @@ def _decode_once_common(
   ), raw_metrics_list
 
 
+# TODO(wangpeng): Remove this function.
 def decode_once_pmap_model(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
@@ -1712,12 +1775,13 @@ def decode_spmd_model(
   decode_step_fn, inputs_partition_spec = partitioner.partition(
       decode_step_fn, inputs_shape_dtype, is_eval
   )
-  decode_once_fn = partition_decode_once_spmd_model(
+  decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
       job_log_dir=job_log_dir,
       prng_key=prng_key,
-      decode_step_fn=decode_step_fn,
+      use_pmap=False,
+      spmd_decode_step=decode_step_fn,
       inputs_partition_spec=inputs_partition_spec,
   )
   trainer_lib.write_post_init_model_hparams_file(
@@ -1743,6 +1807,7 @@ def decode_spmd_model(
   )
 
 
+# TODO(wangpeng): Remove this function.
 def partition_decode_once_spmd_model(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
@@ -1757,34 +1822,15 @@ def partition_decode_once_spmd_model(
     inputs_partition_spec: NestedPartitionSpec,
 ) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
   """Returns a function that runs decode over all decoder datasets."""
-
-  def decode_once_fn(partitioned_train_state, summary_writers):
-    with py_utils.timeit() as decode_period:
-      (
-          decode_metrics_list,
-          processed_decode_metrics_list,
-          decode_seqio_metrics_list,
-          num_decode_steps,
-      ) = decode_once_spmd_model(
-          decode_programs=decode_programs,
-          task_p=task_p,
-          job_log_dir=job_log_dir,
-          train_state=partitioned_train_state,
-          summary_writers=summary_writers,
-          prng_key=prng_key,
-          decode_step_fn=decode_step_fn,
-          inputs_partition_spec=inputs_partition_spec,
-      )
-    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
-    return tuning_lib.DecodeMetrics(
-        metrics_list=decode_metrics_list,
-        processed_metrics_list=processed_decode_metrics_list,
-        seqio_metrics_list=decode_seqio_metrics_list,
-        steps_per_sec=decode_steps_per_sec,
-        input_names=[p.decode_input.name for p in decode_programs],
-    )
-
-  return decode_once_fn
+  return partitioned_decode_once(
+      decode_programs=decode_programs,
+      task_p=task_p,
+      prng_key=prng_key,
+      job_log_dir=job_log_dir,
+      use_pmap=False,
+      spmd_decode_step=decode_step_fn,
+      inputs_partition_spec=inputs_partition_spec,
+  )
 
 
 def _is_shape_dtype_struct(x):
@@ -1792,6 +1838,7 @@ def _is_shape_dtype_struct(x):
   return isinstance(x, jax.ShapeDtypeStruct)
 
 
+# TODO(wangpeng): Remove this function.
 def _decode_once_spmd_model(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
@@ -1848,6 +1895,7 @@ def _decode_once_spmd_model(
   )
 
 
+# TODO(wangpeng): Remove this function.
 def decode_once_spmd_model(
     *,
     decode_programs: List[SingleTaskDecodeProgram],

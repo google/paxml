@@ -328,23 +328,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
     return decode_programs
 
-  def _partition_decode_once_fns_pmap(self, prng_key, decode_input_p):
-    decode_programs = self._create_decode_programs(decode_input_p)
-
-    prng_key, decode_key = jax.random.split(prng_key, 2)
-    logging.info('decode prng_seed: %s', decode_key)
-    decode_key = self._partitioner.preprocess_prng_key(decode_key)
-    decode_once_fn = eval_lib.partition_decode_once_pmap_model(
-        decode_programs=decode_programs,
-        task_p=self._task.hparams,
-        var_weight_params=self._partitioner.get_train_state_metadata().var_weight_hparams,
-        prng_seed=decode_key,
-        job_log_dir=self._job_log_dir,
-    )
-    decode_input_names = [p.decode_input.name for p in decode_programs]
-    return decode_once_fn, prng_key, decode_input_names
-
-  def _partition_decode_once_fns_spmd(
+  def partition_decode_once_fns(
       self,
       prng_key: jax.random.KeyArray,
       decode_input_ps: Sequence[base_input.BaseInput.HParams],
@@ -353,48 +337,64 @@ class DefaultExecutor(base_executor.BaseExecutor):
       jax.random.KeyArray,
       Sequence[str],
   ]:
-    assert decode_input_ps, 'decode_input_p must not be empty'
+    use_pmap = self._task.hparams.model.ici_mesh_shape is None
+
+    # TODO(wangpeng): pmap and spmd should both do this step.
+    if not use_pmap:
+      assert decode_input_ps, 'decode_input_p must not be empty'
+
     prng_key, decode_key = jax.random.split(prng_key, 2)
-    logging.info('decode prng_key: %s', decode_key)
+    logging.info(
+        'decode %s: %s', 'prng_seed' if use_pmap else 'prng_key', decode_key
+    )
     decode_key = self._partitioner.preprocess_prng_key(decode_key)
 
-    padded_decode_input_ps = [
-        self._partitioner.preprocess_input_params(input_p)
-        for input_p in decode_input_ps
-    ]
+    # TODO(wangpeng): pmap and spmd should both do this step.
+    if not use_pmap:
+      padded_decode_input_ps = [
+          self._partitioner.preprocess_input_params(input_p)
+          for input_p in decode_input_ps
+      ]
 
-    decode_programs = self._create_decode_programs(padded_decode_input_ps)
-
-    _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-        padded_decode_input_ps[0]
+    decode_programs = self._create_decode_programs(
+        decode_input_ps if use_pmap else padded_decode_input_ps
     )
 
-    # TODO(pax-dev): Support auto-sharding for decoder step.
-    step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
-    assert is_eval
-    decode_step_fn, decode_input_partition_spec = self._partitioner.partition(
-        step_fn, decode_inputs_shape_dtype, is_eval
-    )
+    if use_pmap:
+      var_weight_params = (
+          self._partitioner.get_train_state_metadata().var_weight_hparams
+      )
+      spmd_decode_step = None
+      decode_input_partition_spec = None
+    else:
+      var_weight_params = None
 
-    decode_once_fn = eval_lib.partition_decode_once_spmd_model(
+      _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+          padded_decode_input_ps[0]
+      )
+
+      # TODO(pax-dev): Support auto-sharding for decoder step.
+      step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
+      assert is_eval
+      spmd_decode_step, decode_input_partition_spec = (
+          self._partitioner.partition(
+              step_fn, decode_inputs_shape_dtype, is_eval
+          )
+      )
+
+    decode_once_fn = eval_lib.partitioned_decode_once(
         decode_programs=decode_programs,
         task_p=self._task.hparams,
         job_log_dir=self._job_log_dir,
         prng_key=decode_key,
-        decode_step_fn=decode_step_fn,
+        use_pmap=use_pmap,
+        var_weight_params=var_weight_params,
+        spmd_decode_step=spmd_decode_step,
         inputs_partition_spec=decode_input_partition_spec,
     )
 
     decode_input_names = [p.decode_input.name for p in decode_programs]
     return decode_once_fn, prng_key, decode_input_names
-
-  @property
-  def partition_decode_once_fns(self):
-    # TODO(wangpeng): Merge the two branches by extracting common code.
-    if self._task.hparams.model.ici_mesh_shape is not None:
-      return self._partition_decode_once_fns_spmd
-    else:
-      return self._partition_decode_once_fns_pmap
 
   def start(self):
     is_vars_replicated = self._task.hparams.model.ici_mesh_shape is None
