@@ -23,6 +23,7 @@ from absl import logging
 from etils import epath
 import flax.serialization
 import jax
+from jax.experimental import multihost_utils
 import optax
 import orbax.checkpoint
 from paxml import checkpoint_managers
@@ -666,6 +667,7 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
         directory / f'process_{jax.process_index()}-of-{jax.process_count()}'
     )
     item.save(checkpoint_path)
+    multihost_utils.sync_global_devices('BaseInputCheckpointHandler:save')
 
   def restore(self, directory: epath.Path, item: Any = None) -> None:
     """Restores the given item.
