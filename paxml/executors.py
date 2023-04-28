@@ -339,9 +339,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
   ]:
     use_pmap = self._task.hparams.model.ici_mesh_shape is None
 
-    # TODO(wangpeng): pmap and spmd should both do this step.
-    if not use_pmap:
-      assert decode_input_ps, 'decode_input_p must not be empty'
+    assert decode_input_ps, 'decode_input_p must not be empty'
 
     prng_key, decode_key = jax.random.split(prng_key, 2)
     logging.info(
@@ -349,16 +347,12 @@ class DefaultExecutor(base_executor.BaseExecutor):
     )
     decode_key = self._partitioner.preprocess_prng_key(decode_key)
 
-    # TODO(wangpeng): pmap and spmd should both do this step.
-    if not use_pmap:
-      padded_decode_input_ps = [
-          self._partitioner.preprocess_input_params(input_p)
-          for input_p in decode_input_ps
-      ]
+    preprocessed_decode_input_ps = [
+        self._partitioner.preprocess_input_params(input_p)
+        for input_p in decode_input_ps
+    ]
 
-    decode_programs = self._create_decode_programs(
-        decode_input_ps if use_pmap else padded_decode_input_ps
-    )
+    decode_programs = self._create_decode_programs(preprocessed_decode_input_ps)
 
     if use_pmap:
       var_weight_params = (
@@ -370,7 +364,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
       var_weight_params = None
 
       _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-          padded_decode_input_ps[0]
+          preprocessed_decode_input_ps[0]
       )
 
       # TODO(pax-dev): Support auto-sharding for decoder step.

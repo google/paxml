@@ -1404,7 +1404,7 @@ def partitioned_decode_once(
           processed_decode_metrics_list,
           decode_seqio_metrics_list,
           num_decode_steps,
-      ), _ = _decode_once_common(
+      ), _ = _decode_once(
           decode_programs=decode_programs,
           prng_key=prng_key,
           job_log_dir=job_log_dir,
@@ -1431,30 +1431,7 @@ def partitioned_decode_once(
   return decode_once_fn
 
 
-# TODO(wangpeng): Remove this function.
-def partition_decode_once_pmap_model(  # pylint: disable=missing-function-docstring
-    *,
-    decode_programs: List[SingleTaskDecodeProgram],
-    task_p: tasks_lib.SingleTask.HParams,
-    var_weight_params: NestedWeightHParams,
-    prng_seed: JTensor,
-    job_log_dir: epath.Path,
-    output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
-) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
-  return partitioned_decode_once(
-      decode_programs=decode_programs,
-      task_p=task_p,
-      prng_key=prng_seed,
-      job_log_dir=job_log_dir,
-      use_pmap=True,
-      var_weight_params=var_weight_params,
-      output_pickle=output_pickle,
-      enable_checkpoint_saving=enable_checkpoint_saving,
-  )
-
-
-def _decode_once_common(
+def _decode_once(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
     prng_key: JTensor,
@@ -1649,58 +1626,6 @@ def _decode_once_common(
   ), raw_metrics_list
 
 
-# TODO(wangpeng): Remove this function.
-def decode_once_pmap_model(
-    *,
-    decode_programs: List[SingleTaskDecodeProgram],
-    task_p: tasks_lib.SingleTask.HParams,
-    var_weight_params: NestedWeightHParams,
-    prng_seed: JTensor,
-    job_log_dir: epath.Path,
-    replicated_model_states: TrainState,
-    summary_writers: List[SummaryWriter],
-    output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
-) -> Tuple[
-    List[Optional[Dict[str, float]]],  # decode metrics.
-    List[Optional[Dict[str, float]]],  # processed decode metrics.
-    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-    List[int],  # performed decode steps.
-]:
-  """Runs the decoding on the entire decoder datasets for a PMAP model.
-
-  Args:
-    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
-    task_p: Params for the task encapsulating a data parallel model.
-    var_weight_params: Nested structure of HParams for the model weights.
-    prng_seed: The prng seed used for decoding.
-    job_log_dir: Directory for the job logs.
-    replicated_model_states: A TrainState object.
-    summary_writers: The summary writer objects to log summaries.
-    output_pickle: Whether to write decoding results to a pickle file.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-
-  Returns:
-    A tuple of (a list of decode metrics,
-                a list of processed decode metrics,
-                a list of optional decoder (seqio) metrics.
-                 list of integers as performed decode steps for each input).
-      Items from each list are aligned with each input from inputs.
-  """
-  return _decode_once_common(
-      decode_programs=decode_programs,
-      prng_key=prng_seed,
-      job_log_dir=job_log_dir,
-      train_state=replicated_model_states,
-      summary_writers=summary_writers,
-      use_pmap=True,
-      task_p=task_p,
-      var_weight_params=var_weight_params,
-      output_pickle=output_pickle,
-      enable_checkpoint_saving=enable_checkpoint_saving,
-  )[0]
-
-
 def decode_spmd_model(
     jax_task: tasks_lib.SingleTask,
     prng_key: PRNGKey,
@@ -1807,163 +1732,9 @@ def decode_spmd_model(
   )
 
 
-# TODO(wangpeng): Remove this function.
-def partition_decode_once_spmd_model(
-    *,
-    decode_programs: List[SingleTaskDecodeProgram],
-    task_p: tasks_lib.SingleTask.HParams,
-    job_log_dir: epath.Path,
-    prng_key: JTensor,
-    # TODO(wangpeng): Remove this argument.
-    decode_step_fn: Callable[
-        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-    ],
-    inputs_partition_spec: NestedPartitionSpec,
-) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
-  """Returns a function that runs decode over all decoder datasets."""
-  return partitioned_decode_once(
-      decode_programs=decode_programs,
-      task_p=task_p,
-      prng_key=prng_key,
-      job_log_dir=job_log_dir,
-      use_pmap=False,
-      spmd_decode_step=decode_step_fn,
-      inputs_partition_spec=inputs_partition_spec,
-  )
-
-
 def _is_shape_dtype_struct(x):
   """Indicates whether the input is of type ShapeDtypeStruct or not."""
   return isinstance(x, jax.ShapeDtypeStruct)
-
-
-# TODO(wangpeng): Remove this function.
-def _decode_once_spmd_model(
-    *,
-    decode_programs: List[SingleTaskDecodeProgram],
-    job_log_dir: epath.Path,
-    train_state: TrainState,
-    summary_writers: List[SummaryWriter],
-    prng_key: JTensor,
-    decode_step_fn: Callable[
-        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-    ],
-    inputs_partition_spec: NestedPartitionSpec,
-    metrics_p: Optional[base_metrics.BaseMetrics.HParams],
-) -> Tuple[
-    Tuple[
-        List[Optional[Dict[str, float]]],  # decode metrics.
-        List[Optional[Dict[str, float]]],  # processed decode metrics.
-        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-        List[int],  # performed decode steps.
-    ],
-    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
-]:
-  """Runs the decoding once on the entire decoder datasets for an SPMD model.
-
-  Args:
-    decode_programs: List[SingleTaskDecodeProgram],
-    job_log_dir: Directory for the job logs.
-    train_state: A TrainState object.
-    summary_writers: List[eval_lib.SummaryWriter],
-    prng_key: The prng key used for decoding.
-    decode_step_fn: pjit'ed decode functions.
-    inputs_partition_spec: Partition specs for inputs.
-    metrics_p: Parameters to configure how to aggregate the metrics.
-
-  Returns:
-    A tuple of(
-        tuple of (a list of decode metrics,
-                  a list of processed decode metrics,
-                  a list of optional decoder (seqio) metrics.
-                  list of integers as performed decode steps for each input).
-        raw clu metrics).
-      Items from each list are aligned with each input from inputs.
-  """
-  return _decode_once_common(
-      decode_programs=decode_programs,
-      prng_key=prng_key,
-      job_log_dir=job_log_dir,
-      train_state=train_state,
-      summary_writers=summary_writers,
-      use_pmap=False,
-      spmd_decode_step=decode_step_fn,
-      inputs_partition_spec=inputs_partition_spec,
-      metrics_p=metrics_p,
-  )
-
-
-# TODO(wangpeng): Remove this function.
-def decode_once_spmd_model(
-    *,
-    decode_programs: List[SingleTaskDecodeProgram],
-    task_p: tasks_lib.SingleTask.HParams,
-    job_log_dir: epath.Path,
-    train_state: TrainState,
-    summary_writers: List[SummaryWriter],
-    prng_key: JTensor,
-    decode_step_fn: Callable[
-        [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-        Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-    ],
-    inputs_partition_spec: NestedPartitionSpec,
-) -> Tuple[
-    List[Optional[Dict[str, float]]],  # decode metrics.
-    List[Optional[Dict[str, float]]],  # processed decode metrics.
-    List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
-    List[int],  # performed decode steps.
-]:
-  """Runs the decoding once on the entire decoder datasets for an SPMD model.
-
-  Args:
-    decode_programs: List[SingleTaskDecodeProgram],
-    task_p: Params for the task that encapsulates an SPMD model.
-    job_log_dir: Directory for the job logs.
-    train_state: A TrainState object.
-    summary_writers: The summary writer objects to log summaries.
-    prng_key: The prng key used for decoding.
-    decode_step_fn: pjit'ed decode functions.
-    inputs_partition_spec: Partition specs for inputs.
-
-  Returns:
-    A tuple of (a list of decode metrics,
-                a list of processed decode metrics,
-                a list of optional decoder (seqio) metrics.
-                 list of integers as performed decode steps for each input).
-      Items from each list are aligned with each input from inputs.
-  """
-  # Track metric specified by task_p.track_decoder_metric.
-  if task_p.track_decoder_metric:
-    logging.warn(
-        'Decoder metric tracking is not implemented yet for pjit '
-        'models. Ignoring metric tracking.'
-    )
-  (
-      (
-          decode_metrics_list,
-          processed_decode_metrics_list,
-          seqio_metrics_list,
-          num_decode_steps,
-      ),
-      _,
-  ) = _decode_once_spmd_model(
-      decode_programs=decode_programs,
-      job_log_dir=job_log_dir,
-      train_state=train_state,
-      summary_writers=summary_writers,
-      prng_key=prng_key,
-      decode_step_fn=decode_step_fn,
-      inputs_partition_spec=inputs_partition_spec,
-      metrics_p=task_p.metrics,
-  )
-  return (
-      decode_metrics_list,
-      processed_decode_metrics_list,
-      seqio_metrics_list,
-      num_decode_steps,
-  )
 
 
 def _common_eval_or_decode_loop(
