@@ -457,10 +457,6 @@ def evaluate(
   if not eval_input_p:
     logging.info('No eval datasets defined. Returning early.')
     return
-  for inp in eval_input_p:
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
 
   task_p = experiment_config.task()
   task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
@@ -674,10 +670,6 @@ def decode(
   if not combined_input_ps:
     logging.info('No input datasets defined.')
     return
-  for inp in combined_input_ps:
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
 
   # TODO(laigd): the logic below is very similar to the logic in evaluate(),
   # merge them.
@@ -717,6 +709,10 @@ def decode(
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
   )
+  # TODO(laigd): move this to decode program when ready.
+  decoder_inputs = [
+      partitioner.preprocess_input_config(p) for p in decoder_inputs
+  ]
 
   checkpointer = _create_checkpointer(
       jax_task,
@@ -1654,7 +1650,6 @@ def decode_spmd_model(
       should_stop_early.
   """
   task_p = jax_task.hparams
-  padded_input_p = [partitioner.preprocess_input_config(inp) for inp in input_p]
 
   # TODO(hthu): Remove eval_input_p as it basically isn't effective.
   # Either decoder or eval inputs is not empty.
@@ -1674,7 +1669,7 @@ def decode_spmd_model(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_input_ps=eval_input_p,
-      decode_input_ps=padded_input_p,
+      decode_input_ps=input_p,
       job_log_dir=job_log_dir,
       eval_key=eval_key,
   )
@@ -1920,13 +1915,13 @@ def infer_and_write(
   partitioner = partitioning.create_partitioner(
       task, reshard_inputs=reshard_inputs
   )
+  inputs_p = [partitioner.preprocess_input_config(p) for p in inputs_p]
   input_for_shape = None
   if not task_p.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_config(inputs_p[0])
-    input_for_shape = instantiate(input_p)
+    input_for_shape = instantiate(inputs_p[0])
   partitioner.setup(
       task, prng_key, train_input_specs, input_for_shape, job_log_dir
   )
@@ -1942,11 +1937,6 @@ def infer_and_write(
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
-  for inp in inputs_p:
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
-
   if model_p.mesh_shape is not None:
     # TODO(b/238416854): add support for SPMD models
     raise NotImplementedError('SPMD infer_and_write not implemented yet')

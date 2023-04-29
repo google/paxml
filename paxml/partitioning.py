@@ -313,21 +313,26 @@ class Partitioner(metaclass=abc.ABCMeta):
     """The global mesh."""
     return None
 
-  @abc.abstractmethod
   def preprocess_input_config(
-      self, input_ps: base_input.BaseInput.HParams
+      self, input_p: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
-    """Preprocess input hparam if necessary.
+    """Preprocess and updates the input config if necessary.
 
-    This is necessary before using the hparam to create the input pipeline, so
-    that the generated input batch can be used to run the partitioned function.
+    It is necessary to call this before using the config to create the input
+    pipeline. Input pipelines created without the preprocessing may have invalid
+    runtime configrations and can cause error.
 
     Args:
-      input_ps: The input hparam(s) to adjust.
+      input_p: The input config to preprocess.
 
     Returns:
-      The adjusted input hparam(s), with the same nested structure.
+      The preprocessed input config.
     """
+    # Updates the runtime information.
+    if input_p.num_infeed_hosts == 0:
+      input_p.num_infeed_hosts = jax.process_count()
+    input_p.infeed_host_index = jax.process_index()
+    return input_p
 
   @abc.abstractmethod
   def initialize_prng_key_and_train_state(
@@ -539,12 +544,6 @@ class PmapPartitioner(Partitioner):
     _write_input_specs(per_device_shape_dtype, self._job_log_dir)
     return per_device_shape_dtype
 
-  def preprocess_input_config(
-      self, input_ps: base_input.BaseInput.HParams
-  ) -> base_input.BaseInput.HParams:
-    """Preprocess input hparam if necessary."""
-    return input_ps
-
   def initialize_prng_key_and_train_state(
       self,
       root_prng_key: PRNGKey,
@@ -706,12 +705,13 @@ class PjitPartitioner(Partitioner):
     return self._global_mesh
 
   def preprocess_input_config(
-      self, input_ps: base_input.BaseInput.HParams
+      self, input_p: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary."""
+    input_p = super().preprocess_input_config(input_p)
     assert self.global_mesh
     return trainer_lib.adjust_input_params_for_small_batch(
-        input_ps, self.global_mesh
+        input_p, self.global_mesh
     )
 
   def initialize_prng_key_and_train_state(

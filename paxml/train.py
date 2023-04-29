@@ -811,9 +811,6 @@ def train_and_evaluate(
   task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
 
   input_p = experiment_config.datasets()
-  # Note that we modify input params below with runtime information, therefore
-  # experiment_config.datasets() should not be called again as it won't have the
-  # correct runtime information populated.
   for inp in input_p:
     if not isinstance(
         inp, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
@@ -821,9 +818,6 @@ def train_and_evaluate(
       raise ValueError(
           f'Expecting BaseInput.HParams from datasets(), got: {inp.ToText()}'
       )
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
   train_input_p = [v for v in input_p if v.is_training]
   if len(train_input_p) != 1:
     raise ValueError(
@@ -848,10 +842,6 @@ def train_and_evaluate(
     decode_input_p = experiment_config.decoder_datasets()
   else:
     decode_input_p = []
-  for inp in decode_input_p:
-    if inp.num_infeed_hosts == 0:
-      inp.num_infeed_hosts = jax.process_count()
-    inp.infeed_host_index = jax.process_index()
 
   checkpoint_type = checkpoint_types.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task_p
