@@ -230,7 +230,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
 
     # Creates the root prng key and train input pipeline.
     root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
-    train_input_p = partitioner.preprocess_input_params(train_input_p)
+    train_input_p = partitioner.preprocess_input_config(train_input_p)
     train_input, train_input_for_partitioner, train_input_for_checkpoint = (
         self._maybe_create_train_input(task_p, train_input_p)
     )
@@ -348,7 +348,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     decode_key = self._partitioner.preprocess_prng_key(decode_key)
 
     preprocessed_decode_input_ps = [
-        self._partitioner.preprocess_input_params(input_p)
+        self._partitioner.preprocess_input_config(input_p)
         for input_p in decode_input_ps
     ]
 

@@ -183,7 +183,7 @@ class Partitioner(metaclass=abc.ABCMeta):
   # for model.init. Needed only if train_inputs_shape_dtype is not available
   # (==None) when we call setup below.
   train_input_p = ...  # The config for training input pipeline.
-  train_input_p = partitioner.preprocess_input_params(train_input_p)
+  train_input_p = partitioner.preprocess_input_config(train_input_p)
   train_input_pipeline = instantiate(train_input_p)
 
   partitioner.setup(
@@ -314,7 +314,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     return None
 
   @abc.abstractmethod
-  def preprocess_input_params(
+  def preprocess_input_config(
       self, input_ps: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary.
@@ -539,7 +539,7 @@ class PmapPartitioner(Partitioner):
     _write_input_specs(per_device_shape_dtype, self._job_log_dir)
     return per_device_shape_dtype
 
-  def preprocess_input_params(
+  def preprocess_input_config(
       self, input_ps: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary."""
@@ -705,7 +705,7 @@ class PjitPartitioner(Partitioner):
   def global_mesh(self) -> jax.sharding.Mesh:
     return self._global_mesh
 
-  def preprocess_input_params(
+  def preprocess_input_config(
       self, input_ps: base_input.BaseInput.HParams
   ) -> base_input.BaseInput.HParams:
     """Preprocess input hparam if necessary."""

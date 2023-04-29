@@ -682,7 +682,7 @@ class BaseEvalProgram(Program):
     # Creates the eval input pipeline.
     logging.debug('Initializing eval_input pipeline : %s', self._input_p)
     self._eval_input_pipeline = instantiate(
-        self._partitioner.preprocess_input_params(self._input_p)
+        self._partitioner.preprocess_input_config(self._input_p)
     )
     self._name = self.eval_input.name
     self._eval_unpadded_global_batch_size = (

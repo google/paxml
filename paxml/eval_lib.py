@@ -486,7 +486,7 @@ def evaluate(
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_params(eval_input_p[0])
+    input_p = partitioner.preprocess_input_config(eval_input_p[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
@@ -712,7 +712,7 @@ def decode(
 
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_params(combined_input_ps[0])
+    input_p = partitioner.preprocess_input_config(combined_input_ps[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
@@ -1654,7 +1654,7 @@ def decode_spmd_model(
       should_stop_early.
   """
   task_p = jax_task.hparams
-  padded_input_p = [partitioner.preprocess_input_params(inp) for inp in input_p]
+  padded_input_p = [partitioner.preprocess_input_config(inp) for inp in input_p]
 
   # TODO(hthu): Remove eval_input_p as it basically isn't effective.
   # Either decoder or eval inputs is not empty.
@@ -1925,7 +1925,7 @@ def infer_and_write(
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_params(inputs_p[0])
+    input_p = partitioner.preprocess_input_config(inputs_p[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       task, prng_key, train_input_specs, input_for_shape, job_log_dir
