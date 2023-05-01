@@ -799,7 +799,7 @@ def filter_vars_for_grad_or_opt(
 def create_state_partition_specs(
     var_weight_hparams: NestedJTensor,
     mesh_shape: Sequence[int],
-    mesh_axis_names: List[str],
+    mesh_axis_names: Sequence[str],
     discard_opt_states: bool,
     learners: Optional[Sequence[learners_lib.Learner]],
 ):
@@ -978,7 +978,7 @@ def create_state_unpadded_shapes(
 def create_state_padded_shapes(
     var_weight_hparams: NestedJTensor,
     mesh_shape: Sequence[int],
-    mesh_axis_names: List[str],
+    mesh_axis_names: Sequence[str],
     discard_opt_states: bool,
     learners: Optional[Sequence[learners_lib.Learner]],
 ) -> TrainState:
@@ -1292,7 +1292,7 @@ class SingleTask(base_task.BaseTask):
     MAX = 'max'
     MIN = 'min'
   # TODO(b/269191093) Should this type be relaxed to BaseLayer?
-  model: Optional[base_model.BaseModel] = None
+  model: base_model.BaseModel = None
 
   # Implementation note: `SingleTask` is not defined in the interpreter
   # context here, so we need to wrap it in a lambda which will look it up from
@@ -1451,7 +1451,7 @@ class SingleTask(base_task.BaseTask):
         backward variables.
     """
     mesh_shape = self.model.mesh_shape
-    mesh_axis_names = self.model.mesh_axis_names
+    mesh_axis_names: Sequence[str] = self.model.mesh_axis_names
     return create_state_padded_shapes(
         var_weight_hparams,
         mesh_shape,

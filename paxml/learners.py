@@ -122,7 +122,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   # task or having everyone set it through the loss_aggregator.
   loss_name: Optional[str] = None
   stochastic_gradient: Optional[sgf.BaseStochasticGradient] = None
-  optimizer: Optional[optimizers.BaseOptimizer] = None
+  optimizer: optimizers.BaseOptimizer = None
   skip_zero_gradients: Optional[bool] = None
   grad_norm_summary: bool = True
   grad_norm_individual_vars: bool = False
@@ -258,6 +258,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     def clip_grads(grads, grad_norm):
       if clip_gradient_norm_to_value:
+        grad_norm: JTensor
         assert clip_gradient_single_norm_to_value == 0.0
         grad_scale = jnp.minimum(
             jnp.array(1, grad_norm.dtype),

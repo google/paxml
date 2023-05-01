@@ -231,9 +231,9 @@ class Partitioner(metaclass=abc.ABCMeta):
     self._init_is_eval = init_is_eval
 
     # States to set in .setup().
-    self._jax_task = None
+    self._jax_task: tasks_lib.SingleTask = None
     self._job_log_dir = None
-    self._init_key = None
+    self._init_key: PRNGKey = None
     self._train_inputs_shape_dtype = None
 
     # The train state metadata, set in .get_train_state_metadata().
@@ -959,6 +959,7 @@ class PjitPartitioner(Partitioner):
     # here could be derived from a eval/decode dataset so it only includes a
     # subset of TrainState. Here we project the metadata according to the
     # actual state.
+    metadata.partition_specs: TrainState
     partition_specs = metadata.partition_specs.replace(
         mdl_vars=filter_nestedmap(
             metadata.partition_specs.mdl_vars, unpadded_state.mdl_vars
@@ -985,6 +986,7 @@ class PjitPartitioner(Partitioner):
     """Remove paddings from variables."""
     # Similar to _pad_states above we need to project the metadata to match the
     # actual padded_state.
+    metadata.partition_specs: TrainState
     partition_specs = metadata.partition_specs.replace(
         mdl_vars=filter_nestedmap(
             metadata.partition_specs.mdl_vars, padded_state.mdl_vars
@@ -1118,7 +1120,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     """
     super().__init__(init_is_eval, reshard_inputs, task_p)
     self._auto_sharding_info = auto_sharding_info
-    self._auto_sharding_result = None  # Used to cache auto-sharding results.
+    self._auto_sharding_result: AutoShardingPjitPartitioner._AutoShardingResult = (
+        None  # Cached results.
+    )
 
   def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput

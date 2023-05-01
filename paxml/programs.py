@@ -158,26 +158,26 @@ class BaseTrainProgram(Program):
 
   def __init__(self):
     # States to set in self.setup().
-    self._task = None
-    self._train_input = None
-    self._partitioner = None
-    self._train_prng_seed = None
-    self._eval_prng_seed = None
+    self._task: tasks_lib.SingleTask = None
+    self._train_input: base_input.BaseInput = None
+    self._partitioner: partitioning.Partitioner = None
+    self._train_prng_seed: PRNGKey = None
+    self._eval_prng_seed: PRNGKey = None
     self._initial_step = -1
 
     # States to initialize lazily in self.setup().
-    self._train_unpadded_global_batch_size = None
-    self._profiler = None
+    self._train_unpadded_global_batch_size: int = None
+    self._profiler: profiling.Profiler = None
     self._train_summary_writer = None
-    self._train_summary_handler = None
-    self._eval_train_summary_handler = None
+    self._train_summary_handler: summary_utils.SummaryHandler = None
+    self._eval_train_summary_handler: summary_utils.SummaryHandler = None
     self._train_summary_last_time = None
     self._train_summary_last_step = None
     # Used to limit the number of inflight training steps.
     self._pending_train_losses: _InflightQueue = None
 
     # Other states used during training.
-    self._first_step_completion_time = None
+    self._first_step_completion_time: float = None
     self._init_duration_set = False
 
     # Used to enter context of various summary writer at .setup().
@@ -200,8 +200,8 @@ class BaseTrainProgram(Program):
       partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
       # TODO(laigd): it should take a root prng key and split it.
-      train_prng_seed: pytypes.PRNGKey,
-      eval_prng_seed: pytypes.PRNGKey,
+      train_prng_seed: PRNGKey,
+      eval_prng_seed: PRNGKey,
       init_step: int,
   ) -> None:
     self._task = task
@@ -641,10 +641,10 @@ class BaseEvalProgram(Program):
     self._input_p = input_p
 
     # States to set in self.setup()
-    self._task = None
+    self._task: tasks_lib.SingleTask = None
     self._partitioner: partitioning.Partitioner = None
-    self._job_log_dir = None
-    self._eval_prng_seed = None
+    self._job_log_dir: epath.Path = None
+    self._eval_prng_seed: PRNGKey = None
 
     # States to initialize lazily in self.setup()
     self._eval_input_pipeline = None
@@ -666,7 +666,7 @@ class BaseEvalProgram(Program):
       task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
-      eval_prng_seed: pytypes.PRNGKey,
+      eval_prng_seed: PRNGKey,
       summary_base_dir: Optional[epath.Path] = None,
   ) -> None:
     self._task = task
