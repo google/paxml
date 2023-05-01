@@ -218,7 +218,7 @@ def restore_checkpoint(
       logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
       return None
   restore_args = None
-  if checkpoint_type == CheckpointType.GDA:
+  if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     restore_args = {
         'specs': state_specs,
         'mesh': global_mesh,
