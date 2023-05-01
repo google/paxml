@@ -26,6 +26,7 @@ from paxml.tasks.lm.params.c4 import TransformerLmSpmdPipelineAdam
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
+from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import transformers
 
@@ -34,11 +35,12 @@ WeightInit = base_layer.WeightInit
 
 GPT_EOS_ID = 1
 
+
 ## from https://github.com/google/paxml/commit/9b5682019806dcb058b82ec2f122aa30ed51f255
 def configure_gpt3_task(
     cls,
-    task_p: tasks_lib.SingleTask.HParams,
-) -> tasks_lib.SingleTask.HParams:
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+) -> pax_fiddle.Config[tasks_lib.SingleTask]:
   """Returns task with gpt3 related configs."""
   model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
 
@@ -142,7 +144,7 @@ class GPT126M(TransformerLmSpmdAdam):
   R_COS_MIN_RATIO = 0.1
   LR_COS_MAX = 1.0
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
     task_p.train.num_train_steps = self.MAX_STEPS
@@ -170,22 +172,26 @@ class GPT126M(TransformerLmSpmdAdam):
 
     return task_p
 
+
 @experiment_registry.register
 class Pile126M(GPT126M, PileUnsupervisedDataset):
-  def task(self) -> tasks_lib.SingleTask.HParams:
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     return task_p
 
+
 @experiment_registry.register
 class Lambada126M(GPT126M, LambadaDataset):
-  
+
   ICI_MESH_SHAPE = [8,1,1]
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.always_use_train_for_model_init=False
     task_p.model.report_strict_acc=True
     return task_p
+
 
 ## 32 node
 @experiment_registry.register
@@ -269,9 +275,10 @@ class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
   MICROBATCH_SIZE = 12
   MAX_STEPS = 75000
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     return task_p
+
 
 ## single node training
 @experiment_registry.register

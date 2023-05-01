@@ -87,7 +87,9 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
   MAX_SEQ_LEN = 2048
   TRAIN_INPUT_RANDOM_SEED = None
 
-  def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
+  def _dataset_common(
+      self, is_training
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     num_local_devices = jax.local_device_count()
     if self.PERCORE_BATCH_SIZE >= 1:
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
@@ -120,7 +122,7 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
@@ -134,7 +136,9 @@ class LambadaDataset(base_experiment.BaseExperiment):
   PERCORE_BATCH_SIZE: int = 1
   MAX_SEQ_LEN: int = 2048
 
-  def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
+  def _dataset_common(
+      self, is_training
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     num_local_devices = jax.local_device_count()
     if self.PERCORE_BATCH_SIZE >= 1:
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
@@ -168,7 +172,7 @@ class LambadaDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=False)
