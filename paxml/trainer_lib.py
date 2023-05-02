@@ -275,13 +275,11 @@ def adjust_input_params_for_small_batch(
     copy.batch_padding_size = local_device_count - batch_size
 
   assert inp_p.num_infeed_hosts <= jax.process_count()
-  # LINT.IfChange(PspecSharding)
   if jax.process_count() == 1:
     # If there is only one host, valid examples are already contiguous so we can
     # use default Jax array creation.
     # Inputs use pspec sharding (see praxis.BaseInput.reshard_for_spmd).
     return copy
-  # LINT.ThenChange(trainer_lib.py:UsePspecOnArrayInputs)
   # Some hosts may produce duplicate data, but they will be discarded.
   copy.infeed_host_index = jax.process_index() % inp_p.num_infeed_hosts
   if copy.infeed_host_index >= inp_p.num_infeed_hosts:

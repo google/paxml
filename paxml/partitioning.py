@@ -783,7 +783,7 @@ class PjitPartitioner(Partitioner):
       partition_specs: Optional[NestedPartitionSpec],
   ) -> NestedJTensor:
     """Preprocess the input batch before using it."""
-    if self._reshard_inputs or input_pipeline.hparams.experimental_remote_input:
+    if self._reshard_inputs:
       padded_inputs = input_pipeline.reshard_for_spmd(
           padded_inputs, self.global_mesh, partition_specs
       )
@@ -1050,9 +1050,9 @@ class PjitPartitioner(Partitioner):
 
     asserts.assert_same_structure(fn_out_partition_specs, out_shapes)
 
-    # LINT.IfChange(UsePspecOnArrayInputs)
-    use_pspec_on_array_inputs = (jax.process_count() == 1)
-    # LINT.ThenChange(trainer_lib.py:PspecSharding)
+    # When reshard_inputs is true, inputs are jax.Arrays created by
+    # reshard_for_spmd(). The shardings may have a custom device order.
+    use_pspec_on_array_inputs = not self._reshard_inputs
     partitioned_step_fn = self._pjit(
         step_fn,
         is_eval,

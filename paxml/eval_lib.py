@@ -467,7 +467,10 @@ def evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
+  reshard_inputs = (
+      checkpoint_type != CheckpointType.PERSISTENCE or
+      eval_input_p[0].experimental_remote_input
+  )
   partitioner = partitioning.create_partitioner(
       jax_task,
       init_is_eval=True,
@@ -682,7 +685,10 @@ def decode(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
+  reshard_inputs = (
+      checkpoint_type != CheckpointType.PERSISTENCE or
+      combined_input_ps[0].experimental_remote_input
+  )
   partitioner = partitioning.create_partitioner(
       jax_task,
       init_is_eval=True,
@@ -1911,7 +1917,10 @@ def infer_and_write(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, task.hparams
   )
-  reshard_inputs = checkpoint_type != CheckpointType.PERSISTENCE
+  reshard_inputs = (
+      checkpoint_type != CheckpointType.PERSISTENCE or
+      inputs_p[0].experimental_remote_input
+  )
   partitioner = partitioning.create_partitioner(
       task, reshard_inputs=reshard_inputs
   )

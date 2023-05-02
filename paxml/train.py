@@ -879,7 +879,13 @@ def train_and_evaluate(
   # Creates the partitioner, which will be set up later.
   partitioner = experiment_config.partitioner()
   if not partitioner:
-    reshard_inputs = checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
+    # For the input pipeline on the Pathways client, the inputs are numpy
+    # arrays. We rely on the Pathways to transfer the inputs, since
+    # jax.device_put() has a larger performance overhead.
+    reshard_inputs = (
+        checkpointer.checkpoint_type != CheckpointType.PERSISTENCE or
+        train_input_p.experimental_remote_input
+    )
     partitioner = partitioning.create_partitioner(
         jax_task,
         reshard_inputs=reshard_inputs,
