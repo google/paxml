@@ -25,6 +25,7 @@ from absl import logging
 from etils import epath
 import jax
 import orbax.checkpoint
+from orbax.checkpoint import utils
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
@@ -98,6 +99,27 @@ def _create_items_dict_with_metadata(
   return items
 
 
+def _is_legacy_flax_checkpoint(path: epath.Path) -> bool:
+  """Returns whether the checkpoint is a legacy Flax checkpoint format.
+
+  Old-format Flax checkpoint conforming to
+  'path/to/dir/checkpoints/checkpoint_100'.
+  Contrast with 'standard' old-format Flax checkpoint conforming to
+  'path/to/dir/checkpoints/checkpoint_100/checkpoint'.
+  The former is not considered a valid checkpoint by Orbax because it is not a
+  directory. It thus requires special handling.
+
+  Args:
+    path: the checkpoint path.
+
+  Returns:
+    Boolean indicating whether the path is legacy Flax checkpoint or not.
+  """
+  return checkpoint_paths.is_checkpoint_asset(path) and (
+      not checkpoint_paths.is_tmp_checkpoint_asset(path) and path.is_file()
+  )
+
+
 @dataclasses.dataclass
 class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
   """Options for constructing OrbaxCheckpointManager.
@@ -150,24 +172,27 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     # advance of any operations.
     self._directory = epath.Path(directory)
     if self._directory.exists():
-      steps = self.all_steps(read=True)
-      if steps:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(steps)
-        ) as pool:
-          versions = list(
-              pool.map(
-                  functools.partial(
-                      _get_checkpoint_version,
-                      self._checkpoint_type,
-                      self._directory,
-                  ),
-                  steps,
-              )
+      step = self.any_step()
+      if step is not None:
+        version = _get_checkpoint_version(
+            self._checkpoint_type, self._directory, step
+        )
+        logging.info(
+            'Found existing checkpoint with version: %s, step: %s',
+            version,
+            step,
+        )
+        if version != self._version:
+          logging.warning(
+              (
+                  'Found existing checkpoints with old version %s, compared to '
+                  'latest version %s. Use version of existing checkpoints for '
+                  'restoring and saving future checkpoints.'
+              ),
+              version,
+              self._version,
           )
-        if not all(v == versions[0] for v in versions):
-          raise ValueError('Expected all checkpoints to have the same version.')
-        self._version = versions[0]
+          self._version = version
 
     super().__init__(directory, *args, **kwargs)
     # Set to 1 if not provided or set to 0.
@@ -181,19 +206,24 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     steps = list(super().all_steps(read=read))
     if read:
       for path in self.directory.iterdir():
-        # Old-format Flax checkpoint conforming to
-        # 'path/to/dir/checkpoints/checkpoint_100'.
-        # Contrast with 'standard' old-format Flax checkpoint conforming to
-        # 'path/to/dir/checkpoints/checkpoint_100/checkpoint'.
-        # The former is not considered a valid checkpoint by Orbax because it is
-        # not a directory. It thus requires special handling.
-        if (
-            checkpoint_paths.is_checkpoint_asset(path)
-            and not checkpoint_paths.is_tmp_checkpoint_asset(path)
-            and path.is_file()
-        ):
+        if _is_legacy_flax_checkpoint(path):
           steps.append(checkpoint_paths.get_step_from_checkpoint_asset(path))
     return steps
+
+  def any_step(self) -> Optional[int]:
+    """Returns any step tracked by the checkpoint manager.
+
+    Returns:
+      A step (integer) or None.
+    """
+    any_step = utils.any_checkpoint_step(self.directory)
+    if any_step is not None:
+      return any_step
+
+    for path in self.directory.iterdir():
+      if _is_legacy_flax_checkpoint(path):
+        return checkpoint_paths.get_step_from_checkpoint_asset(path)
+    return None
 
   def _checkpoint_name(self, step: int) -> str:
     return checkpoint_paths.checkpoint_name(
