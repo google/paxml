@@ -409,9 +409,6 @@ class SeqIOInput(base_input.BaseInput):
     # Internal params set by Pax internally.
     _latest_model_step: int = 0
 
-  DeterministicInputParams = base_hyperparams.FiddleHParamsClassStub(  # pylint: disable=invalid-name
-      DeterministicInput
-  )
   # Required params.
   mixture_name: Optional[str] = None
   mixture_or_task: Optional[Union[seqio.Task, seqio.Mixture]] = None
