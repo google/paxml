@@ -648,7 +648,7 @@ class BaseEvalProgram(Program):
 
     # States to initialize lazily in self.setup()
     self._eval_input_pipeline = None
-    self._name = None
+    self._name: str = None
     self._eval_unpadded_global_batch_size: int = None
     self._eval_num_steps: int = None
     self._eval_summary_writer = None

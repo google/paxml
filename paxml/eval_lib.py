@@ -23,7 +23,7 @@ import gc
 import sys
 import time
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from absl import flags
 from absl import logging
@@ -31,8 +31,6 @@ from clu import metrics as clu_metrics
 from clu import platform
 from etils import epath
 import jax
-from jax.experimental import multihost_utils
-import jax.numpy as jnp
 import numpy as np
 from paxml import base_experiment
 from paxml import base_metrics
@@ -940,10 +938,10 @@ class SingleTaskDecodeProgram(programs.Program):
     )
     self._dirname = epath.Path(self._input.name)
 
-    self._prng_key = None
-    self._job_log_dir = None
-    self._basedir = None
-    self._summary_writer = None
+    self._prng_key: PRNGKey = None
+    self._job_log_dir: epath.Path = None
+    self._basedir: epath.Path = None
+    self._summary_writer: SummaryWriter = None
     self._use_pmap = None
 
     self._pmap_decode_step = None
@@ -953,7 +951,7 @@ class SingleTaskDecodeProgram(programs.Program):
 
     self._spmd_decode_step = None
     self._inputs_partition_spec = None
-    self._metrics_p = None
+    self._metrics_p: base_metrics.BaseMetrics.HParams = None
 
   def setup(
       self,
@@ -967,18 +965,18 @@ class SingleTaskDecodeProgram(programs.Program):
               [TrainState, PRNGKey, NestedJTensor],
               Tuple[NestedMap, NestedMap, NestedMap],
           ]
-      ] = None,
-      task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]] = None,
-      output_pickle: bool = True,
-      enable_checkpoint_saving: bool = True,
+      ],
+      task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]],
+      output_pickle: bool,
+      enable_checkpoint_saving: bool,
       spmd_decode_step: Optional[
           Callable[
               [TrainState, PRNGKey, NestedJTensor, Optional[int]],
               Tuple[Tuple[NestedMap, NestedMap], NestedMap],
           ]
-      ] = None,
-      inputs_partition_spec: Optional[NestedPartitionSpec] = None,
-      metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
+      ],
+      inputs_partition_spec: Optional[NestedPartitionSpec],
+      metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
   ) -> None:
     """Sets up the program.
 
