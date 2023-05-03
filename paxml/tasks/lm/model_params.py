@@ -41,7 +41,7 @@ WeightInit = base_layer.WeightInit
 
 
 def set_sharding_annotations_v1(
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     training_optimized: bool,
     ici_mesh_shape: Sequence[int],
     dcn_mesh_shape: Optional[Sequence[int]] = None,
@@ -85,13 +85,15 @@ def set_sharding_annotations_v1(
     )
 
 
-def set_default_adam(task_p: tasks_lib.SingleTask.HParams,
-                     learning_rate: float,
-                     weight_decay: float,
-                     *,
-                     warmup_steps: int = 4000,
-                     decay_start: int = 4001,
-                     decay_end: int = 300000) -> None:
+def set_default_adam(
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    learning_rate: float,
+    weight_decay: float,
+    *,
+    warmup_steps: int = 4000,
+    decay_start: int = 4001,
+    decay_end: int = 300000,
+) -> None:
   """Sets the default Adam optimizer settings in the model config.
 
   Args:
@@ -122,14 +124,16 @@ def set_default_adam(task_p: tasks_lib.SingleTask.HParams,
   )
 
 
-def set_default_adafactor(task_p: tasks_lib.SingleTask.HParams,
-                          learning_rate: float,
-                          weight_decay: float,
-                          *,
-                          warmup_steps: int = 4000,
-                          decay_start: int = 4001,
-                          decay_end: int = 100000,
-                          clip_gradient_norm_to_value: float = 5.0) -> None:
+def set_default_adafactor(
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    learning_rate: float,
+    weight_decay: float,
+    *,
+    warmup_steps: int = 4000,
+    decay_start: int = 4001,
+    decay_end: int = 100000,
+    clip_gradient_norm_to_value: float = 5.0,
+) -> None:
   """Sets the default AdaFactor optimizer settings in the task config.
 
   Args:
@@ -220,7 +224,7 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
   MESH_SHAPE = None
   TRAINING_OPTIMIZED_SHARDING = True
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classification_task')
     task_p.model = pax_fiddle.Config(
         models.ClassificationMLPModel, name='classification_model'
@@ -269,7 +273,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
 
   ENABLE_BFLOAT16 = True
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(
@@ -357,7 +361,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
   CHECKPOINT_EVERY_N_STEPS = 500
   CHECKPOINT_SAVE_MAX_TO_KEEP = 10
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
@@ -442,7 +446,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   ATTEN_LOGIT_CAP = 50.0
   USE_BIAS = False
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
     task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
@@ -552,7 +556,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   DCN_MESH_SHAPE = [1, 1, 1]
   TRAINING_OPTIMIZED_SHARDING = True
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
       if self.NUM_HEADS is None:
@@ -730,7 +734,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
   # for DCN.
   STREAM_IO = False
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
       if self.NUM_HEADS is None:

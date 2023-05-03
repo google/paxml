@@ -55,6 +55,7 @@ pytype_strict_library(
     srcs = ["automl_interfaces.py"],
     deps = [
         "//praxis:base_hyperparams",
+        "//praxis:pax_fiddle",
         # Implicit pyglove dependency.
     ],
 )
@@ -333,6 +334,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit pyglove dependency.
+        # Implicit seqio dependency.
     ],
 )
 
@@ -518,6 +520,7 @@ pytype_strict_library(
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
@@ -546,6 +549,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
@@ -598,6 +602,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
     ],
@@ -653,6 +658,7 @@ pytype_strict_library(
         "//praxis:asserts",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
     ],
@@ -692,6 +698,7 @@ pytype_strict_library(
         ":trainer_lib",
         # Implicit etils dependency.
         "//praxis:base_input",
+        "//praxis:pax_fiddle",
     ],
 )
 
@@ -731,6 +738,7 @@ pytype_strict_library(
     deps = [
         ":base_task",
         # Implicit etils dependency.
+        "//praxis:pax_fiddle",
         "//praxis:py_utils",
     ],
 )

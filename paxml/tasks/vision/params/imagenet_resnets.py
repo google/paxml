@@ -122,7 +122,8 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
   MESH_SHAPE = [1, 8, 1]
 
   def get_input_specs_provider_params(
-      self) -> base_input.BaseInputSpecsProvider.HParams:
+      self,
+  ) -> pax_fiddle.Config[base_input.BaseInputSpecsProvider]:
     """Returns the hparams of the input specs provider.
 
     Returns:
@@ -132,7 +133,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         batch_size=self.TRAIN_BATCH_SIZE
     )
 
-  def _dataset_train(self) -> base_input.LingvoInputAdaptor.HParams:
+  def _dataset_train(self) -> pax_fiddle.Config[base_input.LingvoInputAdaptor]:
     """Returns training data input configs."""
     input_obj = input_generator.ImageNetTrain
     input_p = input_obj.Params()
@@ -141,7 +142,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         base_input.LingvoInputAdaptor, input=input_p, is_training=True
     )
 
-  def _dataset_test(self) -> base_input.LingvoInputAdaptor.HParams:
+  def _dataset_test(self) -> pax_fiddle.Config[base_input.LingvoInputAdaptor]:
     """Returns test / validation data input configs."""
     input_obj = input_generator.ImageNetValidation
     input_p = input_obj.Params()
@@ -150,7 +151,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         base_input.LingvoInputAdaptor, input=input_p, is_training=False
     )
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset configs."""
     return [self._dataset_train(), self._dataset_test()]
 
@@ -165,10 +166,10 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     )
     return net
 
-  def _optimizer(self) -> optimizers.BaseOptimizer.HParams:
+  def _optimizer(self) -> pax_fiddle.Config[optimizers.BaseOptimizer]:
     return pax_fiddle.Config(optimizers.ShardedSgd, momentum=0.9, nesterov=True)
 
-  def _lr_schedule(self) -> schedules.BaseSchedule.HParams:
+  def _lr_schedule(self) -> pax_fiddle.Config[schedules.BaseSchedule]:
     lrs = [1, 0.1, 0.01, 0.001, 0.0]
     epoch_boundaries = [5, 30, 60, 80, 90]
     iters = input_generator.TRAIN_EXAMPLES // self.TRAIN_BATCH_SIZE
@@ -179,7 +180,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         values=lrs,
     )
 
-  def _learner(self) -> learners.Learner.HParams:
+  def _learner(self) -> pax_fiddle.Config[learners.Learner]:
     lp = pax_fiddle.Config(learners.Learner)
     lp.loss_name = self.LOSS_NAME
     lp.bprop_variable_exclusion = self.BPROP_VARIABLE_EXCLUSION
@@ -199,8 +200,8 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     return lp
 
   def _configure_task(
-      self,
-      task_p: tasks_lib.SingleTask.HParams) -> tasks_lib.SingleTask.HParams:
+      self, task_p: pax_fiddle.Config[tasks_lib.SingleTask]
+  ) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Configures commonly used task_p settings."""
 
     train_p = task_p.train
@@ -237,7 +238,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     train_p.eval_skip_train = True  # Disable eval of train input data.
     return task_p
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task configs."""
     resnet = self._network()
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classifier_task')

@@ -36,6 +36,7 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
@@ -243,8 +244,9 @@ def write_train_provenance_file(
 
 
 def adjust_input_params_for_small_batch(
-    inp_p: base_input.BaseInput.HParams,
-    global_mesh: jax.sharding.Mesh) -> base_input.BaseInput.HParams:
+    inp_p: pax_fiddle.Config[base_input.BaseInput],
+    global_mesh: jax.sharding.Mesh,
+) -> pax_fiddle.Config[base_input.BaseInput]:
   """Creates a copy of inp_p adjusted when per-device batch < 1."""
   # Remote input adjusts the params for small batch itself.
   if inp_p.experimental_remote_input:
@@ -1219,7 +1221,7 @@ def infer_partition_spec_based_on_rank_fn(
 
 
 def get_inputs_shape_dtype(
-    input_p: base_input.BaseInput.HParams,
+    input_p: pax_fiddle.Config[base_input.BaseInput],
 ) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
   """Returns the per-host and global shape/dtype information of the input."""
   sample_inputs = instantiate(input_p).get_next_padded()
@@ -1272,7 +1274,7 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
 
 
 def get_train_input_specs(
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     input_specs_provider: base_input.BaseInputSpecsProvider,
 ):
   """Gets the shape/dtype of the inputs to the model."""

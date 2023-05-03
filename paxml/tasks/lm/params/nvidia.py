@@ -83,7 +83,7 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   LR_COS_MIN_RATIO = 0.1
   LR_COS_MAX = 1.0
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     task_p.train.save_interval_steps = 100000

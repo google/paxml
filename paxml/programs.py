@@ -22,27 +22,27 @@ import queue
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
-import jax
-from jax.experimental import multihost_utils
-from jax import monitoring
-import numpy as np
-
 from absl import flags
 from absl import logging
 from etils import epath
+import jax
+from jax import monitoring
+from jax.experimental import multihost_utils
+import numpy as np
 from paxml import io_utils
 from paxml import metric_utils
 from paxml import partitioning
-from paxml import tasks_lib
-from paxml import trainer_lib
-from paxml import train_states
 from paxml import seqio_input
 from paxml import summary_utils
+from paxml import tasks_lib
+from paxml import train_states
+from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
-from praxis import pytypes
+from praxis import pax_fiddle
 from praxis import py_utils
+from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
 from paxml import profiling  # mapped to internal
@@ -637,7 +637,7 @@ def _maybe_write_scoring_outputs(
 
 class BaseEvalProgram(Program):
 
-  def __init__(self, input_p: base_input.BaseInput.HParams):
+  def __init__(self, input_p: pax_fiddle.Config[base_input.BaseInput]):
     self._input_p = input_p
 
     # States to set in self.setup()
@@ -849,7 +849,7 @@ class SingleTaskEvalProgram(BaseEvalProgram):
 
   def __init__(
       self,
-      input_p: base_input.BaseInput.HParams,
+      input_p: pax_fiddle.Config[base_input.BaseInput],
   ):
     super().__init__(input_p)
 

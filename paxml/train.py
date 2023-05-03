@@ -28,6 +28,7 @@ import jax
 from jax import monitoring
 import jax.numpy as jnp
 import numpy as np
+import orbax.checkpoint
 from paxml import base_experiment
 from paxml import checkpoint_managers
 from paxml import checkpoint_types
@@ -40,9 +41,9 @@ from paxml import train_states
 from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
-import orbax.checkpoint
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -608,11 +609,11 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
 
 def _create_checkpointer(
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     job_log_dir: epath.Path,
     checkpoint_type: CheckpointType,
     todelete_subdir: Optional[str],
-    train_input_p: Optional[base_input.BaseInput.HParams] = None,
+    train_input_p: Optional[pax_fiddle.Config[base_input.BaseInput]] = None,
     enable_async_checkpointing: bool = True,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
@@ -805,7 +806,7 @@ def train_and_evaluate(
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
-  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
 
   # in case the user passed in a string dtype, convert it to an actual dtype
   task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)

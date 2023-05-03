@@ -376,8 +376,8 @@ class WeightedSumAggregator(MultiObjectiveAggregator):
 def weighted_sum_reward(
     metrics_and_weights: Sequence[Tuple[Metric, float]],
     goal: str = 'maximize',
-    reward_for_nan: Optional[float] = None
-    ) -> MultiObjective.HParams:
+    reward_for_nan: Optional[float] = None,
+) -> pax_fiddle.Config[MultiObjective]:
   """Returns a reward by weighted summing multiple metrics."""
   metrics = [m for m, _ in metrics_and_weights]
   weights = [w for _, w in metrics_and_weights]

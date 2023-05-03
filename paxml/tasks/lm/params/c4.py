@@ -160,7 +160,9 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
   TRAINING_SEED = 9876
   TRAINING_NUM_BATCHES_TO_SKIP = None
 
-  def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
+  def _dataset_common(
+      self, is_training
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     if is_training:
       percore_batch_size = self.PERCORE_BATCH_SIZE
     else:
@@ -225,7 +227,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
@@ -235,8 +237,8 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
 
 def set_adam_and_learning_rate_schedule(
     cls,
-    task_p: tasks_lib.SingleTask.HParams,
-) -> tasks_lib.SingleTask.HParams:
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+) -> pax_fiddle.Config[tasks_lib.SingleTask]:
   """Sets the Adam optimizer and the learning rate schedule."""
   lp = task_p.train.learner
   lp.loss_name = 'total_loss'
@@ -353,7 +355,7 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
   LR_COS_DECAY_START = 4001
   LR_COS_DECAY_END = 300000
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
@@ -411,7 +413,7 @@ class TransformerLmSpmdPipelineAdam(
   LR_COS_DECAY_START = 4001
   LR_COS_DECAY_END = 300000
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
@@ -449,7 +451,7 @@ class LmCloudSpmdAdam(TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
 @experiment_registry.register
 class LmCloudSpmdAdamLimitSteps(LmCloudSpmdAdam):
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = 4000
     return task_p
@@ -484,8 +486,8 @@ class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
 
 def configure_gpt3_task(
     cls,
-    task_p: tasks_lib.SingleTask.HParams,
-) -> tasks_lib.SingleTask.HParams:
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+) -> pax_fiddle.Config[tasks_lib.SingleTask]:
   """Returns task with gpt3 related configs."""
   model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
 
@@ -567,7 +569,7 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   # Sub-class has to specify a mesh.
   ICI_MESH_SHAPE = [1, 4, 2]
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
@@ -635,7 +637,7 @@ class C4SpmdGpt3AdamOrgHP(C4SpmdAdam):
   CHECKPOINT_EVERY_N_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
@@ -680,7 +682,7 @@ class C4SpmdPipelineAdam(TransformerLmSpmdPipelineAdam, C4UnsupervisedDataset):
   NUM_STAGES = 2
   EMB_W_DATA_DIMS = ('replica', 'data')
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
@@ -751,7 +753,7 @@ class C4SpmdPipelineGpt3AdamOrgHP(C4SpmdPipelineAdam):
   CHECKPOINT_EVERY_N_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
@@ -912,7 +914,7 @@ class C4Spmd1BAdam4Replicas(C4SpmdAdam):
 @experiment_registry.register
 class C4Spmd1BAdam4ReplicasLimitSteps(C4Spmd1BAdam4Replicas):
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = 15000
     return task_p

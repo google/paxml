@@ -103,7 +103,7 @@ def _wait_until_step(checkpointer, start_step):
 
 
 def _get_train_input_specs(
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     experiment_config: base_experiment.BaseExperiment,
 ):
   """Gets the shape/dtype of the inputs to the model."""
@@ -459,7 +459,7 @@ def evaluate(
     return
 
   task_p = experiment_config.task()
-  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
   prng_key = jax.random.PRNGKey(task_p.evaluate.random_seed)
@@ -542,8 +542,8 @@ class _EvalRunner:
       *,
       jax_task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
-      eval_input_ps: Sequence[base_input.BaseInput.HParams],
-      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+      eval_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       job_log_dir: epath.Path,
       eval_key: PRNGKey,
   ):
@@ -677,7 +677,7 @@ def decode(
   # TODO(laigd): the logic below is very similar to the logic in evaluate(),
   # merge them.
   task_p = experiment_config.task()
-  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(task_p, experiment_config)
   prng_key = jax.random.PRNGKey(task_p.decode.random_seed)
@@ -789,8 +789,8 @@ def decode_pmap_model(
     partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
     # TODO(wangpeng): Rename to `decode_input_params`
-    input_p: Sequence[base_input.BaseInput.HParams],
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
+    input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+    eval_input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
     job_log_dir: epath.Path,
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -968,7 +968,7 @@ class SingleTaskDecodeProgram(programs.Program):
               Tuple[NestedMap, NestedMap, NestedMap],
           ]
       ] = None,
-      task_p: Optional[tasks_lib.SingleTask.HParams] = None,
+      task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]] = None,
       output_pickle: bool = True,
       enable_checkpoint_saving: bool = True,
       spmd_decode_step: Optional[
@@ -978,7 +978,7 @@ class SingleTaskDecodeProgram(programs.Program):
           ]
       ] = None,
       inputs_partition_spec: Optional[NestedPartitionSpec] = None,
-      metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
+      metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
   ) -> None:
     """Sets up the program.
 
@@ -1032,7 +1032,7 @@ class SingleTaskDecodeProgram(programs.Program):
       self,
       step_i: int,
       replicated_model_states: TrainState,
-      task_p: tasks_lib.SingleTask.HParams,
+      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
       decode_metrics_list: List[Dict[str, float]],
   ) -> None:
     basedir = self._basedir
@@ -1362,7 +1362,7 @@ class SingleTaskDecodeProgram(programs.Program):
 def partitioned_decode_once(
     *,
     decode_programs: List[SingleTaskDecodeProgram],
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     prng_key: JTensor,
     job_log_dir: epath.Path,
     use_pmap: bool,
@@ -1444,7 +1444,7 @@ def _decode_once(
     train_state: TrainState,
     summary_writers: List[SummaryWriter],
     use_pmap: bool,
-    task_p: Optional[tasks_lib.SingleTask.HParams] = None,
+    task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]] = None,
     var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
@@ -1455,7 +1455,7 @@ def _decode_once(
         ]
     ] = None,
     inputs_partition_spec: Optional[NestedPartitionSpec] = None,
-    metrics_p: Optional[base_metrics.BaseMetrics.HParams] = None,
+    metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
 ) -> Tuple[
     Tuple[
         List[Optional[Dict[str, float]]],  # decode metrics.
@@ -1631,8 +1631,8 @@ def decode_spmd_model(
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
-    input_p: Sequence[base_input.BaseInput.HParams],
-    eval_input_p: Sequence[base_input.BaseInput.HParams],
+    input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+    eval_input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
     job_log_dir: epath.Path,
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
@@ -1739,7 +1739,7 @@ def _is_shape_dtype_struct(x):
 def _common_eval_or_decode_loop(
     mode: io_utils.EvaluationMode,
     checkpointer: _EvalCheckpointer,
-    task_p: tasks_lib.SingleTask.HParams,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     job_log_dir: epath.Path,
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: TrainState,
@@ -1904,7 +1904,7 @@ def infer_and_write(
   """
   jax.monitoring.record_event('/jax/pax/infer_and_write/beacon')
   task_p = experiment_config.task()
-  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   task = instantiate(task_p)
   model_p = task_p.model
   inputs_p = experiment_config.decoder_datasets()
@@ -1958,7 +1958,7 @@ def infer_and_write_pmap(
     prng_key: PRNGKey,
     partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
-    inputs_p: Sequence[base_input.BaseInput.HParams],
+    inputs_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
     job_log_dir: epath.Path,
 ) -> None:
   """Runs the infer_and_write for each of the inputs given task in pmap."""

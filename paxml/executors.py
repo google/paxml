@@ -50,7 +50,7 @@ TrainStateProvenance = train_states.TrainStateProvenance
 
 def _maybe_init_or_update_latest_model_step(
     train_input: Optional[base_input.BaseInput],
-    train_input_p: base_input.BaseInput.HParams,
+    train_input_p: pax_fiddle.Config[base_input.BaseInput],
     initial_global_step: int,
 ) -> base_input.BaseInput:
   """Updates `train_input_p` in place its latest model step."""
@@ -212,8 +212,8 @@ class DefaultExecutor(base_executor.BaseExecutor):
       checkpointer: Any,
       partitioner: partitioning.Partitioner,
       input_specs_provider: base_input.BaseInputSpecsProvider,
-      train_input_p: base_input.BaseInput.HParams,
-      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+      train_input_p: pax_fiddle.Config[base_input.BaseInput],
+      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
       early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
@@ -331,7 +331,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
   def partition_decode_once_fns(
       self,
       prng_key: jax.random.KeyArray,
-      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
   ) -> Tuple[
       Callable[..., tuning_lib.DecodeMetrics],
       jax.random.KeyArray,

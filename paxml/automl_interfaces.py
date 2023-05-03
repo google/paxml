@@ -21,6 +21,7 @@ import enum
 import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
 from praxis import base_hyperparams
+from praxis import pax_fiddle
 import pyglove as pg
 
 
@@ -141,11 +142,12 @@ class SearchHParams(BaseHyperParams):
       `num_train_steps`. If False, training will be stopped when there is no
       further eval/decode steps.
   """
-  search_algorithm: Optional[BaseAlgorithm.HParams] = None
-  search_reward: Optional[BaseReward.HParams] = None
-  early_stopping: Optional[BaseEarlyStoppingPolicy.HParams] = None
+  search_algorithm: Optional[pax_fiddle.Config[BaseAlgorithm]] = None
+  search_reward: Optional[pax_fiddle.Config[BaseReward]] = None
+  early_stopping: Optional[pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None
   cross_step_metric_aggregator: Optional[
-      CrossStepMetricAggregator.HParams] = None
+      pax_fiddle.Config[CrossStepMetricAggregator]
+  ] = None
   max_num_trials: int = 1000000
   errors_to_skip: Optional[List[
       Union[Type[Exception], Tuple[Type[Exception], str]]]] = None

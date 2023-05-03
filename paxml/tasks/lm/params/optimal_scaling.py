@@ -19,6 +19,7 @@ from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.tasks.lm.params.lm_cloud import LmCloudSpmd
 from praxis import layers
+from praxis import pax_fiddle
 
 
 class OptimalScaling(LmCloudSpmd):
@@ -30,7 +31,7 @@ class OptimalScaling(LmCloudSpmd):
   PERCORE_BATCH_SIZE = None
   NUM_LAYERS = None
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     # pylint: disable=invalid-name
     self.MODEL_DIMS = self.NUM_LAYERS * 128
     self.HIDDEN_DIMS = self.MODEL_DIMS * 4

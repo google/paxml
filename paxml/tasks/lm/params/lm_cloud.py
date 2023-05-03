@@ -33,7 +33,9 @@ class SyntheticDataset(base_experiment.BaseExperiment):
   PERCORE_BATCH_SIZE = 16
   MAX_SEQ_LEN = 1024
 
-  def _dataset_common(self, is_training) -> base_input.BaseInput.HParams:
+  def _dataset_common(
+      self, is_training
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     num_local_devices = jax.local_device_count()
     batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
     input_p = input_generator.SyntheticLmData.HParams()
@@ -48,7 +50,7 @@ class SyntheticDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
@@ -98,7 +100,7 @@ class LmCloudTransformerAdam(model_params.TransformerLmPmapAdam,
   DROPOUT_PROB = 0.0
   LEARNING_RATE = 1e-3
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     task_p.train.learner.repeat_prefix_sep = '_'
@@ -114,7 +116,7 @@ class LmCloudTransformerAdamTest(LmCloudTransformerAdam):
 class LmCloudTransformerAdamLimitSteps(LmCloudTransformerAdam):
   NUM_LAYERS = 10
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = 2000
     return task_p
@@ -137,7 +139,7 @@ class LmCloudSpmd(model_params.TransformerLmSpmdAdafactor, SyntheticDataset):
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
@@ -184,7 +186,7 @@ class LmCloudSpmd2BLimitSteps(LmCloudSpmd2B):
   Global batch size = 2 * 2 * 1 * 32 = 128
   """
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = 300
     return task_p
@@ -302,7 +304,7 @@ class LmCloudSpmdPipeline(model_params.TransformerLmSpmdPipelineAdafactor,
   MICROBATCH_SIZE = None
   NUM_STAGES = None
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)

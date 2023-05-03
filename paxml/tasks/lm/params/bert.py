@@ -33,7 +33,7 @@ class BertDataset(base_experiment.BaseExperiment):
   MLPERF_REMASK = True
   RANDOM_BUFFER_SIZE = 100_000
 
-  def _datasetTrain(self) -> base_input.BaseInput.HParams:
+  def _datasetTrain(self) -> pax_fiddle.Config[base_input.BaseInput]:
     """Parameters for using the original ML Perf training data."""
     p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     p.name = 'train'
@@ -48,7 +48,7 @@ class BertDataset(base_experiment.BaseExperiment):
     p.is_training = True
     return p
 
-  def _datasetTest(self) -> base_input.BaseInput.HParams:
+  def _datasetTest(self) -> pax_fiddle.Config[base_input.BaseInput]:
     """Parameters for using the original ML Perf eval data."""
     p = pax_fiddle.Config(input_generator.TFRecordBertInput)
     p.name = 'test'
@@ -61,11 +61,11 @@ class BertDataset(base_experiment.BaseExperiment):
     p.is_training = False
     return p
 
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [self._datasetTrain(), self._datasetTest()]
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     raise NotImplementedError()
 
 
@@ -172,7 +172,7 @@ class BertSpmdL33H12kBiggerBatch(BertSpmd):
   # Save a checkpoint every n steps.
   CHECKPOINT_EVERY_N_STEPS = 1000
 
-  def task(self) -> tasks_lib.SingleTask.HParams:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     # Enable label smoothing.

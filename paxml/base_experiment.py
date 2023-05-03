@@ -40,10 +40,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   # the dataset is used for training or eval.
   # All training and eval datasets must have unique names.
   @abc.abstractmethod
-  def datasets(self) -> List[base_input.BaseInput.HParams]:
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters."""
 
-  def training_dataset(self) -> base_input.BaseInput.HParams:
+  def training_dataset(self) -> pax_fiddle.Config[base_input.BaseInput]:
     """Returns the tentatively unique training split.
 
     Raises a ValueError exception if there is no training split or there are
@@ -62,16 +62,17 @@ class BaseExperiment(metaclass=abc.ABCMeta):
 
   # Optional. Returns a list of datasets to be decoded.
   # When specified, all decoder datasets must have unique names.
-  def decoder_datasets(self) -> List[base_input.BaseInput.HParams]:
+  def decoder_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for decoder."""
     return []
 
   @abc.abstractmethod
-  def task(self) -> base_task.BaseTask.HParams:
+  def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
     """Returns the task parameters."""
 
   def get_input_specs_provider_params(
-      self) -> base_input.BaseInputSpecsProvider.HParams:
+      self,
+  ) -> pax_fiddle.Config[base_input.BaseInputSpecsProvider]:
     """Returns the hparams of the input specs provider.
 
     By default, it retrieves the input specs from the training input pipeline

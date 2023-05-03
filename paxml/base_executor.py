@@ -19,11 +19,12 @@ import abc
 from typing import Any, Optional, Sequence
 
 from etils import epath
-from praxis import base_input
 from paxml import partitioning
 from paxml import programs
 from paxml import tasks_lib
 from paxml import trainer_lib
+from praxis import base_input
+from praxis import pax_fiddle
 
 
 class BaseExecutor(metaclass=abc.ABCMeta):
@@ -40,8 +41,8 @@ class BaseExecutor(metaclass=abc.ABCMeta):
       # train/eval/decode inputs and programs.
       # 1) Encapsulate train_input_p in train_program and don't pass it here.
       # 2) Migrate decode pipeline to decode_programs.
-      train_input_p: base_input.BaseInput.HParams,
-      decode_input_ps: Sequence[base_input.BaseInput.HParams],
+      train_input_p: pax_fiddle.Config[base_input.BaseInput],
+      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
       # TODO(laigd): this shouldn't be part of the executor API, consider adding

@@ -36,6 +36,7 @@ from paxml import trainer_lib
 from praxis import asserts
 from praxis import base_input
 from praxis import base_layer
+from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
@@ -315,7 +316,7 @@ class Partitioner(metaclass=abc.ABCMeta):
 
   def preprocess_input_config(
       self, input_p: base_input.BaseInput.HParams
-  ) -> base_input.BaseInput.HParams:
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     """Preprocess and updates the input config if necessary.
 
     It is necessary to call this before using the config to create the input
@@ -660,7 +661,7 @@ class PjitPartitioner(Partitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task_p: tasks_lib.SingleTask.HParams,
+      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
   ):
     """Constructor.
 
@@ -705,8 +706,8 @@ class PjitPartitioner(Partitioner):
     return self._global_mesh
 
   def preprocess_input_config(
-      self, input_p: base_input.BaseInput.HParams
-  ) -> base_input.BaseInput.HParams:
+      self, input_p: pax_fiddle.Config[base_input.BaseInput]
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
     """Preprocess input hparam if necessary."""
     input_p = super().preprocess_input_config(input_p)
     assert self.global_mesh
@@ -1104,7 +1105,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task_p: tasks_lib.SingleTask.HParams,
+      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
       auto_sharding_info: AutoShardingInfo,
   ):
     """Constructor.
@@ -1347,7 +1348,9 @@ def create_partitioner(
     init_is_eval: bool = False,
     reshard_inputs: bool = False,
     auto_sharding_mode: Optional[RunningMode] = None,
-    auto_sharding_input_params: Optional[base_input.BaseInput.HParams] = None,
+    auto_sharding_input_params: Optional[
+        pax_fiddle.Config[base_input.BaseInput]
+    ] = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 

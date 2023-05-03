@@ -241,7 +241,7 @@ def run_experiment(
                            '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
 
   task_p = experiment_config.task()
-  task_p = typing.cast(tasks_lib.SingleTask.HParams, task_p)
+  task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
 
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'

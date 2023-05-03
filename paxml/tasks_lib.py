@@ -36,6 +36,7 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 import optax
+import orbax.checkpoint
 from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
@@ -52,7 +53,6 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
-import orbax.checkpoint
 
 from paxml import checkpoints  # mapped to internal
 
@@ -724,7 +724,7 @@ class CheckpointLoadingRules(NamedTuple):
     input_specs_provider_p: A `BaseInputSpecsProvider.HParams` used to provide
       input specs information for the pre-trained model initialization.
   """
-  task_p: SingleTask.HParams
+  task_p: pax_fiddle.Config[SingleTask]
   load_rules: Sequence[Tuple[RegexStr, str]]
   safe_load: bool = False
   ignore_rules: Optional[Sequence[RegexStr]] = None
@@ -734,7 +734,8 @@ class CheckpointLoadingRules(NamedTuple):
   load_ema_states: bool = True
   partial_load_opt_states: bool = False
   input_specs_provider_p: Optional[
-      base_input.BaseInputSpecsProvider.HParams] = None
+      pax_fiddle.Config[base_input.BaseInputSpecsProvider]
+  ] = None
 
 
 def get_excluded_var_mask_for_grad_or_opt(
@@ -1333,7 +1334,9 @@ class SingleTask(base_task.BaseTask):
     learner_params = NestedMap.FromNestedDict(learner_params)
     uid = itertools.count()
 
-    def _instantiate(p: learners_lib.Learner.HParams) -> learners_lib.Learner:
+    def _instantiate(
+        p: pax_fiddle.Config[learners_lib.Learner],
+    ) -> learners_lib.Learner:
       p = p.clone().set(name='learner_%d' % next(uid))
       return instantiate(p)
 

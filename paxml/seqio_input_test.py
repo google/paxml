@@ -727,7 +727,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
   def _construct_scoring_task_enum_fields(
       self,
-      p: seqio_input.SeqIOInput.HParams,
+      p: pax_fiddle.Config[seqio_input.SeqIOInput],
       ds: tf.data.Dataset,
       scores: Sequence[float],
   ) -> Sequence[Tuple[Optional[str], NestedMap]]:

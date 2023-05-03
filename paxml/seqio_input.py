@@ -1798,8 +1798,8 @@ def get_eval_hparams_for_seqio(
     shuffle: bool = None,
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
-    check_split_exists: bool = False
-) -> list[SeqIOInput.HParams]:
+    check_split_exists: bool = False,
+) -> list[pax_fiddle.Config[SeqIOInput]]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
   This is the easiest way to configure eval hparams in datasets() (for scoring
