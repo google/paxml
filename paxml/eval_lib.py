@@ -964,7 +964,7 @@ class SingleTaskDecodeProgram(programs.Program):
       use_pmap: bool,
       pmap_decode_step: Optional[
           Callable[
-              [TrainState, PRNGKey, NestedJTensor, Optional[int]],
+              [TrainState, PRNGKey, NestedJTensor],
               Tuple[NestedMap, NestedMap, NestedMap],
           ]
       ] = None,
@@ -1102,15 +1102,9 @@ class SingleTaskDecodeProgram(programs.Program):
     if use_pmap:
       pmap_decode_step = self._pmap_decode_step
       output_pickle = self._output_pickle
-
-      def decode_step_func(inputs, batch_idx):
-        # TODO(pax): shall we eval all sub-models during eval?
-        return pmap_decode_step(
-            train_state,
-            prng_key,
-            inputs,
-            batch_idx * jnp.ones((jax.local_device_count(),)),
-        )
+      decode_step_func = functools.partial(
+          pmap_decode_step, train_state.to_eval_state()
+      )
 
     else:
       spmd_decode_step = self._spmd_decode_step
@@ -1121,7 +1115,8 @@ class SingleTaskDecodeProgram(programs.Program):
       # use a single global key instead to rely on pjit to split for different
       # replicas.
       spmd_decode_step_fn = functools.partial(
-          spmd_decode_step, train_state.to_eval_state(), prng_key
+          spmd_decode_step,
+          train_state.to_eval_state(),
       )
 
     if programs.can_load_written_outputs(
@@ -1176,13 +1171,21 @@ class SingleTaskDecodeProgram(programs.Program):
       batch = partitioner.preprocess_inputs(
           decode_input, batch, None if use_pmap else inputs_partition_spec
       )
+
+      task_p = self._task_p
+      if task_p and task_p.decode.prng_key_fold_with_batch_index:
+        decode_key = jax.random.fold_in(prng_key, step_num)
+      else:
+        decode_key = prng_key
+
       if use_pmap:
         (weighted_scalars, out, summary_tensors, updated_metrics) = (
-            decode_step_func(batch, batch_idx=step_num)
+            decode_step_func(decode_key, batch)
         )
       else:
         (weighted_scalars, out, updated_metrics), updated_vars = (
             spmd_decode_step_fn(
+                decode_key,
                 batch,
                 decode_input.get_global_batch_size(decode_input.hparams),
             )
@@ -1520,18 +1523,13 @@ def _decode_once(
     aggregate_fn = instantiate(metrics_p).aggregate
     model = decode_programs[0].model
 
-    def decode_step(mdl_states, prng_key, inputs, batch_idx):
-      if task_p.decode.prng_key_fold_with_batch_index:
-        prng_key_decode = jax.random.fold_in(prng_key, batch_idx)
-      else:
-        prng_key_decode = prng_key
-      mdl_states = mdl_states.to_eval_state()
+    def decode_step(mdl_states, decode_key, inputs):
       (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
           # TODO(wangpeng): Move `decode_step` out of `trainer_lib.py`.
           trainer_lib.decode_step(
               model,
               mdl_states,
-              prng_key_decode,
+              decode_key,
               var_weight_params,
               inputs,
               model_p.fprop_dtype,
