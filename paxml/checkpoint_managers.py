@@ -320,6 +320,9 @@ class OrbaxCheckpointManager:
 
     if train_input_checkpointer:
       checkpointers[INPUT_ITEM_NAME] = train_input_checkpointer
+
+# Internal Orbax infra configuration
+
     self._manager = _CheckpointManagerImpl(
         directory,
         checkpointers,

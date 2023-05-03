@@ -340,7 +340,7 @@ class MetricUtilsTest(absltest.TestCase):
             'x/a': 2
         })
 
-  # Internal scalar types test
+    # Internal scalar types test
 
 
 if __name__ == '__main__':
