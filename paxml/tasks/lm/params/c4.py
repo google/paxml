@@ -259,7 +259,15 @@ def set_adam_and_learning_rate_schedule(
 
   if hasattr(cls, 'PERCORE_BATCH_SIZE'):
     global_batch_size = int(cls.PERCORE_BATCH_SIZE * jax.device_count() + 1e-6)
-    assert global_batch_size > 0
+    if global_batch_size == 0:
+      logging.warning(
+          (
+              'Found global_batch_size = 0: cls.PERCORE_BATCH_SIZE=%s,'
+              ' jax.device_count()=%s'
+          ),
+          cls.PERCORE_BATCH_SIZE,
+          jax.device_count(),
+      )
     assert global_batch_size <= 8192
   else:
     global_batch_size = None
