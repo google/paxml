@@ -853,7 +853,7 @@ class PjitPartitioner(Partitioner):
       is_eval: bool,
       metadata: TrainStateMetadata,
       input_partition_spec: NestedPartitionSpec,
-      is_auto_sharding: bool = False,
+      use_padding: bool = True,
   ) -> Partitioner.PartitionedStepFn:
     """Returns a step function to apply the SPMD partition (pjit)."""
     task_p = self._jax_task.hparams
@@ -867,11 +867,7 @@ class PjitPartitioner(Partitioner):
     def _wrapped_step_fn(
         state, prng_key, inputs, unpadded_global_batch_size=None
     ):
-      # When auto-sharding is enabled, we can't pad the variables whose input
-      # sharding may get changed by auto-sharding.
-      # TODO(pax-dev): Add support for padding and unpadding inputs when auto
-      # sharding is enabled.
-      if not is_auto_sharding:
+      if use_padding:
         # When there are input padding on multi-host, we use a different device
         # order in the program's input sharding. We now make sure they are
         # resharded back to the device order consistent with the global mesh.
@@ -914,7 +910,7 @@ class PjitPartitioner(Partitioner):
       assert len(fn_out) > 1
 
       # Pad the model states again for training step functions.
-      if not is_auto_sharding:
+      if use_padding:
         padded_states = self._pad_states(metadata, fn_out[0])
         fn_out = (padded_states,) + fn_out[1:]
       return fn_out
@@ -1237,7 +1233,11 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         self._auto_sharding_info.is_eval,
         train_state_metadata,
         input_partition_spec=input_partition_spec,
-        is_auto_sharding=True,
+        # When auto-sharding is enabled, we can't pad the variables whose input
+        # sharding may get changed by auto-sharding.
+        # TODO(pax-dev): Add support for padding and unpadding inputs when auto
+        # sharding is enabled.
+        use_padding=False,
     )
 
     with self.global_mesh:
