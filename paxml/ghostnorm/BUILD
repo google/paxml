@@ -36,6 +36,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         "//praxis:pytypes",
         "//praxis/layers",
+        "//praxis/layers:base_ops",
     ],
 )
 
@@ -52,6 +53,7 @@ py_strict_test(
         # Implicit optax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
+        "//praxis/layers:linears",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

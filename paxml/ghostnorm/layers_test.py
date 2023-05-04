@@ -26,6 +26,7 @@ from paxml.ghostnorm import base
 from paxml.ghostnorm import linears
 from praxis import base_layer
 from praxis import pax_fiddle
+from praxis.layers import linears as praxis_linears
 import tensorflow as tf
 
 instantiate = base_layer.instantiate
@@ -43,27 +44,61 @@ class LayersTest(parameterized.TestCase):
   @parameterized.named_parameters(
       {
           'testcase_name': 'Linear',
-          'layer_tpl': pax_fiddle.Config(linears.LinearGhostNorm,
-                                         input_dims=10, output_dims=3),
+          'reference_layer_cls': praxis_linears.Linear,
+          'ghostnorm_layer_cls': linears.LinearGhostNorm,
+          'configs': dict(input_dims=10, output_dims=3),
           'inputs_shape': (32, 10),
-      }
+      },
+      {
+          'testcase_name': 'LinearMultiDimInputs',
+          'reference_layer_cls': praxis_linears.Linear,
+          'ghostnorm_layer_cls': linears.LinearGhostNorm,
+          'configs': dict(input_dims=10, output_dims=3),
+          'inputs_shape': (32, 24, 10),
+      },
+      {
+          'testcase_name': 'Bias',
+          'reference_layer_cls': praxis_linears.Bias,
+          'ghostnorm_layer_cls': linears.BiasGhostNorm,
+          'configs': {'dims': 3},
+          'inputs_shape': (32, 24, 3),
+      },
   )
-  def test_calculate_grad_norms(self, layer_tpl, inputs_shape):
-    layer = instantiate(layer_tpl)
+  def test_calculate_grad_norms(self, reference_layer_cls, ghostnorm_layer_cls,
+                                configs, inputs_shape):
+    ref_layer_tpl = pax_fiddle.Config(reference_layer_cls, **configs)
+    ghostnorm_layer_tpl = pax_fiddle.Config(ghostnorm_layer_cls, **configs)
+    ref_layer = instantiate(ref_layer_tpl)
+    ghostnorm_layer = instantiate(ghostnorm_layer_tpl)
     inputs = jnp.asarray(np.random.normal(0, 0.1, size=inputs_shape))
 
     prng_key = jax.random.PRNGKey(seed=1234)
     prng_key, init_key, random_key, noise_key = jax.random.split(prng_key, 4)
-    initial_vars = layer.init({PARAMS: init_key, RANDOM: random_key}, inputs)
+    initial_vars = ghostnorm_layer.init({PARAMS: init_key, RANDOM: random_key},
+                                        inputs)
+
+    # make sure the layer behaves the same as the reference layer in forward
+    ghostnorm_outputs = ghostnorm_layer.apply(
+        initial_vars, inputs, rngs={RANDOM: noise_key})
+    ref_outputs = ref_layer.apply(
+        initial_vars, inputs, rngs={RANDOM: noise_key})
+    np.testing.assert_allclose(ghostnorm_outputs, ref_outputs,
+                               rtol=1e-5, atol=1e-5)
 
     def simple_loss(outputs):
       # simple loss for testing purpose
       # note the ghost clipping library assumes mean loss over the batch
       outputs = outputs.reshape((outputs.shape[0], -1))
-      return jnp.mean(jnp.sum(jnp.square(outputs), axis=1))
+      target = 1  # an arbitrary value for testing purpose
+      return jnp.mean(jnp.sum(jnp.square(outputs - target), axis=1))
 
     def loss_fn(mdl_vars, inputs):
-      outputs = layer.apply(mdl_vars, inputs, rngs={RANDOM: noise_key})
+      outputs = ghostnorm_layer.apply(mdl_vars, inputs,
+                                      rngs={RANDOM: noise_key})
+      return simple_loss(outputs)
+
+    def loss_fn_ref(mdl_vars, inputs):
+      outputs = ref_layer.apply(mdl_vars, inputs, rngs={RANDOM: noise_key})
       return simple_loss(outputs)
 
     # get expected per-example gradient norms by explicitly materialize
@@ -88,6 +123,14 @@ class LayersTest(parameterized.TestCase):
 
     # test if the computed per-example gradient norms match expected values
     np.testing.assert_allclose(per_eg_grad_norms, fast_per_eg_grad_norms,
+                               rtol=1e-5, atol=1e-5)
+
+    # test if the computed gradient matches the grad of the reference layer
+    grad_fn_ref = jax.grad(loss_fn_ref)
+    grad_ref = grad_fn_ref(initial_vars, inputs)[PARAMS]
+    grad_diffs = jax.tree_map(lambda x, y: np.mean(np.abs(x-y.param)),
+                              grad_ref, grad_with_sq_norms)
+    np.testing.assert_allclose(jax.tree_util.tree_flatten(grad_diffs)[0], 0,
                                rtol=1e-5, atol=1e-5)
 
     # second pass to compute norm-clipped gradients

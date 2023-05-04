@@ -20,64 +20,120 @@ import jax.numpy as jnp
 from paxml.ghostnorm import base
 from praxis import layers
 from praxis import pytypes
+from praxis.layers import base_ops
 
 JTensor = pytypes.JTensor
 
 
-@jax.custom_vjp
-def matmul(inputs, weights):
-  """Forward matmul."""
-  return jnp.matmul(inputs, base.get_param(weights))
+def make_last_dim_projector(einsum: base_ops.Einsum):
+  """Constructs an operator that does last-dim projection given an einsum."""
 
+  project_with_einsum = lambda x, w: einsum('...y, yz -> ...z', x, w)
 
-def matmul_fwd(inputs, weights):
-  """Forward matmul for custom vjp."""
-  y, vjp_fun = jax.vjp(jnp.matmul, inputs, base.get_param(weights))
-  return y, (vjp_fun, inputs, base.get_aux(weights))
+  @jax.custom_vjp
+  def project_last_dim(inputs, weights):
+    """Linear projection on the last dim of the input JTensor."""
+    return project_with_einsum(inputs, base.get_param(weights))
 
+  def project_last_dim_fwd(inputs, weights):
+    """Forward linear projection for custom vjp."""
+    y, vjp_fun = jax.vjp(project_with_einsum, inputs, base.get_param(weights))
+    return y, (vjp_fun, inputs, base.get_param(weights), base.get_aux(weights))
 
-def matmul_bwd(res, g):
-  """Backward matmul for custom vjp, computing per-example gradient norms."""
-  vjp_fun, inputs, aux = res
-  if aux is None:  # When aux is None, just do standard back-propagation
-    u_inputs, u_weights = vjp_fun(g)
-  else:
-    # When aux is not None, it contains per-example scaling, and the
-    # back-propagation also returns per-example gradient square norms.
+  def project_last_dim_bwd(res, g):
+    """Backward linear projection, computing per-example gradient norms."""
+    vjp_fun, inputs, weights, aux = res
+    if aux is None:  # When aux is None, just do standard back-propagation
+      u_inputs, u_weights = vjp_fun(g)
+    else:
+      # When aux is not None, it contains per-example scaling, and the
+      # back-propagation also returns per-example gradient square norms.
 
-    # Per-example scaling coefficient. Normally this is all ones. When computing
-    # the average of scaled (i.e. L2-norm clipped) per-example gradients, this
-    # contains a scaling coefficient for each example in the batch.
-    # (batch_size,) => (batch_size, 1)
-    scales = jnp.expand_dims(aux, axis=1)
-    # scaled_g: (batch_size, output_dim)
-    scaled_g = scales * g
+      # Per-example scaling coefficient. Normally this is all ones. When
+      # computing the average of scaled (i.e. L2-norm clipped) per-example
+      # gradients, this contains a scaling coefficient for each example in the
+      # batch. Shape is (batch_size,).
+      scales = aux
 
-    # scaled gradients for parameters to achieve per-eg grad clipping
-    # u_inputs_scaled: (batch_size, input_dim)
-    # u_weights: (input_dim, output_dim)
-    u_inputs_scaled, u_weights = vjp_fun(scaled_g)
-    # Revert the effect of per-example scaling. This derivative with
-    # respect to the inputs will be back-propagated to lower layers. Each layer
-    # handles per-example scaling independently. So we revert scaling here.
-    u_inputs = u_inputs_scaled / jnp.maximum(scales, 1e-7)
+      # u_inputs: (batch_size, ..., input_dim)
+      u_inputs = einsum('ij, ...j -> ...i', weights, g)
 
-    # compute per-example gradient square norms for matmul
-    batch_size = g.shape[0]
-    scaled_g *= batch_size  # this assumes the loss averages over examples
-    zsum = jnp.square(scaled_g).sum(axis=1)
-    hsum = jnp.square(inputs).sum(axis=1)
-    per_example_grad_sq_norms = zsum*hsum
-    u_weights = base.ParamWithAux(u_weights, per_example_grad_sq_norms)
-  return u_inputs, u_weights
+      # scaled gradients for parameters to achieve per-eg grad clipping
+      # scaled_g: (batch_size, ..., output_dim)
+      scaled_g = einsum('i, i... -> i...', scales, g)
 
+      # -----------------------------------------------------------------------
+      # Compute per-example gradient square norms.
+      # The batch_size factor is needed when the loss is *averaged* over the
+      # mini-batch of examples (instead of summed over).
+      batch_size = g.shape[0]
+      if inputs.ndim == 2:
+        # There is a more memory efficient implementation for the rank-2 case
+        zsum = jnp.square(scaled_g * batch_size).sum(axis=1)
+        hsum = jnp.square(inputs).sum(axis=1)
+        per_example_grad_sq_norms = zsum*hsum
+        u_weights = jnp.matmul(inputs.T, scaled_g)
+      else:  # generic case
+        # shape: (batch_size, input_dim, output_dim)
+        per_example_grad = einsum(
+            'k...i, k...j -> kij', inputs, scaled_g * batch_size)
+        per_example_grad_sq_norms = (per_example_grad**2).sum(axis=(1, 2))
+        u_weights = jnp.mean(per_example_grad, axis=0)
 
-matmul.defvjp(matmul_fwd, matmul_bwd)
+      u_weights = base.ParamWithAux(u_weights, per_example_grad_sq_norms)
+    return u_inputs, u_weights
+
+  project_last_dim.defvjp(project_last_dim_fwd, project_last_dim_bwd)
+  return project_last_dim
 
 
 class LinearGhostNorm(layers.Linear):
-  """Linear layer with ghost norm support using matmul with custom vjp rule."""
+  """Linear layer with ghost norm support with custom vjp rule."""
+
+  def setup(self) -> None:
+    super().setup()
+    self._projector = make_last_dim_projector(self.einsum)
 
   def __call__(self, inputs: JTensor) -> JTensor:
-    # TODO(chiyuan): handle higher dimension input tensors as in base class
-    return matmul(inputs, self.theta.w)
+    return self._projector(inputs, self.theta.w)
+
+
+@jax.custom_vjp
+def bias_add(inputs, bias):
+  return inputs + base.get_param(bias)
+
+
+def bias_add_fwd(inputs, bias):
+  """Forward pass for bias_add."""
+  outputs = inputs + base.get_param(bias)
+  return outputs, base.get_aux(bias)
+
+
+def bias_add_bwd(res, g):
+  """Backward pass for bias_add, computing per-example gradient norms."""
+  aux = res
+  u_inputs = g
+  if aux is None:  # When aux is None, just do standard back-propagation
+    u_bias = jnp.sum(g, axis=range(g.ndim-1))
+  else:
+    scales = aux[:, jnp.newaxis]
+    # The batch_size factor is needed when the loss is *averaged* over the
+    # mini-batch of examples (instead of summed over).
+    batch_size = scales.shape[0]
+    # shape: (batch_size, output_dim)
+    per_example_grad = jnp.sum(g, axis=range(1, g.ndim-1)) * scales * batch_size
+    per_example_grad_sq_norms = (per_example_grad**2).sum(axis=1)
+    u_bias = jnp.mean(per_example_grad, axis=0)
+    u_bias = base.ParamWithAux(u_bias, per_example_grad_sq_norms)
+
+  return u_inputs, u_bias
+
+
+bias_add.defvjp(bias_add_fwd, bias_add_bwd)
+
+
+class BiasGhostNorm(layers.Bias):
+  """Bias layer with ghost norm support."""
+
+  def __call__(self, inputs: JTensor) -> JTensor:
+    return bias_add(inputs, self.theta.b)
