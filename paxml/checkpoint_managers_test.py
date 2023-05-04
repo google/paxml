@@ -312,6 +312,13 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+    # Assert that the descriptor proto is serialized.
+    descriptor_path = (
+        next(checkpoint_manager.directory.glob(f'{CHECKPOINT_PREFIX}*'))
+        / 'descriptor/descriptor.pbtxt'
+    )
+    self.assertTrue(descriptor_path.exists())
+
     restored = self.restore(
         checkpoint_manager,
         0,
@@ -848,6 +855,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           f.copy(step_dir / f.name)
       (step_dir / 'state').rmtree()
       checkpoint_manager._manager._version = 0.0
+      checkpoint_manager._manager._options.enable_descriptor = False
     elif legacy_version == 1.0:
       # Transform metadata to what we would expect in a version 1 checkpoint
       metadata = json.loads(fp_metadata.read_text())
