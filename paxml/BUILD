@@ -552,6 +552,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

@@ -43,6 +43,7 @@ from praxis import base_layer
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 import tensorflow.compat.v2 as tf
 
 from paxml import profiling  # mapped to internal
@@ -269,9 +270,10 @@ class BaseTrainProgram(Program):
           lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
           model_inputs,
       )
-      # TODO(laigd): consider allowing that specs being a subset of the actual
-      # input and relax this requirement.
-      if self._partitioner.train_inputs_shape_dtype != inputs_shape_dtype:
+
+      if not trees.is_subset(
+          self._partitioner.train_inputs_shape_dtype, inputs_shape_dtype
+      ):
         raise ValueError(
             'Spec of actual training input does not match train input specs. '
             f'Spec of actual training input: {inputs_shape_dtype}, '
