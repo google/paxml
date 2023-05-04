@@ -37,6 +37,7 @@ from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
+from paxml import xla_passthrough
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -800,14 +801,22 @@ class BaseEvalProgram(Program):
         break
 
       step_num += 1
+      eval_inputs, unsupported_inputs, supported_input_partition_spec = (
+          xla_passthrough.split_out_xla_unsupported_batch(
+              eval_inputs, partitioning_spec=self.eval_input_partition_spec
+          )
+      )
       eval_inputs = self._partitioner.preprocess_inputs(
-          self.eval_input, eval_inputs, self.eval_input_partition_spec
+          self.eval_input, eval_inputs, supported_input_partition_spec
       )
       loss, weighted_scalars, per_example_out, summary_tensors = self.eval_step(
           state,
           self._eval_prng_seed,
           eval_inputs,
           self._eval_unpadded_global_batch_size,
+      )
+      xla_passthrough.merge_back_xla_unsupported_batch(
+          per_example_out, unsupported_inputs
       )
       logging.info('Finished eval step %d for %s', step_num, self._name)
       loss, weighted_scalars, per_example_out, summary_tensors = (

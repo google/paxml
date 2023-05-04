@@ -206,6 +206,7 @@ pytype_strict_library(
         ":train_states",
         ":trainer_lib",
         ":tuning_lib",
+        ":xla_passthrough",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.metrics dependency.
@@ -274,6 +275,17 @@ pytype_strict_library(
         "//paxml:checkpoints",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "xla_passthrough",
+    srcs = ["xla_passthrough.py"],
+    srcs_version = "PY3",
+    deps = [
+        # Implicit absl.logging dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
     ],
 )
 
@@ -540,6 +552,7 @@ pytype_strict_library(
         ":tasks_lib",
         ":train_states",
         ":trainer_lib",
+        ":xla_passthrough",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
@@ -876,6 +889,18 @@ pytype_strict_test(
         # Implicit etils dependency.
         # Implicit numpy dependency.
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "xla_passthrough_test",
+    srcs = ["xla_passthrough_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    deps = [
+        ":xla_passthrough",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit numpy dependency.
     ],
 )
 

@@ -45,6 +45,7 @@ from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
 from paxml import tuning_lib
+from paxml import xla_passthrough
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -1166,6 +1167,12 @@ class SingleTaskDecodeProgram(programs.Program):
             input_name,
         )
         break
+      batch, tpu_unsupported_batch, inputs_partition_spec = (
+          xla_passthrough.split_out_xla_unsupported_batch(
+              batch,
+              partitioning_spec=None if use_pmap else inputs_partition_spec,
+          )
+      )
       batch = partitioner.preprocess_inputs(
           decode_input, batch, None if use_pmap else inputs_partition_spec
       )
@@ -1232,6 +1239,10 @@ class SingleTaskDecodeProgram(programs.Program):
       elif jax.process_index() == 0:
         weighted_scalars = jax.tree_map(np.array, weighted_scalars)
         decode_metrics.store(weighted_scalars)
+
+      xla_passthrough.merge_back_xla_unsupported_batch(
+          out, tpu_unsupported_batch
+      )
 
       if jax.process_index() == 0:
         # Run `process_decode_out` on CPU device as its implementation
