@@ -481,23 +481,39 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       # reference to MaskedNode's.
       self._set_param_names(reference_nested_names)
 
-    def create_restore_args(pspec, shape_struct):
+    def _create_restore_args(shape_struct):
+      return orbax.checkpoint.RestoreArgs(
+          dtype=shape_struct.dtype,
+      )
+
+    def _create_sharded_restore_args(shape_struct, pspec):
       # Providing `None` indicates that the shape should be restored exactly as
       # saved.
       restore_shape = (
           None if self._enforce_restore_shape_check else shape_struct.shape
       )
       return orbax.checkpoint.ArrayRestoreArgs(
-          restore_type=jax.Array,
           mesh=mesh,
           mesh_axes=pspec,
           global_shape=restore_shape,
           dtype=shape_struct.dtype,
       )
 
-    restore_args = jax.tree_map(
-        create_restore_args, reference_state_specs, reference_train_state
-    )
+    # May be None if `pmap_use_tensorstore` restoration path is in use.
+    if reference_state_specs is None:
+      logging.warning(
+          'Found `None` for `state_specs` during restoration. If not restoring'
+          ' using PMAP and `pmap_use_tensorstore`, this may indicate an error.'
+      )
+      restore_args = jax.tree_util.tree_map(
+          _create_restore_args, reference_train_state
+      )
+    else:
+      restore_args = jax.tree_map(
+          _create_sharded_restore_args,
+          reference_train_state,
+          reference_state_specs,
+      )
     restored_train_state = super().restore(
         directory,
         item=reference_train_state,
