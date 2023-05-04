@@ -25,8 +25,6 @@ from praxis import pax_fiddle
 import pyglove as pg
 
 
-BaseHyperParams = base_hyperparams.BaseHyperParams
-BaseParameterizable = base_hyperparams.BaseParameterizable
 MetricAggregationFn = Callable[[Sequence[float]], float]
 
 
@@ -105,7 +103,8 @@ class CrossStepMetricAggregator(
 BaseExperiment = Any
 
 
-class SearchHParams(BaseHyperParams):
+@dataclasses.dataclass
+class SearchHParams:
   """Hyperparameters for an AutoML search.
 
   Attributes:
