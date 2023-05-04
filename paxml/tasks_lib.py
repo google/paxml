@@ -1125,7 +1125,10 @@ class SingleTask(base_task.BaseTask):
         the number of training steps.
       device_sync_interval_steps: How many train steps to dispatch before
         explicit device sync. If set, log loss and write summaries in a separate
-        thread.
+        thread. Note that users should be careful setting this value to be very
+        high. Due to more events are dispatched in parallel, it has the
+        implications to increase memory usage or lead to OOMs. An emprical
+        number like 10 should work in practice.
       log_train_output_interval_steps:  How frequently to log training output to
         the INFO stream. If set to None, use the same value as for
         `summary_interval_steps`.
