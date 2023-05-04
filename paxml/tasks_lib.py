@@ -1638,10 +1638,11 @@ class SingleTask(base_task.BaseTask):
       target_partition_specs: Optional[TrainState] = None,
   ) -> Tuple[TrainState, TrainStateProvenance]:
     """Applies one CheckpointLoadingRules to train_state."""
-    uses_gda = (
-        checkpoint_type == CheckpointType.GDA
-        or checkpoint_type == CheckpointType.PERSISTENCE
-    )
+    uses_gda = checkpoint_type in {
+        CheckpointType.GDA,
+        CheckpointType.GDA_VERSION_SUBDIR,
+        CheckpointType.PERSISTENCE,
+    }
     if uses_gda:
       rules.task_p.model.ici_mesh_shape = self.model.hparams.ici_mesh_shape
       rules.task_p.model.dcn_mesh_shape = self.model.hparams.dcn_mesh_shape
@@ -1712,7 +1713,11 @@ class SingleTask(base_task.BaseTask):
 
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.hparams.ici_mesh_shape is None):
-      assert checkpoint_type in {CheckpointType.GDA, CheckpointType.PERSISTENCE}
+      assert checkpoint_type in {
+          CheckpointType.GDA,
+          CheckpointType.GDA_VERSION_SUBDIR,
+          CheckpointType.PERSISTENCE,
+      }
       loaded_train_state = restore_pmap_from_tensorstore(
           ckpt_train_state,
           ckpt_path,

@@ -174,6 +174,23 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     if self._directory.exists():
       step = self.any_step()
       if step is not None:
+        # Account for trying to actually load GDA_VERSION_SUBDIR instead of GDA.
+        if checkpoint_type == CheckpointType.GDA:
+          if (
+              not checkpoint_paths.make_checkpoint_step_dir(
+                  self._directory, step, checkpoint_type=CheckpointType.GDA
+              ).exists()
+              and checkpoint_paths.make_checkpoint_step_dir(
+                  self._directory,
+                  step,
+                  checkpoint_type=CheckpointType.GDA_VERSION_SUBDIR,
+              ).exists()
+          ):
+            logging.info(
+                'Updated checkpoint_type from GDA to GDA_VERSION_SUBDIR'
+            )
+            self._checkpoint_type = CheckpointType.GDA_VERSION_SUBDIR
+
         version = _get_checkpoint_version(
             self._checkpoint_type, self._directory, step
         )

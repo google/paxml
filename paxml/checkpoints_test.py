@@ -101,6 +101,28 @@ class CheckpointsTest(parameterized.TestCase):
     )
 
   @parameterized.parameters(
+      'checkpoint_1234',
+      '1234',
+  )
+  def test_latest_checkpoint_succeeds_for_finalized_ckpt(self, directory_name):
+    ckpt = self.directory / directory_name
+    ckpt.write_text('some data')
+
+    self.assertEqual(checkpoints.latest_checkpoint(self.directory), ckpt)
+
+  @parameterized.parameters(
+      'checkpoint1234',
+      'tmp_1010101.checkpoint_1234',
+  )
+  def test_latest_checkpoint_returns_none_for_pending_cpkt(
+      self, directory_name
+  ):
+    ckpt = self.directory / directory_name
+    ckpt.write_text('some data')
+
+    self.assertIsNone(checkpoints.latest_checkpoint(self.directory))
+
+  @parameterized.parameters(
       (
           checkpoint_types.CheckpointType.UNSPECIFIED,
           epath.Path('/tmp/checkpoints/1234'),

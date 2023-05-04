@@ -256,7 +256,10 @@ class CheckpointManagerTest(parameterized.TestCase):
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
-    if checkpoint_type == CheckpointType.GDA:
+    if checkpoint_type in {
+        CheckpointType.GDA,
+        CheckpointType.GDA_VERSION_SUBDIR,
+    }:
       restore_kwargs = {
           'specs': state_specs,
           'mesh': global_mesh,
@@ -264,6 +267,8 @@ class CheckpointManagerTest(parameterized.TestCase):
       }
     elif checkpoint_type == CheckpointType.FLAX:
       restore_kwargs = None
+    else:
+      raise ValueError(f'Unsupported CheckpointType {checkpoint_type}.')
     return checkpoint_manager.restore(
         step,
         train_state,
@@ -1006,6 +1011,53 @@ class CheckpointManagerTest(parameterized.TestCase):
           transforms=transforms,
       )
       orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+
+  @parameterized.parameters((True,), (False,))
+  def test_restoring_gda_independent_of_prefix(self, remove_checkpoint_prefix):
+    # Test that GDA checkpoint formats can be restored, whether the
+    # "checkpoint_" prefix is there or not.
+    train_input_pipeline = None
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=CheckpointType.GDA,
+        train_input_pipeline=train_input_pipeline,
+    )
+    self.save(
+        checkpoint_manager,
+        0,
+        self.train_state,
+        train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=(
+            self.train_state_unpadded_shape_dtype_struct
+        ),
+    )
+    if remove_checkpoint_prefix:
+      os.rename(
+          os.path.join(self.directory, 'checkpoint_00000000'),
+          os.path.join(self.directory, '0'),
+      )
+    expected = self.train_state
+    train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=CheckpointType.GDA,
+        train_input_pipeline=train_input_pipeline,
+    )
+    self.assertEqual(checkpoint_manager.all_steps(), [0])
+
+    restored = checkpoint_manager.restore(
+        0,
+        train_state_global_shapes,
+        train_input_pipeline=train_input_pipeline,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+        restore_kwargs={
+            'specs': self.state_specs,
+            'mesh': self.global_mesh,
+            'transforms': None,
+        },
+    )
+
+    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
 
 
 if __name__ == '__main__':

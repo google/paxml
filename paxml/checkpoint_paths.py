@@ -33,7 +33,7 @@ CHECKPOINT_PREFIX = 'checkpoint_'
 STATE_ITEM_NAME = 'state'
 INPUT_ITEM_NAME = 'train_input'
 TMP_PREFIX = 'tmp_'
-CHECKPOINT_PATTERN_RE = re.compile(rf'{CHECKPOINT_PREFIX}[\d]+$')
+CHECKPOINT_PATTERN_RE = re.compile(rf'({CHECKPOINT_PREFIX})?[\d]+$')
 TMP_CHECKPOINT_PATTERN_RE = re.compile(
     rf'{TMP_PREFIX}[\d]+.{CHECKPOINT_PREFIX}[\d]+$'
 )
