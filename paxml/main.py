@@ -91,6 +91,14 @@ flags.DEFINE_bool(
     'means that the training can continue ahead when checkpointing is '
     'happening.')
 flags.DEFINE_bool(
+    'exit_after_ondemand_checkpoint',
+    False,
+    (
+        'If True, exits immediately after finishing saving on-demand checkpoint'
+        ' due to preemption.'
+    ),
+)
+flags.DEFINE_bool(
     'tensorstore_use_ocdbt',
     False,
     'If True, uses OCDBT format when saving with Tensorstore.',
@@ -259,6 +267,7 @@ def run_experiment(
         enable_checkpoint_saving=enable_checkpoint_saving,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
+        exit_after_ondemand_checkpoint=FLAGS.exit_after_ondemand_checkpoint,
     )
 
   elif FLAGS.mode == 'eval':

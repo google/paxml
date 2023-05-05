@@ -202,6 +202,10 @@ class _TrainingCheckpointer(metaclass=abc.ABCMeta):
     """Waits for any incomplete save operations to complete."""
     raise NotImplementedError
 
+  def reached_preemption(self, step: int) -> bool:
+    """Returns True if a preemption sync point has been reached."""
+    raise NotImplementedError
+
 
 class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
@@ -231,6 +235,9 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
+
+  def reached_preemption(self, step: int) -> bool:
+    return self.checkpoint_manager.reached_preemption(step)
 
   def _save_with_args(
       self,
@@ -407,6 +414,9 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
+
+  def reached_preemption(self, step: int) -> bool:
+    return self.checkpoint_manager.reached_preemption(step)
 
   def _restore_with_args(
       self,
@@ -775,6 +785,7 @@ def train_and_evaluate(
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
+    exit_after_ondemand_checkpoint: bool = False,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -803,6 +814,8 @@ def train_and_evaluate(
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
     tensorstore_use_ocdbt: Uses OCDBT format for saving new checkpoints.
+    exit_after_ondemand_checkpoint: If True, exists immediately after saving an
+      on-demand checkpoint due to preemption.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -919,5 +932,6 @@ def train_and_evaluate(
         train_program,
         eval_programs,
         early_stopping_fn,
+        exit_after_ondemand_checkpoint=exit_after_ondemand_checkpoint,
     )
     executor.start()

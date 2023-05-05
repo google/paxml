@@ -131,6 +131,9 @@ class _Checkpointer(Protocol):
   def wait_until_finished(self):
     ...
 
+  def reached_preemption(self, step: int) -> bool:
+    ...
+
 
 class DefaultExecutor(base_executor.BaseExecutor):
   """The default executor for running programs."""
@@ -217,6 +220,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
       early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+      exit_after_ondemand_checkpoint: bool = False,
   ):
     self._task = jax_task
     self._job_log_dir = job_log_dir
@@ -226,6 +230,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._train_program = train_program
     self._eval_programs = eval_programs
     self._early_stopping_fn = early_stopping_fn
+    self._exit_after_ondemand_checkpoint = exit_after_ondemand_checkpoint
     task_p = jax_task.hparams
 
     # Creates the root prng key and train input pipeline.
@@ -410,6 +415,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
         self._eval_prng_seed,
         is_vars_replicated,
         self._train_prng_seed,
+        self._exit_after_ondemand_checkpoint,
     )
 
     # Shutdown the programs and run necessary cleanup.
@@ -437,6 +443,7 @@ def _train_and_evaluate_common(
     eval_prng_seed,
     is_vars_replicated,
     train_prng_seed,
+    exit_after_ondemand_checkpoint,
 ):
   """Training loop code common to both pmap and spmd."""
   task_p = task.hparams
@@ -509,6 +516,11 @@ def _train_and_evaluate_common(
           train_state_metadata.partition_specs,
           train_input_for_checkpoint,
       )
+      if exit_after_ondemand_checkpoint and checkpointer.reached_preemption(
+          step_i
+      ):
+        checkpointer.wait_until_finished()
+        exit(1)
 
       if not train_program.should_run(partitioned_train_state, step_i):
         logging.info(

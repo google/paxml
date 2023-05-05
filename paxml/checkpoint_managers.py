@@ -247,10 +247,14 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
         step, checkpoint_type=self._checkpoint_type
     )
 
+  def reached_preemption(self, step: int) -> bool:
+    """Returns True if a preemption sync point has been reached."""
+    return preemption.reached_preemption_sync_point(step)
+
   def should_save(self, step: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
     # Whether to save an on-demand checkpoint due to preemption
-    if preemption.reached_preemption_sync_point(step):
+    if self.reached_preemption(step):
       return True
     last_checkpoint_step = (
         self._last_checkpoint.step if self._last_checkpoint else None
@@ -367,6 +371,9 @@ class OrbaxCheckpointManager:
 
   def wait_until_finished(self):
     self._manager.wait_until_finished()
+
+  def reached_preemption(self, step: int) -> bool:
+    return self._manager.reached_preemption(step)
 
   def should_save(self, step: int) -> bool:
     return self._manager.should_save(step)
