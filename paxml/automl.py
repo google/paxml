@@ -158,8 +158,8 @@ def neural_architecture_search(
     reward = pax_fiddle.Config(
         MultiObjective,
         metrics=metrics,
-        aggregator_tpl=aggregator_cls.HParams(
-            cost_objective=cost_objective, exponent=exponent
+        aggregator_tpl=pax_fiddle.Config(
+            aggregator_cls, cost_objective=cost_objective, exponent=exponent
         ),
         reward_for_nan=reward_for_nan,
     )
