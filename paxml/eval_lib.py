@@ -1179,7 +1179,12 @@ class SingleTaskDecodeProgram(programs.Program):
 
       task_p = self._task_p
       if task_p and task_p.decode.prng_key_fold_with_batch_index:
-        decode_key = jax.random.fold_in(prng_key, step_num)
+        if prng_key.ndim > 1:
+          decode_key = jax.vmap(lambda x: jax.random.fold_in(x, step_num))(
+              prng_key
+          )
+        else:
+          decode_key = jax.random.fold_in(prng_key, step_num)
       else:
         decode_key = prng_key
 
