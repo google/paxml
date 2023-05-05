@@ -464,7 +464,7 @@ class SeqIOInput(base_input.BaseInput):
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
     if not self.name:
-      mixture_name = self.mixture_name or self.mixture_or_task.name
+      mixture_name = self.mixture_name or self.mixture_or_task.name  # pytype: disable=attribute-error
       self.name = f'{mixture_name}_{self.split_name}'
     if (
         not self.is_training
@@ -488,8 +488,19 @@ class SeqIOInput(base_input.BaseInput):
     self.is_targets_init = False
 
   def _validate_deterministic(self):
+    """Validates deterministic input settings and creates the shard info."""
     if self.deterministic_input:
       raise ValueError('deterministic_input is not supported')
+    shard_info = seqio.ShardInfo(
+        index=self.infeed_host_index, num_shards=self.num_infeed_hosts
+    )
+    logging.info(
+        'ShardInfo for %s: shard_id: %d, num_shards: %d, ',
+        self._mixture_or_task_inst.name,
+        shard_info.index,
+        shard_info.num_shards,
+    )
+    return shard_info
 
   def _validate_eval_task(self):
     assert isinstance(self.mixture_or_task_inst, seqio.Task)
@@ -524,17 +535,7 @@ class SeqIOInput(base_input.BaseInput):
     self._mixture_or_task_inst = (
         self.mixture_or_task or seqio.get_mixture_or_task(self.mixture_name)
     )
-    shard_info = seqio.ShardInfo(
-        index=self.infeed_host_index, num_shards=self.num_infeed_hosts
-    )
-    logging.info(
-        'ShardInfo for %s: shard_id: %d, num_shards: %d, ',
-        self._mixture_or_task_inst.name,
-        shard_info.index,
-        shard_info.num_shards,
-    )
-    self._shard_info = shard_info
-    self._validate_deterministic()
+    self._shard_info = self._validate_deterministic()
 
     if not self.is_training and isinstance(
         self.mixture_or_task_inst, seqio.Task
