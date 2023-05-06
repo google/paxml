@@ -18,7 +18,7 @@
 import contextlib
 import functools
 import gc
-from typing import Any, Callable, Optional, Protocol, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple
 
 from absl import logging
 from etils import epath
@@ -40,31 +40,39 @@ from praxis import py_utils
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
+from paxml import checkpoints  # mapped to internal
+
 instantiate = base_hyperparams.instantiate
-PRNGKey = pytypes.PRNGKey
 RunningMode = trainer_lib.RunningMode
 SummaryWriter = tf.summary.SummaryWriter
 TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
 
 
-def _maybe_init_or_update_latest_model_step(
-    train_input: Optional[base_input.BaseInput],
+def _maybe_update_latest_model_step(
     train_input_p: pax_fiddle.Config[base_input.BaseInput],
-    initial_global_step: int,
-) -> base_input.BaseInput:
+    initial_global_step: Optional[int],
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+) -> None:
   """Updates `train_input_p` in place its latest model step."""
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
-    if train_input:
-      return train_input
-    else:
-      return instantiate(train_input_p)
+    # Not deterministic seqio.
+    return
+  logging.info('step used for deterministic seqio: %d', initial_global_step)
+  if initial_global_step is None:
+    if task_p.train.external_checkpoint_path:
+      logging.warning(
+          'Disabling deterministic SeqIO since it will restore from external'
+          ' checkpoint, and the step number is not known beforehand.'
+      )
+    # When not restoring from external_checkpoint_path, it means no checkpoint
+    # to restore in this case and it'll train from step 0, so no need to update.
+    return
+  logging.info('Updating _latest_model_step for training input.')
   dp = train_input_p.deterministic_input_start_index
   dp._latest_model_step = (
       initial_global_step  # pylint: disable=protected-access
   )
-  logging.info('Reinstantiating input because _latest_model_step is updated.')
-  return instantiate(train_input_p)
 
 
 class _DecodeSummaryWriters(contextlib.ExitStack):
@@ -95,46 +103,6 @@ class _DecodeSummaryWriters(contextlib.ExitStack):
     return self.decode_summary_writers
 
 
-class _Checkpointer(Protocol):
-  """Checkpointer interface."""
-
-  def save_if_needed(
-      self,
-      step_i,
-      partitioned_train_state,
-      train_state_unpadded_shape_dtype_struct,
-      train_state_pspecs,
-      train_input_pipeline,
-  ):
-    ...
-
-  def save_final(
-      self,
-      step_i,
-      *,
-      partitioned_train_state,
-      train_state_unpadded_shape_dtype_struct,
-      train_state_pspecs,
-      train_input_pipeline,
-  ):
-    ...
-
-  def get_model_states(
-      self,
-      partitioner: partitioning.Partitioner,
-      metadata: trainer_lib.TrainStateMetadata,
-      root_prng_key: PRNGKey,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
-    ...
-
-  def wait_until_finished(self):
-    ...
-
-  def reached_preemption(self, step: int) -> bool:
-    ...
-
-
 class DefaultExecutor(base_executor.BaseExecutor):
   """The default executor for running programs."""
 
@@ -145,7 +113,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._job_log_dir: epath.Path = None
     self._early_stopping_fn = None
     self._task: tasks_lib.SingleTask = None
-    self._checkpointer: _Checkpointer = None
+    self._checkpointer: checkpoints.TrainingCheckpointer = None
     self._partitioner: partitioning.Partitioner = None
     self._decode_input_ps = None
     self._train_program: programs.BaseTrainProgram = None
@@ -163,6 +131,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
   def _maybe_create_train_input(
       self,
       task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      step: Optional[int],
       train_input_p: pax_fiddle.Config[base_input.BaseInput],
   ) -> Tuple[
       Optional[base_input.BaseInput],
@@ -173,14 +142,15 @@ class DefaultExecutor(base_executor.BaseExecutor):
 
     Args:
       task_p: The task config.
+      step: The step number of the checkpoint to restore from. If None, means no
+        checkpoint to restore.
       train_input_p: The config for the train input pipeline.
 
     Returns:
       A 3-tuple (train_input, train_input_for_partitioner,
       train_input_for_checkpoint), where:
 
-      - train_input: represents the train input pipeline. It can be created here
-        or later in _maybe_init_or_update_latest_model_step.
+      - train_input: the train input pipeline.
       - train_input_for_partitioner: represents the train_input_pipeline arg
         passed to partitioner.setup(). If set, the partitioner will use it to
         get the shape/dtype information for model.init.
@@ -188,24 +158,16 @@ class DefaultExecutor(base_executor.BaseExecutor):
         passed to checkpointer.get_model_states(). If set, the checkpointer will
         restore its states from checkpoint.
     """
+    if not task_p.train.enable_input_checkpointing:
+      _maybe_update_latest_model_step(train_input_p, step, task_p)
+    train_input = instantiate(train_input_p)
 
-    if not task_p.train.enforce_input_specs:
-      train_input = instantiate(train_input_p)
-      train_input_for_partitioner = train_input
-      if not task_p.train.enable_input_checkpointing:
-        train_input_for_checkpoint = None
-      else:
-        train_input_for_checkpoint = train_input
-    else:
-      train_input_for_partitioner = None
-      if not task_p.train.enable_input_checkpointing:
-        # In this case, train_input will be created in
-        # _maybe_init_or_update_latest_model_step() later.
-        train_input = None
-        train_input_for_checkpoint = None
-      else:
-        train_input = instantiate(train_input_p)
-        train_input_for_checkpoint = train_input
+    train_input_for_partitioner = (
+        None if task_p.train.enforce_input_specs else train_input
+    )
+    train_input_for_checkpoint = (
+        train_input if task_p.train.enable_input_checkpointing else None
+    )
     return train_input, train_input_for_partitioner, train_input_for_checkpoint
 
   def setup(
@@ -237,7 +199,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
     root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
     train_input_p = partitioner.preprocess_input_config(train_input_p)
     train_input, train_input_for_partitioner, train_input_for_checkpoint = (
-        self._maybe_create_train_input(task_p, train_input_p)
+        self._maybe_create_train_input(
+            task_p, checkpointer.step_to_restore, train_input_p
+        )
     )
 
     # Sets up the partitioner. Note it only needs shape/dtype information of the
@@ -295,11 +259,11 @@ class DefaultExecutor(base_executor.BaseExecutor):
         )
     )
     logging.info('Model initial global_step=%d', initial_global_step)
-    if not task_p.train.enable_input_checkpointing:
-      train_input = _maybe_init_or_update_latest_model_step(
-          train_input, train_input_p, initial_global_step
+    if checkpointer.step_to_restore is not None:
+      assert checkpointer.step_to_restore == initial_global_step, (
+          f'Checkpoint number {checkpointer.step_to_restore} and restored step'
+          f' number {initial_global_step} mismatch.'
       )
-    assert train_input  # The real train input should be created by now.
 
     # Splits the key.
     prng_key, train_prng_seed, eval_prng_seed = jax.random.split(

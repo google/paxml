@@ -15,7 +15,6 @@
 
 """Training loop for Pax model."""
 
-import abc
 import contextlib
 import datetime
 import re
@@ -145,69 +144,7 @@ def _restore_from_external_checkpoint(
   )
 
 
-class _TrainingCheckpointer(metaclass=abc.ABCMeta):
-  """Adapts particular implementations of checkpointing into a common API."""
-
-  @abc.abstractmethod
-  def save_if_needed(
-      self,
-      step_i,
-      partitioned_train_state,
-      train_state_unpadded_shape_dtype_struct,
-      train_state_pspecs,
-      train_input_pipeline,
-  ):
-    raise NotImplementedError
-
-  @abc.abstractmethod
-  def save_final(
-      self,
-      step_i,
-      *,
-      partitioned_train_state,
-      train_state_unpadded_shape_dtype_struct,
-      train_state_pspecs,
-      train_input_pipeline,
-  ):
-    raise NotImplementedError
-
-  @abc.abstractmethod
-  def get_model_states(
-      self,
-      partitioner: partitioning.Partitioner,
-      metadata: trainer_lib.TrainStateMetadata,
-      root_prng_key: PRNGKey,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
-    """Restores TrainState from checkpoint or initializes it.
-
-    Args:
-      partitioner: The partitioner used to initialized the model states and root
-        prng key.
-      metadata: A TrainStateMetadata instance.
-      root_prng_key: PRNGKey for initializing the model variables.
-      train_input_pipeline: Training input pipeline instance
-
-    Returns:
-      (train_state, total_num_params, initialized_root_prng_key).
-    """
-    raise NotImplementedError
-
-  @property
-  @abc.abstractmethod
-  def checkpoint_type(self) -> CheckpointType:
-    raise NotImplementedError
-
-  def wait_until_finished(self):
-    """Waits for any incomplete save operations to complete."""
-    raise NotImplementedError
-
-  def reached_preemption(self, step: int) -> bool:
-    """Returns True if a preemption sync point has been reached."""
-    raise NotImplementedError
-
-
-class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
+class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
 
   def __init__(
       self,
@@ -232,6 +169,11 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     self._external_checkpoint_path = external_checkpoint_path
     # TODO(b/278628399) Consider providing default implementation.
     self._external_checkpoint_handler = external_checkpoint_handler
+    self._step_to_restore = self.checkpoint_manager.latest_step()
+
+  @property
+  def step_to_restore(self) -> Optional[int]:
+    return self._step_to_restore
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -339,9 +281,8 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
       root_prng_key: PRNGKey,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
-    step = self.checkpoint_manager.latest_step()
     with py_utils.timeit() as restore_period:
-      if step is None:
+      if self._step_to_restore is None:
         if self._external_checkpoint_path is None:
           partitioned_train_state = None
         else:
@@ -355,7 +296,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
           )
       else:
         partitioned_train_state = self._restore_with_args(
-            step,
+            self._step_to_restore,
             metadata.padded_global_shapes,
             metadata.unpadded_global_shapes,
             partitioner.global_mesh,
@@ -368,9 +309,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
 
     root_prng_key, partitioned_train_state, train_state_provenance = (
         partitioner.initialize_prng_key_and_train_state(
-            root_prng_key,
-            partitioned_train_state,
-            self.checkpoint_type,
+            root_prng_key, partitioned_train_state, self.checkpoint_type
         )
     )
 
@@ -387,7 +326,7 @@ class _OrbaxPjitTrainingCheckpointer(_TrainingCheckpointer):
     return self._checkpoint_type
 
 
-class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
+class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
 
   def __init__(
       self,
@@ -411,6 +350,11 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
     self._restore_transformations = restore_transformations
     self._external_checkpoint_path = external_checkpoint_path
     self._external_checkpoint_handler = external_checkpoint_handler
+    self._step_to_restore = self.checkpoint_manager.latest_step()
+
+  @property
+  def step_to_restore(self) -> Optional[int]:
+    return self._step_to_restore
 
   def wait_until_finished(self):
     self.checkpoint_manager.wait_until_finished()
@@ -471,9 +415,8 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
       train_input_pipeline: Optional[base_input.BaseInput] = None,
   ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
-    step = self.checkpoint_manager.latest_step()
     with py_utils.timeit() as restore_period:
-      if step is None:
+      if self._step_to_restore is None:
         if self._external_checkpoint_path is None:
           train_state = None
         else:
@@ -487,7 +430,7 @@ class _OrbaxPmapTrainingCheckpointer(_TrainingCheckpointer):
           )
       else:
         train_state = self._restore_with_args(
-            step,
+            self._step_to_restore,
             train_state_global_shapes,
             metadata.unpadded_global_shapes,
             train_input_pipeline,
@@ -629,7 +572,7 @@ def _create_checkpointer(
     enforce_restore_shape_check: bool = False,
     maybe_use_persistence_checkpointing: bool = False,
     tensorstore_use_ocdbt: bool = False,
-) -> _TrainingCheckpointer:
+) -> checkpoints.TrainingCheckpointer:
   """Creates a checkpoint manager."""
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
   train_p = task_p.train

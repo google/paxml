@@ -773,6 +773,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
+        "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",

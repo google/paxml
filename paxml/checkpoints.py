@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import abc
 from typing import Any, Optional, Sequence, Tuple, cast
 
 from absl import logging
@@ -706,3 +707,72 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
   def structure(self, directory: epath.Path) -> Any:
     """Unimplemented. See parent class."""
     return NotImplementedError
+
+
+class TrainingCheckpointer(metaclass=abc.ABCMeta):
+  """Pax training checkpointer API."""
+
+  @abc.abstractmethod
+  def save_if_needed(
+      self,
+      step_i,
+      partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
+      train_state_pspecs,
+      train_input_pipeline,
+  ):
+    """Saves a new checkpoint at given step if necessary."""
+
+  @abc.abstractmethod
+  def save_final(
+      self,
+      step_i,
+      *,
+      partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct,
+      train_state_pspecs,
+      train_input_pipeline,
+  ):
+    """Saves a new checkpoint at given final step after training finishes."""
+
+  @property
+  @abc.abstractmethod
+  def step_to_restore(self) -> Optional[int]:
+    """Returns the step number of the checkpoint to restore from.
+
+    Returns:
+      The step number, or None which indicates either there is no checkpoint to
+      restore, or it'll restore from an external checkpoint.
+    """
+
+  @abc.abstractmethod
+  def get_model_states(
+      self, partitioner, metadata, root_prng_key, train_input_pipeline
+  ):
+    """Restores TrainState from checkpoint or initializes it.
+
+    Args:
+      partitioner: The partitioner used to initialized the model states and root
+        prng key.
+      metadata: A TrainStateMetadata instance.
+      root_prng_key: PRNGKey for initializing the model variables.
+      train_input_pipeline: Training input pipeline instance
+
+    Returns:
+      (train_state, total_num_params, initialized_root_prng_key).
+    """
+
+  @property
+  @abc.abstractmethod
+  def checkpoint_type(self) -> CheckpointType:
+    """Returns the checkpoint type."""
+
+  @abc.abstractmethod
+  def wait_until_finished(self):
+    """Waits for any incomplete save operations to complete."""
+
+  @abc.abstractmethod
+  def reached_preemption(self, step: int) -> bool:
+    """Returns True if a preemption sync point has been reached."""
+
+
