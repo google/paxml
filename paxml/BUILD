@@ -333,6 +333,7 @@ pytype_strict_library(
         ":train",
         ":trainer_lib",
         ":tuning_lib",
+        # Implicit internal tf.data service dependency.  # BC internal suffix.
         # Implicit internal Jax runtime dependency.  # BC internal suffix.
         # Implicit Jax software support dependency.  # BC internal suffix.
         # Implicit absl.app dependency.
