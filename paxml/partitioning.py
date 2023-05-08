@@ -315,7 +315,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     return None
 
   def preprocess_input_config(
-      self, input_p: base_input.BaseInput.HParams
+      self, input_p: pax_fiddle.Config[base_input.BaseInput]
   ) -> pax_fiddle.Config[base_input.BaseInput]:
     """Preprocess and updates the input config if necessary.
 

@@ -952,7 +952,7 @@ class SingleTaskDecodeProgram(programs.Program):
 
     self._spmd_decode_step = None
     self._inputs_partition_spec = None
-    self._metrics_p: base_metrics.BaseMetrics.HParams = None
+    self._metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics] = None
 
   def setup(
       self,
