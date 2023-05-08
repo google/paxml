@@ -317,12 +317,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
-    # Assert that the descriptor proto is serialized.
-    descriptor_path = (
-        next(checkpoint_manager.directory.glob(f'{CHECKPOINT_PREFIX}*'))
-        / 'descriptor/descriptor.pbtxt'
-    )
-    self.assertTrue(descriptor_path.exists())
+# Internal Orbax infra configuration test
 
     restored = self.restore(
         checkpoint_manager,
