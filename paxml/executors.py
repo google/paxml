@@ -252,19 +252,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
           train_state_provenance, job_log_dir
       )
 
-    # Restore the train input states for deterministic inputs.
-    initial_global_step = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(
-            partitioned_train_state.step
-        )
-    )
-    logging.info('Model initial global_step=%d', initial_global_step)
-    if checkpointer.step_to_restore is not None:
-      assert checkpointer.step_to_restore == initial_global_step, (
-          f'Checkpoint number {checkpointer.step_to_restore} and restored step'
-          f' number {initial_global_step} mismatch.'
-      )
-
     # Splits the key.
     prng_key, train_prng_seed, eval_prng_seed = jax.random.split(
         root_prng_key, 3
@@ -424,16 +411,23 @@ def _train_and_evaluate_common(
   else:
     decode_input_names = []
 
-  logging.info('Training loop starting...')
+  initial_global_step = int(
+      py_utils.maybe_unreplicate_for_fully_replicated(
+          partitioned_train_state.step
+      )
+  )
+  logging.info('Model initial global_step=%d', initial_global_step)
+  if checkpointer.step_to_restore is not None:
+    assert checkpointer.step_to_restore == initial_global_step, (
+        f'Checkpoint number {checkpointer.step_to_restore} and restored step'
+        f' number {initial_global_step} mismatch.'
+    )
 
+  logging.info('Training loop starting...')
   with _DecodeSummaryWriters(
       job_log_dir, decode_input_names
   ) as decode_summary_writers:
-    step_i = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(
-            partitioned_train_state.step
-        )
-    )
+    step_i = initial_global_step
 
     # Sets up the programs.
     train_program.setup(
