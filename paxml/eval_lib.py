@@ -505,11 +505,12 @@ def evaluate(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
+  eval_programs = experiment_config.eval_programs()
   prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
-      eval_input_ps=eval_input_p,
+      eval_programs=eval_programs,
       decode_input_ps=[],
       job_log_dir=job_log_dir,
       eval_key=eval_key,
@@ -541,7 +542,7 @@ class _EvalRunner:
       *,
       jax_task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
-      eval_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+      eval_programs: Sequence[programs.BaseEvalProgram],
       decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       job_log_dir: epath.Path,
       eval_key: PRNGKey,
@@ -549,9 +550,7 @@ class _EvalRunner:
     self._jax_task = jax_task
     self._partitioner = partitioner
     self._job_log_dir = job_log_dir
-    self._eval_programs = [
-        programs.SingleTaskEvalProgram(input_p) for input_p in eval_input_ps
-    ]
+    self._eval_programs = eval_programs
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
 
@@ -741,6 +740,7 @@ def decode(
         checkpointer.restore_checkpoint_dir,
     )
 
+  eval_programs = experiment_config.eval_programs()
   if task_p.model.mesh_shape is not None:
     decode_method = decode_spmd_model
     extra_kwargs = {}
@@ -756,7 +756,7 @@ def decode(
       partitioner,
       checkpointer,
       decoder_inputs,
-      eval_inputs,
+      eval_programs,
       job_log_dir,
       continuous_decode,
       early_stopping_fn,
@@ -789,7 +789,7 @@ def decode_pmap_model(
     checkpointer: _EvalCheckpointer,
     # TODO(wangpeng): Rename to `decode_input_params`
     input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
-    eval_input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+    eval_programs: Sequence[programs.BaseEvalProgram],
     job_log_dir: epath.Path,
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
@@ -804,7 +804,7 @@ def decode_pmap_model(
     partitioner: The partitioner, will be used to partition the step function.
     checkpointer: The model checkpointing method to use.
     input_p: List of input params to be decoded.
-    eval_input_p: List of input params to be evaluated.
+    eval_programs: List of eval programs to run.
     job_log_dir: Directory for the job logs.
     continuous_decode: whether to continuously decode on the latest ckpt.
     early_stopping_fn: An optional callable object for reporting metrics and
@@ -815,9 +815,6 @@ def decode_pmap_model(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   task_p = jax_task.hparams
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
-
   if continuous_decode:
     # Waits until train.decode_start_after_n_steps is reached.
     _wait_until_step(
@@ -831,7 +828,7 @@ def decode_pmap_model(
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
-      eval_input_ps=eval_input_p,
+      eval_programs=eval_programs,
       decode_input_ps=input_p,
       job_log_dir=job_log_dir,
       eval_key=eval_key,
@@ -1646,7 +1643,7 @@ def decode_spmd_model(
     partitioner: partitioning.Partitioner,
     checkpointer: _EvalCheckpointer,
     input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
-    eval_input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+    eval_programs: Sequence[programs.BaseEvalProgram],
     job_log_dir: epath.Path,
     continuous_decode: bool,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
@@ -1659,7 +1656,7 @@ def decode_spmd_model(
     partitioner: The partitioner used to partition the step function.
     checkpointer: The model checkpointing method to use.
     input_p: List of input params to be decoded.
-    eval_input_p: List of input params to be evaluated.
+    eval_programs: List of eval programs to run.
     job_log_dir: Directory for the job logs.
     continuous_decode: whether to continuously decode on the latest ckpt.
     early_stopping_fn: An optional callable object for reporting metrics and
@@ -1668,11 +1665,6 @@ def decode_spmd_model(
       should_stop_early.
   """
   task_p = jax_task.hparams
-
-  # TODO(hthu): Remove eval_input_p as it basically isn't effective.
-  # Either decoder or eval inputs is not empty.
-  assert list(input_p) + list(eval_input_p)
-
   if continuous_decode:
     # Waits until train.decode_start_after_n_steps is reached.
     _wait_until_step(
@@ -1686,7 +1678,7 @@ def decode_spmd_model(
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
-      eval_input_ps=eval_input_p,
+      eval_programs=eval_programs,
       decode_input_ps=input_p,
       job_log_dir=job_log_dir,
       eval_key=eval_key,
