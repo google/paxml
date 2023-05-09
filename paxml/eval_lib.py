@@ -740,7 +740,7 @@ def decode(
         checkpointer.restore_checkpoint_dir,
     )
 
-  eval_programs = experiment_config.eval_programs()
+  eval_programs = experiment_config.eval_programs() if run_eval else []
   if task_p.model.mesh_shape is not None:
     decode_method = decode_spmd_model
     extra_kwargs = {}
