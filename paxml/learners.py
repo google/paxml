@@ -39,7 +39,6 @@ NestedJTensor = base_layer.NestedJTensor
 NestedBool = base_layer.NestedBool
 NestedWeightHParams = base_layer.NestedWeightHParams
 SummaryType = base_layer.SummaryType
-InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 instantiate = base_hyperparams.instantiate
 
 

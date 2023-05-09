@@ -32,7 +32,6 @@ from praxis import base_layer
 from praxis import pax_fiddle
 
 instantiate = base_hyperparams.instantiate
-InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 

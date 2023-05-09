@@ -31,7 +31,6 @@ import pyglove as pg
 
 
 BaseParameterizable = base_hyperparams.BaseParameterizable
-InstantiableHyperParams = base_hyperparams.InstantiableHyperParams
 
 BaseAlgorithm = automl_interfaces.BaseAlgorithm
 BaseEarlyStoppingPolicy = automl_interfaces.BaseEarlyStoppingPolicy
