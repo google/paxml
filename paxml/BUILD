@@ -330,6 +330,7 @@ pytype_strict_library(
         ":experiment_registry",
         ":setup_jax",
         ":tasks_lib",
+        ":tf_data_service_lib",
         ":train",
         ":trainer_lib",
         ":tuning_lib",
@@ -781,6 +782,16 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "tf_data_service_lib",
+    srcs = ["tf_data_service_lib.py"],
+    deps = [
+        # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
