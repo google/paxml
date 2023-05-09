@@ -115,9 +115,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._task: tasks_lib.SingleTask = None
     self._checkpointer: checkpoints.TrainingCheckpointer = None
     self._partitioner: partitioning.Partitioner = None
-    self._decode_input_ps = None
     self._train_program: programs.BaseTrainProgram = None
     self._eval_programs: Sequence[programs.BaseEvalProgram] = None
+    self._decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram] = None
 
     # States to lazily initialize in .setup().
     self._train_input_pipeline = None
@@ -188,7 +188,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._job_log_dir = job_log_dir
     self._checkpointer = checkpointer
     self._partitioner = partitioner
-    self._decode_input_ps = decode_input_ps
     self._train_program = train_program
     self._eval_programs = eval_programs
     self._early_stopping_fn = early_stopping_fn
@@ -269,8 +268,14 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._prng_key = prng_key
     self._train_prng_seed = train_prng_seed
     self._eval_prng_seed = eval_prng_seed
+    self._decode_programs = self._create_decode_programs(decode_input_ps)
 
-  def _create_decode_programs(self, decode_input_params):
+  def _create_decode_programs(self, decode_input_ps):
+    preprocessed_decode_input_ps = [
+        self._partitioner.preprocess_input_config(input_p)
+        for input_p in decode_input_ps
+    ]
+
     # TODO(wangpeng): Make decode programs configurable.
     create_decode_program = functools.partial(
         eval_lib.SingleTaskDecodeProgram,
@@ -279,94 +284,31 @@ class DefaultExecutor(base_executor.BaseExecutor):
     )
     decode_programs = [
         create_decode_program(decode_input=instantiate(p), input_index=i)
-        for i, p in enumerate(decode_input_params)
+        for i, p in enumerate(preprocessed_decode_input_ps)
     ]
     trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
     return decode_programs
 
-  def partition_decode_once_fns(
-      self,
-      prng_key: jax.random.KeyArray,
-      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
-  ) -> Tuple[
-      Callable[..., tuning_lib.DecodeMetrics],
-      jax.random.KeyArray,
-      Sequence[str],
-  ]:
-    use_pmap = self._task.model.ici_mesh_shape is None
-
-    assert decode_input_ps, 'decode_input_p must not be empty'
-
-    prng_key, decode_key = jax.random.split(prng_key, 2)
-    logging.info(
-        'decode %s: %s', 'prng_seed' if use_pmap else 'prng_key', decode_key
-    )
-    decode_key = self._partitioner.preprocess_prng_key(decode_key)
-
-    preprocessed_decode_input_ps = [
-        self._partitioner.preprocess_input_config(input_p)
-        for input_p in decode_input_ps
-    ]
-
-    decode_programs = self._create_decode_programs(preprocessed_decode_input_ps)
-
-    if use_pmap:
-      var_weight_params = (
-          self._partitioner.get_train_state_metadata().var_weight_hparams
-      )
-      spmd_decode_step = None
-      decode_input_partition_spec = None
-    else:
-      var_weight_params = None
-
-      _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-          preprocessed_decode_input_ps[0]
-      )
-
-      # TODO(pax-dev): Support auto-sharding for decoder step.
-      step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
-      assert is_eval
-      spmd_decode_step, decode_input_partition_spec = (
-          self._partitioner.partition(
-              step_fn, decode_inputs_shape_dtype, is_eval
-          )
-      )
-
-    decode_once_fn = eval_lib.partitioned_decode_once(
-        decode_programs=decode_programs,
-        task_p=self._task.hparams,
-        job_log_dir=self._job_log_dir,
-        prng_key=decode_key,
-        use_pmap=use_pmap,
-        var_weight_params=var_weight_params,
-        spmd_decode_step=spmd_decode_step,
-        inputs_partition_spec=decode_input_partition_spec,
-    )
-
-    decode_input_names = [p.decode_input.name for p in decode_programs]
-    return decode_once_fn, prng_key, decode_input_names
-
   def start(self):
     is_vars_replicated = self._task.model.ici_mesh_shape is None
     _train_and_evaluate_common(
-        self._task,
-        self._partitioner,
-        self._train_program,
-        self._train_input_pipeline,
-        self._partitioned_train_state,
-        self._train_state_provenance,
-        self._prng_key,
-        self._eval_programs,
-        self._decode_input_ps,
-        self._total_num_params,
-        self._early_stopping_fn,
-        self._checkpointer,
-        self.partition_decode_once_fns,
-        self._job_log_dir,
-        self._eval_prng_seed,
-        is_vars_replicated,
-        self._train_prng_seed,
-        self._exit_after_ondemand_checkpoint,
+        task=self._task,
+        partitioner=self._partitioner,
+        train_program=self._train_program,
+        train_input=self._train_input_pipeline,
+        partitioned_train_state=self._partitioned_train_state,
+        train_state_provenance=self._train_state_provenance,
+        prng_key=self._prng_key,
+        eval_programs=self._eval_programs,
+        decode_programs=self._decode_programs,
+        total_num_params=self._total_num_params,
+        early_stopping_fn=self._early_stopping_fn,
+        checkpointer=self._checkpointer,
+        job_log_dir=self._job_log_dir,
+        eval_prng_seed=self._eval_prng_seed,
+        exit_after_ondemand_checkpoint=self._exit_after_ondemand_checkpoint,
+        is_vars_replicated=is_vars_replicated,
+        train_prng_seed=self._train_prng_seed,
     )
 
     # Shutdown the programs and run necessary cleanup.
@@ -375,7 +317,81 @@ class DefaultExecutor(base_executor.BaseExecutor):
       program.shutdown()
 
 
+def _get_partition_decode_once_fn(
+    *,
+    decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram],
+    prng_key: jax.random.KeyArray,
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    job_log_dir: epath.Path,
+    use_pmap: bool,
+    train_state_preprocessor: Optional[
+        Callable[[TrainState], TrainState]
+    ] = None,
+) -> Tuple[
+    Callable[..., tuning_lib.DecodeMetrics],
+    jax.random.KeyArray,
+    Sequence[str],
+]:
+  """Returns a decode function, a new PRNG key and decode input names.
+
+  Args:
+    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
+    prng_key: The prng key used for decoding.
+    task_p: Params for the task encapsulating a data parallel model.
+    job_log_dir: Directory for the job logs.
+    use_pmap: Whether to use pmap (instead of SPMD/pjit).
+    train_state_preprocessor: A function to preprocess the train state before
+      decoding.
+  """
+  assert decode_programs, '`decode_programs` must not be empty'
+  partitioner = decode_programs[0].partitioner
+
+  prng_key, decode_key = jax.random.split(prng_key, 2)
+  logging.info(
+      'decode %s: %s', 'prng_seed' if use_pmap else 'prng_key', decode_key
+  )
+  decode_key = partitioner.preprocess_prng_key(decode_key)
+
+  if use_pmap:
+    var_weight_params = (
+        partitioner.get_train_state_metadata().var_weight_hparams
+    )
+    spmd_decode_step = None
+    decode_input_partition_spec = None
+  else:
+    var_weight_params = None
+
+    # TODO(wangpeng): Store `input_p` in SingleTaskDecodeProgram to avoid using
+    # `hparams` here.
+    _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
+        decode_programs[0].decode_input.hparams.clone()
+    )
+
+    # TODO(pax-dev): Support auto-sharding for decoder step.
+    step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
+    assert is_eval
+    spmd_decode_step, decode_input_partition_spec = partitioner.partition(
+        step_fn, decode_inputs_shape_dtype, is_eval
+    )
+
+  decode_once_fn = eval_lib.partitioned_decode_once(
+      decode_programs=decode_programs,
+      task_p=task_p,
+      job_log_dir=job_log_dir,
+      prng_key=decode_key,
+      use_pmap=use_pmap,
+      var_weight_params=var_weight_params,
+      spmd_decode_step=spmd_decode_step,
+      inputs_partition_spec=decode_input_partition_spec,
+      train_state_preprocessor=train_state_preprocessor,
+  )
+
+  decode_input_names = [p.decode_input.name for p in decode_programs]
+  return decode_once_fn, prng_key, decode_input_names
+
+
 def _train_and_evaluate_common(
+    *,
     task: tasks_lib.SingleTask,
     partitioner: partitioning.Partitioner,
     train_program: programs.BaseTrainProgram,
@@ -385,16 +401,19 @@ def _train_and_evaluate_common(
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
     eval_programs: Sequence[programs.BaseEvalProgram],
-    decode_input_p,
+    decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram],
     total_num_params,
     early_stopping_fn,
     checkpointer,
-    partition_decode_once_fns,
     job_log_dir,
     eval_prng_seed,
+    # TODO(wangpeng): Rename to `use_pmap`.
     is_vars_replicated,
     train_prng_seed,
     exit_after_ondemand_checkpoint,
+    decode_state_preprocessor: Optional[
+        Callable[[TrainState], TrainState]
+    ] = None,
 ):
   """Training loop code common to both pmap and spmd."""
   task_p = task.hparams
@@ -404,9 +423,16 @@ def _train_and_evaluate_common(
       train_input if train_p.enable_input_checkpointing else None
   )
 
-  if decode_input_p:
-    decode_once_fn, prng_key, decode_input_names = partition_decode_once_fns(
-        prng_key, decode_input_p
+  if decode_programs:
+    decode_once_fn, prng_key, decode_input_names = (
+        _get_partition_decode_once_fn(
+            decode_programs=decode_programs,
+            prng_key=prng_key,
+            task_p=task_p,
+            job_log_dir=job_log_dir,
+            use_pmap=is_vars_replicated,
+            train_state_preprocessor=decode_state_preprocessor,
+        )
     )
   else:
     decode_input_names = []
@@ -538,7 +564,7 @@ def _train_and_evaluate_common(
 
       decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
       if (
-          decode_input_p
+          decode_programs
           and train_p.decode_interval_steps
           and step_i % train_p.decode_interval_steps == 0
       ):

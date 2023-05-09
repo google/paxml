@@ -1018,10 +1018,17 @@ class SingleTaskDecodeProgram(programs.Program):
 
   @property
   def model(self):
+    assert self._model is not None
     return self._model
 
   @property
+  def partitioner(self):
+    assert self._partitioner is not None
+    return self._partitioner
+
+  @property
   def decode_input(self):
+    assert self._input is not None
     return self._input
 
   def _find_and_maybe_update_tracked_metric(
@@ -1372,7 +1379,7 @@ class SingleTaskDecodeProgram(programs.Program):
 
 def partitioned_decode_once(
     *,
-    decode_programs: List[SingleTaskDecodeProgram],
+    decode_programs: Sequence[SingleTaskDecodeProgram],
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     prng_key: JTensor,
     job_log_dir: epath.Path,
@@ -1388,6 +1395,9 @@ def partitioned_decode_once(
         ]
     ] = None,
     inputs_partition_spec: Optional[NestedPartitionSpec] = None,
+    train_state_preprocessor: Optional[
+        Callable[[TrainState], TrainState]
+    ] = None,
 ) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
   """Returns a function that runs decode over all decoder datasets.
 
@@ -1396,7 +1406,7 @@ def partitioned_decode_once(
     task_p: Params for the task encapsulating a data parallel model.
     prng_key: The prng key used for decoding.
     job_log_dir: Directory for the job logs.
-    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+    use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
       `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
       be set; otherwise, `spmd_decode_step`, `inputs_partition_spec` and
       `metrics_p` should be set.
@@ -1405,9 +1415,17 @@ def partitioned_decode_once(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     spmd_decode_step: pjit'ed decode function.
     inputs_partition_spec: Partition specs for inputs.
+    train_state_preprocessor: A function to preprocess the train state before
+      decoding.
   """
-
-  def decode_once_fn(partitioned_train_state, summary_writers):
+  def decode_once_fn(
+      partitioned_train_state: TrainState,
+      summary_writers: List[SummaryWriter],
+  ) -> tuning_lib.DecodeMetrics:
+    if train_state_preprocessor is not None:
+      partitioned_train_state = train_state_preprocessor(
+          partitioned_train_state
+      )
     with py_utils.timeit() as decode_period:
       if not use_pmap and task_p.track_decoder_metric:
         logging.warn(
@@ -1449,7 +1467,7 @@ def partitioned_decode_once(
 
 def _decode_once(
     *,
-    decode_programs: List[SingleTaskDecodeProgram],
+    decode_programs: Sequence[SingleTaskDecodeProgram],
     prng_key: JTensor,
     job_log_dir: epath.Path,
     train_state: TrainState,
@@ -1484,7 +1502,7 @@ def _decode_once(
     job_log_dir: Directory for the job logs.
     train_state: A `TrainState` object.
     summary_writers: The summary writer objects to log summaries.
-    use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
+    use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
       `task_p`, `var_weight_params`, `output_pickle` and
       `enable_checkpoint_saving` should be set; otherwise, `spmd_decode_step`,
       `inputs_partition_spec` and `metrics_p` should be set.
