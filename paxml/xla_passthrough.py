@@ -79,17 +79,15 @@ def split_out_xla_unsupported_batch(batch, partitioning_spec=None):
   # Similarly for the multi-host case, which is not supported yet: return out
   # the original batch object without modifying it.
   if jax.process_count() > 1 and unsupported_batch:
-    # TODO(b/279795947): Consider making this a hard error once people have had
-    # some time to adjust as needed.
-    logging.warn(
+    # TODO(b/279795947): Support xla passthrough for multihost eval.
+    raise NotImplementedError(
         (
             'Unsupported inputs (with keys %s) were detected, but running with'
             ' more than one host. Forwarding these keys is currently not'
             ' supported (but may be supported in the future).'
-        ),
-        unsupported_batch.keys(),
+        )
+        % unsupported_batch.keys(),
     )
-    return batch, {}, partitioning_spec
 
   batch = {k: v for k, v in batch.items() if k not in unsupported_batch}
   if partitioning_spec is not None:
