@@ -58,7 +58,7 @@ def _maybe_update_latest_model_step(
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     # Not deterministic seqio.
     return
-  logging.info('step used for deterministic seqio: %d', initial_global_step)
+  logging.info(f'step used for deterministic seqio: {initial_global_step}')
   if initial_global_step is None:
     if task_p.train.external_checkpoint_path:
       logging.warning(
