@@ -412,7 +412,7 @@ class Partitioner(metaclass=abc.ABCMeta):
   @property
   def _init_do_eval(self):
     """Whether to set do_eval=True when running abstract_init_with_metadata."""
-    if self._jax_task.hparams.train.always_use_train_for_model_init:
+    if self._jax_task.train.always_use_train_for_model_init:
       return False
     return self._init_is_eval
 
@@ -631,7 +631,7 @@ class PmapPartitioner(Partitioner):
           state,
           prng_key,
           inputs,
-          self._jax_task.hparams.model.fprop_dtype,
+          self._jax_task.model.fprop_dtype,
           train_state_metadata.var_weight_hparams,
       )
 
@@ -949,7 +949,7 @@ class PjitPartitioner(Partitioner):
       self, metadata: TrainStateMetadata, unpadded_state: TrainState
   ):
     """Pad variables to avoid uneven sharding."""
-    model_p = self._jax_task.hparams.model
+    model_p = self._jax_task.model
 
     # Here the metadata is derived from input_spec which includes all possible
     # inputs. Thus metadata includes the full TrainState. The unpadded_state
@@ -1370,7 +1370,7 @@ def create_partitioner(
   Returns:
     A Partitioner instance.
   """
-  if jax_task.hparams.model.ici_mesh_shape is None:
+  if jax_task.model.ici_mesh_shape is None:
     partitioner = PmapPartitioner(init_is_eval)
   else:
     auto_sharding_info = None

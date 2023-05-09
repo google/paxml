@@ -219,7 +219,7 @@ class BaseTrainProgram(Program):
     self._train_summary_writer = self._exitstack.enter_context(
         summary_utils.get_summary_writer(summary_train_dir)
     )
-    train_p = self._task.hparams.train
+    train_p = self._task.train
     self._train_summary_handler = summary_utils.SummaryHandler(
         self._train_summary_writer,
         train_p.summary_interval_steps,
@@ -244,7 +244,7 @@ class BaseTrainProgram(Program):
 
     # Initializes other states.
     self._train_unpadded_global_batch_size = (
-        train_input.hparams.cls.get_global_batch_size(train_input.hparams)
+        train_input.get_global_batch_size(train_input.hparams)
     )
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
@@ -256,12 +256,12 @@ class BaseTrainProgram(Program):
     self._pending_train_losses = _InflightQueue(train_p.max_inflight_steps)
 
   def should_run(self, state: TrainState, step: int) -> bool:
-    return step < self._task.hparams.train.num_train_steps
+    return step < self._task.train.num_train_steps
 
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
   def run(self, state: TrainState, step: int) -> ProgramOutput:
-    train_p = self._task.hparams.train
+    train_p = self._task.train
     logging.debug('  Retrieving inputs.')
     model_inputs = self._train_input.get_next_padded()
     if train_p.enforce_input_specs and step == self._initial_step:
@@ -391,7 +391,7 @@ class BaseTrainProgram(Program):
     new_step = step + 1
     steps_per_sec = None
 
-    train_p = self._task.hparams.train
+    train_p = self._task.train
     if train_p.device_sync_interval_steps:
       should_sync_device = (
           new_step % train_p.device_sync_interval_steps
@@ -459,7 +459,7 @@ class BaseTrainProgram(Program):
     return steps_per_sec
 
   def _maybe_run_eval_train(self, new_state: TrainState, new_step: int):
-    train_p = self._task.hparams.train
+    train_p = self._task.train
     eval_train_metrics = None
 
     if train_p.eval_skip_train:

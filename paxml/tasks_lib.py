@@ -117,7 +117,7 @@ def is_vectorized(states: TrainState) -> bool:
   return NO_PREFIX_KEY in states.opt_states[0]
 
 
-def has_ema(task_p: SingleTask.HParams) -> bool:
+def has_ema(task_p: pax_fiddle.Config[SingleTask]) -> bool:
   """Determines whether ema is used or not."""
   return task_p.train.learner.optimizer.ema_decay > 0.0
 
@@ -744,18 +744,18 @@ def get_excluded_var_mask_for_grad_or_opt(
     mask_all_non_trainable: bool,
 ) -> NestedMap:
   """Returns whether each var should be excluded for grad/optimizer."""
-  if learner.hparams.keep_optimizer_state_for_excluded_vars:
+  if learner.keep_optimizer_state_for_excluded_vars:
     return jax.tree_map(lambda _: False, var_weight_hparams)
   # Skip variables for gradients.
-  if learner.hparams.bprop_variable_inclusion:
-    assert not learner.hparams.bprop_variable_exclusion
+  if learner.bprop_variable_inclusion:
+    assert not learner.bprop_variable_exclusion
     excluded_for_grad = py_utils.match_variable_names(
-        var_weight_hparams, learner.hparams.bprop_variable_inclusion
+        var_weight_hparams, learner.bprop_variable_inclusion
     )
     excluded_for_grad = jax.tree_map(lambda x: not x, excluded_for_grad)
   else:
     excluded_for_grad = py_utils.match_variable_names(
-        var_weight_hparams, learner.hparams.bprop_variable_exclusion
+        var_weight_hparams, learner.bprop_variable_exclusion
     )
   if mask_all_non_trainable:
     excluded_for_grad = jax.tree_util.tree_map(
@@ -772,7 +772,7 @@ def get_excluded_var_mask_for_opt(
 ) -> NestedMap:
   """Returns whether each var should be excluded for optimizer."""
   return get_excluded_var_mask_for_grad_or_opt(
-      var_weight_hparams, learner, learner.optimizer.hparams.ema_decay == 0.0
+      var_weight_hparams, learner, learner.optimizer.ema_decay == 0.0
   )
 
 
@@ -1394,8 +1394,8 @@ class SingleTask(base_task.BaseTask):
 
   @property
   def has_ema_decay(self):
-    return bool(self.learners[0].hparams.optimizer and
-                self.learners[0].hparams.optimizer.ema_decay > 0)
+    return bool(self.learners[0].optimizer and
+                self.learners[0].optimizer.ema_decay > 0)
 
   @property
   def inference_runner(self) -> BaseInferenceRunner:
@@ -1647,9 +1647,9 @@ class SingleTask(base_task.BaseTask):
         CheckpointType.PERSISTENCE,
     }
     if uses_gda:
-      rules.task_p.model.ici_mesh_shape = self.model.hparams.ici_mesh_shape
-      rules.task_p.model.dcn_mesh_shape = self.model.hparams.dcn_mesh_shape
-      rules.task_p.model.mesh_axis_names = self.model.hparams.mesh_axis_names
+      rules.task_p.model.ici_mesh_shape = self.model.ici_mesh_shape
+      rules.task_p.model.dcn_mesh_shape = self.model.dcn_mesh_shape
+      rules.task_p.model.mesh_axis_names = self.model.mesh_axis_names
     ckpt_task = typing.cast(SingleTask, instantiate(rules.task_p))
     is_step_loaded, is_var_initialized, is_opt_states_initialized = load_status
     model_vars = train_state.mdl_vars
@@ -1715,7 +1715,7 @@ class SingleTask(base_task.BaseTask):
       )
 
     if (py_utils.pmap_use_tensorstore() and
-        ckpt_task.model.hparams.ici_mesh_shape is None):
+        ckpt_task.model.ici_mesh_shape is None):
       assert checkpoint_type in {
           CheckpointType.GDA,
           CheckpointType.GDA_VERSION_SUBDIR,
