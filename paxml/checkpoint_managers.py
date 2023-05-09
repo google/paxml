@@ -15,9 +15,7 @@
 
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
-import concurrent
 import dataclasses
-import functools
 import typing
 from typing import Any, Mapping, Optional, Sequence, Union
 
@@ -31,7 +29,6 @@ from paxml import checkpoint_paths
 from paxml import checkpoint_types
 from paxml import checkpoint_version
 from praxis import base_input
-from praxis import py_utils
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
@@ -133,11 +130,14 @@ class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
       consuming. By default, delete the checkpoint assets. TODO(b/278901950):
       Remove this option when it is available in Orbax OSS.
     cleanup_tmp_directories: if True, cleans up any existing temporary
-      directories on CheckpointManager creation.
+      directories on CheckpointManager creation. Set to False by default and
+      overridden in select places (like train.py). Otherwise, the
+      CheckpointManager is typically a one-off and does not need to concern
+      itself with much directory management.
   """
 
   todelete_subdir: Optional[str] = None
-  cleanup_tmp_directories: bool = True
+  cleanup_tmp_directories: bool = False
 
 
 class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):

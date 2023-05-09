@@ -35,8 +35,8 @@ import numpy as np
 import optax
 import orbax.checkpoint
 from paxml import checkpoint_managers
-from paxml import checkpoint_types
 from paxml import checkpoint_paths
+from paxml import checkpoint_types
 from paxml import checkpoints
 from paxml import train_states
 from praxis import base_input
@@ -713,7 +713,8 @@ class CheckpointManagerTest(parameterized.TestCase):
       pass  # Do nothing to simulate failure of finalization.
 
     options = checkpoint_managers.CheckpointManagerOptions(
-        save_interval_steps=1
+        save_interval_steps=1,
+        cleanup_tmp_directories=True,
     )
 
     with mock.patch.object(
