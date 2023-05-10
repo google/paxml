@@ -199,6 +199,15 @@ def restore_checkpoint(
     ValueError: When a mismatch between the current checkpoint structure and
     the saved checkpoint one is detected.
   """
+  # This can happen if you forget to destructure the (state, provenance) tuple
+  # which some APIs now return. Not having this error results in a failed
+  # restore with uninformative error messages.
+  if not issubclass(type(state_global_shapes), train_states.TrainState):
+    raise ValueError(
+        'state_global_shapes must be a subclass of'
+        f' `{train_states.TrainState}`, but was'
+        f' `{type(state_global_shapes)}`.'
+    )
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
     return None

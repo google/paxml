@@ -21,6 +21,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from etils import epath
 import flax
+from flax import linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -66,6 +67,31 @@ class CheckpointsTest(parameterized.TestCase):
       self.assertFalse(orbax_utils.is_tmp_checkpoint(item_dir))
       tmp_item_dir = orbax_utils.create_tmp_directory(item_dir)
       self.assertTrue(orbax_utils.is_tmp_checkpoint(tmp_item_dir))
+
+  def test_train_state_type_check(self):
+    class Model(nn.Module):
+
+      @nn.compact
+      def __call__(self, x: jax.Array) -> jax.Array:
+        return nn.linear.Dense(128)(x)
+
+    m = Model()
+
+    model_vars = m.init(jax.random.PRNGKey(0), jnp.zeros([4, 256]))
+    optimizer = optax.sgd(0.1)
+    opt_params = optimizer.init(model_vars['params'])
+    train_state = train_states.TrainState(
+        jnp.asarray([0], jnp.int64), model_vars, opt_params
+    )
+    # Save the "checkpoint".
+    tmp_dir = self.create_tempdir('test_train_state_type_check_checkpoint')
+    checkpoints.save_checkpoint(train_state, tmp_dir, overwrite=True)
+    # This is the correct usage.
+    checkpoints.restore_checkpoint(train_state, tmp_dir)
+    # This is what happens if you forget to destructure the (state,
+    # provenance) tuple that some PAX APIs return. This should fail.
+    with self.assertRaisesRegex(ValueError, 'must be a subclass of') as _:
+      checkpoints.restore_checkpoint((train_state, []), tmp_dir)  # type: ignore
 
   @parameterized.parameters(
       ('foobar123', False),
