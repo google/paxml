@@ -924,6 +924,27 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         ['inputs', 'targets'],
     )
 
+  def test_get_eval_hparams_for_seqio_with_task_object(self):
+    self._setup_seqio_test_registry()
+    mixture = seqio.get_mixture_or_task('test_mixture')
+    batch_size = 32
+    feature_lengths = {'inputs': 1024, 'targets': 256}
+    seed = 123
+    predict_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture, batch_size, feature_lengths, seed,
+        seqio_input.MetricType.PREDICT)
+    score_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture, batch_size, feature_lengths, seed,
+        seqio_input.MetricType.SCORE)
+    self.assertListEqual([p.name for p in predict_hparams], [
+        'pred_and_score_task',
+        'pred_task',
+    ])
+    self.assertListEqual([p.name for p in score_hparams], [
+        'pred_and_score_task',
+        'score_task',
+    ])
+
   def test_repeat_on_full_eval_fails(self):
     self._setup_seqio_test_registry()
     p = pax_fiddle.Config(

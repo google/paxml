@@ -1786,7 +1786,7 @@ class MetricType(enum.Enum):
 
 
 def get_eval_hparams_for_seqio(
-    task_or_mixture_name: str,
+    task_or_mixture_name: Union[str, seqio.Task, seqio.Mixture],
     batch_size: int,
     feature_lengths: Mapping[str, int],
     seed: int,
@@ -1819,7 +1819,7 @@ def get_eval_hparams_for_seqio(
   >>>       mixture_name, batch_size, feature_lengths, MetricType.PREDICT, seed)
 
   Args:
-    task_or_mixture_name: SeqIO Task/Mixture name to run eval on.
+    task_or_mixture_name: SeqIO Task/Mixture instance or name to run eval on.
     batch_size: The global eval batch size.
     feature_lengths: A dict of feature lenghs to trim sequences to, e.g.
       {'inputs': 1024, 'targets': 256}
@@ -1848,6 +1848,15 @@ def get_eval_hparams_for_seqio(
     in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
     have splits specified, this can cause file operations.
   """
+  if isinstance(task_or_mixture_name, (seqio.Task, seqio.Mixture)):
+    task_or_mixture = task_or_mixture_name
+    task_or_mixture_name = task_or_mixture.name
+  elif isinstance(task_or_mixture_name, str):
+    task_or_mixture = seqio.get_mixture_or_task(task_or_mixture_name)
+  else:
+    raise TypeError('Expected `task_or_mixture_name` to be a string, a Task, '
+                    f'or a Mixture; got {task_or_mixture_name!r}')
+
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
     feature_converter = LanguageModelFeatures(
@@ -1855,7 +1864,7 @@ def get_eval_hparams_for_seqio(
   p = pax_fiddle.Config(
       SeqIOInput,
       name=task_or_mixture_name,
-      mixture_name=task_or_mixture_name,
+      mixture_or_task=task_or_mixture,
       feature_converter=feature_converter,
       is_training=False,
       eval_loop_num_batches=None,
@@ -1885,13 +1894,14 @@ def get_eval_hparams_for_seqio(
     raise ValueError(f'unsupported metric type: {metric_type}')
 
   # Split hparams per tasks and filter by metric type.
-  tasks: Sequence[seqio.Task] = seqio.get_subtasks(
-      seqio.get_mixture_or_task(task_or_mixture_name))
+  tasks: Sequence[seqio.Task] = seqio.get_subtasks(task_or_mixture)
   hparams = []
   for task in tasks:
-    hp = p.clone().set(mixture_name=task.name, name=task.name,
-                       use_enumeration=use_enumeration,
-                       use_cached=use_cached)
+    hp = p.clone().set(
+        mixture_or_task=task,
+        name=task.name,
+        use_enumeration=use_enumeration,
+        use_cached=use_cached)
     # Allow selecting split based on `Callable` `split_name` if mixture contains
     # tasks with varying splits.
     hp.split_name = select_split(task.name, split_name)
