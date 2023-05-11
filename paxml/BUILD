@@ -1053,6 +1053,17 @@ py_strict_test(
     ],
 )
 
+py_strict_test(
+    name = "main_test",
+    srcs = ["main_test.py"],
+    deps = [
+        ":base_experiment",
+        ":experiment_registry",
+        ":main_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+    ],
+)
+
 pytype_strict_test(
     name = "parameterized_experiment_test",
     srcs = ["parameterized_experiment_test.py"],

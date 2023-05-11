@@ -23,6 +23,7 @@ python paxml/main.py \
 
 import importlib
 import os
+import pprint
 import random
 import re
 import time
@@ -65,7 +66,8 @@ epath.DEFINE_path(
     'job_log_dir',
     None,
     'Directory where all experiment assets will be stored.',
-    required=True)
+    # Marked as required in __main__ below
+)
 flags.DEFINE_enum(
     'mode',
     'train',
@@ -224,12 +226,18 @@ def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   try:
     importlib.import_module(module_name)
   except ModuleNotFoundError as e:
-    raise ValueError(f'Could not find experiment `{experiment_name}`.') from e
+    raise ValueError(
+        f'Could not find experiment `{experiment_name}` because could not '
+        f'import module `{module_name}`.'
+    ) from e
   # Google-internal experiment module import cleanup
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is not None:
     return experiment_class
-  raise ValueError(f'Could not find experiment `{experiment_name}`.')
+  raise ValueError(
+      f'Could not find experiment `{experiment_name}`.\nRegistered experiments '
+      f'are: {pprint.pformat(experiment_registry.get_all())}'
+  )
 
 
 def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
