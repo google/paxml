@@ -550,6 +550,9 @@ def _train_and_evaluate_common(
                     job_log_dir,
                 )
             )
+          jax.monitoring.record_event_duration_secs(
+              '/jax/pax/train/interleaved_eval_duration_sec',
+              eval_period.elapsed)
           eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
           eval_metrics = tuning_lib.EvalMetrics(
               metrics_list=eval_metrics_list,
@@ -568,21 +571,25 @@ def _train_and_evaluate_common(
           and train_p.decode_interval_steps
           and step_i % train_p.decode_interval_steps == 0
       ):
-        if train_p.decode_use_ema_states:
-          if not tasks_lib.has_ema(task_p):
-            raise ValueError(
-                'decode_use_ema_states is requested but the '
-                'learner does not seem to have ema enabled'
+        with py_utils.timeit() as decode_period:
+          if train_p.decode_use_ema_states:
+            if not tasks_lib.has_ema(task_p):
+              raise ValueError(
+                  'decode_use_ema_states is requested but the '
+                  'learner does not seem to have ema enabled'
+              )
+            decode_partitioned_train_state = tasks_lib.extract_ema(
+                partitioned_train_state
             )
-          decode_partitioned_train_state = tasks_lib.extract_ema(
-              partitioned_train_state
+            logging.debug('  Performing decode_once_fn() with ema states.')
+          else:
+            decode_partitioned_train_state = partitioned_train_state
+          decode_metrics = decode_once_fn(
+              decode_partitioned_train_state, decode_summary_writers
           )
-          logging.debug('  Performing decode_once_fn() with ema states.')
-        else:
-          decode_partitioned_train_state = partitioned_train_state
-        decode_metrics = decode_once_fn(
-            decode_partitioned_train_state, decode_summary_writers
-        )
+        jax.monitoring.record_event_duration_secs(
+            '/jax/pax/train/interleaved_decode_duration_sec',
+            decode_period.elapsed)
 
       logging.debug('step=`%d`: End', step_i - 1)
 

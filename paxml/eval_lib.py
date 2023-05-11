@@ -94,11 +94,15 @@ def _wait_until_step(checkpointer, start_step):
   if not start_step:
     return
 
-  while True:
-    cur_step = checkpointer.retrieve_latest_checkpoint_step()
-    if cur_step is not None and start_step <= cur_step:
-      break
-    time.sleep(300)
+  with py_utils.timeit() as wait_period:
+    while True:
+      cur_step = checkpointer.retrieve_latest_checkpoint_step()
+      if cur_step is not None and start_step <= cur_step:
+        break
+      time.sleep(300)
+  jax.monitoring.record_event_duration_secs(
+      '/jax/pax/eval_or_decode/wait_duration_sec', wait_period.elapsed
+  )
 
 
 def _get_train_input_specs(
@@ -152,10 +156,14 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
 
   def wait_for_new_step(self, last_checkpoint_step: int) -> int:
     new_checkpoint_step = self.retrieve_latest_checkpoint_step()
-    while new_checkpoint_step == last_checkpoint_step:
-      logging.info('Sleep before checking for new latest checkpoint.')
-      time.sleep(60)
-      new_checkpoint_step = self.retrieve_latest_checkpoint_step()
+    with py_utils.timeit() as wait_period:
+      while new_checkpoint_step == last_checkpoint_step:
+        logging.info('Sleep before checking for new latest checkpoint.')
+        time.sleep(60)
+        new_checkpoint_step = self.retrieve_latest_checkpoint_step()
+    jax.monitoring.record_event_duration_secs(
+        '/jax/pax/eval_or_decode/wait_duration_sec', wait_period.elapsed
+    )
     # There must be a new checkpoint here.
     assert new_checkpoint_step is not None
     logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
@@ -607,6 +615,9 @@ class _EvalRunner:
               self._job_log_dir,
           )
       )
+    jax.monitoring.record_event_duration_secs(
+      '/jax/pax/eval/duration_sec', eval_period.elapsed
+    )
     return tuning_lib.EvalMetrics(
         metrics_list=eval_metrics_list,
         scoring_metrics_list=eval_scoring_metrics_list,
@@ -1453,6 +1464,9 @@ def partitioned_decode_once(
           inputs_partition_spec=inputs_partition_spec,
           metrics_p=task_p.metrics,
       )
+    jax.monitoring.record_event_duration_secs(
+      '/jax/pax/decode/duration_sec', decode_period.elapsed
+    )
     decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
     return tuning_lib.DecodeMetrics(
         metrics_list=decode_metrics_list,

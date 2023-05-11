@@ -321,6 +321,9 @@ class BaseTrainProgram(Program):
             self._train_unpadded_global_batch_size,
         )
       del state  # Unused anymore.
+    jax.monitoring.record_event_duration_secs(
+        '/jax/pax/train/duration_sec', train_period.elapsed
+    )
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
