@@ -123,7 +123,7 @@ class Program(metaclass=abc.ABCMeta):
 
   @abc.abstractmethod
   def run(self, state: TrainState, step: int) -> ProgramOutput:
-    """Runs the program on given state and train step `step`."""
+    """Runs the program on given `state` and train step `step`."""
 
   @abc.abstractmethod
   def shutdown(self) -> None:
@@ -231,7 +231,7 @@ class BaseTrainProgram(Program):
         train_p.summary_interval_steps,
         accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
         log_interval_steps=_train_log_interval_steps(train_p),
-        is_async=bool(train_p.device_sync_interval_steps),
+        is_async=train_p.async_summary_writing,
         name='training',
     )
 
@@ -307,12 +307,14 @@ class BaseTrainProgram(Program):
     with jax.profiler.StepTraceAnnotation('train', step_num=step):
       with py_utils.timeit() as train_period:
         (
+            new_step,
             new_state,
             loss,
             weighted_scalars,
             per_example_out,
             summary_tensors,
         ) = self.train_step(
+            step,
             state,
             self._train_prng_seed,
             model_inputs,
@@ -329,9 +331,9 @@ class BaseTrainProgram(Program):
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
 
-    new_step, steps_per_sec = self._maybe_write_summaries(
-        new_state,
+    steps_per_sec = self._maybe_write_summaries(
         step,
+        new_step,
         loss,
         weighted_scalars,
         summary_tensors,
@@ -363,12 +365,36 @@ class BaseTrainProgram(Program):
   @abc.abstractmethod
   def train_step(
       self,
+      step: int,
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
-    """The train step function."""
+  ) -> Tuple[int, TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
+    """The train step function.
+
+    Args:
+      step: The current train step counter.
+      state: The current train state.
+      prng_key: The PRNG key for this train step.
+      inputs: The data input for this train step.
+      unpadded_global_batch_size: The unpadded global batch size of the train
+        input.
+
+    Returns:
+      A tuple (new_step, new_state, loss, weighted_scalars, per_example_out,
+      summary_tensors), where:
+
+      - new_step: The updated train step counter. Usually this should be step+1.
+      - new_state: The updated train state.
+      - loss: The loss as computed by model.fprop.
+      - weighted_scalars: A dict of (value, weight) pairs representing simple
+        weighted average metrics or losses.
+      - per_example_out: Auxilillary per-example output as computed in
+        model.fprop.
+      - summary_tensors: A dict or nested map of summary tensors computed in
+        forward as well as backward.
+    """
 
   @abc.abstractmethod
   def eval_train_step(
@@ -388,27 +414,22 @@ class BaseTrainProgram(Program):
 
   def _maybe_write_summaries(
       self,
-      new_state: TrainState,
       step: int,
+      new_step: int,
       loss,
       weighted_scalars,
       summary_tensors,
       per_example_out,
   ):
-    new_step = step + 1
-    steps_per_sec = None
+    # Compute steps/sec every this many steps, revisit when necessary.
+    compute_steps_per_sec_interval_steps = 10
 
-    train_p = self._task.train
-    if train_p.device_sync_interval_steps:
-      should_sync_device = (
-          new_step % train_p.device_sync_interval_steps
-      ) == 0
-    else:
-      should_sync_device = self._train_summary_handler.should_write(
-          new_step
-      )
-    if should_sync_device:
-      new_step, steps_per_sec = self._sync_device(new_state, step)
+    steps_per_sec = None
+    should_compute_steps_per_sec = (
+        new_step % compute_steps_per_sec_interval_steps == 0
+    )
+    if should_compute_steps_per_sec:
+      steps_per_sec = self._compute_steps_per_sec(step)
 
     # Note: Train metrics are currently reported at step + 1, while these
     # training metrics/summaries are pre-model weight updates.
@@ -422,16 +443,10 @@ class BaseTrainProgram(Program):
         steps_per_sec=steps_per_sec,
     )
     logging.debug('  Wrote summaries (attempted).')
+    return steps_per_sec
 
-    return new_step, steps_per_sec
-
-  def _sync_device(self, new_state: TrainState, step: int):
-    # Synchronize step. This is performed at a fixed interval to avoid
-    # a gap between steps.
-    new_step = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(new_state.step)
-    )
-    steps_per_sec = self._compute_steps_per_sec(
+  def _compute_steps_per_sec(self, step: int):
+    steps_per_sec = self._steps_per_sec(
         step, self._train_summary_last_time, self._train_summary_last_step
     )
     logging.info('steps/sec: %f', steps_per_sec)
@@ -451,11 +466,9 @@ class BaseTrainProgram(Program):
           '/jax/pax/init/time_before_first_step_secs', init_duration
       )
       self._init_duration_set = True
-    return new_step, steps_per_sec
+    return steps_per_sec
 
-  def _compute_steps_per_sec(
-      self, step, summary_last_time, summary_last_step
-  ):
+  def _steps_per_sec(self, step, summary_last_time, summary_last_step):
     """Computes the number of training steps per second."""
     # Note: This function doesn't account for the time spent on running
     # interleaved evaluation (if any) and/or evaluation on the training batch.
@@ -555,7 +568,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
     if not self._eval_train_step_created:
       # TODO(pax): Support auto-sharding for eval step. In this case, we would
       # have to fix the sharding of the input to be the same as what's derived
-      # from the train_step.
+      # from the step.
 
       # Ignores the returned input partition spec. It should be the same as
       # self.train_input_partition_spec since the input shapes are the same.
@@ -569,14 +582,17 @@ class SingleTaskTrainProgram(BaseTrainProgram):
 
   def train_step(
       self,
+      step: int,
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> Tuple[int, TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The train step function."""
     train_step, _ = self._get_train_step(inputs)
-    return train_step(state, prng_key, inputs, unpadded_global_batch_size)
+    return step + 1, *train_step(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
 
   def eval_train_step(
       self,
@@ -773,9 +789,7 @@ class BaseEvalProgram(Program):
     for k in summary_tensors:
       summary_tensors[k] = np.array([np.asarray(t) for t in summary_tensors[k]])
     loss = np.mean(loss, axis=0)
-    logging.info(
-        'step: %d, eval test %s loss: %s', step, self._name, loss
-    )
+    logging.info('step: %d, eval test %s loss: %s', step, self._name, loss)
 
     for key, values in metrics.items():
       # `metric_utils.as_float` computes the average from a list of weighted
