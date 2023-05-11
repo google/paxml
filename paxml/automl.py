@@ -30,8 +30,6 @@ from praxis import pax_fiddle
 import pyglove as pg
 
 
-BaseParameterizable = base_hyperparams.BaseParameterizable
-
 BaseAlgorithm = automl_interfaces.BaseAlgorithm
 BaseEarlyStoppingPolicy = automl_interfaces.BaseEarlyStoppingPolicy
 BaseReward = automl_interfaces.BaseReward
