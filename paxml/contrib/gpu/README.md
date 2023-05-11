@@ -4,7 +4,7 @@ This folder contains scripts that optimize Pax for GPUs.
 ## Building the Container
 The Dockerfile in this folder contains all relevant dataset/gpu dependencies. Run the following command to build a container using this Dockerfile: `bash paxml/contrib/gpu/docker/build.sh <container_name>`. Be sure to run this command from the top-level `paxml` directory in the cloned repository.
 
-The scripts in `scripts_gpu` have been validated with the following paxml commit: [7b1d736fa96fd10c6205c323b2ea467741cd4638](https://github.com/google/paxml/commit/7b1d736fa96fd10c6205c323b2ea467741cd4638). Note that this container is built to run paxml at the tested commit.
+The scripts in `scripts_gpu` have been validated with the following paxml commit: [75d70d7994507974311b29254617d39c9cd4764e](https://github.com/google/paxml/commit/75d70d7994507974311b29254617d39c9cd4764e). Note that this container is built to run paxml at the tested commit.
 
 ## Running the Container (single node)
 Run the following command to launch a container interactively: `bash paxml/contrib/gpu/docker/interactive_pull_and_launch.sh <container_URL> <dataset_path> <vocab_path> <workspace_path>`, where `<workspace_path>` refers to the directory to be mounted to the container. This is where your experiment configs and run scripts should reside. Again, make sure this command is run from the top-level directory of the cloned paxml repository. 
