@@ -95,6 +95,12 @@ def _train_log_interval_steps(
     return train_p.summary_interval_steps
 
 
+def _get_shape_dtype(inputs: NestedJTensor) -> NestedShapeDtypeLike:
+  """Returns the shape/dtype information for the given input."""
+  fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype)
+  return jax.tree_map(fn, inputs)
+
+
 @dataclasses.dataclass
 class ProgramOutput:
   # The train state that's potentially modified by the program.
@@ -284,7 +290,7 @@ class BaseTrainProgram(Program):
     model_inputs = self._partitioner.preprocess_inputs(
         self._train_input,
         model_inputs,
-        self.train_input_partition_spec,
+        self.train_input_partition_spec(model_inputs),
     )
     logging.debug('  Retrieved inputs.')
 
@@ -374,9 +380,10 @@ class BaseTrainProgram(Program):
   ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The eval step function on training inputs."""
 
-  @property
   @abc.abstractmethod
-  def train_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+  def train_input_partition_spec(
+      self, inputs: NestedJTensor
+  ) -> Optional[NestedPartitionSpec]:
     """The partition spec for the model training inputs."""
 
   def _maybe_write_summaries(
@@ -473,7 +480,9 @@ class BaseTrainProgram(Program):
         logging.debug('  Retrieved eval model_inputs.')
         logging.debug('  Performing eval_step() runs on training split.')
         eval_inputs = self._partitioner.preprocess_inputs(
-            self._train_input, eval_inputs, self.train_input_partition_spec
+            self._train_input,
+            eval_inputs,
+            self.train_input_partition_spec(eval_inputs),
         )
 
         eval_state = get_eval_train_state(self._task, new_state)
@@ -521,20 +530,27 @@ class SingleTaskTrainProgram(BaseTrainProgram):
     self._eval_train_step_created = False
     self._eval_train_step_fn = None
 
-  def _get_train_step(self) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+  def _get_train_step(
+      self, inputs: NestedJTensor
+  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
     """Creates the train step info (if not done before) and returns them."""
+    # Note: it doesn't matter what batch size `inputs` have, or whether it's the
+    # original or preprocessed input, since:
+    # - For pmap: `inputs` is not used;
+    # - For pjit: batch size doesn't affect the partitioning result, while
+    #   Partitioner.preprocess_inputs() keep other dims the same.
     if not self._train_step_created:
       self._train_step_fn, self._train_step_input_partition_spec = (
           self._partitioner.partition(
               trainer_lib.train_step_single_learner,
-              self._partitioner.train_inputs_shape_dtype,
+              _get_shape_dtype(inputs),
               is_eval=False,
           )
       )
       self._train_step_created = True
     return self._train_step_fn, self._train_step_input_partition_spec
 
-  def _get_eval_train_step(self) -> Any:
+  def _get_eval_train_step(self, inputs: NestedJTensor) -> Any:
     """Creates the train step info (if not done before) and returns them."""
     if not self._eval_train_step_created:
       # TODO(pax): Support auto-sharding for eval step. In this case, we would
@@ -545,7 +561,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       # self.train_input_partition_spec since the input shapes are the same.
       self._eval_train_step_fn, _ = self._partitioner.partition(
           trainer_lib.eval_step_single_learner,
-          self._partitioner.train_inputs_shape_dtype,  # Train input shapes.
+          _get_shape_dtype(inputs),
           is_eval=True,
       )
       self._eval_train_step_created = True
@@ -559,7 +575,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       unpadded_global_batch_size: int,
   ) -> Tuple[TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The train step function."""
-    train_step, _ = self._get_train_step()
+    train_step, _ = self._get_train_step(inputs)
     return train_step(state, prng_key, inputs, unpadded_global_batch_size)
 
   def eval_train_step(
@@ -570,13 +586,14 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       unpadded_global_batch_size: int,
   ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The eval step function on trianing inputs."""
-    eval_train_step = self._get_eval_train_step()
+    eval_train_step = self._get_eval_train_step(inputs)
     return eval_train_step(state, prng_key, inputs, unpadded_global_batch_size)
 
-  @property
-  def train_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+  def train_input_partition_spec(
+      self, inputs: NestedJTensor
+  ) -> Optional[NestedPartitionSpec]:
     """The partition spec for the model training inputs."""
-    _, input_partition_spec = self._get_train_step()
+    _, input_partition_spec = self._get_train_step(inputs)
     return input_partition_spec
 
 
@@ -803,7 +820,8 @@ class BaseEvalProgram(Program):
       step_num += 1
       eval_inputs, unsupported_inputs, supported_input_partition_spec = (
           xla_passthrough.split_out_xla_unsupported_batch(
-              eval_inputs, partitioning_spec=self.eval_input_partition_spec
+              eval_inputs,
+              partitioning_spec=self.eval_input_partition_spec(eval_inputs),
           )
       )
       eval_inputs = self._partitioner.preprocess_inputs(
@@ -846,9 +864,10 @@ class BaseEvalProgram(Program):
   ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The eval step function."""
 
-  @property
   @abc.abstractmethod
-  def eval_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+  def eval_input_partition_spec(
+      self, inputs: NestedJTensor
+  ) -> Optional[NestedPartitionSpec]:
     """The partition spec for the eval inputs."""
 
   def shutdown(self) -> None:
@@ -869,41 +888,15 @@ class SingleTaskEvalProgram(BaseEvalProgram):
     self._eval_step_fn = None
     self._eval_step_input_spec = None
 
-  def _get_eval_step(self) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+  def _get_eval_step(
+      self, inputs: NestedJTensor
+  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
     """Creates the eval step info if not done before."""
     if not self._eval_step_created:
-      # A bit of unfortunate conditioning but we have to branch out pmap/pjit
-      # case here -- As Pmap can simply take the train_inputs_shape_dtype from
-      # the partitioner whearas Pjit need to actually look at current eval input
-      # and get shape from there.
-      input_shape_dtype = self._partitioner.train_inputs_shape_dtype
-      if isinstance(
-          self._partitioner,
-          (
-              partitioning.PjitPartitioner,
-              partitioning.AutoShardingPjitPartitioner,
-          ),
-      ):
-        # Instantiate a stanalone pipeline for one-time use to get sample inputs
-        # since the peek_padded() can return None if the pipeline is exhausted.
-        # This can happen when the input_pipeline is used before the partitioned
-        # step function is invoked as we do it lazily.
-        cloned_input_p = self.eval_input.hparams.clone()
-        # Note that the hparams from eval_input is already preprocessed by
-        # partitioner, so we don't need to do another adjustment here.
-        cloned_pipeline: base_input.BaseInput = instantiate(cloned_input_p)
-        input_shape_dtype = jax.tree_map(
-            py_utils.get_global_input_shape_dtype,
-            cloned_pipeline.get_next_padded(),
-        )
-        # delete one-time usages.
-        del cloned_pipeline, cloned_input_p
-
-      # TODO(laigd): Get rid of inputs_shape_dtype here.
       self._eval_step_fn, self._eval_step_input_spec = (
           self._partitioner.partition(
               trainer_lib.eval_step_single_learner,
-              inputs_shape_dtype=input_shape_dtype,
+              inputs_shape_dtype=_get_shape_dtype(inputs),
               is_eval=True,
           )
       )
@@ -918,11 +911,12 @@ class SingleTaskEvalProgram(BaseEvalProgram):
       unpadded_global_batch_size: int,
   ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
     """The eval step function."""
-    eval_step, _ = self._get_eval_step()
+    eval_step, _ = self._get_eval_step(inputs)
     return eval_step(state, prng_key, inputs, unpadded_global_batch_size)
 
-  @property
-  def eval_input_partition_spec(self) -> Optional[NestedPartitionSpec]:
+  def eval_input_partition_spec(
+      self, inputs: NestedJTensor
+  ) -> Optional[NestedPartitionSpec]:
     """The partition spec for the eval inputs."""
-    _, input_partition_spec = self._get_eval_step()
+    _, input_partition_spec = self._get_eval_step(inputs)
     return input_partition_spec
