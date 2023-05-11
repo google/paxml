@@ -385,6 +385,20 @@ def write_summary_tensor(
     assert False, 'Unsupported summary type: ' + str(summary_type)
 
 
+def get_summary_display_name_from_key(key: str) -> str:
+  """Return a name for a summary using the base type.
+
+  The internally tracked summary keys include type information about aggregate
+  types, eg: AGGREGATE_SCALAR vs SCALAR, which is used for filtering. For
+  externally facing summary names we omit the AGGREGATED_ and use only the base
+  type suffix.
+  """
+  trimmed = base_layer.trim_summary_type_from_key(key)
+  summary_type = base_layer.get_summary_type_from_key(key)
+  base_summary_type = base_layer.get_summary_base_type(summary_type)
+  return trimmed + base_layer.get_summary_type_suffix(base_summary_type)
+
+
 def write_summary_entry(summary_writer: SummaryWriter,
                         step_i: int,
                         loss: JTensor,
@@ -435,6 +449,7 @@ def write_summary_entry(summary_writer: SummaryWriter,
     summaries = flatten_summary_dict(summary_tensors)
     for key, tensors in summaries:
       summary_type = base_layer.get_summary_type_from_key(key)
+      key = get_summary_display_name_from_key(key)
       write_summary_tensor(step_i, key, tensors, summary_type)
 
   # Lastly flush summaries.
