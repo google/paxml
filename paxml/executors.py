@@ -350,7 +350,11 @@ def _get_partition_decode_once_fn(
   logging.info(
       'decode %s: %s', 'prng_seed' if use_pmap else 'prng_key', decode_key
   )
-  decode_key = partitioner.preprocess_prng_key(decode_key)
+  # If prng_key_fold_with_batch_index is True, we need to fold in the step
+  # number before preprocessing the key, so preprocessing need to be done at
+  # every step.
+  if not task_p.decode.prng_key_fold_with_batch_index:
+    decode_key = partitioner.preprocess_prng_key(decode_key)
 
   if use_pmap:
     var_weight_params = (

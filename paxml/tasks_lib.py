@@ -1245,7 +1245,7 @@ class SingleTask(base_task.BaseTask):
 
     Attributes:
       prng_key_fold_with_batch_index: if True, folds the decode prng key per
-        decoding batch index. Only effective for pmap decoding.
+        decoding batch index.
       prng_key_fold_with_global_step: if True, folds the decode prng key with
         the checkpoint global step. Only effective for pmap decoding.
       random_seed: Random seed to use at the beginning of the decoding.

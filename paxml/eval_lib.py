@@ -856,14 +856,18 @@ def decode_pmap_model(
     )
 
   prng_key, decode_key = jax.random.split(prng_key)
-  prng_seed = jax.random.split(decode_key, num=jax.local_device_count())
-  logging.info('decoder prng_seed: %s', prng_seed)
+  # If prng_key_fold_with_batch_index is True, we need to fold in the step
+  # number before preprocessing the key, so preprocessing need to be done at
+  # every step.
+  if not task_p.decode.prng_key_fold_with_batch_index:
+    decode_key = partitioner.preprocess_prng_key(decode_key)
+  logging.info('decoder prng_seed: %s', decode_key)
 
   decode_programs = eval_runner.decode_programs
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
-      prng_key=prng_seed,
+      prng_key=decode_key,
       job_log_dir=job_log_dir,
       use_pmap=True,
       var_weight_params=train_state_metadata.var_weight_hparams,
@@ -1194,12 +1198,10 @@ class SingleTaskDecodeProgram(programs.Program):
 
       task_p = self._task_p
       if task_p and task_p.decode.prng_key_fold_with_batch_index:
-        if prng_key.ndim > 1:
-          decode_key = jax.vmap(lambda x: jax.random.fold_in(x, step_num))(
-              prng_key
-          )
-        else:
-          decode_key = jax.random.fold_in(prng_key, step_num)
+        # In this case, the key is a scalar we need to preprocess it
+        # (broadcast/split) after folding in step_num.
+        decode_key = jax.random.fold_in(prng_key, step_num)
+        decode_key = partitioner.preprocess_prng_key(decode_key)
       else:
         decode_key = prng_key
 
