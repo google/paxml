@@ -49,6 +49,7 @@ PRNGKey = pytypes.PRNGKey
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
+NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
@@ -244,7 +245,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       self,
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeLike],
+      train_inputs_shape_dtype: Optional[NestedShapeDtypeStruct],
       # TODO(pax-dev): remove this arg and always use train_inputs_shape_dtype
       # once all experiments provide input specs.
       train_input_pipeline: Optional[base_input.BaseInput] = None,
