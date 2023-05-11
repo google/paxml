@@ -19,7 +19,6 @@ import abc
 import dataclasses
 import functools
 import json
-import typing
 from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
@@ -30,6 +29,7 @@ import jax
 from jax import core
 from jax import numpy as jnp
 from jax.experimental import pjit
+import numpy as np
 from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
@@ -663,15 +663,17 @@ class PjitPartitioner(Partitioner):
       init_is_eval: bool,
       reshard_inputs: bool,
       task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      device_mesh: Optional[np.ndarray] = None,
   ):
     """Constructor.
 
     Args:
-      reshard_inputs: Whether to reshard model inputs before running the
-        partitioned function. Only applicable for pjit.
       init_is_eval: Whether it should set is_eval=True when running
         abstract_init_with_metadata.
+      reshard_inputs: Whether to reshard model inputs before running the
+        partitioned function. Only applicable for pjit.
       task_p: The params for the task, needed to create global mesh.
+      device_mesh: Optional custom device mesh.
     """
     super().__init__(init_is_eval)
     self._reshard_inputs = reshard_inputs
@@ -680,11 +682,15 @@ class PjitPartitioner(Partitioner):
     # Creates global mesh.
     model_p = task_p.model
     self._mesh_names = model_p.mesh_axis_names
-    device_mesh = py_utils.create_device_mesh(
-        model_p.ici_mesh_shape,
-        model_p.dcn_mesh_shape,
-        contiguous_submeshes=model_p.contiguous_submeshes,
-    )
+    if device_mesh is None:
+      logging.info('creating mesh with py_utils.create_device_mesh')
+      device_mesh = py_utils.create_device_mesh(
+          model_p.ici_mesh_shape,
+          model_p.dcn_mesh_shape,
+          contiguous_submeshes=model_p.contiguous_submeshes,
+      )
+    else:
+      logging.info('Using provided mesh for PjitPartitioner')
     logging.info('device_mesh: %s', device_mesh)
     self._global_mesh = jax.sharding.Mesh(device_mesh, model_p.mesh_axis_names)
 
@@ -1104,6 +1110,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       reshard_inputs: bool,
       task_p: pax_fiddle.Config[tasks_lib.SingleTask],
       auto_sharding_info: AutoShardingInfo,
+      device_mesh: Optional[np.ndarray] = None,
   ):
     """Constructor.
 
@@ -1115,8 +1122,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       task_p: The params for the task, needed to create global mesh.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
+      device_mesh: Optional custom device mesh.
     """
-    super().__init__(init_is_eval, reshard_inputs, task_p)
+    super().__init__(init_is_eval, reshard_inputs, task_p, device_mesh)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result: AutoShardingPjitPartitioner._AutoShardingResult = (
         None  # Cached results.
