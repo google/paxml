@@ -693,6 +693,7 @@ pytype_strict_library(
     srcs = ["partitioning.py"],
     deps = [
         ":tasks_lib",
+        ":tf_data_service_lib",
         ":train_states",
         ":trainer_lib",
         # Implicit absl.logging dependency.

@@ -31,6 +31,7 @@ from jax import numpy as jnp
 from jax.experimental import pjit
 import numpy as np
 from paxml import tasks_lib
+from paxml import tf_data_service_lib
 from paxml import train_states
 from paxml import trainer_lib
 from praxis import asserts
@@ -327,6 +328,15 @@ class Partitioner(metaclass=abc.ABCMeta):
     if input_p.num_infeed_hosts == 0:
       input_p.num_infeed_hosts = jax.process_count()
     input_p.infeed_host_index = jax.process_index()
+
+    if hasattr(input_p, 'tf_data_service_address'):
+      input_p.tf_data_service_address = (
+          tf_data_service_lib.get_tf_data_service_address()
+      )
+      logging.info(
+          'input_p.tf_data_service_address: %s', input_p.tf_data_service_address
+      )
+
     return input_p
 
   @abc.abstractmethod
