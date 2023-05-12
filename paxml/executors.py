@@ -24,6 +24,7 @@ from absl import logging
 from etils import epath
 import jax
 from paxml import base_executor
+from paxml import decode_programs as decode_programs_lib
 from paxml import eval_lib
 from paxml import partitioning
 from paxml import programs
@@ -117,7 +118,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._partitioner: partitioning.Partitioner = None
     self._train_program: programs.BaseTrainProgram = None
     self._eval_programs: Sequence[programs.BaseEvalProgram] = None
-    self._decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram] = None
+    self._decode_programs: Sequence[
+        decode_programs_lib.SingleTaskDecodeProgram
+    ] = None
 
     # States to lazily initialize in .setup().
     self._train_input_pipeline = None
@@ -278,7 +281,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
 
     # TODO(wangpeng): Make decode programs configurable.
     create_decode_program = functools.partial(
-        eval_lib.SingleTaskDecodeProgram,
+        decode_programs_lib.SingleTaskDecodeProgram,
         model=self._task.model,
         partitioner=self._partitioner,
     )
@@ -319,7 +322,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
 
 def _get_partition_decode_once_fn(
     *,
-    decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram],
+    decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     prng_key: jax.random.KeyArray,
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     job_log_dir: epath.Path,
@@ -405,7 +408,7 @@ def _train_and_evaluate_common(
     prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
     eval_programs: Sequence[programs.BaseEvalProgram],
-    decode_programs: Sequence[eval_lib.SingleTaskDecodeProgram],
+    decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     total_num_params,
     early_stopping_fn,
     checkpointer,

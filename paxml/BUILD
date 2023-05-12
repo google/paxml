@@ -196,22 +196,17 @@ pytype_strict_library(
     deps = [
         ":base_experiment",
         ":base_metrics",
+        ":decode_programs",
         ":io_utils",
-        ":metric_tracker_utils",
-        ":metric_utils",
         ":partitioning",
         ":programs",
-        ":seqio_input",
         ":summary_utils",
         ":tasks_lib",
         ":train_states",
         ":trainer_lib",
         ":tuning_lib",
-        ":xla_passthrough",
-        # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit clu.metrics dependency.
-        # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
@@ -219,7 +214,6 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
-        "//praxis:base_model",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
@@ -600,6 +594,41 @@ py_strict_test(
 )
 
 pytype_strict_library(
+    name = "decode_programs",
+    srcs = ["decode_programs.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":base_metrics",
+        ":io_utils",
+        ":metric_tracker_utils",
+        ":metric_utils",
+        ":partitioning",
+        ":programs",
+        ":seqio_input",
+        ":summary_utils",
+        ":tasks_lib",
+        ":train_states",
+        ":xla_passthrough",
+        # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
+        # Implicit clu.metrics dependency.
+        # Implicit clu.platform dependency.
+        # Implicit etils dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//paxml:checkpoints",
+        "//praxis:base_hyperparams",
+        "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:base_model",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
     name = "trainer_lib",
     srcs = ["trainer_lib.py"],
     srcs_version = "PY3",
@@ -767,6 +796,7 @@ pytype_strict_library(
     srcs = ["executors.py"],
     deps = [
         ":base_executor",
+        ":decode_programs",
         ":eval_lib",
         ":partitioning",
         ":programs",
