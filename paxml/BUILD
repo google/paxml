@@ -159,6 +159,7 @@ pytype_strict_library(
         # Implicit orbax.checkpoint dependency.
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
     ],
 )
 
@@ -678,6 +679,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
     ],
 )
 

@@ -95,12 +95,6 @@ def _train_log_interval_steps(
     return train_p.summary_interval_steps
 
 
-def _get_shape_dtype(inputs: NestedJTensor) -> NestedShapeDtypeLike:
-  """Returns the shape/dtype information for the given input."""
-  fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype)
-  return jax.tree_map(fn, inputs)
-
-
 @dataclasses.dataclass
 class ProgramOutput:
   # The train state that's potentially modified by the program.
@@ -560,7 +554,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       self._train_step_fn, self._train_step_input_partition_spec = (
           self._partitioner.partition(
               trainer_lib.train_step_single_learner,
-              _get_shape_dtype(inputs),
+              trees.get_shape_dtype(inputs),
               is_eval=False,
           )
       )
@@ -578,7 +572,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       # self.train_input_partition_spec since the input shapes are the same.
       self._eval_train_step_fn, _ = self._partitioner.partition(
           trainer_lib.eval_step_single_learner,
-          _get_shape_dtype(inputs),
+          trees.get_shape_dtype(inputs),
           is_eval=True,
       )
       self._eval_train_step_created = True
@@ -914,7 +908,7 @@ class SingleTaskEvalProgram(BaseEvalProgram):
       self._eval_step_fn, self._eval_step_input_spec = (
           self._partitioner.partition(
               trainer_lib.eval_step_single_learner,
-              inputs_shape_dtype=_get_shape_dtype(inputs),
+              inputs_shape_dtype=trees.get_shape_dtype(inputs),
               is_eval=True,
           )
       )

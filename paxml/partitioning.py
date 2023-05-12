@@ -39,6 +39,7 @@ from praxis import base_layer
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 
 from paxml import checkpoints  # mapped to internal
 
@@ -159,14 +160,6 @@ def _write_input_specs(
   work_unit.create_artifact(
       platform.ArtifactType.FILE, str(fpath), 'Input specs'
   )
-
-
-def _get_shape_dtype(
-    inputs: Union[NestedShapeDtypeLike, NestedJTensor]
-) -> NestedShapeDtypeLike:
-  """Returns the shape/dtype information for the given input."""
-  fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype)
-  return jax.tree_map(fn, inputs)
 
 
 class Partitioner(metaclass=abc.ABCMeta):
@@ -704,7 +697,7 @@ class PjitPartitioner(Partitioner):
     global_shape_dtype = jax.tree_map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
-    perhost_inputs_shape_dtype = _get_shape_dtype(sample_inputs)
+    perhost_inputs_shape_dtype = trees.get_shape_dtype(sample_inputs)
     _write_input_specs(perhost_inputs_shape_dtype, self._job_log_dir)
     return global_shape_dtype
 

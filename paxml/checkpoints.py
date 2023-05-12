@@ -33,6 +33,7 @@ from paxml import checkpoint_types
 from paxml import train_states
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 
 
 CHECKPOINT_PREFIX = checkpoint_paths.CHECKPOINT_PREFIX
@@ -75,12 +76,6 @@ def get_checkpointer(
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
   return checkpointer
-
-
-def _get_shape_dtype_struct(nested: Any) -> Any:
-  return jax.tree_util.tree_map(
-      lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), nested
-  )
 
 
 def save_checkpoint(
@@ -148,9 +143,7 @@ def save_checkpoint(
         """train_state_unpadded_shape_dtype_struct is not provided. Saving the
         shapes of train_state  as the unpadded shapes."""
     )
-    train_state_unpadded_shape_dtype_struct = _get_shape_dtype_struct(
-        train_state
-    )
+    train_state_unpadded_shape_dtype_struct = trees.get_shape_dtype(train_state)
   checkpoint_manager.save(
       step,
       train_state,
@@ -783,5 +776,3 @@ class TrainingCheckpointer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def reached_preemption(self, step: int) -> bool:
     """Returns True if a preemption sync point has been reached."""
-
-
