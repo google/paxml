@@ -827,7 +827,6 @@ class SeqIOInput(base_input.BaseInput):
 
   def _pad_to_batch_size(self, ds: tf.data.Dataset) -> tf.data.Dataset:
     """Pad the data with new entries to multiples of global batch size."""
-    p = self.hparams
 
     def _add_weight(b):
       if not isinstance(b, py_utils.NestedMap):
@@ -839,16 +838,15 @@ class SeqIOInput(base_input.BaseInput):
       if not isinstance(b, py_utils.NestedMap):
         b = py_utils.NestedMap.FromNestedDict(b)
       b.eval_sample_weights = 0.0
-      if p.use_enumeration:
+      if self.use_enumeration:
         b = _add_fake_enumeration(b)
-      if p.annotate_padding_fields and hasattr(b, 'weights'):
+      if self.annotate_padding_fields and hasattr(b, 'weights'):
         b.weights *= 0
         if hasattr(b, 'paddings'):
           b.paddings = 1 - b.weights
       return b
 
     ds = ds.map(_add_weight)
-    p = self.hparams
     if (
         self.is_training
         or not self.reset_for_eval
@@ -857,7 +855,7 @@ class SeqIOInput(base_input.BaseInput):
     ):
       return ds
 
-    # p.reset_for_eval=True: We are running eval over exactly one epoch.
+    # self.reset_for_eval=True: We are running eval over exactly one epoch.
     # We explicitly cache the entire epoch (in memory) to ensure that it is the
     # same across different iterations. Note that this is needed not only
     # because of ordering, but for data contents as well. For instance, with
@@ -955,7 +953,7 @@ class SeqIOInput(base_input.BaseInput):
             'inputs' in example_orig
         ), '"inputs" field is required but not found'
         inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
-      key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]
+      key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]  # pytype: disable=wrong-arg-types
       t = _get_targets_str(example, self.mixture_or_task_inst)
       targets[key].append(self.task_inst.postprocess_fn(
           t, example=example, is_target=True))
@@ -1257,7 +1255,7 @@ class SeqIOInput(base_input.BaseInput):
     This method is called only on process=0 after aggregating all outputs as
     seqio task's metric_fns take in a global view of examples.
 
-    This function basically does the following (for p.use_enumeration=False):
+    This function basically does the following (for self.use_enumeration=False):
       1. Iterate through SeqIO task's dataset to construct both (a) the
         input prefix-based key, and (b) the task.postprocess_fn(ex['targets']),
         which is the target that is used to compute metrics.
@@ -1268,7 +1266,7 @@ class SeqIOInput(base_input.BaseInput):
       4. Optionally log a couple entries for inspection.
       5. Optionally log all entries in text format for inspection.
 
-    When p.use_enumeration=True, we'll match based on enumeration IDs.
+    When self.use_enumeration=True, we'll match based on enumeration IDs.
 
     For tasks with score_metric_fns, use compute_metrics_eval() below.
 
@@ -1360,7 +1358,7 @@ class SeqIOInput(base_input.BaseInput):
         all task.predict_metric_fns.
       4. Optionally log a couple entries for inspection.
 
-    When p.use_enumeration=True, we'll match based on enumeration IDs.
+    When self.use_enumeration=True, we'll match based on enumeration IDs.
 
     For tasks with predict_metric_fns, use compute_metrics() above.
 

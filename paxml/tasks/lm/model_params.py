@@ -243,8 +243,11 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
     model_p.softmax_tpl.weight_split_dims_mapping.wt = self.SOFTMAX_WEIGHT_SHARDING
     model_p.mlp_tpl.ici_mesh_shape = model_p.mesh_shape
     model_p.mlp_tpl.weight_split_dims_mapping.wt = self.MLP_WEIGHT_SHARDING
-    set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
-                                self.MESH_SHAPE)
+    set_sharding_annotations_v1(
+        task_p,
+        self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
+        self.MESH_SHAPE,
+    )
     set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
     task_p.train.num_train_steps = self.NUM_TRAIN_STEPS
     return task_p
@@ -418,8 +421,11 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
 
     maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
-    set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
-                                self.MESH_SHAPE)
+    set_sharding_annotations_v1(
+        task_p,
+        self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
+        self.MESH_SHAPE,
+    )
 
     return task_p
 

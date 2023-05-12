@@ -686,12 +686,13 @@ class CheckpointLoadingRules(NamedTuple):
 
   - `mdl_vars`: For each element in the flattened model variables, value from
     the first matching CheckpointLoadingRules will be used.
-  - `step`: we take the value of the first checkpoint with `p.load_step`
+  - `step`: we take the value of the first checkpoint with `self.load_step`
     set; otherwise step is left untouched.
   - `opt_states`: we take the value of the first checkpoint with
-    `p.load_opt_states` set; otherwise `opt_states` is left untouched.
+    `self.load_opt_states` set; otherwise `opt_states` is left untouched.
 
-  Note how `p.load_rules` and `p.ignore_rules` support a fine-grained control
+  Note how `self.load_rules` and `self.ignore_rules` support a fine-grained
+  control
   on the loading behavior of `mdl_vars`, but `step` and `opt_states` are always
   loaded atomically (all or nothing).
 
@@ -1334,13 +1335,13 @@ class SingleTask(base_task.BaseTask):
     learner_params = NestedMap.FromNestedDict(learner_params)
     uid = itertools.count()
 
-    def _instantiate(
+    def _build(
         p: pax_fiddle.Config[learners_lib.Learner],
     ) -> learners_lib.Learner:
       p = p.clone().set(name='learner_%d' % next(uid))
-      return instantiate(p)
+      return pax_fiddle.build(p)
 
-    self._learners = NestedMap(sub=learner_params).Transform(_instantiate).sub
+    self._learners = NestedMap(sub=learner_params).Transform(_build).sub
 
     assert self.model is not None
     if isinstance(self.model, pax_fiddle.Config):
@@ -1454,7 +1455,7 @@ class SingleTask(base_task.BaseTask):
         backward variables.
     """
     mesh_shape = self.model.mesh_shape
-    mesh_axis_names: Sequence[str] = self.model.mesh_axis_names
+    mesh_axis_names: Sequence[str] = self.model.mesh_axis_names  # pytype: disable=annotation-type-mismatch
     return create_state_padded_shapes(
         var_weight_hparams,
         mesh_shape,
@@ -1537,8 +1538,6 @@ class SingleTask(base_task.BaseTask):
     Raises:
       RuntimeError: if vn_scale > 0 but vn_regex doesn't match any variables.
     """
-    p = self.hparams
-
     if self.vn.vn_scale > 0.0:
       names = py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
       regexp = re.compile(self.vn.vn_regex)
@@ -1565,16 +1564,19 @@ class SingleTask(base_task.BaseTask):
 
       def add_vn(params, rng, mask):
         if mask:
-          return params + p.vn.vn_scale * jax.random.normal(
-              shape=params.shape, key=rng)
+          return params + self.vn.vn_scale * jax.random.normal(
+              shape=params.shape, key=rng
+          )
         else:
           return params
 
       # VN only updates trainable part and copy non-trainable
       ret = jax.tree_map(add_vn, mdl_vars, rng_tree, vn_mask)
       return jax.tree_map(
-          lambda x, y: jnp.where(step >= p.vn.vn_start_step, x, y), ret,
-          mdl_vars)
+          lambda x, y: jnp.where(step >= self.vn.vn_start_step, x, y),
+          ret,
+          mdl_vars,
+      )
     else:
       return mdl_vars
 
@@ -1843,7 +1845,7 @@ class SingleTask(base_task.BaseTask):
       global_mesh: Optional[jax.sharding.Mesh] = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
   ) -> Tuple[TrainState, TrainStateProvenance, bool]:
-    """Applies p.train.init_from_checkpoint_rules to update train_state.
+    """Applies self.train.init_from_checkpoint_rules to update train_state.
 
     Args:
       train_state: initialized train_state.

@@ -217,10 +217,9 @@ class TFRecordBertInput(base_input.BaseInput):
     return batch.TransformWithKey(pad)
 
   def _ensure_shape(self, batch: NestedMap) -> NestedMap:
-    p = self.hparams
 
     def ensure(x):
-      x = tf.ensure_shape(x, [p.batch_size, p.max_sequence_length])
+      x = tf.ensure_shape(x, [self.batch_size, self.max_sequence_length])
       return x
 
     return batch.Transform(ensure)
@@ -374,6 +373,7 @@ class TextInput(base_input.BaseInput):
 
   def __post_init__(self):
     super().__post_init__()
+    assert self.tokenizer is not None
     self.tokenizer_inst = self.tokenizer.Instantiate()
     self._actual_num_samples = None
     self._dataset = self._gen_dataset()

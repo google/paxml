@@ -476,6 +476,7 @@ class BaseTrainProgram(Program):
     # Note: This function doesn't account for the time spent on running
     # interleaved evaluation (if any) and/or evaluation on the training batch.
     # It's, hence, merely a raw underestimate.
+    assert summary_last_time is not None
     duration_sec = time.time() - summary_last_time
     num_steps = step - summary_last_step
     steps_per_sec = num_steps / duration_sec
