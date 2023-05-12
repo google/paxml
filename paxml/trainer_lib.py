@@ -244,27 +244,41 @@ def write_train_provenance_file(
 
 
 def adjust_input_params_for_small_batch(
-    inp_p: pax_fiddle.Config[base_input.BaseInput],
+    input_p: pax_fiddle.Config[base_input.BaseInput],
     global_mesh: jax.sharding.Mesh,
 ) -> pax_fiddle.Config[base_input.BaseInput]:
-  """Creates a copy of inp_p adjusted when per-device batch < 1."""
+  """Creates a copy of input_p adjusted when the per-device batch < 1.
+
+  When users specify fractional batch sizes for very large models, it is
+  necessary to pad the input batch. This is because JAX requires equally-shaped
+  tensors at every program's entrypoint and exitpoint.
+
+  Args:
+    input_p: Fiddle config of a BaseInput which could be modified.
+    global_mesh: a Mesh needed as reference to construct a device sharding
+      order.
+
+  Returns:
+    The possibly-modified BaseInput Fiddle config.
+  """
   # Remote input adjusts the params for small batch itself.
-  if inp_p.experimental_remote_input:
-    return inp_p
+  if input_p.experimental_remote_input:
+    return input_p
 
   local_device_count = jax.local_device_count()
-  batch_size = fdl.get_callable(inp_p).get_batch_size(inp_p)  # pytype: disable=attribute-error
+  batch_size = fdl.get_callable(input_p).get_batch_size(input_p)  # pytype: disable=attribute-error
 
   if (batch_size % local_device_count == 0 and
-      inp_p.num_infeed_hosts == jax.process_count()):
-    return inp_p
-  copy = inp_p.clone()
+      input_p.num_infeed_hosts == jax.process_count()):
+    return input_p
+
+  copy = input_p.clone()
   if batch_size > local_device_count:
     if batch_size % local_device_count != 0:
       if jax.process_count() > 1:
         # The custom device order resharding currently works only when
         # batch_size < local_device_count.
-        raise NotImplementedError('Per-host batch size must be a multiple of'
+        raise NotImplementedError('Per-host batch size must be a multiple of '
                                   'per-host device count, or smaller than it.')
       else:
         # Single-host input doesn't need to do custom order resharding.
@@ -276,15 +290,15 @@ def adjust_input_params_for_small_batch(
   else:
     copy.batch_padding_size = local_device_count - batch_size
 
-  assert inp_p.num_infeed_hosts <= jax.process_count()
+  assert input_p.num_infeed_hosts <= jax.process_count()
   if jax.process_count() == 1:
     # If there is only one host, valid examples are already contiguous so we can
     # use default Jax array creation.
     # Inputs use pspec sharding (see praxis.BaseInput.reshard_for_spmd).
     return copy
   # Some hosts may produce duplicate data, but they will be discarded.
-  copy.infeed_host_index = jax.process_index() % inp_p.num_infeed_hosts
-  if copy.infeed_host_index >= inp_p.num_infeed_hosts:
+  copy.infeed_host_index = jax.process_index() % input_p.num_infeed_hosts
+  if copy.infeed_host_index >= input_p.num_infeed_hosts:
     logging.info('Process %s: infeed data will be dropped.',
                  jax.process_index())
 
@@ -301,7 +315,7 @@ def adjust_input_params_for_small_batch(
     process_idx = device.process_index
     core_offset_in_host = per_host_core_counter[device.process_index]
     per_host_core_counter[device.process_index] += 1
-    if (process_idx >= inp_p.num_infeed_hosts or
+    if (process_idx >= input_p.num_infeed_hosts or
         core_offset_in_host >= batch_size):
       # Not an infeeding host.
       unused_cores.append(global_device_idx)
