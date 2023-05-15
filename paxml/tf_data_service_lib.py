@@ -36,12 +36,11 @@ import tensorflow as tf
 from typing import Optional
 
 # TODO(b/281571038): When this feature is available in
-# xm_tf_data_service.py, add `tf_data_service_` prefix to all flags
-# here, and update pax/xm_launch.py to enable the prefix.
+# xm_tf_data_service.py, update pax/xm_launch.py to enable the prefix.
 
 # Flags for both tf.data service dispatcher and workers.
 _PORT = flags.DEFINE_integer(
-    'port',
+    'tf_data_service_port',
     0,
     (
         'Specifies the port to bind to. A value of 0 indicates that the server'
@@ -51,12 +50,12 @@ _PORT = flags.DEFINE_integer(
 
 # Flags for tf.data service workers.
 _DISPATCHER_ADDRESS = flags.DEFINE_string(
-    'dispatcher_address',
+    'tf_data_service_dispatcher_address',
     None,
     'Specifies the address of the dispatcher.',
 )
 _WORKER_ADDRESS = flags.DEFINE_string(
-    'worker_address',
+    'tf_data_service_worker_address',
     None,
     (
         'Specifies the address of the worker server. This address is passed to'
@@ -66,21 +65,21 @@ _WORKER_ADDRESS = flags.DEFINE_string(
 )
 
 _DATA_TRANSFER_PROTOCOL = flags.DEFINE_string(
-    'data_transfer_protocol',
+    'tf_data_service_data_transfer_protocol',
     None,
     'A string indicating the protocol to be used by the worker to transfer data'
     ' to the client. E.g. "grpc".',
 )
 
 _DATA_TRANSFER_ADDRESS = flags.DEFINE_string(
-    'data_transfer_address',
+    'tf_data_service_data_transfer_address',
     None,
     'A string indicating the data transfer address of the worker server.',
 )
 
 # Flags for tf.data service dispatcher.
 _WORK_DIR = flags.DEFINE_string(
-    'work_dir',
+    'tf_data_service_work_dir',
     None,
     (
         'A directory to store dispatcher state in. This argument is required'
@@ -88,7 +87,7 @@ _WORK_DIR = flags.DEFINE_string(
     ),
 )
 _FAULT_TOLERANT_MODE = flags.DEFINE_bool(
-    'fault_tolerant_mode',
+    'tf_data_service_fault_tolerant_mode',
     False,
     (
         'Whether the dispatcher should write its state to a journal so that it'
@@ -100,7 +99,7 @@ _FAULT_TOLERANT_MODE = flags.DEFINE_bool(
 )
 
 _WORKER_ADDRESSES = flags.DEFINE_list(
-    'worker_addresses',
+    'tf_data_service_worker_addresses',
     None,
     '(Optional.) If the job uses static sharding with fixed replicas, it needs'
     ' to specify a list of comma-separated worker addresses that will register'
