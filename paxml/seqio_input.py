@@ -645,14 +645,11 @@ class SeqIOInput(base_input.BaseInput):
 
   def _gen_targets_dataset(self):
     self._len_full_ds = 0
-    inputs_length = self.task_feature_lengths['inputs']
+    sequence_length = dict(self.task_feature_lengths)
     # if set, p.eval_metrics_targets_length
     # overrides p.task_feature_lengths['targets']
-    targets_length = (
-        self.eval_metrics_targets_length
-        if self.eval_metrics_targets_length
-        else self.task_feature_lengths['targets']
-    )
+    if self.eval_metrics_targets_length:
+      sequence_length['targets'] = self.eval_metrics_targets_length
     sharded_datasets = []
     sharded_datasets_converted = []
 
@@ -662,7 +659,7 @@ class SeqIOInput(base_input.BaseInput):
           index=host_idx, num_shards=self.num_infeed_hosts
       )
       ds_shard = self.mixture_or_task_inst.get_dataset(
-          sequence_length={'inputs': inputs_length, 'targets': targets_length},
+          sequence_length=sequence_length,
           split=self.split_name,
           shuffle=False,
           num_epochs=1,
