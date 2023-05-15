@@ -325,7 +325,6 @@ pytype_strict_library(
         ":experiment_registry",
         ":setup_jax",
         ":tasks_lib",
-        ":tf_data_service_lib",
         ":train",
         ":trainer_lib",
         ":tuning_lib",
@@ -693,7 +692,6 @@ pytype_strict_library(
     srcs = ["partitioning.py"],
     deps = [
         ":tasks_lib",
-        ":tf_data_service_lib",
         ":train_states",
         ":trainer_lib",
         # Implicit absl.logging dependency.

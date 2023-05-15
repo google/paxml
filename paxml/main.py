@@ -44,7 +44,6 @@ from paxml import eval_lib
 from paxml import experiment_registry
 from paxml import setup_jax
 from paxml import tasks_lib
-from paxml import tf_data_service_lib
 from paxml import train
 from paxml import trainer_lib
 from paxml import tuning_lib
@@ -425,9 +424,6 @@ def main(argv: Sequence[str]) -> None:
   start = time.time()
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
-
-  if tf_data_service_lib.run_tf_data_service(FLAGS.mode):
-    return
 
   if FLAGS.tfds_data_dir is not None:
     # seqio import is slow so avoid module-level import
