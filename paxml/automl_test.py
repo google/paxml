@@ -18,6 +18,7 @@
 import math
 from typing import Optional
 from absl.testing import absltest
+import fiddle as fdl
 from paxml import automl
 from paxml import base_experiment
 from paxml import base_task
@@ -240,7 +241,7 @@ class MetricTest(absltest.TestCase):
     }
     m = automl.Metric.eval('accuracy')
     with self.assertRaisesRegex(
-        ValueError, 'Found multple metrics that match .*'):
+        ValueError, 'Found multiple metrics that match .*'):
       m.get_value(values)
 
     self.assertEqual(
@@ -318,21 +319,24 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           reward_type='tunas').search_reward
-    self.assertIsInstance(p.aggregator_tpl, automl.TunasAbsolute.HParams)
+    self.assertTrue(
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.TunasAbsolute))
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
     ],
                                           150,
                                           reward_type='mnas_hard').search_reward
-    self.assertIsInstance(p.aggregator_tpl, automl.MnasHard.HParams)
+    self.assertTrue(
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasHard))
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
     ],
                                           150,
                                           reward_type='mnas_soft').search_reward
-    self.assertIsInstance(p.aggregator_tpl, automl.MnasSoft.HParams)
+    self.assertTrue(
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasSoft))
     with self.assertRaisesRegex(ValueError, 'Unsupported reward type'):
       automl.neural_architecture_search([
           automl.Metric.eval('accuracy'),

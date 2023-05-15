@@ -837,6 +837,7 @@ py_strict_test(
         ":base_experiment",
         ":base_task",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle dependency.
         "//praxis:base_hyperparams",
         "//praxis:pax_fiddle",
         # Implicit pyglove dependency.

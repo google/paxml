@@ -322,7 +322,7 @@ class Metric:
       if self._aggregator is not None:
         return self._aggregator([m[1] for m in items])
       raise ValueError(
-          f'Found multple metrics that match {self.pattern!r} while '
+          f'Found multiple metrics that match {self.pattern!r} while '
           f'aggregator is not specified: {items}.')
     return items[0][1]
 
