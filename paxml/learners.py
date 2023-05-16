@@ -54,7 +54,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
   Example client code:
 
-  p = Learner.HParams().set(...)
+  p =  pax_fiddle.Config(Learner).set(...)
   learner = base_hyperparams.instantiate(p)
 
   mdl_vars = ...
@@ -96,9 +96,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       different layers while not affecting the behavior of optimizers like
       Adafactor.
     force_repeat_prefix_structure: If true, force optimizer states to have a
-      vectorized repeat_prefix structure, even if no layers are repeated.
-      This should only be enabled when necessary to load broken legacy
-      checkpoints. New models should not use it.
+      vectorized repeat_prefix structure, even if no layers are repeated. This
+      should only be enabled when necessary to load broken legacy checkpoints.
+      New models should not use it.
     skip_step_gradient_norm_value: If non-zero, we skip a step entirely if
       gradient_norm exceeds this value.
     enable_skip_step_on_gradient_anomalies: Skips the step if gradient anomaly

@@ -122,7 +122,7 @@ class BaseMetrics(
 
    Usage pattern: Aggregation over a whole dataset:
 
-      metrics_hparams = SomeMetricsClass.HParams(xxx)
+      metrics_hparams = pax_fiddle.Config(SomeMetricsClass, xxx)
       aggregated_metrics = instantiate(metrics_hparams)
 
       for step_i in range(num_steps):
@@ -138,13 +138,12 @@ class BaseMetrics(
 
   Usage pattern: Aggregate under pmap:
 
-    metrics_hparams = SomeMetricsClass.HParams(xxx)
+    metrics_hparams = pax_fiddle.Config(SomeMetricsClass, xxx)
     metrics_helper = instantiate(metrics_hparams)
 
      def decode_step(some_input):
         batch_metric = compute some metrics
         batch_metric = metrics_helper.aggregate(batch_metrics, reshard=False)
-
   """
   _metrics: Any = dataclasses.field(init=False, repr=False)
 
