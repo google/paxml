@@ -1075,8 +1075,8 @@ def initialize_partitioned_model_states(
 ) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
-  Weights are random initialized first.
-  Then we restores weights based on the init_checkpoint_rules.
+  Weights are random initialized first. Then we restore weights based on the
+  init_checkpoint_rules.
 
   This function is equivalent to calling a pjit-ted version of
   InitializesModelStates().
@@ -1117,18 +1117,24 @@ def initialize_partitioned_model_states(
         prng_key,
         global_input_shapes,
         discard_opt_states,
+        # `do_init_checkpoint_rules` is False for pjit/spmd here because because
+        # checkpoint loading has to be done after partitioning. See below.
         do_init_checkpoint_rules=False,
         var_weight_hparams=var_weight_hparams,
     )
-    return py_utils.maybe_pad_uneven_sharding(outs, train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
-                                              train_state_unpadded_shapes,
-                                              model.hparams.mesh_shape,
-                                              model.hparams.mesh_axis_names)
+    return py_utils.maybe_pad_uneven_sharding(
+        outs,
+        train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
+        train_state_unpadded_shapes,
+        model.hparams.mesh_shape,
+        model.hparams.mesh_axis_names,
+    )
 
   logging.info('unpadded_out_shape: %s', train_state_unpadded_shapes)
   logging.info('train_state_partition_specs: %s', train_state_partition_specs)
-  asserts.assert_same_structure(train_state_unpadded_shapes,
-                                train_state_partition_specs)
+  asserts.assert_same_structure(
+      train_state_unpadded_shapes, train_state_partition_specs
+  )
 
   mesh_names = model.hparams.mesh_axis_names
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
@@ -1145,8 +1151,10 @@ def initialize_partitioned_model_states(
       partitioned_vars
   )
   # Overwrite some parts if init_checkpoint_rules are set (warm-start)
-  if (do_init_checkpoint_rules and
-      jax_task.hparams.train.init_from_checkpoint_rules):
+  if (
+      do_init_checkpoint_rules
+      and jax_task.hparams.train.init_from_checkpoint_rules
+  ):
     # TODO(b/230132535): Note that this application after constructing the
     # partitioned vars is currently inconsistent with what is being performed
     # for pmap models.
