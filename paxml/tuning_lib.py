@@ -652,7 +652,8 @@ def _aggregate_metrics(
     eval_metrics: Optional[EvalMetrics] = None,
     decode_metrics: Optional[DecodeMetrics] = None,
     num_params: Optional[float] = None,
-    train_steps_per_sec: Optional[float] = None) -> Dict[str, float]:
+    train_steps_per_sec: Optional[float] = None,
+) -> Dict[str, Union[float, None]]:
   """Aggregate metrics from training, evaluation and decoding for tuning."""
   metrics = {}
   if train_metrics is not None:

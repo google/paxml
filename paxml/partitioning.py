@@ -19,7 +19,8 @@ import abc
 import dataclasses
 import functools
 import json
-from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
+import pprint
+from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple
 
 from absl import logging
 from clu import platform
@@ -162,6 +163,15 @@ def _write_input_specs(
   )
 
 
+def _spec_mismatch_error(actual_shape_dtype, expected_shape_dtype):
+  """Raises a ValueError because the given specs did not match."""
+  raise ValueError(
+      'Spec of actual training input does not match train input specs. '
+      f'Observed spec:\n{pprint.pformat(actual_shape_dtype)},\n'
+      f'Expected spec:\n{pprint.pformat(expected_shape_dtype)}'
+  )
+
+
 class Partitioner(metaclass=abc.ABCMeta):
   """Interface for partitioning computations.
 
@@ -265,37 +275,46 @@ class Partitioner(metaclass=abc.ABCMeta):
     self._jax_task = jax_task
     self._init_key = init_key
     self._job_log_dir = job_log_dir
-    if train_inputs_shape_dtype is not None:
-      if not train_inputs_shape_dtype:
-        raise ValueError(
-            f'train_inputs_shape_dtype is empty: {train_inputs_shape_dtype}'
-        )
-      if train_input_pipeline:
-        raise ValueError(
-            'Expect one of train_inputs_shape_dtype and train_input_pipeline is'
-            ' specified, got both.'
-        )
+
+    if bool(train_inputs_shape_dtype) == bool(train_input_pipeline):
+      raise ValueError(
+          'Specifying exactly one of train_inputs_shape_dtype and '
+          'train_input_pipeline is required.'
+      )
+
+    if train_inputs_shape_dtype:
       self._train_inputs_shape_dtype = train_inputs_shape_dtype
     else:
-      if not train_input_pipeline:
-        raise ValueError(
-            'Expect one of train_inputs_shape_dtype and train_input_pipeline is'
-            ' specified, got none.'
-        )
       self._train_inputs_shape_dtype = self._get_train_inputs_shape_dtype(
           train_input_pipeline
       )
-      if not self._train_inputs_shape_dtype:
-        raise ValueError(
-            'Not able to get shape/dtype information of train input from'
-            f' train_input_pipeline: {self._train_inputs_shape_dtype}'
-        )
+
+    if not self._train_inputs_shape_dtype:
+      raise ValueError(
+          'Not able to get shape/dtype information of train input from'
+          f' train_input_pipeline: {self._train_inputs_shape_dtype}'
+      )
 
   @abc.abstractmethod
   def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
   ) -> NestedShapeDtypeLike:
     """Get the shape/dtype information for model.init."""
+
+  @abc.abstractmethod
+  def check_input_spec(self, batch: NestedJTensor) -> None:
+    """Check that the given batch matches the expected input spec.
+
+    (Ignores the input batch dimension.)
+
+    Args:
+      batch: the input batch after calling preprocess_inputs.
+
+    Raises:
+      ValueError: if the given spec doesn't conform to this partitioner's
+        expectation. (We ignore batch size here for now, since it's not
+        necessary for model init.)
+    """
 
   @property
   def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
@@ -315,7 +334,7 @@ class Partitioner(metaclass=abc.ABCMeta):
 
     It is necessary to call this before using the config to create the input
     pipeline. Input pipelines created without the preprocessing may have invalid
-    runtime configrations and can cause error.
+    runtime configrations and can cause errors.
 
     Args:
       input_p: The input config to preprocess.
@@ -520,6 +539,10 @@ class Partitioner(metaclass=abc.ABCMeta):
 
 
 class PmapPartitioner(Partitioner):
+  """Partitioner suitable for parallelism enabled via pmap.
+
+  Batch shapes are per-core in this case.
+  """
 
   def __init__(self, init_is_eval: bool):
     super().__init__(init_is_eval)
@@ -539,6 +562,21 @@ class PmapPartitioner(Partitioner):
     )
     _write_input_specs(per_device_shape_dtype, self._job_log_dir)
     return per_device_shape_dtype
+
+  def check_input_spec(self, batch: NestedJTensor) -> None:
+    """Check that the first input batch matches the given input spec."""
+    # Inputs preprocessed by this partitioner are sharded along the first axis.
+    # Shapes specified by users for pmap-type models use per-device batch sizes,
+    # hence we slice out that dimension here.
+    logging.info('Checking input spec [pmap partitioner]')
+
+    # Strip out the batch dimension from the batch and from the spec.
+    fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype)
+    nested_shape_dtype = jax.tree_map(fn, batch)
+    spec = jax.tree_map(fn, self.train_inputs_shape_dtype)
+
+    if not trees.is_subset(spec, nested_shape_dtype):
+      _spec_mismatch_error(nested_shape_dtype, spec)
 
   def initialize_prng_key_and_train_state(
       self,
@@ -716,6 +754,17 @@ class PjitPartitioner(Partitioner):
         input_p, self.global_mesh
     )
 
+  def check_input_spec(self, batch: NestedJTensor) -> None:
+    """Check that the first input batch matches the given input spec."""
+    logging.info('Checking input spec [pjit partitioner]')
+
+    fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype)
+    spec = jax.tree_map(fn, self.train_inputs_shape_dtype)
+    input_batch_spec = jax.tree_map(fn, batch)
+
+    if not trees.is_subset(spec, input_batch_spec):
+      _spec_mismatch_error(input_batch_spec, spec)
+
   def initialize_prng_key_and_train_state(
       self,
       root_prng_key: PRNGKey,
@@ -786,7 +835,7 @@ class PjitPartitioner(Partitioner):
   ) -> NestedJTensor:
     """Preprocess the input batch before using it."""
     if self._reshard_inputs:
-      padded_inputs = input_pipeline.reshard_for_spmd(
+      return input_pipeline.reshard_for_spmd(
           padded_inputs, self.global_mesh, partition_specs
       )
     return padded_inputs

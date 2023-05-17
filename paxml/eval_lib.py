@@ -104,7 +104,7 @@ def _get_train_input_specs(
   """Gets the shape/dtype of the inputs to the model."""
   if not task_p.train.always_use_train_for_model_init:
     return None
-  train_input_specs = trainer_lib.get_train_input_specs(
+  train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
       task_p, instantiate(experiment_config.get_input_specs_provider_params())
   )
   if train_input_specs is None:

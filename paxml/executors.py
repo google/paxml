@@ -211,9 +211,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     # TODO(laigd): let it take ShapeDtypeStruct of prng key instead.
     train_input_specs = None
     if task_p.train.enforce_input_specs:
-      # TODO(laigd): the batch size used in the spec is inconsistent with
-      # BaseInput.get_next_padded(), fix it.
-      train_input_specs = trainer_lib.get_train_input_specs(
+      train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
           task_p, input_specs_provider
       )
       if not train_input_specs:

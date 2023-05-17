@@ -20,7 +20,7 @@ import contextlib
 import dataclasses
 import queue
 import time
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -263,30 +263,20 @@ class BaseTrainProgram(Program):
   def run(self, state: TrainState, step: int) -> ProgramOutput:
     train_p = self._task.train
     logging.debug('  Retrieving inputs.')
-    model_inputs = self._train_input.get_next_padded()
-    if train_p.enforce_input_specs and step == self._initial_step:
-      # At the first step, checks that the input specs provided by the input
-      # specs provider matches the shape/dtype of the actual input.
-      inputs_shape_dtype = jax.tree_map(
-          lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
-          model_inputs,
-      )
 
-      if not trees.is_subset(
-          self._partitioner.train_inputs_shape_dtype, inputs_shape_dtype
-      ):
-        raise ValueError(
-            'Spec of actual training input does not match train input specs. '
-            f'Spec of actual training input: {inputs_shape_dtype}, '
-            f'train input specs: {self._partitioner.train_inputs_shape_dtype}'
-        )
+    model_inputs = self._train_input.get_next_padded()
+
+    # Verify user-provided spec matches the first batch's structure.
+    if step == self._initial_step and train_p.enforce_input_specs:
+      self._partitioner.check_input_spec(model_inputs)
 
     model_inputs = self._partitioner.preprocess_inputs(
         self._train_input,
-        model_inputs,
+        model_inputs,  ## First two args can be consolidated
         self.train_input_partition_spec(model_inputs),
     )
     logging.debug('  Retrieved inputs.')
+
 
     # Waits if it reaches max inflight steps. We do this after retrieving the
     # inputs to maximize efficiency.

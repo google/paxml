@@ -18,6 +18,7 @@
 import dataclasses
 import enum
 import functools
+import pprint
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
@@ -54,6 +55,7 @@ ParamsT = pytypes.HParamsT
 Nested = pytypes.Nested
 NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
+NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedWeightHParams = base_layer.NestedWeightHParams
 TrainState = train_states.TrainState
 TensorProvenance = train_states.TensorProvenance
@@ -268,12 +270,17 @@ def adjust_input_params_for_small_batch(
   local_device_count = jax.local_device_count()
   batch_size = fdl.get_callable(input_p).get_batch_size(input_p)  # pytype: disable=attribute-error
 
-  if (batch_size % local_device_count == 0 and
-      input_p.num_infeed_hosts == jax.process_count()):
+  if (
+      batch_size % local_device_count == 0
+      and input_p.num_infeed_hosts == jax.process_count()
+  ):
     return input_p
 
+  # Determine correct padding amount.
   copy = input_p.clone()
-  if batch_size > local_device_count:
+  if batch_size <= local_device_count:
+    copy.batch_padding_size = local_device_count - batch_size
+  else:
     if batch_size % local_device_count != 0:
       if jax.process_count() > 1:
         # The custom device order resharding currently works only when
@@ -287,8 +294,6 @@ def adjust_input_params_for_small_batch(
             // local_device_count
             * local_device_count
         ) - batch_size
-  else:
-    copy.batch_padding_size = local_device_count - batch_size
 
   assert input_p.num_infeed_hosts <= jax.process_count()
   if jax.process_count() == 1:
@@ -1117,7 +1122,7 @@ def initialize_partitioned_model_states(
         prng_key,
         global_input_shapes,
         discard_opt_states,
-        # `do_init_checkpoint_rules` is False for pjit/spmd here because because
+        # `do_init_checkpoint_rules` is False for pjit/spmd here because
         # checkpoint loading has to be done after partitioning. See below.
         do_init_checkpoint_rules=False,
         var_weight_hparams=var_weight_hparams,
@@ -1295,14 +1300,55 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
   return call
 
 
-def get_train_input_specs(
+def get_train_input_specs_for_model_init(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     input_specs_provider: base_input.BaseInputSpecsProvider,
-):
-  """Gets the shape/dtype of the inputs to the model."""
+) -> NestedShapeDtypeStruct:
+  """Returns the shape/dtypes needed to initialize the partitioner.
+
+  This will have the per-device batch size for pmap cases (when there is no mesh
+  shape defined in the model) and the global batch size for the pjit case.
+
+  Args:
+    task_p: The task parameters
+    input_specs_provider: The BaseInputSpecsProvider that provides the train
+      input shapes/dtypes, which will have per-device batch size for pmap, and
+      per-process batch size for pjit.
+
+  Returns:
+    The input spec needed to initialize the partitioner.
+  """
   train_input_specs = input_specs_provider.get_input_specs()
+  logging.info(
+      'Spec yielded by InputSpecProvider for model init: %s',
+      pprint.pformat(train_input_specs),
+  )
+
+  # All pjit models specify at least the ICI mesh shape.
   if task_p.model.mesh_shape is not None:
+    # Pjit - handle the fractional batch size case.
+    batch_size = jax.tree_leaves(train_input_specs)[0].shape[0]
+    num_devices = jax.local_device_count()
+
+    # Each device needs at least one example.
+    batch_size = max(num_devices, batch_size)
+
+    # And each device needs to receive identically-shape tensors.
+    if batch_size % num_devices != 0:
+      batch_size = ((batch_size + num_devices) // num_devices) * num_devices
+
+    # The batch size we assign here is the global batch size (the convention for
+    # models parallelized with pjit).
     train_input_specs = jax.tree_map(
-        py_utils.get_global_input_shape_dtype, train_input_specs
+        lambda x: jax.ShapeDtypeStruct(  # pylint: disable=g-long-lambda
+            shape=[batch_size * jax.process_count(), *x.shape[1:]],
+            dtype=x.dtype,
+        ),
+        train_input_specs,
     )
+    logging.info(
+        'Modified spec for pjit global batch size: %s',
+        pprint.pformat(train_input_specs),
+    )
+
   return train_input_specs
