@@ -629,7 +629,9 @@ class SummaryHandler:
     if self._summary_pool:
       # Copy the values from device to host first. We dispatch the copies in the
       # main thread to speedup the summary writing and GC of TPU HBM.
-      for tensor in jax.tree_leaves((loss, weighted_scalars, summary_tensors)):
+      for tensor in jax.tree_util.tree_leaves(
+          (loss, weighted_scalars, summary_tensors)
+      ):
         tensor.copy_to_host_async()
 
       def process_fn():

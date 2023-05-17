@@ -148,7 +148,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       noise_stddev: float,
       loss_weight: JTensor,
       prng_key: PRNGKey = None) -> NestedMap:
-    prng_keys = jax.random.split(prng_key, len(jax.tree_leaves(grads)))
+    prng_keys = jax.random.split(
+        prng_key, len(jax.tree_util.tree_leaves(grads))
+    )
     prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
 
     if base_layer.is_running_under_pmap():

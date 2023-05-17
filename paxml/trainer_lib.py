@@ -1327,7 +1327,7 @@ def get_train_input_specs_for_model_init(
   # All pjit models specify at least the ICI mesh shape.
   if task_p.model.mesh_shape is not None:
     # Pjit - handle the fractional batch size case.
-    batch_size = jax.tree_leaves(train_input_specs)[0].shape[0]
+    batch_size = jax.tree_util.tree_leaves(train_input_specs)[0].shape[0]
     num_devices = jax.local_device_count()
 
     # Each device needs at least one example.
