@@ -511,26 +511,20 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_experiment",
-        ":checkpoint_managers",
+        ":checkpoint_creators",
         ":checkpoint_types",
         ":executors",
         ":experiment_utils",
         ":partitioning",
-        ":programs",
         ":tasks_lib",
-        ":train_states",
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
-        # Implicit numpy dependency.
-        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:pax_fiddle",
-        "//praxis:py_utils",
-        "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -825,6 +819,28 @@ pytype_strict_library(
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
         # Implicit tensorflow_no_contrib dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "checkpoint_creators",
+    srcs = ["checkpoint_creators.py"],
+    deps = [
+        ":checkpoint_managers",
+        ":partitioning",
+        ":tasks_lib",
+        ":train_states",
+        ":trainer_lib",
+        # Implicit absl.logging dependency.
+        # Implicit etils dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        # Implicit orbax.checkpoint dependency.
+        "//paxml:checkpoints",
+        "//praxis:base_input",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
     ],
 )
 
