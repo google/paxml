@@ -361,10 +361,7 @@ class SingleTaskDecodeProgram(programs.Program):
     while num_steps < 0 or step_num < num_steps:
       step_num += 1
       try:
-        if use_pmap:
-          batch = decode_input.get_next()
-        else:
-          batch = decode_input.get_next_padded()
+        batch = decode_input.get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         decode_input.reset()
         logging.log_if(
@@ -477,15 +474,6 @@ class SingleTaskDecodeProgram(programs.Program):
               processed_metrics, processed_metric_updates
           )
 
-        logging.info('Finished processing decoded input batch %d', step_num)
-
-      if use_pmap:
-        work_unit.set_task_status(
-            f'Finished decoding on {input_name} (batches={step_num})'
-        )
-
-      logging.info('Finished decoding on %s (batches=%s)', input_name, step_num)
-
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
     seqio_metric_values = None
@@ -541,16 +529,14 @@ class SingleTaskDecodeProgram(programs.Program):
           write_pickle=output_pickle if use_pmap else True,
       )
 
-    if not use_pmap:
-      work_unit.set_task_status(
-          f'Finished processing decoded input batch for {input_name}'
-      )
+    msg = f'Finished decoding input batch at step {step_num} for {input_name}'
+    work_unit.set_task_status(msg)
+    logging.info(msg)
 
     merged_decode_metrics = metric_utils.update_float_dict(
         metric_utils.as_float_dict(decode_metric_dict),
         metric_utils.as_float_dict(metric_values),
     )
-
     merged_processed_decode_metrics = metric_utils.update_float_dict(
         metric_utils.as_float_dict(processed_metric_dict),
         metric_utils.as_float_dict(process_metric_values),
