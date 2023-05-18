@@ -22,6 +22,7 @@ from paxml import base_experiment
 from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.tasks.lm import input_generator
+from paxml.tasks.lm import lg_gpt3_pax
 from paxml.tasks.lm import model_params
 from praxis import base_input
 from praxis import layers
@@ -56,8 +57,85 @@ class SyntheticDataset(base_experiment.BaseExperiment):
         self._dataset_common(is_training=True),
         self._dataset_common(is_training=False)
     ]
+  
 
+class LGSyntheticDataset(base_experiment.BaseExperiment):
+  """Synthetic LM dataset."""
+  PERCORE_BATCH_SIZE = 16
+  MAX_SEQ_LEN = 1024
 
+  def _dataset_train(
+      self
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
+    num_local_devices = jax.local_device_count()
+    batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
+    input_p = lg_gpt3_pax.DataBuild.Params()
+    # if is_training:
+    #   input_p.batch_size = batch_size
+    # else:
+    #   # TODO(zhangqiaorjc): Is this batch size too big for test?
+    input_p.batch_size = batch_size
+    input_p.seq_len = self.SEQUENCE_LENGTH
+    input_p.file_datasource.file_pattern="tfrecord:gs://yejingxin-us-central2/external/lg/dummy-data/valid/*.tfrecords"
+    input_p.file_datasource.file_parallelism = 16
+    input_p.file_datasource.file_buffer_size = 16  # janghoon.han
+    input_p.file_datasource.num_batcher_threads = 16
+    p = pax_fiddle.Config(
+        base_input.LingvoInputAdaptor, input=input_p, is_training=is_training
+    )
+    return p
+  
+  def _dataset_eval(
+    self
+  ) -> pax_fiddle.Config[base_input.BaseInput]:
+    num_local_devices = jax.local_device_count()
+    batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
+    input_p = lg_gpt3_pax.DataBuild.HParams()
+    # if is_training:
+    #   input_p.batch_size = batch_size
+    # else:
+    #   # TODO(zhangqiaorjc): Is this batch size too big for test?
+    input_p.batch_size = batch_size
+    input_p.seq_len = self.SEQUENCE_LENGTH
+    input_p.file_datasource.file_pattern="tfrecord:gs://yejingxin-us-central2/external/lg/dummy-data/valid/*.tfrecords"
+    input_p.file_datasource.file_parallelism = 1
+    input_p.file_datasource.file_buffer_size = 1  # janghoon.han
+    input_p.file_datasource.num_batcher_threads = 16
+    p = pax_fiddle.Config(
+        base_input.LingvoInputAdaptor, input=input_p
+    )
+    return p
+
+  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+    """Returns a list of dataset parameters."""
+    return [
+        self._dataset_train(),
+        self._dataset_eval()
+    ]
+
+@experiment_registry.register
+class LGLmCloudSpmd(model_params.TransformerLmSpmdAdafactor, LGSyntheticDataset):
+  """Base config for an SPMD model."""
+
+  NUM_LAYERS = 10
+  MODEL_DIMS = 2048
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  ACTIVATION_CLS = layers.GELU
+  USE_GATED_ACTIVATION = False
+
+  USE_REPEATED_LAYER = True
+
+  # Autodiff remat.
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    """Returns the task parameters."""
+    task_p = super().task()
+    model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
+    task_p.train.learner.repeat_prefix_sep = '_'
+    task_p.train.num_train_steps = 2
+    return task_p
+  
 @experiment_registry.register
 class LargeMlp(model_params.ClassificationModelAdam, SyntheticDataset):
   """An 8-layer MLP model with large hidden dimensions."""
@@ -178,6 +256,7 @@ class LmCloudSpmd2B(LmCloudSpmd):
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 4, 1]
 
+lmcloudspmd2Blimitsteps = pax_fiddle.auto_config(lambda: LmCloudSpmd2BLimitSteps())
 
 @experiment_registry.register
 class LmCloudSpmd2BLimitSteps(LmCloudSpmd2B):
