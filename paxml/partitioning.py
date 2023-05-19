@@ -20,7 +20,7 @@ import dataclasses
 import functools
 import json
 import pprint
-from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
 from clu import platform
@@ -171,6 +171,69 @@ def _spec_mismatch_error(actual_shape_dtype, expected_shape_dtype):
       f'Observed spec:\n{pprint.pformat(actual_shape_dtype)},\n'
       f'Expected spec:\n{pprint.pformat(expected_shape_dtype)}'
   )
+
+
+class StepFn(Protocol):
+  """Signature of the function passed to `Partitioner.partition()`."""
+
+  def __call__(
+      self,
+      jax_task: tasks_lib.SingleTask,
+      train_state: TrainState,
+      prng_key: PRNGKey,
+      inputs: NestedJTensor,
+      fprop_dtype: jnp.dtype,
+      var_weight_hparams: NestedWeightHParams,
+  ) -> Tuple[Optional[TrainState], trainer_lib.StepFnOutput]:
+    """Step function signature.
+
+    Args:
+      jax_task: A SingleTask instance.
+      train_state: The current TrainState.
+      prng_key: The PRNGKey.
+      inputs: Inputs drawn from the input pipeline.
+      fprop_dtype: Fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+      var_weight_hparams: A pytree of WeightHParams for the model variables.
+
+    Returns:
+      A tuple (new_train_state, output), where:
+
+      new_train_state: the updated TrainState if this step function is used for
+      training, or None otherwise.
+      output: a StepFnOutput instance encapsulating the other outputs of the
+      step function.
+    """
+    ...
+
+
+class PartitionedStepFn(Protocol):
+  """Signature of the partitioned function `Partitioner.partition()` returns."""
+
+  def __call__(
+      self,
+      train_state: TrainState,
+      prng_key: PRNGKey,
+      inputs: NestedJTensor,
+      unpadded_global_batch_size: Optional[int] = None,
+  ) -> Tuple[Optional[TrainState], trainer_lib.StepFnOutput]:
+    """Partitioned step function signature.
+
+    Args:
+      train_state: The current TrainState.
+      prng_key: The PRNGKey.
+      inputs: Inputs drawn from the input pipeline.
+      unpadded_global_batch_size: (Optional) The unpadded size of global batch,
+        and the padding is on the right side of each input.
+
+    Returns:
+      (Same as StepFn.__call__) A tuple (new_train_state, output), where:
+
+      new_train_state: the updated TrainState if this step function is used for
+      training, or None otherwise.
+      output: a StepFnOutput instance encapsulating the other outputs of the
+      step function.
+    """
+    ...
 
 
 class Partitioner(metaclass=abc.ABCMeta):
@@ -474,55 +537,6 @@ class Partitioner(metaclass=abc.ABCMeta):
         partition_specs=to_eval_state(metadata.partition_specs),
     )
 
-  # Signature of the function passed to `self.partition()`.
-  #
-  # Args:
-  #   jax_task: A SingleTask instance.
-  #   train_state: The current TrainState.
-  #   prng_key: The PRNGKey.
-  #   inputs: Inputs drawn from the input pipeline.
-  #   fprop_dtype: Fprop datatype, can be either jnp.float32 or jnp.bfloat16.
-  #   var_weight_hparams: A pytree of WeightHParams for the model variables.
-  #
-  # Returns:
-  #   (new_train_state, ...) if is_eval==False, or just (...) otherwise, where
-  #   new_train_state is the updated TrainState, and ... represents arbitrary
-  #   number and structure of jax array.
-  StepFn = Callable[
-      [
-          tasks_lib.SingleTask,
-          TrainState,
-          PRNGKey,
-          NestedJTensor,
-          jnp.dtype,
-          NestedWeightHParams,
-      ],
-      Any,
-  ]
-
-  # Signature of the partitioned function returned by `self.partition()`.
-  # typing.Protocol is used instead of Callable to better handle Optional args.
-  #
-  # Args:
-  #   train_state: The current TrainState.
-  #   prng_key: The PRNGKey.
-  #   inputs: Inputs drawn from the input pipeline.
-  #   unpadded_global_batch_size: (Optional) The unpadded size of global batch,
-  #     and the padding is on the right side of each input.
-  #
-  # Returns:
-  #   The same as StepFn.
-  class PartitionedStepFn(Protocol):
-
-    def __call__(
-        self,
-        train_state: TrainState,
-        prng_key: PRNGKey,
-        inputs: NestedJTensor,
-        unpadded_global_batch_size: Optional[int] = None,
-    ) -> Any:
-      ...
-
   @abc.abstractmethod
   def partition(
       self,
@@ -545,6 +559,8 @@ class Partitioner(metaclass=abc.ABCMeta):
       - input_partition_spec: The partition spec for the inputs of the step
         function.
     """
+    # TODO(laigd): find a cleaner way to handle train vs. eval, maybe use
+    # different StepFn types, and remove the is_eval arg.
 
 
 class PmapPartitioner(Partitioner):
@@ -657,10 +673,10 @@ class PmapPartitioner(Partitioner):
 
   def partition(
       self,
-      step_fn: Partitioner.StepFn,
+      step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[Partitioner.PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
     """Partitions the step function."""
     del inputs_shape_dtype
 
@@ -867,10 +883,10 @@ class PjitPartitioner(Partitioner):
 
   def partition(
       self,
-      step_fn: Partitioner.StepFn,
+      step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[Partitioner.PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
     """Gets a sharded (pjit-ed) step function of the SPMD Model.
 
     Args:
@@ -897,23 +913,19 @@ class PjitPartitioner(Partitioner):
     with self.global_mesh:
       return (
           self._partition_manual_shard(
-              wrapped_step_fn,
-              is_eval,
-              inputs_shape_dtype,
-              input_partition_spec,
-              metadata,
+              wrapped_step_fn, is_eval, input_partition_spec, metadata
           ),
           input_partition_spec,
       )
 
   def _get_step_fn(
       self,
-      step_fn: Partitioner.StepFn,
+      step_fn: StepFn,
       is_eval: bool,
       metadata: TrainStateMetadata,
       input_partition_spec: NestedPartitionSpec,
       use_padding: bool = True,
-  ) -> Partitioner.PartitionedStepFn:
+  ) -> PartitionedStepFn:
     """Returns a step function to apply the SPMD partition (pjit)."""
     task_p = self._jax_task.hparams
     model_p = task_p.model
@@ -963,10 +975,9 @@ class PjitPartitioner(Partitioner):
           model_p.fprop_dtype,
           metadata.var_weight_hparams,
       )
-
+      assert len(fn_out) == 2  # Output is (updated_train_state, StepFnOutput).
       if is_eval:
         return fn_out
-      assert len(fn_out) > 1
 
       # Pad the model states again for training step functions.
       if use_padding:
@@ -978,7 +989,7 @@ class PjitPartitioner(Partitioner):
 
   def _pjit(
       self,
-      step_fn: Partitioner.PartitionedStepFn,
+      step_fn: PartitionedStepFn,
       is_eval: bool,
       fn_in_partition_specs: NestedPartitionSpec,
       fn_out_partition_specs: NestedPartitionSpec,
@@ -1077,34 +1088,22 @@ class PjitPartitioner(Partitioner):
 
   def _partition_manual_shard(
       self,
-      step_fn: Partitioner.PartitionedStepFn,
+      step_fn: PartitionedStepFn,
       is_eval: bool,
-      inputs_shape_dtype: NestedShapeDtypeLike,
       input_partition_spec: NestedPartitionSpec,
       metadata: TrainStateMetadata,
-  ) -> Partitioner.PartitionedStepFn:
-    prng_key_partition_spec = PartitionSpec(None)
+  ) -> PartitionedStepFn:
+    prng_key_partition_spec = PartitionSpec()
     fn_in_partition_specs = (
         metadata.partition_specs,
         prng_key_partition_spec,
         input_partition_spec,
     )
-
-    var_shapes = metadata.padded_global_shapes
-    out_shapes = jax.eval_shape(
-        step_fn, var_shapes, self._init_key, inputs_shape_dtype, None
+    fn_out_partition_specs = (
+        # When is_eval=True, it returns None for the train state.
+        PartitionSpec() if is_eval else metadata.partition_specs,
+        PartitionSpec(),  # All other outputs are fully replicated.
     )
-    # Currently, all the outputs are fully replicated.
-    # TODO(yonghui): Somehow fetch the output sharding spec from _eval_step fn.
-    fn_out_partition_specs = jax.tree_util.tree_map(
-        lambda _: PartitionSpec(), out_shapes
-    )
-    if not is_eval:
-      fn_out_partition_specs = tuple(
-          [metadata.partition_specs] + list(fn_out_partition_specs[1:])
-      )
-
-    asserts.assert_same_structure(fn_out_partition_specs, out_shapes)
 
     # When reshard_inputs is true, inputs are jax.Arrays created by
     # reshard_for_spmd(). The shardings may have a custom device order.
@@ -1127,7 +1126,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
 
     # The step function to run auto-sharding on. This will be used to compute
     # the train state partition spec.
-    step_fn: Partitioner.StepFn
+    step_fn: StepFn
 
     # Whether step_fn is used for evaluation.
     is_eval: bool
@@ -1145,7 +1144,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     """Output of auto-sharding and related information."""
 
     # The partitioned step_fn generated by auto-sharding.
-    partitioned_step_fn: Partitioner.PartitionedStepFn
+    partitioned_step_fn: PartitionedStepFn
 
     # Generated partition spec for the TrainState.
     train_state_partition_spec: TrainState
@@ -1210,12 +1209,12 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
 
   def _partition_auto_shard(
       self,
-      step_fn: Partitioner.PartitionedStepFn,
+      step_fn: PartitionedStepFn,
       is_eval: bool,
       inputs_shape_dtype: NestedShapeDtypeLike,
       input_partition_spec: NestedPartitionSpec,
       metadata: TrainStateMetadata,
-  ) -> Tuple[Partitioner.PartitionedStepFn, NestedPartitionSpec, TrainState]:
+  ) -> Tuple[PartitionedStepFn, NestedPartitionSpec, TrainState]:
     """Generates and returns the train state partition spec automatically."""
     # Workflow: create abstract train state and ahead of time compile the
     # `step_fn`. Then we can extract the input shardings returned by XLA's
@@ -1341,10 +1340,10 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
 
   def partition(
       self,
-      step_fn: Partitioner.StepFn,
+      step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[Partitioner.PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
     """Returns the auto-sharding partitioned step functions and input specs."""
     # Auto-sharding result is generated by self.get_train_state_metadata, so we
     # call it first if no result is cached.
@@ -1377,7 +1376,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     return super().partition(step_fn, inputs_shape_dtype, is_eval)
 
 
-def get_step_fn(mode: RunningMode) -> Tuple[Partitioner.StepFn, bool]:
+def get_step_fn(mode: RunningMode) -> Tuple[StepFn, bool]:
   """Returns the step function to partition.
 
   Args:

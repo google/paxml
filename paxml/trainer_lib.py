@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union
 from absl import logging
 from etils import epath
 import fiddle as fdl
+from flax import struct as flax_struct
 import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
@@ -640,6 +641,29 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     return new_vars
 
 
+@flax_struct.dataclass
+class StepFnOutput:
+  """Dataclass encapsulating the output of a step function."""
+
+  # Mean loss computed by the model.
+  loss: Optional[JTensor]
+
+  # A dict of (value, weight) pairs representing simple weighted average metrics
+  # or losses.
+  weighted_scalars: WeightedScalars
+
+  # Auxilillary per-example output computed by the model.
+  per_example_out: NestedMap
+
+  # A dict or nested map of summary tensors computed in forward/backward pass.
+  summary_tensors: SummaryDict
+
+  # The updated weights.
+  # TODO(laigd): this is currently only used in the decode step function,
+  # consider remove it, or merge it with summary_tensors.
+  updated_vars: Optional[NestedMap] = None
+
+
 # TODO(yonghui): refactor to pass in learner separately.
 def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
@@ -648,7 +672,7 @@ def train_step_single_learner(
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
-) -> Tuple[TrainState, Any, Any, Any, SummaryDict]:
+) -> Tuple[TrainState, StepFnOutput]:
   """Trains a model for a single step.
 
   This function works for both pmap-ed model and pjit-ed model.
@@ -666,14 +690,7 @@ def train_step_single_learner(
     var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
-    A tuple of the following elements.
-    updated_states - updated states.
-    loss - loss as computed by model.fprop.
-    weighted_scalars - a dict of (value, weight) pairs representing simple
-      weighted average metrics or losses.
-    per_example_out - auxilillary per-example output as computed in model.fprop.
-    summary_tensors - A dict or nested map of summary tensors computed in
-      forward as well as backward.
+    A tuple (updated_states, StepFnOutput).
   """
   model = jax_task.model
   assert len(jax_task.learners) == 1
@@ -885,8 +902,12 @@ def train_step_single_learner(
   summary_tensors.update(fwd_summary_tensors)
   summary_tensors.update(bwd_summary_tensors)
 
-  return (new_states, mean_loss, weighted_scalars, per_example_out,
-          summary_tensors)
+  return new_states, StepFnOutput(
+      loss=mean_loss,
+      weighted_scalars=weighted_scalars,
+      per_example_out=per_example_out,
+      summary_tensors=summary_tensors,
+  )
 
 
 # TODO(laigd): rename - eval has nothing to do with number of learners.
@@ -897,7 +918,7 @@ def eval_step_single_learner(
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
-) -> Tuple[Any, Any, Any, SummaryDict]:
+) -> Tuple[None, StepFnOutput]:
   """Evaluates a model for a single step.
 
   This utility is specialized for the single learner case.
@@ -911,13 +932,9 @@ def eval_step_single_learner(
     var_weight_hparams: A pytree of WeightHParams for the model variables.
 
   Returns:
-    A tuple of the following elements.
-    loss - loss as computed by model.fprop.
-    weighted_scalars - a dict of (value, weight) scalar pairs representing
-      simple metrics or losses.
-    per_example_out - auxilillary per-example output as computed in model.fprop.
-    summary_tensors - A nested map or dict of summary tensors computed in
-      forward as well as backward pass.
+    A tuple (None, StepFnOutput) to be compatible with the general step function
+    output format (updated_train_state, StepFnOutput), where updated_train_state
+    is None since it doesn't update the train state.
   """
   model = jax_task.model
   context_p = base_layer.JaxContext.HParams(
@@ -976,7 +993,12 @@ def eval_step_single_learner(
          _maybe_to_float32,
          (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
 
-  return mean_loss, aggregated_scalars, per_example_out, aggregated_summaries
+  return None, StepFnOutput(
+      loss=mean_loss,
+      weighted_scalars=aggregated_scalars,
+      per_example_out=per_example_out,
+      summary_tensors=aggregated_summaries,
+  )
 
 
 def decode_step(
@@ -1060,10 +1082,19 @@ def decode_step(
 
 def _decode_step_for_partitioner(
     task, states, prng_key, inputs, fprop_dtype, var_weight_hparams
-):
+) -> Tuple[None, StepFnOutput]:
   """Decode step function used by the partitioner."""
-  return decode_step(
-      task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
+  (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
+      decode_step(
+          task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
+      )
+  )
+  return None, StepFnOutput(
+      loss=None,
+      weighted_scalars=weighted_scalars,
+      per_example_out=per_example_out,
+      summary_tensors=updated_metrics,
+      updated_vars=updated_vars,
   )
 
 

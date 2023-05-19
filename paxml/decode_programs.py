@@ -395,21 +395,20 @@ class SingleTaskDecodeProgram(programs.Program):
             decode_step_func(decode_key, batch)
         )
       else:
-        (weighted_scalars, out, updated_metrics), updated_vars = (
-            spmd_decode_step_fn(
-                decode_key,
-                batch,
-                decode_input.get_global_batch_size(decode_input.hparams),
-            )
+        unused_train_state, decode_out = spmd_decode_step_fn(
+            decode_key,
+            batch,
+            decode_input.get_global_batch_size(decode_input.hparams),
         )
-
         # Cross host synchronization happens at this point.
         py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')
         # Output is fully replicated now, so it's ok to unreplicate it by
         # retrieving from device 0 only.
-        out = py_utils.maybe_unreplicate_for_fully_replicated(out)
+        out = py_utils.maybe_unreplicate_for_fully_replicated(
+            decode_out.per_example_out
+        )
         weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-            weighted_scalars
+            decode_out.weighted_scalars
         )
 
         # Because outputs of the decode step in pjit are annotated to
@@ -418,12 +417,12 @@ class SingleTaskDecodeProgram(programs.Program):
         # This also means we don't need to call an all_gather and a reduce()
         # on each clu.metric like we do in pmap mode.
         updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-            updated_metrics
+            decode_out.summary_tensors
         )
 
-        summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+        summary_tensors = decode_out.updated_vars.get(base_layer.SUMMARIES, {})
         summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-        del updated_vars  # release Jax Arrays memory allocations
+        del decode_out  # release Jax Arrays memory allocations
 
         summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
             summary_tensors

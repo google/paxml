@@ -880,7 +880,7 @@ def partitioned_decode_once(
     spmd_decode_step: Optional[
         Callable[
             [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+            Tuple[None, trainer_lib.StepFnOutput],
         ]
     ] = None,
     inputs_partition_spec: Optional[NestedPartitionSpec] = None,
@@ -972,7 +972,7 @@ def _decode_once(
     spmd_decode_step: Optional[
         Callable[
             [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-            Tuple[Tuple[NestedMap, NestedMap], NestedMap],
+            Tuple[None, trainer_lib.StepFnOutput],
         ]
     ] = None,
     inputs_partition_spec: Optional[NestedPartitionSpec] = None,

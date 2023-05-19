@@ -58,6 +58,7 @@ SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 EvaluationMode = io_utils.EvaluationMode
 SummaryWriter = tf.summary.SummaryWriter
+StepFnOutput = trainer_lib.StepFnOutput
 
 NestedMap = py_utils.NestedMap
 TrainState = train_states.TrainState
@@ -277,7 +278,6 @@ class BaseTrainProgram(Program):
     )
     logging.debug('  Retrieved inputs.')
 
-
     # Waits if it reaches max inflight steps. We do this after retrieving the
     # inputs to maximize efficiency.
     self._pending_train_losses.wait_for_next()
@@ -290,14 +290,7 @@ class BaseTrainProgram(Program):
     logging.debug('  Performing train_step().')
     with jax.profiler.StepTraceAnnotation('train', step_num=step):
       with py_utils.timeit() as train_period:
-        (
-            new_step,
-            new_state,
-            loss,
-            weighted_scalars,
-            per_example_out,
-            summary_tensors,
-        ) = self.train_step(
+        new_step, new_state, train_outputs = self.train_step(
             step,
             state,
             self._train_prng_seed,
@@ -311,21 +304,13 @@ class BaseTrainProgram(Program):
     logging.debug(
         '  Completed train_step() in %f seconds.', train_period.elapsed
     )
-    self._pending_train_losses.add_computation(loss)
+    self._pending_train_losses.add_computation(train_outputs.loss)
     if step == self._initial_step:
       self._first_step_completion_time = time.time()
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
-
-    steps_per_sec = self._maybe_write_summaries(
-        step,
-        new_step,
-        loss,
-        weighted_scalars,
-        summary_tensors,
-        per_example_out,
-    )
+    steps_per_sec = self._maybe_write_summaries(step, new_step, train_outputs)
     logging.debug('  Writing summaries (attempt).')
 
     # Run eval at regular step interval.
@@ -341,8 +326,8 @@ class BaseTrainProgram(Program):
     return ProgramOutput(
         new_state,
         aux=NestedMap(
-            loss=loss,
-            weighted_scalars=weighted_scalars,
+            loss=train_outputs.loss,
+            weighted_scalars=train_outputs.weighted_scalars,
             new_train_step=new_step,
             steps_per_sec=steps_per_sec,
             eval_train_metrics=eval_train_metrics,
@@ -357,7 +342,7 @@ class BaseTrainProgram(Program):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[int, TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> Tuple[int, TrainState, StepFnOutput]:
     """The train step function.
 
     Args:
@@ -369,18 +354,12 @@ class BaseTrainProgram(Program):
         input.
 
     Returns:
-      A tuple (new_step, new_state, loss, weighted_scalars, per_example_out,
-      summary_tensors), where:
+      A tuple (new_step, new_state, train_step_fn_out), where:
 
       - new_step: The updated train step counter. Usually this should be step+1.
       - new_state: The updated train state.
-      - loss: The loss as computed by model.fprop.
-      - weighted_scalars: A dict of (value, weight) pairs representing simple
-        weighted average metrics or losses.
-      - per_example_out: Auxilillary per-example output as computed in
-        model.fprop.
-      - summary_tensors: A dict or nested map of summary tensors computed in
-        forward as well as backward.
+      - train_step_fn_out: A StepFnOutput instance encapsulating the output of
+        the train step function.
     """
 
   @abc.abstractmethod
@@ -390,7 +369,7 @@ class BaseTrainProgram(Program):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> StepFnOutput:
     """The eval step function on training inputs."""
 
   @abc.abstractmethod
@@ -400,13 +379,7 @@ class BaseTrainProgram(Program):
     """The partition spec for the model training inputs."""
 
   def _maybe_write_summaries(
-      self,
-      step: int,
-      new_step: int,
-      loss,
-      weighted_scalars,
-      summary_tensors,
-      per_example_out,
+      self, step: int, new_step: int, train_outputs: StepFnOutput
   ):
     # Compute steps/sec every this many steps, revisit when necessary.
     compute_steps_per_sec_interval_steps = 10
@@ -423,10 +396,10 @@ class BaseTrainProgram(Program):
     # TODO(b/264635784): Update the logic to pass step instead.
     self._train_summary_handler.process(
         new_step,
-        loss,
-        weighted_scalars,
-        summary_tensors,
-        per_example_out=per_example_out,
+        train_outputs.loss,
+        train_outputs.weighted_scalars,
+        train_outputs.summary_tensors,
+        per_example_out=train_outputs.per_example_out,
         steps_per_sec=steps_per_sec,
     )
     logging.debug('  Wrote summaries (attempted).')
@@ -487,13 +460,17 @@ class BaseTrainProgram(Program):
         )
 
         eval_state = get_eval_train_state(self._task, new_state)
-        loss, weighted_scalars, _, summary_tensors = self.eval_train_step(
+        eval_outputs = self.eval_train_step(
             eval_state,
             self._eval_prng_seed,
             eval_inputs,
             self._train_unpadded_global_batch_size,
         )
+        loss = eval_outputs.loss
+        weighted_scalars = eval_outputs.weighted_scalars
+        summary_tensors = eval_outputs.summary_tensors
         logging.debug('  Completed eval_step() runs on training split.')
+
         if self._eval_train_summary_handler.process(
             new_step, loss, weighted_scalars, summary_tensors
         ):
@@ -575,7 +552,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[int, TrainState, JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> Tuple[int, TrainState, StepFnOutput]:
     """The train step function."""
     train_step, _ = self._get_train_step(inputs)
     return step + 1, *train_step(
@@ -588,10 +565,13 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> StepFnOutput:
     """The eval step function on trianing inputs."""
     eval_train_step = self._get_eval_train_step(inputs)
-    return eval_train_step(state, prng_key, inputs, unpadded_global_batch_size)
+    unused_train_state, eval_step_fn_out = eval_train_step(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
+    return eval_step_fn_out
 
   def train_input_partition_spec(
       self, inputs: NestedJTensor
@@ -829,12 +809,16 @@ class BaseEvalProgram(Program):
       eval_inputs = self._partitioner.preprocess_inputs(
           self.eval_input, eval_inputs, supported_input_partition_spec
       )
-      loss, weighted_scalars, per_example_out, summary_tensors = self.eval_step(
+      eval_outputs = self.eval_step(
           state,
           self._eval_prng_seed,
           eval_inputs,
           self._eval_unpadded_global_batch_size,
       )
+      loss = eval_outputs.loss
+      weighted_scalars = eval_outputs.weighted_scalars
+      per_example_out = eval_outputs.per_example_out
+      summary_tensors = eval_outputs.summary_tensors
       xla_passthrough.merge_back_xla_unsupported_batch(
           per_example_out, unsupported_inputs
       )
@@ -863,7 +847,7 @@ class BaseEvalProgram(Program):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> StepFnOutput:
     """The eval step function."""
 
   @abc.abstractmethod
@@ -911,10 +895,13 @@ class SingleTaskEvalProgram(BaseEvalProgram):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       unpadded_global_batch_size: int,
-  ) -> Tuple[JTensor, WeightedScalars, NestedMap, SummaryDict]:
+  ) -> StepFnOutput:
     """The eval step function."""
     eval_step, _ = self._get_eval_step(inputs)
-    return eval_step(state, prng_key, inputs, unpadded_global_batch_size)
+    unused_train_state, eval_step_fn_out = eval_step(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
+    return eval_step_fn_out
 
   def eval_input_partition_spec(
       self, inputs: NestedJTensor

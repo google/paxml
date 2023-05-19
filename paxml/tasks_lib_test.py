@@ -277,9 +277,12 @@ class BaseTaskTest(test_utils.TestCase):
 
     # Train the model for one single step.
     for step in range(10):
-      (replicated_mdl_states, _, metrics, _, summary_tensors) = p_train_step(
+      replicated_mdl_states, train_outputs = p_train_step(
           replicated_mdl_states, train_prng_key, mdl_inputs
       )
+      metrics = train_outputs.weighted_scalars
+      summary_tensors = train_outputs.summary_tensors
+
       if step >= vn_start_step:
         # The VN is applied for training
         self.assertGreater(np.array(metrics['loss02'])[0], 0.0)
@@ -297,11 +300,12 @@ class BaseTaskTest(test_utils.TestCase):
       if summary_verbosity == 4:
         self.assertIn('debug_scalar', summary_tensors)
 
-    _, mean_metrics, _, _ = p_eval_step(replicated_mdl_states, eval_prng_key,
-                                        mdl_inputs)
+    _, eval_outputs = p_eval_step(
+        replicated_mdl_states, eval_prng_key, mdl_inputs
+    )
 
     # The VN is not applied for eval
-    self.assertEqual(np.array(mean_metrics['loss02'])[0], 0.0)
+    self.assertEqual(np.array(eval_outputs.weighted_scalars['loss02'])[0], 0.0)
 
   def test_model_linear_regression_ema(self):
     # Set up the model.
@@ -363,8 +367,9 @@ class BaseTaskTest(test_utils.TestCase):
       decay_rate = min(decay, (1 + step) / (10 + step))
       shallow_state = decay_rate * shallow_state + (1. - decay_rate) * param
 
-      (replicated_mdl_states, _, _, _,
-       _) = p_train_step(replicated_mdl_states, train_prng_key, mdl_inputs)
+      replicated_mdl_states, _ = p_train_step(
+          replicated_mdl_states, train_prng_key, mdl_inputs
+      )
 
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):
