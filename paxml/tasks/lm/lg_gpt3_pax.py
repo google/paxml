@@ -41,6 +41,7 @@ from praxis.layers import embedding_softmax
 from praxis.layers import models
 from praxis.layers import transformer_models
 
+
 NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
 
@@ -126,7 +127,7 @@ class DenseLMTemplateLG(base_experiment.BaseExperiment):
   # architecture related
   NUM_LAYERS = 10 #?
   VOCAB_SIZE = 50272
-  DIMS_PER_HEAD = 128 #?
+  DIMS_PER_HEAD = 64 #?
   NUM_HEADS = 64
   MODEL_DIMS = 4 * 1024
   HIDDEN_DIMS = 32 * 1024 #MODEL_DIMS * 4
