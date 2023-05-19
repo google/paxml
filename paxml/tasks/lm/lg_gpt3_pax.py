@@ -99,12 +99,16 @@ class DataBuild(base_input_generator.BaseInputGeneratorFromFiles):
     ids = tf.strided_slice(ids, [0,0], [bs, p.seq_len])
     label = tf.strided_slice(label, [0,0], [bs, p.seq_len])
 
-    ret.tgt.ids = tf.cast(ids, dtype=tf.int32)
-    ret.tgt.labels = tf.cast(label, dtype=tf.int32)
-    ret.tgt.segment_ids = tf.minimum(ret.tgt.ids, 1)
+    ret.ids = tf.cast(ids, dtype=tf.int32)
+    #Anisha: adding dummy paddings and weights
+    ret.paddings = tf.zeros_like(ids)
+    ret.weights = tf.ones_like(ids)
+    
+    ret.labels = tf.cast(label, dtype=tf.int32)
+    ret.segment_ids = tf.minimum(ret.ids, 1)
     seg_pos = tf.range(p.seq_len, dtype=tf.int32)
     seg_pos = tf.expand_dims(seg_pos, axis=0)
-    ret.tgt.segment_pos = tf.tile(seg_pos, [bs, 1])
+    ret.segment_pos = tf.tile(seg_pos, [bs, 1])
     #ret.tgt.segment_pos = tf.cast(label, dtype=tf.int32)
 
     if (p.fprop_dtype is None or
@@ -120,6 +124,46 @@ class DataBuild(base_input_generator.BaseInputGeneratorFromFiles):
             lambda t: tf.ensure_shape(t, (bs, p.seq_len)))
     ret = ret.Transform(_Cast)
     return ret
+  
+  # def BuildInputBatch(self, batch_size, features_list, bucket_keys=None):
+
+  #   p = self.params
+
+  #   ret = py_utils.NestedMap()
+  #   bs = batch_size
+
+  #   ret.tgt = py_utils.NestedMap()
+
+  #   def SetShape(x):
+  #     x.set_shape([bs, p.seq_len +1])
+
+  #   ids = features_list[0]
+  #   SetShape(ids)
+  #   label = tf.roll(ids, -1, axis=-1)
+  #   ids = tf.strided_slice(ids, [0,0], [bs, p.seq_len])
+  #   label = tf.strided_slice(label, [0,0], [bs, p.seq_len])
+
+  #   ret.tgt.ids = tf.cast(ids, dtype=tf.int32)
+  #   ret.tgt.labels = tf.cast(label, dtype=tf.int32)
+  #   ret.tgt.segment_ids = tf.minimum(ret.tgt.ids, 1)
+  #   seg_pos = tf.range(p.seq_len, dtype=tf.int32)
+  #   seg_pos = tf.expand_dims(seg_pos, axis=0)
+  #   ret.tgt.segment_pos = tf.tile(seg_pos, [bs, 1])
+  #   #ret.tgt.segment_pos = tf.cast(label, dtype=tf.int32)
+
+  #   if (p.fprop_dtype is None or
+  #      p.dtype==p.fprop_dtype):
+  #     return ret
+
+  #   def _Cast(v):
+  #     if not v.dtype.is_floating:
+  #       return v
+  #     return tf.cast(v, p.fprop_dtype)
+
+  #   ret = ret.Transform(
+  #           lambda t: tf.ensure_shape(t, (bs, p.seq_len)))
+  #   ret = ret.Transform(_Cast)
+  #   return ret
 
 
 class DenseLMTemplateLG(base_experiment.BaseExperiment):
