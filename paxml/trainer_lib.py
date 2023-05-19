@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import functools
 import pprint
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -29,6 +29,7 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
 from paxml import base_metrics
+from paxml import learners as learners_lib
 from paxml import sgf
 from paxml import summary_utils
 from paxml import tasks_lib
@@ -665,6 +666,9 @@ class StepFnOutput:
 
 
 # TODO(yonghui): refactor to pass in learner separately.
+# TODO(wangpeng): Consider breaking this function into smaller pieces, and/or
+#   moving it to `TrainProgram` or `BaseExecutor`, and/or making `grad_fn` and
+#   `apply_fn` class methods instead of arguments.
 def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
     states: TrainState,
@@ -672,6 +676,37 @@ def train_step_single_learner(
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
+    *,
+    grad_fn: Optional[
+        Callable[
+            [
+                Callable[
+                    [NestedJTensor, NestedMap, PRNGKey],
+                    Tuple[JTensor, sgf.GradAuxInfo],
+                ],
+                learners_lib.Learner,
+                NestedJTensor,
+                NestedMap,
+                PRNGKey,
+            ],
+            Tuple[Any, Any],
+        ]
+    ] = None,
+    apply_fn: Optional[
+        Callable[
+            [
+                base_model.BaseModel,
+                NestedJTensor,
+                NestedMap,
+                bool,
+                Dict[str, PRNGKey],
+            ],
+            Tuple[
+                Tuple[base_model.WeightedScalars, Dict[str, Any]], NestedJTensor
+            ],
+        ]
+    ] = None,
+    expose_updated_nontrainables_to_learner=True,
 ) -> Tuple[TrainState, StepFnOutput]:
   """Trains a model for a single step.
 
@@ -688,6 +723,17 @@ def train_step_single_learner(
     inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
     var_weight_hparams: A pytree of WeightHParams for the model variables.
+    grad_fn: A custom gradient function to be used instead of a default one.
+    apply_fn: A custom apply function to be used instead of a default one. Note
+      that when `grad_fn` is not `None`, this argument has no effect and you
+      don't need it, because the custom `grad_fn` can choose to use whatever
+      "apply" function. `apply_fn` is only used by the default gradient
+      function.
+    expose_updated_nontrainables_to_learner: Whether to make updated
+      non-trainable variables visible to the learner. Some optimizers such as
+      `optimizers.DynamicAccumulator` assume special non-trainable variables
+      such as EMA (Exponential Moving Average) being set during forward-prop for
+      controlling their behavior.
 
   Returns:
     A tuple (updated_states, StepFnOutput).
@@ -727,12 +773,32 @@ def train_step_single_learner(
     with base_layer.JaxContext.new_context(hparams=context_p):
       prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
       apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-      (weighted_scalars, per_example_output), updated_vars = model.apply(
+      if apply_fn is None:
+
+        def apply(
+            variables: NestedJTensor,
+            inputs: NestedMap,
+            mutable: bool,
+            rngs: Dict[str, PRNGKey],
+        ) -> Tuple[
+            Tuple[base_model.WeightedScalars, Dict[str, Any]], NestedJTensor
+        ]:
+          return model.apply(
+              variables,
+              inputs,
+              method=model.__call__,
+              mutable=mutable,
+              rngs=rngs,
+          )
+
+      else:
+        apply = functools.partial(apply_fn, model)
+      (weighted_scalars, per_example_output), updated_vars = apply(
           mdl_vars,
           inputs,
-          mutable=jax_task.hparams.train.apply_mutable_list,
-          method=model.__call__,
-          rngs=apply_rng_keys)
+          jax_task.hparams.train.apply_mutable_list,
+          apply_rng_keys,
+      )
 
       # Fetch all the summary tensors.
       summary_tensors = updated_vars.get(SUMMARIES, {})
@@ -771,41 +837,46 @@ def train_step_single_learner(
       learner,
   )
 
-  def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
-    with_grad = tasks_lib.filter_vars_for_grad_or_opt(
-        mdl_vars, excluded_for_grad
-    )
-    no_grad = jax.tree_map(
-        lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
-    )
+  if grad_fn is None:
 
-    def _loss(
-        mdl_vars_grad: NestedJTensor,
-        mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
-        prng_key: PRNGKey,
-    ):
-      mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
-      merged_vars = jax.tree_map(
-          lambda e, x, y: y if e else x,
-          excluded_for_grad,
-          mdl_vars_grad,
-          mdl_vars_nograd,
+    def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
+      with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+          mdl_vars, excluded_for_grad
       )
-      return _loss_fn(merged_vars, inputs, prng_key)
+      no_grad = jax.tree_map(
+          lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
+      )
 
-    if learner.stochastic_gradient is None:
-      g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
-    else:
-      g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
-    values, grads = g(with_grad, (no_grad, inputs), prng_key)
-    grads = jax.tree_map(
-        lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
-        excluded_for_opt,
-        excluded_for_grad,
-        mdl_vars,
-        grads,
-    )
-    return values, grads
+      def _loss(
+          mdl_vars_grad: NestedJTensor,
+          mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+          prng_key: PRNGKey,
+      ):
+        mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
+        merged_vars = jax.tree_map(
+            lambda e, x, y: y if e else x,
+            excluded_for_grad,
+            mdl_vars_grad,
+            mdl_vars_nograd,
+        )
+        return _loss_fn(merged_vars, inputs, prng_key)
+
+      if learner.stochastic_gradient is None:
+        g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
+      else:
+        g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
+      values, grads = g(with_grad, (no_grad, inputs), prng_key)
+      grads = jax.tree_map(
+          lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
+          excluded_for_opt,
+          excluded_for_grad,
+          mdl_vars,
+          grads,
+      )
+      return values, grads
+
+  else:
+    grad_fn = functools.partial(grad_fn, _loss_fn, learner)
 
   ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
 
@@ -835,8 +906,11 @@ def train_step_single_learner(
 
     # Apply gradient transformations.
     mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
-    # Make updated non-trainable vars visible to EMA.
-    if NON_TRAINABLE in fwd_updated_vars:
+    if (
+        expose_updated_nontrainables_to_learner
+        and NON_TRAINABLE in fwd_updated_vars
+    ):
+      # Make updated non-trainable vars visible to EMA.
       mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
     vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         mdl_vars, excluded_for_opt

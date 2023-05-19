@@ -628,6 +628,7 @@ pytype_strict_library(
     srcs_version = "PY3",
     deps = [
         ":base_metrics",
+        ":learners",
         ":sgf",
         ":summary_utils",
         ":tasks_lib",
