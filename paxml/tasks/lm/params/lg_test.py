@@ -12,6 +12,7 @@ from paxml.tasks.lm import model_params
 from praxis import base_input
 from praxis import layers
 from praxis import pax_fiddle
+from absl import logging
 
 class LGSyntheticDataset(base_experiment.BaseExperiment):
   """Synthetic LM dataset."""
@@ -20,7 +21,7 @@ class LGSyntheticDataset(base_experiment.BaseExperiment):
 
   def _dataset_train(
       self, is_training
-  ) -> pax_fiddle.Config[base_input.BaseInput]:
+  ) -> pax_fiddle.Config[base_input.LingvoInputAdaptor]:
     num_local_devices = jax.local_device_count()
     batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
     input_p = lg_gpt3_pax.DataBuild.Params()
@@ -36,13 +37,13 @@ class LGSyntheticDataset(base_experiment.BaseExperiment):
     input_p.num_batcher_threads = 16
     input_p.file_random_seed =0
     p = pax_fiddle.Config(
-        base_input.LingvoInputAdaptor, input=input_p, is_training=is_training
+        base_input.LingvoInputAdaptor, name='train_dataset', input=input_p, is_training=is_training
     )
     return p
   
   def _dataset_eval(
     self, is_training
-  ) -> pax_fiddle.Config[base_input.BaseInput]:
+  )  -> pax_fiddle.Config[base_input.LingvoEvalAdaptor]:
     num_local_devices = jax.local_device_count()
     batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
     input_p = lg_gpt3_pax.DataBuild.Params()
@@ -57,8 +58,12 @@ class LGSyntheticDataset(base_experiment.BaseExperiment):
     input_p.file_buffer_size = 1  # janghoon.han
     input_p.file_random_seed =0
     p = pax_fiddle.Config(
-        base_input.LingvoEvalAdaptor, input=input_p, is_training=is_training
+        base_input.LingvoEvalAdaptor, input=input_p, name='eval_dataset', 
+        is_training=is_training, reset_for_eval=True, batch_size=input_p.batch_size
     )
+    logging.info(f"LingvoEvalAdaptor.get_batch_size={base_input.LingvoEvalAdaptor.get_batch_size(p)}")
+    logging.info(f"LingvoEvalAdaptor.num_samples={base_input.LingvoEvalAdaptor.num_samples}")
+    logging.info(f"LingvoEvalAdaptor.num_infeed_hosts={base_input.LingvoEvalAdaptor.num_infeed_hosts}")
     return p
 
   def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
