@@ -330,8 +330,8 @@ class SyntheticLmData(base_input_generator.BaseInputGenerator):
     targets = tf.ones([p.batch_size, p.seq_len], dtype=tf.int32)
     input_batch = py_utils.NestedMap()
     input_batch.ids = targets  # equivalent to tf.roll(targets, 1, axis=1)
-    input_batch.paddings = tf.zeros_like(targets)
-    input_batch.weights = tf.ones_like(targets)
+    input_batch.paddings = tf.zeros_like(targets, dtype=tf.float32)
+    input_batch.weights = tf.ones_like(targets, dtype=tf.float32)
     input_batch.labels = targets
     # segment_id = 0 meant padded tokens
     # e.g., if we have two segments packed into one sentence with paddings
