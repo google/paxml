@@ -97,24 +97,29 @@ class LGLmLayers10(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
     return task_p
   
 @experiment_registry.register
-class LGLmLayers1(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
+class LGDenseLmTiny(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
   """Base config for an SPMD model."""
 
   NUM_LAYERS = 1
-#   MODEL_DIMS = 2048
-#   HIDDEN_DIMS = MODEL_DIMS * 4
+  MODEL_DIMS = 512
+  HIDDEN_DIMS = MODEL_DIMS * 4
 #   ACTIVATION_CLS = layers.GELU
 #   USE_GATED_ACTIVATION = False
+  NUM_HEADS = 4
+  DIMS_PER_HEAD = MODEL_DIMS // NUM_HEADS
 
   USE_REPEATED_LAYER = True
 
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
 
+  CHECKPOINT_EVERY_N_STEPS = 1
+  SUMMARY_INTERVAL_STEPS = 1
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
     model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
     task_p.train.learner.repeat_prefix_sep = '_'
-    task_p.train.num_train_steps = 2
+    task_p.train.num_train_steps = 200
     return task_p

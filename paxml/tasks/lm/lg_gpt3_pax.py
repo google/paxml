@@ -174,7 +174,7 @@ class DenseLMTemplateLG(base_experiment.BaseExperiment):
   DIMS_PER_HEAD = 64 #?
   NUM_HEADS = 64
   MODEL_DIMS = 4 * 1024
-  HIDDEN_DIMS = 32 * 1024 #MODEL_DIMS * 4
+  HIDDEN_DIMS = MODEL_DIMS * 4 # originally was 32 * 1024 
   FPROP_DTYPE = jnp.bfloat16 #?
   PACKED_INPUT = True #?
 
