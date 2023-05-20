@@ -53,7 +53,7 @@ class LGSyntheticDataset(base_experiment.BaseExperiment):
       # TODO(zhangqiaorjc): Is this batch size too big for test?
       input_p.batch_size = batch_size
     input_p.seq_len = self.MAX_SEQ_LEN
-    input_p.file_pattern="tfrecord:gs://yejingxin-us-central2/external/lg/dummy-data/eval/*.tfrecords"
+    input_p.file_pattern="tfrecord:gs://yejingxin-us-central2/external/lg/dummy-data/valid/*.tfrecords"
     input_p.file_parallelism = 1
     input_p.file_buffer_size = 1  # janghoon.han
     input_p.file_random_seed =0
