@@ -29,7 +29,6 @@ import jax
 import numpy as np
 from paxml import base_metrics
 from paxml import io_utils
-from paxml import metric_tracker_utils as trk_utils
 from paxml import metric_utils
 from paxml import partitioning
 from paxml import programs
@@ -232,56 +231,6 @@ class SingleTaskDecodeProgram(programs.Program):
   def decode_input(self):
     assert self._input is not None
     return self._input
-
-  def _find_and_maybe_update_tracked_metric(
-      self,
-      step_i: int,
-      replicated_model_states: TrainState,
-      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
-      decode_metrics_list: List[Dict[str, float]],
-  ) -> None:
-    basedir = self._basedir
-    dirname = self._dirname
-    input_name = self._input.name
-    enable_checkpoint_saving = self._enable_checkpoint_saving
-
-    tracked_metric = task_p.track_decoder_metric
-    track_min_or_max = task_p.track_decoder_metric_min_or_max
-    if not track_min_or_max:
-      raise ValueError(
-          'Must also set track_decoder_metric_min_or_max when '
-          f'enabling metric tracking: {task_p}'
-      )
-    m_value = None
-    for d in decode_metrics_list:
-      if tracked_metric in d:
-        m_value = d[tracked_metric]
-        break
-
-    if m_value:
-      # Filesystem friendly name for the tracked metric.
-      tracked_metric_name = tracked_metric.replace('/', '-')
-      tracker_dir_path = (
-          basedir
-          / dirname
-          / f'{tracked_metric_name}_{track_min_or_max}_tracker'
-      )
-      _maybe_update_tracked_metric(
-          m_value,
-          step_i,
-          tracker_dir_path,
-          tracked_metric_name,
-          track_min_or_max,
-          input_name,
-          replicated_model_states,
-          enable_checkpoint_saving=enable_checkpoint_saving,
-      )
-    else:
-      logging.info(
-          'Cannot track metric %s on input %s.',
-          tracked_metric,
-          input_name,
-      )
 
   def run(self, state: TrainState, train_step: int) -> programs.ProgramOutput:
     work_unit = platform.work_unit()
@@ -540,19 +489,6 @@ class SingleTaskDecodeProgram(programs.Program):
         metric_utils.as_float_dict(processed_metric_dict),
         metric_utils.as_float_dict(process_metric_values),
     )
-
-    if use_pmap:
-      task_p = self._task_p
-      assert task_p is not None
-      if task_p.track_decoder_metric:
-        # Track metric specified by task_p.track_decoder_metric.
-        self._find_and_maybe_update_tracked_metric(
-            step_i,
-            train_state,
-            task_p,
-            [merged_decode_metrics, merged_processed_decode_metrics],
-        )
-
     decode_output = DecodeOutput(
         decode_metrics=merged_decode_metrics,
         processed_decode_metrics=merged_processed_decode_metrics,
@@ -561,69 +497,3 @@ class SingleTaskDecodeProgram(programs.Program):
         raw_decode_metrics=metrics,
     )
     return programs.ProgramOutput(state=state, aux=decode_output)
-
-
-def _maybe_update_tracked_metric(
-    m_value: float,
-    step: int,
-    tracker_dir_path: epath.Path,
-    tracked_metric: str,
-    min_or_max: tasks_lib.SingleTask.TrackDecoderMetricMode,
-    data_partition_name: str,
-    replicated_model_states: TrainState,
-    enable_checkpoint_saving: bool = True,
-) -> None:
-  """Updates tracked metric if new value (m_value) is lower that the stored one.
-
-  Also updates the status file maintained by the tracker and writes
-  new checkpoint assets in the same tracker directory.
-
-  Args:
-    m_value: new metric value.
-    step: current training step.
-    tracker_dir_path: directory where the tracker should store the status file
-      and also write and garbage collect checkpoint assets.
-    tracked_metric: name of metric being tracked, e.g. 'wer'.
-    min_or_max: min or max tracker.
-    data_partition_name: data partition on which the value of the metric is
-      being tracked.
-    replicated_model_states: replicated model states used to save the best
-      checkpoint.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-  """
-  if jax.process_index() == 0:
-    tracker_dir_path.mkdir(parents=True, exist_ok=True)
-    initial_value = sys.float_info.max
-    if min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MAX:
-      initial_value = -sys.float_info.max
-    tracker = trk_utils.MetricTracker(
-        dir_name=tracker_dir_path,
-        metric_name=tracked_metric,
-        metric_partition=data_partition_name,
-        initial_metric_value=initial_value,
-    )
-    if (
-        min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MIN
-        and m_value < tracker.metric_value
-    ) or (
-        min_or_max == tasks_lib.SingleTask.TrackDecoderMetricMode.MAX
-        and m_value > tracker.metric_value
-    ):
-      logging.info('Updating tracked %s value and checkpoint.', tracked_metric)
-      tracker.update(value=m_value, global_step=step)
-      # Also save checkpoint; we just need to save the first model replica.
-      # WARNING: the checkpoint saved here will not contain optimizer state
-      # if it is written by a separate decoding job; if decoding is done
-      # interleaved with training as part of the trainer then it will
-      # contain them.
-      # Decoding with this checkpoint may thus produce different results
-      # than those obtained during training if the model state cannot be
-      # fully recovered due to the missing optimizer state, e.g. when using
-      # EMA during training and separate decoding jobs.
-      # TODO(ciprianchelba): specify the checkpoint format and/or async
-      # checkpointing.
-      if enable_checkpoint_saving:
-        unreplicated_model_states = jax.tree_map(
-            lambda x: x[0], replicated_model_states
-        )
-        checkpoints.save_checkpoint(unreplicated_model_states, tracker_dir_path)

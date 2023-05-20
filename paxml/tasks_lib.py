@@ -1049,8 +1049,6 @@ class SingleTask(base_task.BaseTask):
     loss_aggregator: A LossAggregator aggregator class to derermine how the
       losses are aggregated (e.g single or MultiLoss)
     vn: HParams to control variational noise.
-    track_decoder_metric: which decoding metric to track, e.g. 'wer'.
-    track_decoder_metric_min_or_max: track min or max metric value.
     infer_writer: specifies how to generate and write some output with a model
     early_stopping_fn: Function to control whether to stop the training loop
       early; the instantiated class should be callable with signature matching
@@ -1313,10 +1311,6 @@ class SingleTask(base_task.BaseTask):
   vn: pax_fiddle.Config[SingleTask.VariationalNoise] = (
       pax_fiddle.template_field(VariationalNoise)
   )
-  track_decoder_metric: Optional[str] = None
-  track_decoder_metric_min_or_max: Optional[
-      SingleTask.TrackDecoderMetricMode
-  ] = None
   infer_writer: Optional[pax_fiddle.Config[SingleTask.InferWriter]] = None
   early_stopping_fn: Optional[EarlyStoppingFn] = None
   _learners: Any = dataclasses.field(init=False, repr=False)

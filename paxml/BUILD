@@ -348,16 +348,6 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
-    name = "metric_tracker_utils",
-    srcs = ["metric_tracker_utils.py"],
-    srcs_version = "PY3",
-    deps = [
-        # Implicit absl.logging dependency.
-        # Implicit etils dependency.
-    ],
-)
-
-pytype_strict_library(
     name = "metric_utils",
     srcs = ["metric_utils.py"],
     srcs_version = "PY3",
@@ -594,7 +584,6 @@ pytype_strict_library(
     deps = [
         ":base_metrics",
         ":io_utils",
-        ":metric_tracker_utils",
         ":metric_utils",
         ":partitioning",
         ":programs",
@@ -990,18 +979,6 @@ py_strict_test(
         "//praxis:py_utils",
         "//praxis:schedules",
         "//praxis:test_utils",
-    ],
-)
-
-pytype_strict_test(
-    name = "metric_tracker_utils_test",
-    srcs = ["metric_tracker_utils_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
-    deps = [
-        ":metric_tracker_utils",
-        # Implicit absl.flags dependency.
-        # Implicit absl.testing.absltest.absltest dependency.
     ],
 )
 

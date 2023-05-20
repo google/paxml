@@ -244,36 +244,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
 
-  def __init__(
-      self,
-      jax_task: tasks_lib.SingleTask,
-      job_log_dir: epath.Path,
-      checkpoint_type: checkpoints.CheckpointType,
-      restore_checkpoint_dir: epath.Path,
-      restore_checkpoint_step: int,
-      partitioner: partitioning.Partitioner,
-      mode: EvaluationMode,
-      enforce_restore_shape_check: bool = False,
-      ocdbt_coordinator_server: Optional[Any] = None,
-  ):
-    super().__init__(
-        jax_task,
-        job_log_dir,
-        checkpoint_type,
-        restore_checkpoint_dir,
-        restore_checkpoint_step,
-        partitioner,
-        enforce_restore_shape_check=enforce_restore_shape_check,
-        ocdbt_coordinator_server=ocdbt_coordinator_server,
-    )
-    self.track_metric: bool = (mode != EvaluationMode.EVAL) and bool(
-        jax_task.hparams.track_decoder_metric
-    )
-    if py_utils.pmap_use_tensorstore() and self.track_metric:
-      raise ValueError(
-          '`track_decoder_metric` is currently unsupported with TensorStore '
-          'checkpoints.')
-
   def _restore(
       self, step: int, train_state_global_shapes: TrainState
   ) -> Optional[TrainState]:
@@ -298,7 +268,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
     if model_states:
       if self.use_ema:
         model_states = tasks_lib.extract_ema(model_states)
-      elif not self.track_metric:
+      else:
         model_states = model_states.to_eval_state()
     return model_states
 
@@ -365,10 +335,8 @@ def _create_checkpointer(
   )
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
-    extra_kwargs = {}
   else:
     checkpointer_cls = _PmapEvalCheckpointer
-    extra_kwargs = dict(mode=mode)
   return checkpointer_cls(
       jax_task,
       job_log_dir,
@@ -378,7 +346,6 @@ def _create_checkpointer(
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       ocdbt_coordinator_server=ocdbt_coordinator_server,
-      **extra_kwargs,
   )
 
 
@@ -916,12 +883,6 @@ def partitioned_decode_once(
           partitioned_train_state
       )
     with py_utils.timeit() as decode_period:
-      if not use_pmap and task_p.track_decoder_metric:
-        logging.warn(
-            'Decoder metric tracking is not implemented yet for pjit '
-            'models. Ignoring metric tracking.'
-        )
-
       (
           decode_metrics_list,
           processed_decode_metrics_list,
