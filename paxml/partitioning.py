@@ -372,7 +372,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     (Ignores the input batch dimension.)
 
     Args:
-      batch: the input batch after calling preprocess_inputs.
+      batch: the input batch (before calling preprocess_inputs).
 
     Raises:
       ValueError: if the given spec doesn't conform to this partitioner's
