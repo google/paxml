@@ -1224,12 +1224,15 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # to the input partition specs created here. If we use partition specs
     # returned by XLA, it errors out.
     prng_key_partition_spec = PartitionSpec(None)
-    fn_in_partition_specs = (pjit.AUTO, prng_key_partition_spec,
-                             input_partition_spec)
+    fn_in_partition_specs = (
+        pjit.AUTO(self.global_mesh),
+        prng_key_partition_spec,
+        input_partition_spec,
+    )
     fn_out_partition_specs = (
         PartitionSpec()
         if self._auto_sharding_info.replicate_output
-        else pjit.AUTO
+        else pjit.AUTO(self.global_mesh)
     )
 
     partitioned_step_fn = self._pjit(
