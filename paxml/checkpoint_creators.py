@@ -561,6 +561,7 @@ def _create_checkpointer(
     tensorstore_use_ocdbt: bool = False,
 ) -> checkpoints.TrainingCheckpointer:
   """Creates a checkpoint manager."""
+  logging.info('[PAX STATUS]: Creating checkpointer.')
   checkpoint_dir = _make_checkpoint_dir(job_log_dir)
   train_p = task_p.train
   max_to_keep = train_p.save_max_to_keep

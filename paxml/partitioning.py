@@ -347,8 +347,10 @@ class Partitioner(metaclass=abc.ABCMeta):
       )
 
     if train_inputs_shape_dtype:
+      logging.info('[PAX STATUS]: Getting input shapes from spec.')
       self._train_inputs_shape_dtype = train_inputs_shape_dtype
     else:
+      logging.info('[PAX STATUS]: Getting input shapes from first batch.')
       self._train_inputs_shape_dtype = self._get_train_inputs_shape_dtype(
           train_input_pipeline
       )

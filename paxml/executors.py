@@ -38,7 +38,6 @@ from praxis import base_input
 from praxis import base_layer
 from praxis import pax_fiddle
 from praxis import py_utils
-from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -161,6 +160,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
         passed to checkpointer.get_model_states(). If set, the checkpointer will
         restore its states from checkpoint.
     """
+    logging.info('[PAX STATUS]: Instantiating train input pipeline.')
     if not task_p.train.enable_input_checkpointing:
       _maybe_update_latest_model_step(train_input_p, step, task_p)
     train_input = instantiate(train_input_p)
@@ -219,6 +219,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
             'No training input specs available, while enabling '
             '`task_p.train.enforce_input_specs` requires it.'
         )
+    logging.info('[PAX STATUS]: Setting up partitioner')
     partitioner.setup(
         jax_task,
         root_prng_key,
@@ -291,6 +292,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     return decode_programs
 
   def start(self):
+    logging.info('Starting executor.')
     is_vars_replicated = self._task.model.ici_mesh_shape is None
     _train_and_evaluate_common(
         task=self._task,
@@ -313,9 +315,11 @@ class DefaultExecutor(base_executor.BaseExecutor):
     )
 
     # Shutdown the programs and run necessary cleanup.
+    logging.info('[PAX STATUS]: Shutting down executor.')
     self._train_program.shutdown()
     for program in self._eval_programs:
       program.shutdown()
+    logging.info('[PAX STATUS]: Executor shutdown complete.')
 
 
 def _get_partition_decode_once_fn(
@@ -454,7 +458,7 @@ def _train_and_evaluate_common(
         f' number {initial_global_step} mismatch.'
     )
 
-  logging.info('Training loop starting...')
+  logging.info('[PAX STATUS]: Starting training loop.')
   with _DecodeSummaryWriters(
       job_log_dir, decode_input_names
   ) as decode_summary_writers:
@@ -497,7 +501,7 @@ def _train_and_evaluate_common(
     gc.collect()
     gc.freeze()
     while True:
-      logging.debug('step=`%d`: Beginning', step_i)
+      logging.debug('[PAX STATUS]: Beginning step `%d`.', step_i)
       checkpointer.save_if_needed(
           step_i,
           partitioned_train_state,
@@ -538,13 +542,15 @@ def _train_and_evaluate_common(
           train_p.eval_interval_steps
           and step_i % train_p.eval_interval_steps == 0
       ):
-        logging.debug('  Starting eval_step().')
+        logging.debug('[PAX STATUS]:  Starting eval_step().')
         eval_partitioned_train_state = programs.get_eval_train_state(
             task, partitioned_train_state
         )
         # If we have eval test then also evaluate on test.
         if eval_programs:
-          logging.debug('  Performing eval_step() runs on test splits.')
+          logging.debug(
+              '[PAX STATUS]:  Performing eval_step() runs on test splits.'
+          )
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
@@ -566,7 +572,8 @@ def _train_and_evaluate_common(
               input_names=[prog.eval_input.name for prog in eval_programs],
           )
           logging.debug(
-              '  Completed eval_step() runs on test splits in %f seconds.',
+              '[PAX STATUS]:  Completed eval_step() runs on test splits in %f'
+              ' seconds.',
               eval_period.elapsed,
           )
 
@@ -586,7 +593,9 @@ def _train_and_evaluate_common(
             decode_partitioned_train_state = tasks_lib.extract_ema(
                 partitioned_train_state
             )
-            logging.debug('  Performing decode_once_fn() with ema states.')
+            logging.debug(
+                '[PAX STATUS]:  Performing decode_once_fn() with EMA states.'
+            )
           else:
             decode_partitioned_train_state = partitioned_train_state
           decode_metrics = decode_once_fn(
@@ -595,8 +604,7 @@ def _train_and_evaluate_common(
         jax.monitoring.record_event_duration_secs(
             '/jax/pax/train/interleaved_decode_duration_sec',
             decode_period.elapsed)
-
-      logging.debug('step=`%d`: End', step_i - 1)
+      logging.debug('[PAX STATUS]: Step `%d` completed.', step_i - 1)
 
       if early_stopping_fn is not None:
         if tuning_lib.should_early_stop(
@@ -633,7 +641,8 @@ def _train_and_evaluate_common(
           )
           break
     gc.unfreeze()
-    # Save checkpoint for the last step.
+
+    logging.info('[PAX STATUS]: Saving checkpoint for final step.')
     checkpointer.save_final(
         step_i,
         partitioned_train_state=partitioned_train_state,
@@ -643,3 +652,4 @@ def _train_and_evaluate_common(
     )
 
     checkpointer.wait_until_finished()
+    logging.info('[PAX STATUS]: Final checkpoint saved.')

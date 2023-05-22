@@ -136,16 +136,19 @@ def train_and_evaluate(
       on-demand checkpoint due to preemption.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
+  logging.info('[PAX STATUS] Starting `train_and_evaluate`')
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
 
   # in case the user passed in a string dtype, convert it to an actual dtype
   task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
 
+  logging.info('[PAX STATUS] Obtaining and initializing datasets.')
   input_p = experiment_config.datasets()
   for inp in input_p:
     if not isinstance(
-        inp, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
+        inp,
+        (base_input.BaseInput.HParams, base_input.DistributedInputHParams),
     ):
       raise ValueError(
           f'Expecting BaseInput.HParams from datasets(), got: {inp.ToText()}'
@@ -156,6 +159,7 @@ def train_and_evaluate(
         f'Expecting exactly one training split. Got `{len(train_input_p)}`.'
     )
   train_input_p = train_input_p[0]
+  logging.info('[PAX STATUS]: Done initializing dataset objects')
 
   logging.info('train_input_p:')
   for line in base_hyperparams.nested_struct_to_text(
@@ -166,6 +170,7 @@ def train_and_evaluate(
   for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():  # pytype: disable=attribute-error
     logging.info('  %s', line)
 
+  logging.info('[PAX STATUS]: Initializing decoder')
   if (
       run_decode
       and task_p.train.decode_interval_steps is not None
@@ -198,6 +203,7 @@ def train_and_evaluate(
     )
 
   # Creates the task.
+  logging.info('[PAX STATUS]: Creating task')
   jax_task = instantiate(task_p)
   if jax_task.early_stopping_fn is not None:
     if early_stopping_fn is None:
@@ -208,6 +214,7 @@ def train_and_evaluate(
           'train_and_evel function parameter.'
       )
 
+  logging.info('[PAX STATUS]: Initializing partitioner')
   # Creates the partitioner, which will be set up later.
   partitioner = experiment_config.partitioner()
   if not partitioner:
@@ -215,8 +222,8 @@ def train_and_evaluate(
     # arrays. We rely on the Pathways to transfer the inputs, since
     # jax.device_put() has a larger performance overhead.
     reshard_inputs = (
-        checkpointer.checkpoint_type != CheckpointType.PERSISTENCE or
-        train_input_p.experimental_remote_input
+        checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
+        or train_input_p.experimental_remote_input
     )
     partitioner = partitioning.create_partitioner(
         jax_task,
@@ -235,9 +242,11 @@ def train_and_evaluate(
     eval_programs = experiment_config.eval_programs()
 
   # Creates the executor and run the training pipeline.
+  logging.info('[PAX STATUS]: Creating executor.')
   executor = experiment_config.executor()
   if not executor:
     executor = executors.DefaultExecutor()
+  logging.info('[PAX STATUS]: Setting up executor.')
   with partitioner.global_mesh or contextlib.nullcontext():
     executor.setup(
         jax_task,

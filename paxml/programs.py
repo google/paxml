@@ -76,7 +76,7 @@ def get_eval_train_state(task: tasks_lib.SingleTask, state: TrainState):
           'learner does not seem to have ema enabled'
       )
     eval_state = tasks_lib.extract_ema(state).to_eval_state()
-    logging.debug('  Converted train state to eval with ema state.')
+    logging.info('[PAX STATUS]: Converted train state to eval with EMA state.')
   else:
     eval_state = state.to_eval_state()
   return eval_state
@@ -207,6 +207,7 @@ class BaseTrainProgram(Program):
       eval_prng_seed: PRNGKey,
       init_step: int,
   ) -> None:
+    logging.info('[PAX STATUS]: Setting up BaseTrainProgram.')
     self._task = task
     self._train_input = train_input
     self._partitioner = partitioner
@@ -263,7 +264,7 @@ class BaseTrainProgram(Program):
   # correspondingly.
   def run(self, state: TrainState, step: int) -> ProgramOutput:
     train_p = self._task.train
-    logging.debug('  Retrieving inputs.')
+    logging.debug('[PAX STATUS]:  Retrieving inputs.')
 
     model_inputs = self._train_input.get_next_padded()
 
@@ -276,7 +277,7 @@ class BaseTrainProgram(Program):
         model_inputs,  ## First two args can be consolidated
         self.train_input_partition_spec(model_inputs),
     )
-    logging.debug('  Retrieved inputs.')
+    logging.debug('[PAX STATUS]:  Retrieved inputs.')
 
     # Waits if it reaches max inflight steps. We do this after retrieving the
     # inputs to maximize efficiency.
@@ -287,7 +288,7 @@ class BaseTrainProgram(Program):
     if do_profile and step - self._initial_step == profiler_capture_step:
       self._profiler.capture_async()
 
-    logging.debug('  Performing train_step().')
+    logging.debug('[PAX STATUS]:  Performing train_step().')
     with jax.profiler.StepTraceAnnotation('train', step_num=step):
       with py_utils.timeit() as train_period:
         new_step, new_state, train_outputs = self.train_step(
@@ -297,12 +298,12 @@ class BaseTrainProgram(Program):
             model_inputs,
             self._train_unpadded_global_batch_size,
         )
-      del state  # Unused anymore.
+      del state  # Unused.
     jax.monitoring.record_event_duration_secs(
         '/jax/pax/train/duration_sec', train_period.elapsed
     )
     logging.debug(
-        '  Completed train_step() in %f seconds.', train_period.elapsed
+        '[PAX STATUS]: train_step() took %f seconds.', train_period.elapsed
     )
     self._pending_train_losses.add_computation(train_outputs.loss)
     if step == self._initial_step:
@@ -310,8 +311,8 @@ class BaseTrainProgram(Program):
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
+    logging.debug('[PAX STATUS]:  Writing summaries (attempt).')
     steps_per_sec = self._maybe_write_summaries(step, new_step, train_outputs)
-    logging.debug('  Writing summaries (attempt).')
 
     # Run eval at regular step interval.
     # While the eval ones below are post-model weight updates, hence we use the
@@ -402,7 +403,7 @@ class BaseTrainProgram(Program):
         per_example_out=train_outputs.per_example_out,
         steps_per_sec=steps_per_sec,
     )
-    logging.debug('  Wrote summaries (attempted).')
+    logging.debug('[PAX STATUS]:  Wrote summaries (attempted).')
     return steps_per_sec
 
   def _compute_steps_per_sec(self, step: int):
@@ -474,7 +475,7 @@ class BaseTrainProgram(Program):
         if self._eval_train_summary_handler.process(
             new_step, loss, weighted_scalars, summary_tensors
         ):
-          logging.debug('  Wrote eval summaries.')
+          logging.debug('[PAX STATUS]:  Wrote eval summaries.')
         eval_train_metrics = metric_utils.as_float_dict(weighted_scalars)
     return eval_train_metrics
 
@@ -680,7 +681,9 @@ class BaseEvalProgram(Program):
 
     # Creates the eval input pipeline.
     self._input_p = self._partitioner.preprocess_input_config(self._input_p)
-    logging.debug('Initializing eval_input pipeline : %s', self._input_p)
+    logging.info(
+        '[PAX STATUS]: Initializing eval_input pipeline : %s', self._input_p
+    )
     self._eval_input_pipeline = instantiate(self._input_p)
     self._name = self.eval_input.name
     self._eval_unpadded_global_batch_size = (
