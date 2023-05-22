@@ -30,7 +30,7 @@ Example output 0 (--usage=flops):
 
 ##### bert.BertAdamL4H128 #####
 
-GFLOPS = 23.79
+GFLOPS = 47.58
 
 
 **************
@@ -174,7 +174,7 @@ class ExperimentParser:
       client = jax.lib.xla_bridge.get_backend()
       m = jax.xla_computation(model_fprop)(datum).as_hlo_module()
       analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
-      flops = analysis['flops'] / 2.0
+      flops = analysis['flops']
       gflops = flops / 1e9
 
       print('\n' + '#' * 5 + ' ' + self.exp_name + ' ' + '#' * 5)
