@@ -233,7 +233,6 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     train_p.decode_interval_steps = self.DECODE_INTERVAL_STEPS
     train_p.save_max_to_keep = self.SAVE_MAX_TO_KEEP
     train_p.summary_accumulate_interval_steps = 1
-    train_p.device_sync_interval_steps = 10
     train_p.variable_norm_summary = True
     train_p.eval_skip_train = True  # Disable eval of train input data.
     return task_p
