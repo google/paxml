@@ -1207,7 +1207,6 @@ class SingleTask(base_task.BaseTask):
     save_max_to_keep: int = 10
     max_inflight_steps: int = 2
     summary_interval_steps: int = 100
-    device_sync_interval_steps: Optional[int] = None  # Deprecated.
     log_train_output_interval_steps: Optional[int] = None
     summary_accumulate_interval_steps: Optional[int] = None
     async_summary_writing: bool = True
