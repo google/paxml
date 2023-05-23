@@ -254,9 +254,6 @@ def _get_var_mapping(
         all_dest_patterns_in_loading_rules.add(pattern.pattern)
       mo = pattern.match(varname)
       if mo is None:
-        logging.info(
-            '%s Initialization by external checkpoint: '
-            '%s doesn\'t match rule, skip.', kind, varname)
         continue
       if any(pat.match(varname) is not None for pat in ignore_rules):
         logging.info(
@@ -289,6 +286,14 @@ def _get_var_mapping(
       else:
         matched_pspecs[refname] = pspec
       var_mapping[varname_orig] = refname
+      break
+    else:
+      logging.info(
+          '%s Initialization by external checkpoint: '
+          "%s doesn't match rule, skip.",
+          kind,
+          varname,
+      )
 
   if safe_load:
     # Check that all source names have been matched; if they have not then the
