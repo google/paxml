@@ -81,20 +81,27 @@ def _get_dir_names(
   return [epath.Path(p.name) for p in inputs]
 
 
-def _wait_until_step(checkpointer, start_step):
-  """Waits until start_step is reached."""
-  if not start_step:
-    return
-
+def _wait_until_checkpoint_step(
+    checkpoint_dir: epath.Path, step: int, sleep_interval: int
+) -> int:
+  """Waits until a checkpoint for the given step is in checkpoint_dir."""
   with py_utils.timeit() as wait_period:
     while True:
-      cur_step = checkpointer.retrieve_latest_checkpoint_step()
-      if cur_step is not None and start_step <= cur_step:
+      cur_step = checkpoints.retrieve_latest_checkpoint_step_if_exists(
+          checkpoint_dir
+      )
+      if cur_step is not None and step <= cur_step:
         break
-      time.sleep(300)
+      logging.info(
+          'Sleeping waiting for a new checkpoint, the current step is %s',
+          cur_step if cur_step is not None else 'None',
+      )
+      time.sleep(sleep_interval)
+  logging.info('Found new checkpoint at step: %d', cur_step)
   jax.monitoring.record_event_duration_secs(
       '/jax/pax/eval_or_decode/wait_duration_sec', wait_period.elapsed
   )
+  return cur_step
 
 
 def _get_train_input_specs(
@@ -141,25 +148,15 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self._enforce_restore_shape_check = enforce_restore_shape_check
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
 
-  def retrieve_latest_checkpoint_step(self) -> Optional[int]:
+  def retrieve_latest_checkpoint_step(self) -> int:
     return checkpoints.retrieve_latest_checkpoint_step(
         self.restore_checkpoint_dir
     )
 
   def wait_for_new_step(self, last_checkpoint_step: int) -> int:
-    new_checkpoint_step = self.retrieve_latest_checkpoint_step()
-    with py_utils.timeit() as wait_period:
-      while new_checkpoint_step == last_checkpoint_step:
-        logging.info('Sleep before checking for new latest checkpoint.')
-        time.sleep(60)
-        new_checkpoint_step = self.retrieve_latest_checkpoint_step()
-    jax.monitoring.record_event_duration_secs(
-        '/jax/pax/eval_or_decode/wait_duration_sec', wait_period.elapsed
+    return _wait_until_checkpoint_step(
+        self.restore_checkpoint_dir, last_checkpoint_step + 1, sleep_interval=60
     )
-    # There must be a new checkpoint here.
-    assert new_checkpoint_step is not None
-    logging.info('Found new checkpoint at step: %d', new_checkpoint_step)
-    return new_checkpoint_step
 
   @abc.abstractmethod
   def load_checkpoint_for_step(
@@ -186,7 +183,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
   def _restore(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
-  ) -> Optional[TrainState]:
+  ) -> TrainState:
     partitioned_train_state = checkpoints.restore_checkpoint(
         train_state_metadata.padded_global_shapes,
         self.restore_checkpoint_dir,
@@ -200,16 +197,14 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}'
     )
-    if partitioned_train_state and self.use_ema:
+    if self.use_ema:
       partitioned_train_state = tasks_lib.extract_ema(partitioned_train_state)
     return partitioned_train_state
 
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
   ) -> TrainState:
-    partitioned_train_state = self._restore(step, train_state_metadata)
-    assert partitioned_train_state
-    return partitioned_train_state
+    return self._restore(step, train_state_metadata)
 
   def get_model_states(
       self,
@@ -246,7 +241,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
   def _restore(
       self, step: int, train_state_global_shapes: TrainState
-  ) -> Optional[TrainState]:
+  ) -> TrainState:
     if py_utils.pmap_use_tensorstore():
       model_states = tasks_lib.restore_pmap_from_tensorstore(
           train_state_global_shapes,
@@ -265,11 +260,10 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           enforce_restore_shape_check=self._enforce_restore_shape_check,
           tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
-    if model_states:
-      if self.use_ema:
-        model_states = tasks_lib.extract_ema(model_states)
-      else:
-        model_states = model_states.to_eval_state()
+    if self.use_ema:
+      model_states = tasks_lib.extract_ema(model_states)
+    else:
+      model_states = model_states.to_eval_state()
     return model_states
 
   def load_checkpoint_for_step(
@@ -317,17 +311,26 @@ def _create_checkpointer(
     partitioner: partitioning.Partitioner,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
+    wait_until_step: Optional[int] = None,
 ) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
     restore_checkpoint_dir = job_log_dir / 'checkpoints'
 
+  if wait_until_step is not None:
+    logging.info(
+        'Waiting for checkpoint step %d within %s',
+        wait_until_step,
+        restore_checkpoint_dir,
+    )
+    _wait_until_checkpoint_step(
+        restore_checkpoint_dir, wait_until_step, sleep_interval=300
+    )
+
   if restore_checkpoint_step is None and mode is not None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
         job_log_dir, restore_checkpoint_dir, mode
     )
-    # TODO(pax-team): Enforce that a checkpoint exists / a checkpoint step was
-    # retrieved.
 
   ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=jax_task.hparams.train.tensorstore_metadata_key,
@@ -467,6 +470,8 @@ def evaluate(
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+      # at least try to wait until checkpoint dir exists (step 0)
+      wait_until_step=restore_checkpoint_step or 0,
   )
 
   partitioned_train_state, train_state_metadata, prng_key = (
@@ -688,6 +693,11 @@ def decode(
       partitioner.preprocess_input_config(p) for p in decoder_inputs
   ]
 
+  wait_until_step = (
+      jax_task.hparams.train.decode_start_after_n_steps
+      if continuous_decode
+      else None
+  )
   checkpointer = _create_checkpointer(
       jax_task,
       job_log_dir,
@@ -698,6 +708,7 @@ def decode(
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+      wait_until_step=wait_until_step,
   )
 
   if continuous_decode:
@@ -768,11 +779,6 @@ def decode_pmap_model(
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
   task_p = jax_task.hparams
-  if continuous_decode:
-    # Waits until train.decode_start_after_n_steps is reached.
-    _wait_until_step(
-        checkpointer, jax_task.hparams.train.decode_start_after_n_steps
-    )
 
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
@@ -1136,11 +1142,6 @@ def decode_spmd_model(
       should_stop_early.
   """
   task_p = jax_task.hparams
-  if continuous_decode:
-    # Waits until train.decode_start_after_n_steps is reached.
-    _wait_until_step(
-        checkpointer, jax_task.hparams.train.decode_start_after_n_steps
-    )
 
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
@@ -1226,6 +1227,7 @@ def _common_eval_or_decode_loop(
     eval_runner: _EvalRunner,
     decode_inputs: Optional[Sequence[base_input.BaseInput]],
 ):
+  # checkpoint must exist at this point
   last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
   logging.info('Evaluation loop starting...')
   summary_base_dir = job_log_dir / 'summaries'
@@ -1260,33 +1262,28 @@ def _common_eval_or_decode_loop(
         logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
         eval_metrics = eval_runner.run_one_step(partitioned_train_state)
 
-      if not continuous_decode:
-        last_checkpoint_step = last_checkpoint_step or 1
-
-      if last_checkpoint_step is not None:
-        exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
-        is_last_ckpt = (
-            exceeded_ckpt > task_p.train.num_train_steps
-            or not continuous_decode
-        )
-        if tuning_lib.should_early_stop(
-            early_stopping_fn,
+      exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
+      is_last_ckpt = (
+          exceeded_ckpt > task_p.train.num_train_steps or not continuous_decode
+      )
+      if tuning_lib.should_early_stop(
+          early_stopping_fn,
+          last_checkpoint_step,
+          is_last_ckpt,
+          eval_metrics=eval_metrics,
+          decode_metrics=decode_metrics,
+      ):
+        logging.info(
+            (
+                'Early stopped at checkpoint step %d by the'
+                'tuner, while the num_train_steps is %d'
+            ),
             last_checkpoint_step,
-            is_last_ckpt,
-            eval_metrics=eval_metrics,
-            decode_metrics=decode_metrics,
-        ):
-          logging.info(
-              (
-                  'Early stopped at checkpoint step %d by the'
-                  'tuner, while the num_train_steps is %d'
-              ),
-              last_checkpoint_step,
-              task_p.train.num_train_steps,
-          )
-          break
-        if is_last_ckpt:
-          break
+            task_p.train.num_train_steps,
+        )
+        break
+      if is_last_ckpt:
+        break
       # Release partitioned_train_state.
       jax.tree_util.tree_map(lambda x: x.delete(), partitioned_train_state)
       del partitioned_train_state

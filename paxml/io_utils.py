@@ -289,28 +289,22 @@ def load_outputs(basedir: epath.Path,
 
 
 @contextlib.contextmanager
-def checkpoint_progress(job_log_dir: epath.Path, checkpoint_step: Optional[int],
-                        mode: EvaluationMode) -> Iterator[None]:
+def checkpoint_progress(
+    job_log_dir: epath.Path, checkpoint_step: int, mode: EvaluationMode
+) -> Iterator[None]:
   """Checkpoints eval/decode status by writing current step to job_log_dir.
-
-  If checkpoint_step is None, that means we haven't restored from a checkpoint
-  and using random weights. If using random weights, we skip checkpointing
-  eval progress since it's not based on a written checkpoint.
 
   Args:
     job_log_dir: the jobs log directory to write eval progress under.
-    checkpoint_step: current checkpoint step we're restoring weights from. If
-      None, it means we haven't restored from a checkpoint and using random
-      weights instead. If using random weights, we skip checkpointing eval
-      progress since it's not based on a written checkpoint.
+    checkpoint_step: current checkpoint step we're restoring weights from.
     mode: a EvaluationMode enum type indicating the mode in which the model is
       being evaluated
 
   Yields:
     None, purely for context manager api purposes.
   """
-  if checkpoint_step is None or jax.process_index() != 0:
-    # Do nothing for random weights or non-leader processes.
+  if jax.process_index() != 0:
+    # Do nothing for non-leader processes.
     yield
   else:
     # If we're resuming after being preempted mid evaluation, don't overwrite.
@@ -336,7 +330,7 @@ def get_checkpoint_step(
     job_log_dir: epath.Path,
     restore_checkpoint_dir: epath.Path,
     mode: EvaluationMode,
-) -> Optional[int]:
+) -> int:
   """Gets the latest checkpoint step to eval/decode on.
 
   Args:

@@ -20,7 +20,6 @@ from typing import Any, Optional
 
 from absl import logging
 from etils import epath
-import jax
 from jax.experimental import multihost_utils
 import numpy as np
 import orbax.checkpoint
@@ -98,14 +97,19 @@ def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   return int(checkpoint_dir.stem[len(CHECKPOINT_PREFIX) :])
 
 
-def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
-  """Gets the path to the latest checkpoint.
+def latest_checkpoint_if_exists(
+    checkpoint_dir: epath.PathLike,
+) -> Optional[epath.Path]:
+  """Gets the path to the latest checkpoint if any.
+
+  Use this method instead of latest_checkpoint() if you want to handle the case
+  where no checkpoint exists (e.g., the caller waits for a checkpoint).
 
   Args:
     checkpoint_dir: The base directory from where to retrieve checkpoints.
 
   Returns:
-    Path to latest checkpoint or None if there is no checkpoint.
+    Path to the latest checkpoint or None if there is no checkpoint.
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
@@ -126,13 +130,38 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> Optional[epath.Path]:
   return checkpoint_dir / checkpoint_assets[-1]
 
 
-def retrieve_latest_checkpoint_step(
+def latest_checkpoint(checkpoint_dir: epath.PathLike) -> epath.Path:
+  """Gets the path to the latest checkpoint.
+
+  Use this method instead of latest_checkpoint_if_exists() if checkpoint
+  existence is expected.
+
+  Args:
+    checkpoint_dir: The base directory from where to retrieve checkpoints.
+
+  Returns:
+    Path to the latest checkpoint.
+
+  Raises:
+    ValueError: checkpoint_dir does not exist or no checkpoint files were found
+    in it.
+  """
+  checkpoint_dir = epath.Path(checkpoint_dir)
+  path = latest_checkpoint_if_exists(checkpoint_dir)
+  if path is None:
+    _raise_checkpoint_missing_error(checkpoint_dir)
+  return path
+
+
+def retrieve_latest_checkpoint_step_if_exists(
     checkpoint_dir: epath.Path,
 ) -> Optional[int]:
-  """Retrieves the latest checkpoint step if any.
+  """Retrieves the latest checkpoint step within the given directory if any.
 
-  Note that this broadcasts the checkpoint step from host 0 to ensure that all
-  processes get the exact same checkpoint step.
+  Use this method instead of retrieve_latest_checkpoint_step() if you want to
+  handle the case where no checkpoint exists (e.g., the caller waits for a
+  checkpoint). Note that this broadcasts the checkpoint step from host 0 to
+  ensure that all processes get the exact same checkpoint step.
 
   Args:
     checkpoint_dir: The base directory from where to retrieve checkpoints.
@@ -144,7 +173,7 @@ def retrieve_latest_checkpoint_step(
     logging.info('Checkpoint dir \'%s\' does not exist.', checkpoint_dir)
     checkpoint_step = -1
   else:
-    latest_checkpoint_path = latest_checkpoint(checkpoint_dir)
+    latest_checkpoint_path = latest_checkpoint_if_exists(checkpoint_dir)
     if latest_checkpoint_path is None:
       checkpoint_step = -1
     else:
@@ -160,3 +189,35 @@ def retrieve_latest_checkpoint_step(
   if step == -1:
     return None
   return step
+
+
+def retrieve_latest_checkpoint_step(
+    checkpoint_dir: epath.Path,
+) -> int:
+  """Returns the latest checkpoint step within the given directory.
+
+  Use this method instead of retrieve_latest_checkpoint_step_if_exists() if
+  checkpoint existence is expected. Note that this broadcasts the checkpoint
+  step from host 0 to ensure that all processes get the exact same checkpoint
+  step.
+
+  Args:
+    checkpoint_dir: The base directory from where to retrieve checkpoints.
+
+  Raises:
+    ValueError: checkpoint_dir does not exist or no checkpoint files were found
+    in it.
+  """
+  step = retrieve_latest_checkpoint_step_if_exists(checkpoint_dir)
+  if step is None:
+    _raise_checkpoint_missing_error(checkpoint_dir)
+  return step
+
+
+def _raise_checkpoint_missing_error(checkpoint_dir: epath.Path):
+  """Raise checkpoint missing error with helpful message."""
+  if not checkpoint_dir.exists():
+    raise ValueError(f'{checkpoint_dir=!r} does not exist')
+  raise ValueError(
+      f'No checkpoints were found in directory {checkpoint_dir=!r}'
+  )

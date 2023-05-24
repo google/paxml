@@ -45,8 +45,12 @@ JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 PyTree = Any
 
 latest_checkpoint = checkpoint_paths.latest_checkpoint
+latest_checkpoint_if_exists = checkpoint_paths.latest_checkpoint_if_exists
 retrieve_latest_checkpoint_step = (
     checkpoint_paths.retrieve_latest_checkpoint_step
+)
+retrieve_latest_checkpoint_step_if_exists = (
+    checkpoint_paths.retrieve_latest_checkpoint_step_if_exists
 )
 retrieve_checkpoint_type = checkpoint_types.retrieve_checkpoint_type
 make_checkpoint_step_dir = checkpoint_paths.make_checkpoint_step_dir
@@ -163,7 +167,7 @@ def restore_checkpoint(
     enforce_restore_shape_check: bool = False,
     state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
     tensorstore_use_ocdbt: bool = False,
-) -> Optional[train_states.TrainState]:
+) -> train_states.TrainState:
   """Restores a checkpoint from the provided base directory.
 
   This is typically called on an unreplicated TrainState instance.
@@ -185,12 +189,11 @@ def restore_checkpoint(
     tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
 
   Returns:
-    A restored `TrainState` instance. If no step specified and no checkpoint
-    files present, return None.
+    A restored `TrainState` instance.
 
   Raises:
-    ValueError: When a mismatch between the current checkpoint structure and
-    the saved checkpoint one is detected.
+    ValueError: Checkpoint is not found or a mismatch between the current
+    checkpoint structure and the saved checkpoint one is detected.
   """
   # This can happen if you forget to destructure the (state, provenance) tuple
   # which some APIs now return. Not having this error results in a failed
@@ -203,7 +206,7 @@ def restore_checkpoint(
     )
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
-    return None
+    raise ValueError(f'{checkpoint_dir=!r} does not exist')
   checkpointer = get_checkpointer(
       checkpoint_type,
       enforce_restore_shape_check=enforce_restore_shape_check,
@@ -218,8 +221,9 @@ def restore_checkpoint(
   if step is None:
     step = checkpoint_manager.latest_step()
     if step is None:
-      logging.info('No checkpoint found for restore in %s.', checkpoint_dir)
-      return None
+      raise ValueError(
+          f'No checkpoints were found in directory {checkpoint_dir=!r}'
+      )
   restore_args = None
   if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
     restore_args = {

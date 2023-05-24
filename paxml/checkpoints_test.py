@@ -134,7 +134,9 @@ class CheckpointsTest(parameterized.TestCase):
     ckpt = self.directory / directory_name
     ckpt.write_text('some data')
 
-    self.assertEqual(checkpoints.latest_checkpoint(self.directory), ckpt)
+    self.assertEqual(
+        checkpoints.latest_checkpoint_if_exists(self.directory), ckpt
+    )
 
   @parameterized.parameters(
       'checkpoint1234',
@@ -146,7 +148,7 @@ class CheckpointsTest(parameterized.TestCase):
     ckpt = self.directory / directory_name
     ckpt.write_text('some data')
 
-    self.assertIsNone(checkpoints.latest_checkpoint(self.directory))
+    self.assertIsNone(checkpoints.latest_checkpoint_if_exists(self.directory))
 
   @parameterized.parameters(
       (
@@ -172,6 +174,23 @@ class CheckpointsTest(parameterized.TestCase):
         checkpoint_types.maybe_update_checkpoint_type(specified_format, path),
         expected_format,
     )
+
+  def test_retrieve_latest_checkpoint_step_no_checkpoint_raises_exception(self):
+    checkpoint_dir = epath.Path(self.create_tempdir('random').full_path)
+    with self.assertRaisesWithLiteralMatch(
+        ValueError,
+        f'No checkpoints were found in directory {checkpoint_dir=!r}',
+    ):
+      checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
+
+  def test_retrieve_latest_checkpoint_step_dir_does_not_exist_raises_exception(
+      self,
+  ):
+    checkpoint_dir = epath.Path('does_not_exist')
+    with self.assertRaisesWithLiteralMatch(
+        ValueError, f'{checkpoint_dir=!r} does not exist'
+    ):
+      checkpoints.retrieve_latest_checkpoint_step(checkpoint_dir)
 
 
 class _CustomPyTreeNode(flax.struct.PyTreeNode):
