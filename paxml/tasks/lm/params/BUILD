@@ -34,7 +34,6 @@ pytype_library(
         "nvidia.py",
         "optimal_scaling.py",
     ],
-    srcs_version = "PY3",
     tags = ["keep_dep"],
     deps = [
         # Implicit absl.logging dependency.
@@ -66,8 +65,6 @@ py_strict_test(
     name = "c4_test",
     timeout = "long",
     srcs = ["c4_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":params",
         # Implicit absl.testing.absltest.absltest dependency.

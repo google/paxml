@@ -30,7 +30,6 @@ pytype_strict_library(
         "input_generator.py",
         "resnet_preprocessing.py",
     ],
-    srcs_version = "PY3",
     deps = [
         # Implicit absl.logging dependency.
         # Implicit tensorflow_no_contrib dependency.
@@ -40,8 +39,6 @@ pytype_strict_library(
 py_strict_test(
     name = "input_generator_test",
     srcs = ["input_generator_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     tags = [
         "external",
         "notap",

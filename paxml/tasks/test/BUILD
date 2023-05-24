@@ -27,7 +27,6 @@ py_library(
     srcs = [
         "synthetic.py",
     ],
-    srcs_version = "PY3",
     tags = ["keep_dep"],
     deps = [
         "//paxml:base_experiment",

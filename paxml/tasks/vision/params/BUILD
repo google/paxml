@@ -30,7 +30,6 @@ pytype_library(
     srcs = [
         "imagenet_resnets.py",
     ],
-    srcs_version = "PY3",
     deps = [
         # Implicit absl.flags dependency.
         # Implicit jax dependency.

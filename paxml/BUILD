@@ -94,7 +94,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "base_experiment",
     srcs = ["base_experiment.py"],
-    srcs_version = "PY3",
     deps = [
         ":automl",
         ":base_executor",
@@ -109,7 +108,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "base_inference_runner",
     srcs = ["base_inference_runner.py"],
-    srcs_version = "PY3",
     deps = [
         ":train_states",
         "//praxis:base_hyperparams",
@@ -124,7 +122,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "base_metrics",
     srcs = ["base_metrics.py"],
-    srcs_version = "PY3",
     deps = [
         ":summary_utils",
         # Implicit jax dependency.
@@ -138,14 +135,12 @@ pytype_strict_library(
 pytype_strict_library(
     name = "base_task",
     srcs = ["base_task.py"],
-    srcs_version = "PY3",
     deps = ["//praxis:base_hyperparams"],
 )
 
 pytype_strict_library(
     name = "checkpoints",
     srcs = ["checkpoints.py"],
-    srcs_version = "PY3",
     deps = [
         ":checkpoint_managers",
         ":checkpoint_paths",
@@ -192,7 +187,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "eval_lib",
     srcs = ["eval_lib.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
         ":base_metrics",
@@ -242,7 +236,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "experiment_registry",
     srcs = ["experiment_registry.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
     ],
@@ -251,7 +244,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "experiment_utils",
     srcs = ["experiment_utils.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
     ],
@@ -260,7 +252,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "io_utils",
     srcs = ["io_utils.py"],
-    srcs_version = "PY3",
     deps = [
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
@@ -276,7 +267,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "xla_passthrough",
     srcs = ["xla_passthrough.py"],
-    srcs_version = "PY3",
     deps = [
         # Implicit absl.logging dependency.
         # Implicit jax dependency.
@@ -304,8 +294,6 @@ pytype_strict_library(
 pytype_binary(
     name = "main",
     srcs = ["main.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         # Please add additional dependencies to the target "main_lib" below.
         # so that they are also included in the BUILD macro pax_targets().
@@ -318,7 +306,6 @@ pytype_binary(
 pytype_strict_library(
     name = "main_lib",
     srcs = ["main.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
         ":eval_lib",
@@ -350,7 +337,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "metric_utils",
     srcs = ["metric_utils.py"],
-    srcs_version = "PY3",
     deps = [
         ":summary_utils",
         # Implicit absl.logging dependency.
@@ -390,7 +376,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "seqio_input",
     srcs = ["seqio_input.py"],
-    srcs_version = "PY3",
     deps = [
         ":metric_utils",
         # Implicit absl.logging dependency.
@@ -438,7 +423,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "summary_utils",
     srcs = ["summary_utils.py"],
-    srcs_version = "PY3",
     deps = [
         ":train_states",
         # Implicit absl.flags dependency.
@@ -458,7 +442,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "tasks_lib",
     srcs = ["tasks_lib.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_inference_runner",
         ":base_metrics",
@@ -490,7 +473,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "test_helper",
     srcs = ["test_helper.py"],
-    srcs_version = "PY3",
     deps = [
         # Implicit absl.testing.absltest.absltest dependency.
     ],
@@ -499,7 +481,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "train",
     srcs = ["train.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
         ":checkpoint_creators",
@@ -523,7 +504,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "programs",
     srcs = ["programs.py"],
-    srcs_version = "PY3",
     deps = [
         ":io_utils",
         ":metric_utils",
@@ -580,7 +560,6 @@ py_strict_test(
 pytype_strict_library(
     name = "decode_programs",
     srcs = ["decode_programs.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_metrics",
         ":io_utils",
@@ -614,7 +593,6 @@ pytype_strict_library(
 pytype_strict_library(
     name = "trainer_lib",
     srcs = ["trainer_lib.py"],
-    srcs_version = "PY3",
     deps = [
         ":base_metrics",
         ":learners",
@@ -840,7 +818,6 @@ pytype_strict_library(
 py_strict_test(
     name = "automl_test",
     srcs = ["automl_test.py"],
-    python_version = "PY3",
     deps = [
         ":automl",
         ":base_experiment",
@@ -856,8 +833,6 @@ py_strict_test(
 py_strict_test(
     name = "base_inference_runner_test",
     srcs = ["base_inference_runner_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":base_inference_runner",
         ":train_states",
@@ -879,8 +854,6 @@ py_strict_test(
 py_strict_test(
     name = "base_metrics_test",
     srcs = ["base_metrics_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":base_metrics",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -919,8 +892,6 @@ py_strict_test(
 py_strict_test(
     name = "experiment_registry_test",
     srcs = ["experiment_registry_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":base_experiment",
         ":experiment_registry",
@@ -934,8 +905,6 @@ py_strict_test(
 pytype_strict_test(
     name = "io_utils_test",
     srcs = ["io_utils_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":io_utils",
         # Implicit absl.flags dependency.
@@ -950,8 +919,6 @@ pytype_strict_test(
 pytype_strict_test(
     name = "xla_passthrough_test",
     srcs = ["xla_passthrough_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":xla_passthrough",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -1037,8 +1004,6 @@ py_strict_test(
 py_strict_test(
     name = "tasks_lib_test",
     srcs = ["tasks_lib_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":checkpoints",
         ":learners",
@@ -1067,8 +1032,6 @@ py_strict_test(
 py_strict_test(
     name = "tuning_lib_test",
     srcs = ["tuning_lib_test.py"],
-    python_version = "PY3",
-    srcs_version = "PY3",
     deps = [
         ":automl",
         ":base_experiment",
