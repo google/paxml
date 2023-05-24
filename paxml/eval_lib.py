@@ -1021,7 +1021,6 @@ def _decode_once(
               var_weight_params,
               inputs,
               model_p.fprop_dtype,
-              task_p.decode.prng_key_fold_with_global_step,
           )
       )
 
