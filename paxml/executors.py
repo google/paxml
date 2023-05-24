@@ -546,7 +546,7 @@ def _train_and_evaluate_common(
       ):
         logging.log_first_n(INFO, '[PAX STATUS]:  Starting eval_step().', 5)
         eval_partitioned_train_state = programs.get_eval_train_state(
-            task, partitioned_train_state
+            task, partitioned_train_state, task.train.eval_use_ema_states
         )
         # If we have eval test then also evaluate on test.
         if eval_programs:
@@ -588,20 +588,9 @@ def _train_and_evaluate_common(
           and step_i % train_p.decode_interval_steps == 0
       ):
         with py_utils.timeit() as decode_period:
-          if train_p.decode_use_ema_states:
-            if not tasks_lib.has_ema(task_p):
-              raise ValueError(
-                  'decode_use_ema_states is requested but the '
-                  'learner does not seem to have ema enabled'
-              )
-            decode_partitioned_train_state = tasks_lib.extract_ema(
-                partitioned_train_state
-            )
-            logging.debug(
-                '[PAX STATUS]:  Performing decode_once_fn() with EMA states.'
-            )
-          else:
-            decode_partitioned_train_state = partitioned_train_state
+          decode_partitioned_train_state = programs.get_eval_train_state(
+              task, partitioned_train_state, task.train.decode_use_ema_states
+          )
           decode_metrics = decode_once_fn(
               decode_partitioned_train_state, decode_summary_writers
           )

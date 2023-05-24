@@ -256,9 +256,7 @@ class SingleTaskDecodeProgram(programs.Program):
     if use_pmap:
       pmap_decode_step = self._pmap_decode_step
       output_pickle = self._output_pickle
-      decode_step_func = functools.partial(
-          pmap_decode_step, train_state.to_eval_state()
-      )
+      decode_step_func = functools.partial(pmap_decode_step, train_state)
 
     else:
       spmd_decode_step = self._spmd_decode_step
@@ -269,10 +267,7 @@ class SingleTaskDecodeProgram(programs.Program):
       # use a single global key instead to rely on pjit to split for different
       # replicas.
       assert spmd_decode_step is not None
-      spmd_decode_step_fn = functools.partial(
-          spmd_decode_step,
-          train_state.to_eval_state(),
-      )
+      spmd_decode_step_fn = functools.partial(spmd_decode_step, train_state)
 
     if programs.can_load_written_outputs(
         job_log_dir, input_name, EvaluationMode.DECODE, step_i

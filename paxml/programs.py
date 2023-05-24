@@ -67,13 +67,25 @@ instantiate = base_hyperparams.instantiate
 _INIT_TIME = time.time()
 
 
-def get_eval_train_state(task: tasks_lib.SingleTask, state: TrainState):
+def get_eval_train_state(
+    task: tasks_lib.SingleTask, state: TrainState, use_ema: bool
+):
+  """Returns a TrainState for evaluation (eval/decode).
+
+  Args:
+    task: The jax task.
+    state: The TrainState for training (i.e. with opt_states).
+    use_ema: Whether to use ema variables for eval/decode.
+
+  Returns:
+    The TrainState for evaluation, with the opt_states stripped out.
+  """
   task_p = task.hparams
-  if task_p.train.eval_use_ema_states:
+  if use_ema:
     if not tasks_lib.has_ema(task_p):
       raise ValueError(
-          'eval_use_ema_states is requested but the '
-          'learner does not seem to have ema enabled'
+          'use_ema is requested but the learner does not seem to have ema '
+          'enabled.'
       )
     eval_state = tasks_lib.extract_ema(state).to_eval_state()
     logging.info('[PAX STATUS]: Converted train state to eval with EMA state.')
@@ -467,7 +479,9 @@ class BaseTrainProgram(Program):
             self.train_input_partition_spec(eval_inputs),
         )
 
-        eval_state = get_eval_train_state(self._task, new_state)
+        eval_state = get_eval_train_state(
+            self._task, new_state, self._task.train.eval_use_ema_states
+        )
         eval_outputs = self.eval_train_step(
             eval_state,
             self._eval_prng_seed,
