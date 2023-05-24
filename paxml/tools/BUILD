@@ -40,4 +40,23 @@ exports_files([
     "dump_hparams.py",
     "dump_input_specs.py",
     "model_analysis.py",
+    "validate_config.py",
 ])
+
+pytype_strict_library(
+    name = "validate_config_lib",
+    srcs = ["validate_config_lib.py"],
+    deps = [
+        # Implicit absl.app dependency.
+        # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
+        # Implicit fiddle.absl_flags dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//paxml:base_experiment",
+        "//paxml:experiment_registry",
+        "//praxis:base_layer",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+    ],
+)

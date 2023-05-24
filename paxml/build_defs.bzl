@@ -92,6 +92,7 @@ def pax_targets(
         on all registered experiments.
     ":dump_hparams", a Python util binary that writes experiment hparams to
         file.
+    ":validate_config", a Python binary that validates an experiment config.
 
     Args:
       experiments: a list of py_library targets that defines and registers all
@@ -106,6 +107,7 @@ def pax_targets(
       add_main_mpm_target: Add a ':main_mpm' target.
       main_kwargs: dict of args to provide when building main binary.
       add_smoke_test: Whether to add the :all_experiments_smoke_test target.
+      smoke_test_py_test_rule: Test rule use to build the smoke test.
       smoke_test_args: The list of command line arguments that can be passed to the
        :all_experiments_smoke_test target.
       smoke_test_exclude_regexes: Exclusion regexes of experiment configurations to be
@@ -279,6 +281,23 @@ def pax_targets(
             "//praxis:py_utils",
         ] + extra_deps,
         exp_sources = exp_sources,
+    )
+
+    validate_config_name = "validate_config"
+    validate_config_name = validate_config_name if not prefix_name else "%s_%s" % (
+        prefix_name,
+        validate_config_name,
+    )
+    export_binary(
+        name = validate_config_name,
+        main = "//paxml/tools:validate_config.py",
+        py_binary_rule = pytype_strict_binary,
+        deps = [
+            "//paxml/tools:validate_config_lib",
+        ] + extra_deps,
+        exp_sources = exp_sources,
+        exec_properties = {"mem": "20g"},  # validate_config is a very large executable.
+        # Implicit py_binary flag
     )
 
 def _export_test(
