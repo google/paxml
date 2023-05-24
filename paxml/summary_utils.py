@@ -666,7 +666,9 @@ class SummaryHandler:
     """Adds summaries for a given step."""
 
     if should_log:
-      logging.info('step_i: %d, %s loss: %s', step, self._name, loss)
+      logging.info(
+          '[PAX STATUS] step_i: %d, %s loss: %s', step, self._name, loss
+      )
       logging.info('weighted_scalars: %s', weighted_scalars)
       if per_example_out:
         logging.info('per_example_out: %s', per_example_out)

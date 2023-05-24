@@ -48,6 +48,8 @@ SummaryWriter = tf.summary.SummaryWriter
 TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
 
+INFO = logging.INFO
+
 
 def _maybe_update_latest_model_step(
     train_input_p: pax_fiddle.Config[base_input.BaseInput],
@@ -501,7 +503,7 @@ def _train_and_evaluate_common(
     gc.collect()
     gc.freeze()
     while True:
-      logging.debug('[PAX STATUS]: Beginning step `%d`.', step_i)
+      logging.log_first_n(INFO, '[PAX STATUS]: Beginning step `%d`.', 5, step_i)
       checkpointer.save_if_needed(
           step_i,
           partitioned_train_state,
@@ -542,7 +544,7 @@ def _train_and_evaluate_common(
           train_p.eval_interval_steps
           and step_i % train_p.eval_interval_steps == 0
       ):
-        logging.debug('[PAX STATUS]:  Starting eval_step().')
+        logging.log_first_n(INFO, '[PAX STATUS]:  Starting eval_step().', 5)
         eval_partitioned_train_state = programs.get_eval_train_state(
             task, partitioned_train_state
         )
@@ -571,9 +573,11 @@ def _train_and_evaluate_common(
               steps_per_sec=eval_steps_per_sec,
               input_names=[prog.eval_input.name for prog in eval_programs],
           )
-          logging.debug(
+          logging.log_first_n(
+              INFO,
               '[PAX STATUS]:  Completed eval_step() runs on test splits in %f'
               ' seconds.',
+              5,
               eval_period.elapsed,
           )
 
@@ -603,8 +607,11 @@ def _train_and_evaluate_common(
           )
         jax.monitoring.record_event_duration_secs(
             '/jax/pax/train/interleaved_decode_duration_sec',
-            decode_period.elapsed)
-      logging.debug('[PAX STATUS]: Step `%d` completed.', step_i - 1)
+            decode_period.elapsed,
+        )
+      logging.log_first_n(
+          INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1
+      )
 
       if early_stopping_fn is not None:
         if tuning_lib.should_early_stop(

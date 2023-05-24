@@ -264,7 +264,7 @@ class BaseTrainProgram(Program):
   # correspondingly.
   def run(self, state: TrainState, step: int) -> ProgramOutput:
     train_p = self._task.train
-    logging.debug('[PAX STATUS]:  Retrieving inputs.')
+    logging.log_first_n(logging.INFO, '[PAX STATUS]:  Retrieving inputs.', 5)
 
     model_inputs = self._train_input.get_next_padded()
 
@@ -277,7 +277,7 @@ class BaseTrainProgram(Program):
         model_inputs,  ## First two args can be consolidated
         self.train_input_partition_spec(model_inputs),
     )
-    logging.debug('[PAX STATUS]:  Retrieved inputs.')
+    logging.log_first_n(logging.INFO, '[PAX STATUS]:  Retrieved inputs.', 5)
 
     # Waits if it reaches max inflight steps. We do this after retrieving the
     # inputs to maximize efficiency.
@@ -288,7 +288,9 @@ class BaseTrainProgram(Program):
     if do_profile and step - self._initial_step == profiler_capture_step:
       self._profiler.capture_async()
 
-    logging.debug('[PAX STATUS]:  Performing train_step().')
+    logging.log_first_n(
+        logging.INFO, '[PAX STATUS]:  Performing train_step().', 5
+    )
     with jax.profiler.StepTraceAnnotation('train', step_num=step):
       with py_utils.timeit() as train_period:
         new_step, new_state, train_outputs = self.train_step(
@@ -302,8 +304,11 @@ class BaseTrainProgram(Program):
     jax.monitoring.record_event_duration_secs(
         '/jax/pax/train/duration_sec', train_period.elapsed
     )
-    logging.debug(
-        '[PAX STATUS]: train_step() took %f seconds.', train_period.elapsed
+    logging.log_first_n(
+        logging.INFO,
+        '[PAX STATUS]: train_step() took %f seconds.',
+        5,
+        train_period.elapsed,
     )
     self._pending_train_losses.add_computation(train_outputs.loss)
     if step == self._initial_step:
@@ -311,7 +316,9 @@ class BaseTrainProgram(Program):
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
-    logging.debug('[PAX STATUS]:  Writing summaries (attempt).')
+    logging.log_first_n(
+        logging.INFO, '[PAX STATUS]:  Writing summaries (attempt).', 5
+    )
     steps_per_sec = self._maybe_write_summaries(step, new_step, train_outputs)
 
     # Run eval at regular step interval.
