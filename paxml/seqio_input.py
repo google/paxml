@@ -716,13 +716,15 @@ class SeqIOInput(base_input.BaseInput):
     choice_dataset = tf.data.Dataset.range(self.num_infeed_hosts).repeat(
         largest_shard
     )
+    # Set num_epoch=-1 to repeat the dataset indefinitely.
+    num_epochs = -1 if self.should_repeat else 1
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
-    )
+    ).repeat(num_epochs)
     if not self.use_enumeration:
       self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
           sharded_datasets_converted, choice_dataset
-      )
+      ).repeat(num_epochs)
 
   def _gen_filtered_artifacts(self) -> None:
     """Create filtered targets artifacts."""
@@ -955,7 +957,7 @@ class SeqIOInput(base_input.BaseInput):
           example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
-          raise Exception(
+          raise StopIteration(
               'Exhausted eval data with reset_for_eval=False after'
               f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
@@ -1064,7 +1066,7 @@ class SeqIOInput(base_input.BaseInput):
           example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
-          raise Exception(
+          raise StopIteration(
               'Exhausted eval data with reset_for_eval=False after'
               f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
@@ -1077,7 +1079,7 @@ class SeqIOInput(base_input.BaseInput):
       # remove enum related fields from example as seqio metric_fns API
       # expects the output from the task dataset directly.
       key = py_utils.get_enumeration_id(example, pop=True)
-      assert key is not None and key not in targets
+      assert key is not None
       targets[key] = example
 
       # we keep the ragged tensors and add them into the targets.
@@ -1171,7 +1173,7 @@ class SeqIOInput(base_input.BaseInput):
         example_convert = next(self.targets_iter_converted)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
         if self._num_eval_examples > 0:
-          raise Exception(
+          raise StopIteration(
               'Exhausted eval data with reset_for_eval=False after'
               f' {num_examples-1} examples (batch_size={self.batch_size})'
           ) from exc
@@ -1820,6 +1822,9 @@ def get_eval_hparams_for_seqio(
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
     check_split_exists: bool = False,
+    eval_loop_num_batches: Optional[int] = None,
+    repeat: Optional[bool] = None,
+    reset_for_eval: bool = True,
 ) -> list[pax_fiddle.Config[SeqIOInput]]:
   """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
 
@@ -1867,6 +1872,12 @@ def get_eval_hparams_for_seqio(
     check_split_exists: If set, checks for `split_name` existing as a split
     in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
     have splits specified, this can cause file operations.
+    eval_loop_num_batches: Num of batches to process per eval loop. This 
+      value is ignored if reset_for_eval is set True. If None, eval will run
+      on the entire dataset.
+    repeat: Whether to repeat the data.
+    reset_for_eval: If set, eval will continue until tf.errors.OutOfRange is
+      raised, and reset() will called for each eval.
   """
   if isinstance(task_or_mixture_name, (seqio.Task, seqio.Mixture)):
     task_or_mixture = task_or_mixture_name
@@ -1887,12 +1898,13 @@ def get_eval_hparams_for_seqio(
       mixture_or_task=task_or_mixture,
       feature_converter=feature_converter,
       is_training=False,
-      eval_loop_num_batches=None,
-      reset_for_eval=True,
+      reset_for_eval=reset_for_eval,
       shuffle=shuffle,
       batch_size=batch_size,
       num_infeed_hosts=num_infeed_hosts,
       input_random_seed=seed,
+      eval_loop_num_batches=eval_loop_num_batches,
+      repeat=repeat
   )
 
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
