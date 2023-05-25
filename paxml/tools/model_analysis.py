@@ -171,9 +171,7 @@ class ExperimentParser:
     with base_layer.JaxContext.new_context(
         hparams=base_layer.JaxContext.HParams(do_eval=True)
     ):
-      client = jax.lib.xla_bridge.get_backend()
-      m = jax.xla_computation(model_fprop)(datum).as_hlo_module()
-      analysis = jax.lib.xla_client._xla.hlo_module_cost_analysis(client, m)
+      analysis = jax.jit(model_fprop).lower(datum).cost_analysis()
       flops = analysis['flops']
       gflops = flops / 1e9
 
