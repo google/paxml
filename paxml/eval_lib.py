@@ -533,8 +533,8 @@ class _EvalRunner:
         partitioner=partitioner,
     )
     self._decode_programs = [
-        create_decode_program(decode_input=instantiate(p), input_index=i)
-        for i, p in enumerate(decode_input_ps)
+        create_decode_program(decode_input=instantiate(p))
+        for p in decode_input_ps
     ]
     trainer_lib.check_unique_names(
         [p.decode_input for p in self._decode_programs]
@@ -849,14 +849,6 @@ def partitioned_decode_once(
     var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
-    # TODO(wangpeng): Remove this argument.
-    spmd_decode_step: Optional[
-        Callable[
-            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-            Tuple[None, trainer_lib.StepFnOutput],
-        ]
-    ] = None,
-    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
     train_state_preprocessor: Optional[
         Callable[[TrainState], TrainState]
     ] = None,
@@ -870,13 +862,10 @@ def partitioned_decode_once(
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
       `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
-      be set; otherwise, `spmd_decode_step`, `inputs_partition_spec` and
-      `metrics_p` should be set.
+      be set; otherwise, `metrics_p` should be set.
     var_weight_params: Nested structure of HParams for the model weights.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-    spmd_decode_step: pjit'ed decode function.
-    inputs_partition_spec: Partition specs for inputs.
     train_state_preprocessor: A function to preprocess the train state before
       decoding.
   """
@@ -905,8 +894,6 @@ def partitioned_decode_once(
           var_weight_params=var_weight_params,
           output_pickle=output_pickle,
           enable_checkpoint_saving=enable_checkpoint_saving,
-          spmd_decode_step=spmd_decode_step,
-          inputs_partition_spec=inputs_partition_spec,
           metrics_p=task_p.metrics,
       )
     jax.monitoring.record_event_duration_secs(
@@ -936,13 +923,6 @@ def _decode_once(
     var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
-    spmd_decode_step: Optional[
-        Callable[
-            [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-            Tuple[None, trainer_lib.StepFnOutput],
-        ]
-    ] = None,
-    inputs_partition_spec: Optional[NestedPartitionSpec] = None,
     metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
 ) -> Tuple[
     Tuple[
@@ -963,14 +943,12 @@ def _decode_once(
     summary_writers: The summary writer objects to log summaries.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
       `task_p`, `var_weight_params`, `output_pickle` and
-      `enable_checkpoint_saving` should be set; otherwise, `spmd_decode_step`,
-      `inputs_partition_spec` and `metrics_p` should be set.
+      `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should be
+      set.
     task_p: Params for the task encapsulating a data parallel model.
     var_weight_params: Nested structure of HParams for the model weights.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-    spmd_decode_step: pjit'ed decode function.
-    inputs_partition_spec: Partition specs for inputs.
     metrics_p: Parameters to configure how to aggregate the metrics.
 
   Returns:
@@ -1093,12 +1071,11 @@ def _decode_once(
         task_p=task_p,
         output_pickle=output_pickle,
         enable_checkpoint_saving=enable_checkpoint_saving,
-        spmd_decode_step=spmd_decode_step,
-        inputs_partition_spec=inputs_partition_spec,
         metrics_p=metrics_p,
     )
-    decode_output = decode_program.run(train_state, step_i).aux
 
+  for decode_program in decode_programs:
+    decode_output = decode_program.run(train_state, step_i).aux
     decode_metrics_list.append(decode_output.decode_metrics)
     processed_decode_metrics_list.append(decode_output.processed_decode_metrics)
     seqio_metrics_list.append(decode_output.seqio_metrics)
@@ -1156,34 +1133,12 @@ def decode_spmd_model(
   )
   decode_programs = eval_runner.decode_programs
 
-  if decode_programs:
-    # Peek to avoid exhausting the input pipeline.
-    sample_inputs = decode_programs[0].decode_input.peek_padded()
-    inputs_shape_dtype = jax.tree_map(
-        py_utils.get_global_input_shape_dtype, sample_inputs
-    )
-  else:
-    # This means there is no input to run, and currently this happens only
-    # when user runs decode() with eval input, i.e. `mode` is set to DECODE
-    # above. In that case, the partitioned decode_step_fn won't get used since
-    # there is no decode input, and we simply use the training input shapes
-    # to partition.
-    # TODO(laigd): avoid cases like this.
-    inputs_shape_dtype = partitioner.train_inputs_shape_dtype
-
-  decode_step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
-  assert is_eval
-  decode_step_fn, inputs_partition_spec = partitioner.partition(
-      decode_step_fn, inputs_shape_dtype, is_eval
-  )
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
       job_log_dir=job_log_dir,
       prng_key=prng_key,
       use_pmap=False,
-      spmd_decode_step=decode_step_fn,
-      inputs_partition_spec=inputs_partition_spec,
   )
   trainer_lib.write_post_init_model_hparams_file(
       jax_task.model,

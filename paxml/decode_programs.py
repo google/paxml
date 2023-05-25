@@ -18,7 +18,7 @@
 import collections
 import functools
 import sys
-from typing import Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from absl import flags
 from absl import logging
@@ -36,6 +36,7 @@ from paxml import seqio_input
 from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import train_states
+from paxml import trainer_lib
 from paxml import xla_passthrough
 from praxis import base_hyperparams
 from praxis import base_input
@@ -44,6 +45,7 @@ from praxis import base_model
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -57,6 +59,7 @@ NestedMap = py_utils.NestedMap
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
 SummaryWriter = tf.summary.SummaryWriter
+StepFnOutput = trainer_lib.StepFnOutput
 TrainState = train_states.TrainState
 PRNGKey = pytypes.PRNGKey
 
@@ -116,9 +119,6 @@ class SingleTaskDecodeProgram(programs.Program):
       model: base_model.BaseModel,
       partitioner: partitioning.Partitioner,
       decode_input: base_input.BaseInput,
-      # This argument is used for `sync_global_devices`.
-      # TODO(wangpeng): Try removing this argument.
-      input_index: Optional[int] = None,
   ):
     """The constructor.
 
@@ -126,12 +126,10 @@ class SingleTaskDecodeProgram(programs.Program):
       model: The model to be used for decoding.
       partitioner: The partitioner used to partition the decode function.
       decode_input: The instantiated input to be decoded.
-      input_index: The index of this input among a list of inputs.
     """
     self._model = model
     self._partitioner = partitioner
     self._input = decode_input
-    self._input_index = input_index
     self._num_steps = (
         -1 if self._input.reset_for_eval else self._input.eval_loop_num_batches
     )
@@ -148,9 +146,12 @@ class SingleTaskDecodeProgram(programs.Program):
     self._output_pickle = None
     self._enable_checkpoint_saving = None
 
-    self._spmd_decode_step = None
-    self._inputs_partition_spec = None
     self._metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics] = None
+
+    # Decode step function information.
+    self._decode_step_created = False
+    self._decode_step_fn = None
+    self._decode_step_input_spec = None
 
   def setup(
       self,
@@ -168,13 +169,6 @@ class SingleTaskDecodeProgram(programs.Program):
       task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]],
       output_pickle: bool,
       enable_checkpoint_saving: bool,
-      spmd_decode_step: Optional[
-          Callable[
-              [TrainState, PRNGKey, NestedJTensor, Optional[int]],
-              Tuple[Tuple[NestedMap, NestedMap], NestedMap],
-          ]
-      ],
-      inputs_partition_spec: Optional[NestedPartitionSpec],
       metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
   ) -> None:
     """Sets up the program.
@@ -185,14 +179,12 @@ class SingleTaskDecodeProgram(programs.Program):
       summary_writer: The summary writer to log summaries.
       use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
         `task_p`, `var_weight_params`, `output_pickle` and
-        `enable_checkpoint_saving` should be set; otherwise, `spmd_decode_step`,
-        `inputs_partition_spec` and `metrics_p` should be set.
+        `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should
+        be set.
       pmap_decode_step: pmap'ed decode function.
       task_p: Params for the task encapsulating a data parallel model.
       output_pickle: Whether to write decoding results to a pickle file.
       enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-      spmd_decode_step: pjit'ed decode function.
-      inputs_partition_spec: Partition specs for inputs.
       metrics_p: Parameters to configure how to aggregate the metrics.
     """
     self._prng_key = prng_key
@@ -206,16 +198,11 @@ class SingleTaskDecodeProgram(programs.Program):
     self._output_pickle = output_pickle
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
-    self._spmd_decode_step = spmd_decode_step
-    self._inputs_partition_spec = inputs_partition_spec
     self._metrics_p = metrics_p
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     # TODO(wangpeng): Implement and use it.
     raise NotImplementedError()
-
-  def shutdown(self) -> None:
-    pass
 
   @property
   def model(self):
@@ -235,7 +222,6 @@ class SingleTaskDecodeProgram(programs.Program):
   def run(self, state: TrainState, train_step: int) -> programs.ProgramOutput:
     work_unit = platform.work_unit()
     use_pmap = self._use_pmap
-    train_state = state
     step_i = train_step
     partitioner = self._partitioner
     model = self._model
@@ -248,7 +234,7 @@ class SingleTaskDecodeProgram(programs.Program):
     basedir = self._basedir
     dirname = self._dirname
     raw_filename = programs.get_filename(
-        train_state.step if use_pmap else step_i, EvaluationMode.DECODE.value
+        state.step if use_pmap else step_i, EvaluationMode.DECODE.value
     )
     filename = basedir / dirname / raw_filename
     metrics_p = self._metrics_p
@@ -256,18 +242,7 @@ class SingleTaskDecodeProgram(programs.Program):
     if use_pmap:
       pmap_decode_step = self._pmap_decode_step
       output_pickle = self._output_pickle
-      decode_step_func = functools.partial(pmap_decode_step, train_state)
-
-    else:
-      spmd_decode_step = self._spmd_decode_step
-      inputs_partition_spec = self._inputs_partition_spec
-      split = self._input_index
-
-      # We do not fold in jax.process_index in contrast to the pmap version and
-      # use a single global key instead to rely on pjit to split for different
-      # replicas.
-      assert spmd_decode_step is not None
-      spmd_decode_step_fn = functools.partial(spmd_decode_step, train_state)
+      decode_step_func = functools.partial(pmap_decode_step, state)
 
     if programs.can_load_written_outputs(
         job_log_dir, input_name, EvaluationMode.DECODE, step_i
@@ -318,11 +293,11 @@ class SingleTaskDecodeProgram(programs.Program):
       batch, tpu_unsupported_batch, inputs_partition_spec = (
           xla_passthrough.split_out_xla_unsupported_batch(
               batch,
-              partitioning_spec=None if use_pmap else inputs_partition_spec,
+              partitioning_spec=None if use_pmap else self.decode_input_partition_spec(batch),
           )
       )
       batch = partitioner.preprocess_inputs(
-          decode_input, batch, None if use_pmap else inputs_partition_spec
+          decode_input, batch, inputs_partition_spec
       )
 
       task_p = self._task_p
@@ -339,13 +314,14 @@ class SingleTaskDecodeProgram(programs.Program):
             decode_step_func(decode_key, batch)
         )
       else:
-        unused_train_state, decode_out = spmd_decode_step_fn(
+        decode_out = self.decode_step(
+            state,
             decode_key,
             batch,
             decode_input.get_global_batch_size(decode_input.hparams),
         )
         # Cross host synchronization happens at this point.
-        py_utils.sync_global_devices(f'spmd_decode_step_fn{split}_{step_num}')
+        py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
         # Output is fully replicated now, so it's ok to unreplicate it by
         # retrieving from device 0 only.
         out = py_utils.maybe_unreplicate_for_fully_replicated(
@@ -492,3 +468,42 @@ class SingleTaskDecodeProgram(programs.Program):
         raw_decode_metrics=metrics,
     )
     return programs.ProgramOutput(state=state, aux=decode_output)
+
+  def _get_decode_step(
+      self, inputs: NestedJTensor
+  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+    """Creates the decode step info if not done before."""
+    if not self._decode_step_created:
+      self._decode_step_fn, self._decode_step_input_spec = (
+          self._partitioner.partition(
+              trainer_lib._decode_step_for_partitioner,
+              inputs_shape_dtype=trees.get_shape_dtype(inputs),
+              is_eval=True,
+          )
+      )
+      self._decode_step_created = True
+    return self._decode_step_fn, self._decode_step_input_spec
+
+  def decode_step(
+      self,
+      state: train_states.TrainState,
+      prng_key: PRNGKey,
+      inputs: NestedJTensor,
+      unpadded_global_batch_size: int,
+  ) -> StepFnOutput:
+    """The decode step function."""
+    decode_step, _ = self._get_decode_step(inputs)
+    unused_train_state, decode_step_fn_out = decode_step(
+        state, prng_key, inputs, unpadded_global_batch_size
+    )
+    return decode_step_fn_out
+
+  def decode_input_partition_spec(
+      self, inputs: NestedJTensor
+  ) -> Optional[NestedPartitionSpec]:
+    """The partition spec for the decode inputs."""
+    _, input_partition_spec = self._get_decode_step(inputs)
+    return input_partition_spec
+
+  def shutdown(self) -> None:
+    pass

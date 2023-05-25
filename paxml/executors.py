@@ -287,8 +287,8 @@ class DefaultExecutor(base_executor.BaseExecutor):
         partitioner=self._partitioner,
     )
     decode_programs = [
-        create_decode_program(decode_input=instantiate(p), input_index=i)
-        for i, p in enumerate(preprocessed_decode_input_ps)
+        create_decode_program(decode_input=instantiate(p))
+        for p in preprocessed_decode_input_ps
     ]
     trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
     return decode_programs
@@ -363,28 +363,11 @@ def _get_partition_decode_once_fn(
   if not task_p.decode.prng_key_fold_with_batch_index:
     decode_key = partitioner.preprocess_prng_key(decode_key)
 
+  var_weight_params = None
   if use_pmap:
     var_weight_params = (
         partitioner.get_train_state_metadata().var_weight_hparams
     )
-    spmd_decode_step = None
-    decode_input_partition_spec = None
-  else:
-    var_weight_params = None
-
-    # TODO(wangpeng): Store `input_p` in SingleTaskDecodeProgram to avoid using
-    # `hparams` here.
-    _, decode_inputs_shape_dtype = trainer_lib.get_inputs_shape_dtype(
-        decode_programs[0].decode_input.hparams.clone()
-    )
-
-    # TODO(pax-dev): Support auto-sharding for decoder step.
-    step_fn, is_eval = partitioning.get_step_fn(RunningMode.DECODE)
-    assert is_eval
-    spmd_decode_step, decode_input_partition_spec = partitioner.partition(
-        step_fn, decode_inputs_shape_dtype, is_eval
-    )
-
   decode_once_fn = eval_lib.partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
@@ -392,8 +375,6 @@ def _get_partition_decode_once_fn(
       prng_key=decode_key,
       use_pmap=use_pmap,
       var_weight_params=var_weight_params,
-      spmd_decode_step=spmd_decode_step,
-      inputs_partition_spec=decode_input_partition_spec,
       train_state_preprocessor=train_state_preprocessor,
   )
 

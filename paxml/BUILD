@@ -570,6 +570,7 @@ pytype_strict_library(
         ":summary_utils",
         ":tasks_lib",
         ":train_states",
+        ":trainer_lib",
         ":xla_passthrough",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
@@ -586,6 +587,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
