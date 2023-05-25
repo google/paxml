@@ -201,7 +201,7 @@ flags.DEFINE_string(
 
 ## multiprocessing GPU flags
 flags.DEFINE_bool(
-    'multiprocess_gpu', False, 
+    'multiprocess_gpu', False,
     'Whether to initialize JAX distributed for multi-host GPU')
 flags.DEFINE_string(
     'server_addr', None, help='server ip addr')
@@ -214,6 +214,7 @@ flags.DEFINE_integer(
 # available through JAX.
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   """Retrieves an experiment config from the global registry."""
   experiment_class = experiment_registry.get(experiment_name)
@@ -245,6 +246,7 @@ def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
   time.sleep(random.randint(min_secs, max_secs))
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def run_experiment(
     experiment_config: base_experiment.BaseExperiment,
     work_unit: platform.WorkUnit,
@@ -358,6 +360,7 @@ def run_experiment(
   py_utils.sync_global_devices('All tasks finish.')
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def run(experiment_config: base_experiment.BaseExperiment,
         enable_checkpoint_saving: bool = True):
   """Run an experiment.
@@ -421,8 +424,9 @@ def run(experiment_config: base_experiment.BaseExperiment,
         running_mode=FLAGS.mode)
 
 
+@py_utils.benchmark(prefix='[PAX STATUS]: E2E time: ')
 def main(argv: Sequence[str]) -> None:
-  start = time.time()
+  logging.info('[PAX STATUS]: Program start.')
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
@@ -455,9 +459,6 @@ def main(argv: Sequence[str]) -> None:
   experiment_config.validate()
   run(experiment_config=experiment_config,
       enable_checkpoint_saving=FLAGS.enable_checkpoint_saving)
-
-  e2e_time = time.time() - start
-  logging.info(f'E2E time: {e2e_time}')
 
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')

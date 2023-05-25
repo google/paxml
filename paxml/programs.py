@@ -274,10 +274,10 @@ class BaseTrainProgram(Program):
 
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
+  @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
   def run(self, state: TrainState, step: int) -> ProgramOutput:
     train_p = self._task.train
     logging.log_first_n(logging.INFO, '[PAX STATUS]:  Retrieving inputs.', 5)
-
     model_inputs = self._train_input.get_next_padded()
 
     # Verify user-provided spec matches the first batch's structure.

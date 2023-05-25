@@ -23,18 +23,24 @@ import jax
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
+
 @dataclasses.dataclass
 class JaxDistributedOptions:
   coordinator_address: str
   num_processes: int
   process_id: int
 
-def setup_jax(globally_use_hardware_rng: bool,
-              jax_backend_target: Optional[str], jax_xla_backend: Optional[str],
-              jax_enable_checks: bool,
-              jax_traceback_filtering_option: str = 'auto',
-              should_initialize_jax_distributed: bool = False,
-              jax_distributed_options: Optional[JaxDistributedOptions] = None,) -> None:
+
+@py_utils.benchmark('[PAX STATUS]: ')
+def setup_jax(
+    globally_use_hardware_rng: bool,
+    jax_backend_target: Optional[str],
+    jax_xla_backend: Optional[str],
+    jax_enable_checks: bool,
+    jax_traceback_filtering_option: str = 'auto',
+    should_initialize_jax_distributed: bool = False,
+    jax_distributed_options: Optional[JaxDistributedOptions] = None,
+) -> None:
   """Setups JAX and logs information about this job."""
 
   # Hide any GPUs from TensorFlow. Otherwise TF might reserve memory and make
@@ -65,9 +71,11 @@ def setup_jax(globally_use_hardware_rng: bool,
 
   if should_initialize_jax_distributed:
     if jax_distributed_options:
-      jax.distributed.initialize(jax_distributed_options.coordinator_address,
-                                 jax_distributed_options.num_processes,
-                                 jax_distributed_options.process_id)
+      jax.distributed.initialize(
+          jax_distributed_options.coordinator_address,
+          jax_distributed_options.num_processes,
+          jax_distributed_options.process_id,
+      )
     else:
       jax.distributed.initialize()
 

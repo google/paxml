@@ -673,6 +673,7 @@ class PmapPartitioner(Partitioner):
         self._train_state_metadata, discard_opt_states
     )
 
+  @py_utils.benchmark('[PAX STATUS]: ')
   def partition(
       self,
       step_fn: StepFn,
@@ -883,6 +884,7 @@ class PjitPartitioner(Partitioner):
         self._train_state_metadata, discard_opt_states
     )
 
+  @py_utils.benchmark('[PAX STATUS]: ')
   def partition(
       self,
       step_fn: StepFn,

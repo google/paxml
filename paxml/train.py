@@ -34,6 +34,7 @@ from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import pax_fiddle
+from praxis import py_utils
 import tensorflow.compat.v2 as tf
 
 from paxml import checkpoints  # mapped to internal
@@ -90,6 +91,7 @@ def write_experiment_class_vars_file(
     exp_summary_fpath.write_text(cls_vars_summary)
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.PathLike,
@@ -136,7 +138,6 @@ def train_and_evaluate(
       on-demand checkpoint due to preemption.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
-  logging.info('[PAX STATUS] Starting `train_and_evaluate`')
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
 
