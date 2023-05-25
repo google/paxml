@@ -659,10 +659,8 @@ class StepFnOutput:
   # A dict or nested map of summary tensors computed in forward/backward pass.
   summary_tensors: SummaryDict
 
-  # The updated weights.
-  # TODO(laigd): this is currently only used in the decode step function,
-  # consider remove it, or merge it with summary_tensors.
-  updated_vars: Optional[NestedMap] = None
+  # A dict of clu.metrics. Used by decode step function currently.
+  clu_metrics: Optional[Dict[str, Any]] = None
 
 
 # TODO(yonghui): refactor to pass in learner separately.
@@ -1159,12 +1157,13 @@ def _decode_step_for_partitioner(
           task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
       )
   )
+  summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
   return None, StepFnOutput(
       loss=None,
       weighted_scalars=weighted_scalars,
       per_example_out=per_example_out,
-      summary_tensors=updated_metrics,
-      updated_vars=updated_vars,
+      summary_tensors=summary_tensors,
+      clu_metrics=updated_metrics,
   )
 
 

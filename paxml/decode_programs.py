@@ -361,10 +361,10 @@ class SingleTaskDecodeProgram(programs.Program):
         # This also means we don't need to call an all_gather and a reduce()
         # on each clu.metric like we do in pmap mode.
         updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-            decode_out.summary_tensors
+            decode_out.clu_metrics
         )
 
-        summary_tensors = decode_out.updated_vars.get(base_layer.SUMMARIES, {})
+        summary_tensors = decode_out.summary_tensors
         summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
         del decode_out  # release Jax Arrays memory allocations
 
