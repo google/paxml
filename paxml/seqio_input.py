@@ -347,6 +347,8 @@ class SeqIOInput(base_input.BaseInput):
       changes before the cache is applied.
     trim_output_features: If True, it trims output features to be less than the
       length given by `sequence_length`.
+    try_in_mem_cache: If True, caches sufficiently small datasets in memory
+      for efficiency.
     eval_auto_pad: Only used when p.is_training=False. Automatically pad the
       data to multiples of global batch size, using the first example in the
       data. Padded entries will have batch_input.eval_sample_weight == 0.0.
@@ -428,6 +430,10 @@ class SeqIOInput(base_input.BaseInput):
   # behaviour. the main purpose is for prefixlm to not problematically
   # pack on the inputs.
   trim_output_features: bool = True
+  # Set `try_in_mem_cache` to maintain backward-compatibility since this is also
+  # enabled by default in SeqIO. This flag has side effects to increase host
+  # memory usage and may lead to OOMs in some senarios.
+  try_in_mem_cache: bool = True
   # Params to adjust the starting example index for deterministic input.
   # Implementation note: `SingleTask` is not defined in the interpreter
   # context here, so we need to wrap it in a lambda which will look it up from
@@ -667,6 +673,7 @@ class SeqIOInput(base_input.BaseInput):
           seed=self.input_random_seed,
           use_cached=self.use_cached,
           trim_output_features=self.trim_output_features,
+          try_in_mem_cache=self.try_in_mem_cache,
       )
       if self.use_enumeration:
         ds_shard = _enumerate_dataset(ds_shard, self.is_training, shard_info)
@@ -795,6 +802,7 @@ class SeqIOInput(base_input.BaseInput):
         use_cached=self.use_cached,
         seed=self.input_random_seed,
         trim_output_features=self.trim_output_features,
+        try_in_mem_cache=self.try_in_mem_cache,
     )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
 
