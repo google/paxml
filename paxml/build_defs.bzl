@@ -323,8 +323,6 @@ def _export_test(
 
     py_test_rule(
         name = name,
-        python_version = "PY3",
-        srcs_version = "PY3",
         srcs = [test_copied],
         args = args,
         deps = deps,
@@ -354,7 +352,6 @@ def export_binary(
     # Main script.
     py_binary_rule(
         name = name,
-        python_version = "PY3",
         main = main_copied,
         srcs = [main_copied],
         deps = deps,
