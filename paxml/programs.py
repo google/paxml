@@ -703,8 +703,7 @@ class BaseEvalProgram(Program):
     # Creates the eval input pipeline.
     self._input_p = self._partitioner.preprocess_input_config(self._input_p)
     logging.info(
-        '[PAX STATUS]: Initializing eval_input pipeline : %s',
-        self._input_p.name,
+        '[PAX STATUS]: Initializing eval_input pipeline : %s', self._input_p
     )
     self._eval_input_pipeline = instantiate(self._input_p)
     self._name = self.eval_input.name
