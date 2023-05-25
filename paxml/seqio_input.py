@@ -484,8 +484,25 @@ class SeqIOInput(base_input.BaseInput):
       self.configure_symbolic_checkpointing()
     super().__post_init__()
     self._validate_hparams()
-    self._dataset = self._get_dataset()
-    self._iter = self._dataset.as_numpy_iterator()
+
+    with py_utils.timeit() as get_dataset_timer:
+      self._dataset = self._get_dataset()
+    logging.info(
+        '[PAX STATUS]: SeqIO init took %d seconds (mixture=%s, split=%s)',
+        get_dataset_timer.elapsed,
+        self.mixture_name,
+        self.split_name,
+    )
+
+    with py_utils.timeit() as np_iterator_timer:
+      self._iter = self._dataset.as_numpy_iterator()
+    logging.info(
+        '[PAX STATUS]: SeqIO dataset `as_numpy_iterator` call took %d seconds'
+        ' (mixture=%s, split=%s)',
+        np_iterator_timer.elapsed,
+        self.mixture_name,
+        self.split_name,
+    )
 
     # Populated by first call to `self._get_targets_with_enum_key`. Subsequent
     # calls to it short circuit by returning the cached values.

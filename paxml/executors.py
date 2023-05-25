@@ -60,7 +60,10 @@ def _maybe_update_latest_model_step(
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     # Not deterministic seqio.
     return
-  logging.info(f'step used for deterministic seqio: {initial_global_step}')
+
+  logging.info(
+      'Attempting to use step for deterministic seqio: %d', initial_global_step
+  )
   if initial_global_step is None:
     if task_p.train.external_checkpoint_path:
       logging.warning(
@@ -70,6 +73,7 @@ def _maybe_update_latest_model_step(
     # When not restoring from external_checkpoint_path, it means no checkpoint
     # to restore in this case and it'll train from step 0, so no need to update.
     return
+
   logging.info('Updating _latest_model_step for training input.')
   dp = train_input_p.deterministic_input_start_index
   dp._latest_model_step = (
@@ -162,7 +166,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
         passed to checkpointer.get_model_states(). If set, the checkpointer will
         restore its states from checkpoint.
     """
-    logging.info('[PAX STATUS]: Instantiating train input pipeline.')
+    logging.info(
+        '[PAX STATUS]: Instantiating train input pipeline (%s)', train_input_p
+    )
     if not task_p.train.enable_input_checkpointing:
       _maybe_update_latest_model_step(train_input_p, step, task_p)
     train_input = instantiate(train_input_p)
