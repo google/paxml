@@ -225,20 +225,11 @@ def pax_targets(
         main = "//paxml/tools:dump_hparams.py",
         py_binary_rule = pytype_strict_binary,
         deps = [
-            # Implicit absl.app dependency.
-            # Implicit absl.flags dependency.
-            # Implicit absl.logging dependency.
-            # Implicit jax dependency.
-            # Implicit numpy dependency.
-            "//paxml:base_experiment",
-            "//paxml:experiment_registry",
-            "//praxis:base_hyperparams",
-            "//praxis:base_layer",
-            "//praxis:py_utils",
-            # Implicit pyglove dependency.
-            # Implicit tensorflow_no_contrib dependency.
+            "//paxml/tools:dump_hparams_lib",
         ] + extra_deps,
         exp_sources = exp_sources,
+        exec_properties = {"mem": "20g"},  # dump_hparams can be a very large executable.
+        # Implicit py_binary flag
     )
 
     dump_input_specs_name = "dump_input_specs"

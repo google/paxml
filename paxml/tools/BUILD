@@ -60,3 +60,24 @@ pytype_strict_library(
         "//praxis:py_utils",
     ],
 )
+
+pytype_strict_library(
+    name = "dump_hparams_lib",
+    srcs = ["dump_hparams_lib.py"],
+    deps = [
+        # Implicit absl.app dependency.
+        # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
+        # Implicit fiddle.absl_flags dependency.
+        # Implicit jax dependency.
+        # Implicit numpy dependency.
+        "//paxml:base_experiment",
+        "//paxml:experiment_registry",
+        "//praxis:base_hyperparams",
+        "//praxis:base_layer",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        # Implicit pyglove dependency.
+        # Implicit tensorflow_no_contrib dependency.
+    ],
+)
