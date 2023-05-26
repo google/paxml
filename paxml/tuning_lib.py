@@ -53,6 +53,7 @@ TrialFn = Callable[[
 SUB_EXPERIMENT_STEP_INTERVAL = 1000_000_000
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def get_search_space(
     experiment_config: base_experiment.BaseExperiment
     ) -> pg.hyper.DynamicEvaluationContext:

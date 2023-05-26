@@ -548,6 +548,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     return self._checkpoint_type
 
 
+@py_utils.benchmark('[PAX STATUS]: ', first_n=2)
 def _create_checkpointer(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     job_log_dir: epath.Path,

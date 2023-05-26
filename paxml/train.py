@@ -52,6 +52,7 @@ _create_checkpointer = checkpoint_creators._create_checkpointer
 # pylint: enable=protected-access
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def write_hparams_file(
     model_config: base_experiment.BaseExperiment,
     job_log_dir: epath.Path,
@@ -144,7 +145,7 @@ def train_and_evaluate(
   # in case the user passed in a string dtype, convert it to an actual dtype
   task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
 
-  logging.info('[PAX STATUS] Obtaining and initializing datasets.')
+  logging.info('[PAX STATUS]: Getting dataset configurations.')
   input_p = experiment_config.datasets()
   for inp in input_p:
     if not isinstance(
@@ -160,7 +161,7 @@ def train_and_evaluate(
         f'Expecting exactly one training split. Got `{len(train_input_p)}`.'
     )
   train_input_p = train_input_p[0]
-  logging.info('[PAX STATUS]: Done initializing dataset objects')
+  logging.info('[PAX STATUS]: Done getting dataset configurations.')
 
   logging.info('train_input_p:')
   for line in base_hyperparams.nested_struct_to_text(

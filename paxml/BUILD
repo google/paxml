@@ -85,7 +85,6 @@ pytype_strict_library(
         # Implicit orbax.checkpoint dependency.
         "//paxml:preemption",
         "//praxis:base_input",
-        "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -324,12 +323,10 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
-        # Implicit fiddle dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
-        # Implicit pyglove dependency.
         # Implicit seqio dependency.
     ],
 )
@@ -781,7 +778,6 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
-        "//praxis:pytypes",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )

@@ -36,7 +36,6 @@ from absl import logging
 # Required import to setup work units when running through XManager.
 from clu import platform
 from etils import epath
-import fiddle as fdl
 from fiddle import absl_flags
 import jax
 from paxml import base_experiment
@@ -50,7 +49,6 @@ from paxml import trainer_lib
 from paxml import tuning_lib
 from praxis import pax_fiddle
 from praxis import py_utils
-import pyglove as pg
 
 # internal experiment module import
 
@@ -62,11 +60,11 @@ flags.DEFINE_string(
     'has a format like "<task>.<module>.<experiment>", which should have been '
     'already registered in the global experiment registry with '
     '@experiment_registry.register.')
-epath.DEFINE_path(
+_JOB_LOGDIR = epath.DEFINE_path(
     'job_log_dir',
     None,
     'Directory where all experiment assets will be stored.',
-    # Marked as required in __main__ below
+    # Marked as required below.
 )
 flags.DEFINE_enum(
     'mode',
@@ -241,6 +239,7 @@ def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   )
 
 
+@py_utils.benchmark('[PAX STATUS]: ')
 def wait_with_random_jitter(min_secs: int, max_secs: int) -> None:
   """Sleeps for a random short interval to avoid thundering herd RPC calls."""
   time.sleep(random.randint(min_secs, max_secs))
@@ -361,6 +360,21 @@ def run_experiment(
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
+def _setup_xm_work_unit():
+  """Setup the global work unit for XM."""
+  work_unit = platform.work_unit()
+  work_unit.set_task_status(
+      f'process_index: {jax.process_index()}, '
+      f'process_count: {jax.process_count()}'
+  )
+  if jax.process_index() == 0:
+    work_unit.create_artifact(
+        platform.ArtifactType.DIRECTORY, str(_JOB_LOGDIR.value), 'job_log_dir'
+    )
+  return work_unit
+
+
+@py_utils.benchmark('[PAX STATUS]: ')
 def run(experiment_config: base_experiment.BaseExperiment,
         enable_checkpoint_saving: bool = True):
   """Run an experiment.
@@ -379,12 +393,7 @@ def run(experiment_config: base_experiment.BaseExperiment,
   # (Borg task 0 is not guaranteed to be host 0)
   if jax.process_count() > 128:
     wait_with_random_jitter(min_secs=0, max_secs=60)
-  work_unit = platform.work_unit()
-  work_unit.set_task_status(f'process_index: {jax.process_index()}, '
-                            f'process_count: {jax.process_count()}')
-  if jax.process_index() == 0:
-    work_unit.create_artifact(platform.ArtifactType.DIRECTORY,
-                              str(FLAGS.job_log_dir), 'job_log_dir')
+  work_unit = _setup_xm_work_unit()
 
   # Start jax.profiler for TensorBoard and profiling in open source.
   if FLAGS.jax_profiler_port is not None:
@@ -403,7 +412,7 @@ def run(experiment_config: base_experiment.BaseExperiment,
     run_experiment(
         experiment_config,
         work_unit,
-        job_log_dir=FLAGS.job_log_dir,
+        job_log_dir=_JOB_LOGDIR.value,
         early_stopping_fn=None,
         enable_checkpoint_saving=enable_checkpoint_saving)
   else:
@@ -414,7 +423,7 @@ def run(experiment_config: base_experiment.BaseExperiment,
         trial_fn=run_experiment,
         experiment_config=experiment_config,
         work_unit=work_unit,
-        job_log_dir=FLAGS.job_log_dir,
+        job_log_dir=_JOB_LOGDIR.value,
         study=FLAGS.study,
         pythia_port=FLAGS.pythia_port,
         is_metric_reporting_role=(FLAGS.metrics_from == FLAGS.mode),
@@ -465,18 +474,14 @@ _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
 
 if __name__ == '__main__':
   # Only dump from Borg task 0.
-  if 'BORG_TASK_HANDLE' in os.environ:
-    handle = os.getenv('BORG_TASK_HANDLE')
-    task_id, _, _ = _TASK_HANDLE_RE.match(handle).groups()  # pytype: disable=attribute-error  # re-none
-    if int(task_id) == 0:
-      dump_dir = os.getenv('XLA_DUMP_TO')
-      if dump_dir:
-        existing_xla_flags = os.getenv('XLA_FLAGS')
-        to_append = f'--xla_dump_to={dump_dir}'
-        if existing_xla_flags:
-          os.environ['XLA_FLAGS'] = f'{existing_xla_flags} {to_append}'
+  if handle := os.getenv('BORG_TASK_HANDLE'):
+    if (task_id := _TASK_HANDLE_RE.match(handle).group(1)) == '0':  # pytype: disable=attribute-error  # re-none
+      if dump_dir := os.getenv('XLA_DUMP_TO'):
+        if existing := os.getenv('XLA_FLAGS'):
+          os.environ['XLA_FLAGS'] = f'{existing} --xla_dump_to={dump_dir}'
         else:
-          os.environ['XLA_FLAGS'] = to_append
+          os.environ['XLA_FLAGS'] = f'--xla_dump_to={dump_dir}'
+
   # Log XLA_FLAGS for easy debugging.
   logging.info("os.environ['XLA_FLAGS']=%s", os.getenv('XLA_FLAGS'))
 

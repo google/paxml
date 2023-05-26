@@ -245,16 +245,21 @@ class DefaultExecutor(base_executor.BaseExecutor):
       )
 
     # Restore TrainState from checkpoint or initialize it.
-    (
-        partitioned_train_state,
-        train_state_provenance,
-        total_num_params,
-        root_prng_key,
-    ) = checkpointer.get_model_states(
-        partitioner,
-        train_state_metadata,
-        root_prng_key,
-        train_input_for_checkpoint,
+    with py_utils.timeit() as checkpoint_load_timer:
+      (
+          partitioned_train_state,
+          train_state_provenance,
+          total_num_params,
+          root_prng_key,
+      ) = checkpointer.get_model_states(
+          partitioner,
+          train_state_metadata,
+          root_prng_key,
+          train_input_for_checkpoint,
+      )
+    logging.info(
+        '[PAX STATUS]: Checkpoint load / variable init took %d seconds',
+        checkpoint_load_timer.elapsed,
     )
     if train_state_provenance:
       trainer_lib.write_train_provenance_file(
