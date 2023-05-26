@@ -60,7 +60,7 @@ class TrainState(flax_struct.PyTreeNode):
 
   def to_eval_state(self) -> TrainState:
     """Returns a new TrainState with opt_states removed, for eval purpose."""
-    return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states={})
+    return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states=[])
 
 
 @dataclasses.dataclass

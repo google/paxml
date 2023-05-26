@@ -831,7 +831,7 @@ def create_state_partition_specs(
       mesh_shape=mesh_shape,
       device_axis_names=mesh_axis_names)
   if discard_opt_states:
-    opt_var_partition_specs = {}
+    opt_var_partition_specs = []
   else:
     opt_var_weight_hparams = []
     for learner in learners:
@@ -935,7 +935,7 @@ def create_state(
   mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
   var_weight_hparams = jax.tree_util.tree_map(lambda x: x, var_weight_hparams)
   if discard_opt_states:
-    opt_states = {}
+    opt_states = []
   else:
     opt_states = _create_opt_states(mdl_vars, var_weight_hparams, learners)
 
