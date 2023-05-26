@@ -62,7 +62,8 @@ def _maybe_update_latest_model_step(
     return
 
   logging.info(
-      'Attempting to use step for deterministic seqio: %d', initial_global_step
+      'Attempting to use global step for deterministic seqio (@ step %r)...',
+      initial_global_step,
   )
   if initial_global_step is None:
     if task_p.train.external_checkpoint_path:
