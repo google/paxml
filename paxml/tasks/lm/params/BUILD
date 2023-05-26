@@ -36,6 +36,7 @@ pytype_library(
     ],
     tags = ["keep_dep"],
     deps = [
+        ":lm_cloud",
         # Implicit absl.logging dependency.
         # Implicit fiddle dependency.
         # Implicit jax dependency.
@@ -58,6 +59,25 @@ pytype_library(
         # Implicit seqio dependency.
         # Implicit t5.data dependency.
         # Implicit t5.data.preprocessors dependency.
+    ],
+)
+
+pytype_library(
+    name = "lm_cloud",
+    srcs = [
+        "lm_cloud.py",
+    ],
+    deps = [
+        # Implicit absl.logging dependency.
+        # Implicit jax dependency.
+        "//paxml:base_experiment",
+        "//paxml:experiment_registry",
+        "//paxml:tasks_lib",
+        "//paxml/tasks/lm:input_generator",
+        "//paxml/tasks/lm:model_params",
+        "//praxis:base_layer",
+        "//praxis:pax_fiddle",
+        "//praxis/layers",
     ],
 )
 
