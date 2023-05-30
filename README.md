@@ -217,26 +217,47 @@ also use different random seed to avoid duplicate batches during training.
 `input.reset()` is never called on training data, but it can for eval (or
 decode) data.
 
-For each eval (or decode) run, Pax will fetch `N` batches from `input` by
-calling `input.get_next()` `N` times, after which Pax will optionally reset by
-calling `input.reset()`, depending on the value of `p.reset_for_eval`.
 
-The number of batches used, `N`, can be a fixed number specified by user, via
-`p.eval_loop_num_batches`; or `N` can be dynamic
-(`p.eval_loop_num_batches=None`), in which case we call `input.get_next()` until
-we exhaust all of its data (by raising `StopIteration` or
-`tf.errors.OutOfRange`).
+For each eval (or decode) run, Pax fetches `N` batches from `input` by calling
+`input.get_next()` `N` times. The number of batches used, `N`, can be a fixed
+number specified by user, via `p.eval_loop_num_batches`; or `N` can be dynamic
+(`p.eval_loop_num_batches=None`) i.e. we call `input.get_next()` until we
+exhaust all of its data (by raising `StopIteration` or `tf.errors.OutOfRange`).
 
-|                          | `N`: static                  | `N`: dynamic       |
-| ------------------------ | ---------------------------- | ------------------ |
-| `p.reset_for_eval=True`  | Each eval run uses the first `N` batches consistently. `p.eval_loop_num_batches=N`. Not supported yet. | One epoch per eval run. `input` must be finite and raise after its data is exhausted. All shards must raise after the same number of batches. |
-| `p.reset_for_eval=False` | Each eval run uses non-overlapping `N` batches on a rolling basis. `p.eval_loop_num_batches=N`. `input` must repeat indefinitely and never raise. | Not supported.     |
+If `p.reset_for_eval=True`, `p.eval_loop_num_batches` is ignored and `N` is
+determined dynamically as the number of batches to exhaust the data. In this
+case, `p.repeat` should be set to False, as doing otherwise would lead to
+infinite decode/eval.
 
-For the "eval on exactly one epoch" use case with `p.reset_for_eval=True,
-p.eval_loop_num_batches=None`, input must handle sharding correctly such that
-each shard raises at the same step after exactly the same number of batches are
-produced. This usually means that the input must pad the eval data. This is done
-automatically by `SeqIOInput` and `LingvoEvalAdaptor` (see more below).
+If `p.reset_for_eval=False`, Pax will fetch `p.eval_loop_num_batches` batches.
+This should be set with `p.repeat=True` so that data are not prematurely
+exhausted.
+
+Note that LingvoEvalAdaptor inputs require `p.reset_for_eval=True`.
+
+|                          | `N`: static             | `N`: dynamic            |
+| ------------------------ | ----------------------- | ----------------------- |
+| `p.reset_for_eval=True`  | Each eval run uses the  | One epoch per eval run. |
+:                          : first `N` batches. Not  : `eval_loop_num_batches` :
+:                          : supported yet.          : is ignored. Input must  :
+:                          :                         : be finite               :
+:                          :                         : (`p.repeat=False`)      :
+| `p.reset_for_eval=False` | Each eval run uses      | Not supported.          |
+:                          : non-overlapping `N`     :                         :
+:                          : batches on a rolling    :                         :
+:                          : basis, according to     :                         :
+:                          : `eval_loop_num_batches` :                         :
+:                          : . Input must repeat     :                         :
+:                          : indefinitely            :                         :
+:                          : (`p.repeat=True`) or    :                         :
+:                          : otherwise may raise     :                         :
+:                          : exception               :                         :
+
+If running decode/eval on exactly one epoch (i.e. when `p.reset_for_eval=True`),
+the input must handle sharding correctly such that each shard raises at the same
+step after exactly the same number of batches are produced. This usually means
+that the input must pad the eval data. This is done automatically
+by`SeqIOInput` and `LingvoEvalAdaptor` (see more below).
 
 ### Eval metrics
 
@@ -244,7 +265,7 @@ For the majority of inputs, we only ever call `get_next()` on them to get
 batches of data. One type of eval data is an exception to this, where "how to
 compute metrics" is also defined on the input object as well.
 
-This is only supported with `SeqIOInput` that defines some caonical eval
+This is only supported with `SeqIOInput` that defines some canonical eval
 benchmark. Specifically, Pax uses `predict_metric_fns` and `score_metric_fns()` defined on the SeqIO task to compute
 eval metrics (although Pax does not depend on SeqIO evaluator directly).
 

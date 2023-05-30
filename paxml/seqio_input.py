@@ -618,7 +618,7 @@ class SeqIOInput(base_input.BaseInput):
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
 
-    Corresponds to`eval_loop_num_batches` when reset_for_eval=True;
+    Corresponds to`eval_loop_num_batches` when reset_for_eval=False;
     otherwise eval runs on full dataset.
     """
     if (
