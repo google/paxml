@@ -198,7 +198,7 @@ def pax_targets(
             smoke_test_args.append("--include_only_regexes=" + _shell_quote(smoke_test_include_only_regexes))
 
         smoke_test_kwargs = smoke_test_kwargs or {}
-        _export_test(
+        export_test(
             name = test_name,
             test_src = "//paxml:experiment_imports_all_test.py",
             exp_sources = exp_sources,
@@ -291,7 +291,7 @@ def pax_targets(
         # Implicit py_binary flag
     )
 
-def _export_test(
+def export_test(
         name,
         test_src,
         deps,
