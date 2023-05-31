@@ -539,10 +539,9 @@ def _maybe_aggregate_metrics_summaries(
       aggregated_scalars[key] = (sum_value / (sum_weight + 1e-8), sum_weight)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_dict)
-    per_example_out = jax.tree_map(
-        lambda x: jax.lax.all_gather(  # pylint: disable=g-long-lambda
-            x, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True),
-        per_example_out)
+    per_example_out = jax.lax.all_gather(
+        per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
+    )
   else:
     # No aggregation of weighted scalars is needed.
     aggregated_scalars = weighted_scalars
@@ -1213,7 +1212,35 @@ def _decode_step_for_partitioner(
           task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
       )
   )
+  # TODO(laigd): move this inside decode_step(). None of the existing callers
+  # need more than summary_tensors.
   summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
+  summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
+
+  # TODO(laigd): this logic is similar to _maybe_aggregate_metrics_summaries,
+  # consider unify them.
+  if base_layer.is_running_under_pmap():
+    # Similar to (train|eval)_step_single_learner, we aggregate all outputs from
+    # each device using an all_gather, so that the results are fully replicated.
+    weighted_scalars = task.metrics_aggregator.aggregate(weighted_scalars)
+    per_example_out = jax.lax.all_gather(
+        per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
+    )
+    summary_tensors = summary_utils.aggregate_per_replica_summaries(
+        summary_tensors
+    )
+
+    # Gathers the metrics across workers, and then aggregate them.
+    # Note that it's important to disable tiling (tiled=False by default) when
+    # calling all_gather(), so that clu_metrics.Metric.reduce() can aggregate
+    # the value correctly using jax.lax.scan.
+    aggregated_metrics = {}
+    for metric_name, metric in updated_metrics.items():
+      aggregated_metrics[metric_name] = jax.lax.all_gather(
+          metric, axis_name=PMAP_PARALLEL_AXIS_NAME
+      ).reduce()
+    updated_metrics = aggregated_metrics
+
   return None, StepFnOutput(
       loss=None,
       weighted_scalars=weighted_scalars,

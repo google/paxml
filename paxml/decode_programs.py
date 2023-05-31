@@ -141,7 +141,6 @@ class SingleTaskDecodeProgram(programs.Program):
     self._summary_writer: SummaryWriter = None
     self._use_pmap = None
 
-    self._pmap_decode_step = None
     self._task_p = None
     self._output_pickle = None
     self._enable_checkpoint_saving = None
@@ -160,12 +159,6 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: epath.Path,
       summary_writer: SummaryWriter,
       use_pmap: bool,
-      pmap_decode_step: Optional[
-          Callable[
-              [TrainState, PRNGKey, NestedJTensor],
-              Tuple[NestedMap, NestedMap, NestedMap],
-          ]
-      ],
       task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]],
       output_pickle: bool,
       enable_checkpoint_saving: bool,
@@ -181,7 +174,6 @@ class SingleTaskDecodeProgram(programs.Program):
         `task_p`, `var_weight_params`, `output_pickle` and
         `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should
         be set.
-      pmap_decode_step: pmap'ed decode function.
       task_p: Params for the task encapsulating a data parallel model.
       output_pickle: Whether to write decoding results to a pickle file.
       enable_checkpoint_saving: Whether to perform checkpoint saving or not.
@@ -193,7 +185,6 @@ class SingleTaskDecodeProgram(programs.Program):
     self._summary_writer = summary_writer
     self._use_pmap = use_pmap
 
-    self._pmap_decode_step = pmap_decode_step
     self._task_p = task_p
     self._output_pickle = output_pickle
     self._enable_checkpoint_saving = enable_checkpoint_saving
@@ -240,9 +231,7 @@ class SingleTaskDecodeProgram(programs.Program):
     metrics_p = self._metrics_p
 
     if use_pmap:
-      pmap_decode_step = self._pmap_decode_step
       output_pickle = self._output_pickle
-      decode_step_func = functools.partial(pmap_decode_step, state)
 
     if programs.can_load_written_outputs(
         job_log_dir, input_name, EvaluationMode.DECODE, step_i
@@ -309,48 +298,30 @@ class SingleTaskDecodeProgram(programs.Program):
       else:
         decode_key = prng_key
 
-      if use_pmap:
-        (weighted_scalars, out, summary_tensors, updated_metrics) = (
-            decode_step_func(decode_key, batch)
-        )
-      else:
-        decode_out = self.decode_step(
-            state,
-            decode_key,
-            batch,
-            trainer_lib.BaseStepFnStaticArgs(
-                unpadded_global_batch_size=decode_input.get_global_batch_size(
-                    decode_input.hparams
-                )
-            ),
-        )
+      decode_out = self.decode_step(
+          state,
+          decode_key,
+          batch,
+          trainer_lib.BaseStepFnStaticArgs(
+              unpadded_global_batch_size=decode_input.get_global_batch_size(
+                  decode_input.hparams
+              )
+          ),
+      )
+      if not use_pmap:  # TODO(laigd): investigate if we can remove this sync.
         # Cross host synchronization happens at this point.
         py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
-        # Output is fully replicated now, so it's ok to unreplicate it by
-        # retrieving from device 0 only.
-        out = py_utils.maybe_unreplicate_for_fully_replicated(
-            decode_out.per_example_out
-        )
-        weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-            decode_out.weighted_scalars
-        )
 
-        # Because outputs of the decode step in pjit are annotated to
-        # be Jax Arrays, they are already fully replicated across
-        # shards and we can just unreplicate.
-        # This also means we don't need to call an all_gather and a reduce()
-        # on each clu.metric like we do in pmap mode.
-        updated_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
-            decode_out.clu_metrics
-        )
-
-        summary_tensors = decode_out.summary_tensors
-        summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-        del decode_out  # release Jax Arrays memory allocations
-
-        summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-            summary_tensors
-        )
+      # Output is fully replicated now, so it's ok to unreplicate it by
+      # retrieving from device 0 only.
+      unreplicated_decode_out = py_utils.maybe_unreplicate_for_fully_replicated(
+          decode_out
+      )
+      del decode_out  # release Jax Arrays memory allocations
+      per_example_out = unreplicated_decode_out.per_example_out
+      weighted_scalars = unreplicated_decode_out.weighted_scalars
+      updated_metrics = unreplicated_decode_out.clu_metrics
+      summary_tensors = unreplicated_decode_out.summary_tensors
 
       # Merge clu.metrics to update for each minibatch.
       metrics = _merge_clu_metrics(metrics, updated_metrics)
@@ -367,11 +338,15 @@ class SingleTaskDecodeProgram(programs.Program):
         # side decode_step_fun
         decode_metrics.store(weighted_scalars)
       elif jax.process_index() == 0:
+        # Copy the tensor from device memory to ram, since accumulating such
+        # tensor on devices may cause HBM OOM, when
+        # task_p.train.summary_accumulate_interval_steps is set.
+        # TODO(laigd): investigate whether we should apply this to pmap as well.
         weighted_scalars = jax.tree_map(np.array, weighted_scalars)
         decode_metrics.store(weighted_scalars)
 
       xla_passthrough.merge_back_xla_unsupported_batch(
-          out, tpu_unsupported_batch
+          per_example_out, tpu_unsupported_batch
       )
 
       if jax.process_index() == 0:
@@ -380,14 +355,16 @@ class SingleTaskDecodeProgram(programs.Program):
         # its outputs, we also don't want on-device allocation as
         # would eventually lead to HBM OOM.
         with jax.default_device(jax.devices('cpu')[0]):
-          out = jax.tree_map(np.asarray, out)
-          process_decode_output = model.process_decode_out(decode_input, out)
+          per_example_out = jax.tree_map(np.asarray, per_example_out)
+          process_decode_output = model.process_decode_out(
+              decode_input, per_example_out
+          )
 
         (process_weighted_scalars, processed_out, processed_metric_updates) = (
             process_decode_output
         )
         processed_out = seqio_input.maybe_update_decode_output_keys(
-            processed_out, out
+            processed_out, per_example_out
         )
 
         process_decode_metrics.store(process_weighted_scalars)

@@ -375,18 +375,12 @@ def _get_partition_decode_once_fn(
   if not task_p.decode.prng_key_fold_with_batch_index:
     decode_key = partitioner.preprocess_prng_key(decode_key)
 
-  var_weight_params = None
-  if use_pmap:
-    var_weight_params = (
-        partitioner.get_train_state_metadata().var_weight_hparams
-    )
   decode_once_fn = eval_lib.partitioned_decode_once(
       decode_programs=decode_programs,
       task_p=task_p,
       job_log_dir=job_log_dir,
       prng_key=decode_key,
       use_pmap=use_pmap,
-      var_weight_params=var_weight_params,
       train_state_preprocessor=train_state_preprocessor,
   )
 

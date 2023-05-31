@@ -818,7 +818,6 @@ def decode_pmap_model(
       prng_key=decode_key,
       job_log_dir=job_log_dir,
       use_pmap=True,
-      var_weight_params=train_state_metadata.var_weight_hparams,
       output_pickle=output_pickle,
       enable_checkpoint_saving=enable_checkpoint_saving,
   )
@@ -846,7 +845,6 @@ def partitioned_decode_once(
     prng_key: JTensor,
     job_log_dir: epath.Path,
     use_pmap: bool,
-    var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
     train_state_preprocessor: Optional[
@@ -861,9 +859,8 @@ def partitioned_decode_once(
     prng_key: The prng key used for decoding.
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
-      be set; otherwise, `metrics_p` should be set.
-    var_weight_params: Nested structure of HParams for the model weights.
+      `output_pickle` and `enable_checkpoint_saving` should be set; otherwise,
+      `metrics_p` should be set.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     train_state_preprocessor: A function to preprocess the train state before
@@ -891,7 +888,6 @@ def partitioned_decode_once(
           summary_writers=summary_writers,
           use_pmap=use_pmap,
           task_p=task_p,
-          var_weight_params=var_weight_params,
           output_pickle=output_pickle,
           enable_checkpoint_saving=enable_checkpoint_saving,
           metrics_p=task_p.metrics,
@@ -920,7 +916,6 @@ def _decode_once(
     summary_writers: List[SummaryWriter],
     use_pmap: bool,
     task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]] = None,
-    var_weight_params: Optional[NestedWeightHParams] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
     metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
@@ -942,11 +937,9 @@ def _decode_once(
     train_state: A `TrainState` object.
     summary_writers: The summary writer objects to log summaries.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `task_p`, `var_weight_params`, `output_pickle` and
-      `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should be
-      set.
+      `task_p`, `output_pickle` and `enable_checkpoint_saving` should be set;
+      otherwise, `metrics_p` should be set.
     task_p: Params for the task encapsulating a data parallel model.
-    var_weight_params: Nested structure of HParams for the model weights.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     metrics_p: Parameters to configure how to aggregate the metrics.
@@ -985,76 +978,6 @@ def _decode_once(
     )
     logging.info('decode prng_key: %s', prng_key)
 
-  if use_pmap:
-    aggregate_fn = instantiate(metrics_p).aggregate
-    model = decode_programs[0].model
-
-    def decode_step(mdl_states, decode_key, inputs):
-      (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
-          # TODO(wangpeng): Move `decode_step` out of `trainer_lib.py`.
-          trainer_lib.decode_step(
-              model,
-              mdl_states,
-              decode_key,
-              var_weight_params,
-              inputs,
-              model_p.fprop_dtype,
-          )
-      )
-
-      weighted_scalars = aggregate_fn(weighted_scalars)
-      aggregated_per_example_out = jax.lax.all_gather(
-          per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
-      )
-
-      summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
-      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-      aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
-          summary_tensors
-      )
-
-      # We want to aggregate metrics across workers.
-      # In pmap we do an all gather of the metric state across workers, and then
-      # call reduce() on the metric which by default calls merge across workers.
-      aggregated_metrics = {}
-      for metric_name, metric in updated_metrics.items():
-        aggregated_metrics[metric_name] = jax.lax.all_gather(
-            metric, axis_name=PMAP_PARALLEL_AXIS_NAME
-        ).reduce()
-
-      return (
-          weighted_scalars,
-          aggregated_per_example_out,
-          aggregated_summaries,
-          aggregated_metrics,
-      )
-
-    # As an example, suppose the output leaf from trainer_lib.decoder_step()
-    # for each core has shape: [per_core_batch_size, decoding_length].
-    # In the all_gather we set tiled=True, so the output chunks are all
-    # concatenated into the existing batch axis, so we get shape
-    # [num_cores x per_core_batch_size, decoding_length].
-    # In the pmap call we set out_axes=None to not have to manually unreplicate,
-    # so the output of pmap_decode_step() will have the same shape.
-    #
-    # Example code snippet showing this:
-    #   # shape (8, 3, 2)
-    #   x = jnp.tile(jnp.arange(8)[:, None, None],[1, 3, 2])
-    #   # shape (24, 2)
-    #   z = jax.pmap(
-    #       lambda y: jax.lax.all_gather(y+1, axis_name='i', tiled=True),
-    #       axis_name='i', out_axes=None)(x)
-    #
-    # We aggregate all outputs from decode_step.
-    # TODO(wangpeng): Make this a class attribute of `SingleTaskDecodeProgram`
-    pmap_decode_step = jax.pmap(
-        decode_step,
-        axis_name=PMAP_PARALLEL_AXIS_NAME,
-        out_axes=(None, None, None, None),
-    )
-  else:
-    pmap_decode_step = None
-
   decode_metrics_list = []
   processed_decode_metrics_list = []
   seqio_metrics_list = []
@@ -1067,7 +990,6 @@ def _decode_once(
         job_log_dir=job_log_dir,
         summary_writer=summary_writers[i],
         use_pmap=use_pmap,
-        pmap_decode_step=pmap_decode_step,
         task_p=task_p,
         output_pickle=output_pickle,
         enable_checkpoint_saving=enable_checkpoint_saving,
