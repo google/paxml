@@ -318,7 +318,11 @@ class SingleTaskDecodeProgram(programs.Program):
             state,
             decode_key,
             batch,
-            decode_input.get_global_batch_size(decode_input.hparams),
+            trainer_lib.BaseStepFnStaticArgs(
+                unpadded_global_batch_size=decode_input.get_global_batch_size(
+                    decode_input.hparams
+                )
+            ),
         )
         # Cross host synchronization happens at this point.
         py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
@@ -489,12 +493,12 @@ class SingleTaskDecodeProgram(programs.Program):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: trainer_lib.BaseStepFnStaticArgs,
   ) -> StepFnOutput:
     """The decode step function."""
     decode_step, _ = self._get_decode_step(inputs)
     unused_train_state, decode_step_fn_out = decode_step(
-        state, prng_key, inputs, unpadded_global_batch_size
+        state, prng_key, inputs, static_args
     )
     return decode_step_fn_out
 

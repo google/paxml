@@ -59,6 +59,7 @@ WeightedScalars = pytypes.WeightedScalars
 EvaluationMode = io_utils.EvaluationMode
 SummaryWriter = tf.summary.SummaryWriter
 StepFnOutput = trainer_lib.StepFnOutput
+BaseStepFnStaticArgs = trainer_lib.BaseStepFnStaticArgs
 
 NestedMap = py_utils.NestedMap
 TrainState = train_states.TrainState
@@ -310,7 +311,9 @@ class BaseTrainProgram(Program):
             state,
             self._train_prng_seed,
             model_inputs,
-            self._train_unpadded_global_batch_size,
+            BaseStepFnStaticArgs(
+                unpadded_global_batch_size=self._train_unpadded_global_batch_size
+            ),
         )
       del state  # Unused.
     jax.monitoring.record_event_duration_secs(
@@ -361,7 +364,7 @@ class BaseTrainProgram(Program):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> Tuple[int, TrainState, StepFnOutput]:
     """The train step function.
 
@@ -370,8 +373,7 @@ class BaseTrainProgram(Program):
       state: The current train state.
       prng_key: The PRNG key for this train step.
       inputs: The data input for this train step.
-      unpadded_global_batch_size: The unpadded global batch size of the train
-        input.
+      static_args: Encapsulates any static arguments needed by the step function.
 
     Returns:
       A tuple (new_step, new_state, train_step_fn_out), where:
@@ -388,15 +390,26 @@ class BaseTrainProgram(Program):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> StepFnOutput:
-    """The eval step function on training inputs."""
+    """The eval step function on training inputs.
+
+    Args:
+      state: The current train state.
+      prng_key: The PRNG key for this eval step.
+      inputs: The training data input for this eval step.
+      static_args: Encapsulates any static arguments needed by the step function.
+
+    Returns:
+      A StepFnOutput instance encapsulating the output of the eval step
+      function.
+    """
 
   @abc.abstractmethod
   def train_input_partition_spec(
       self, inputs: NestedJTensor
   ) -> Optional[NestedPartitionSpec]:
-    """The partition spec for the model training inputs."""
+    """Returns the partition spec for the model training inputs."""
 
   def _maybe_write_summaries(
       self, step: int, new_step: int, train_outputs: StepFnOutput
@@ -486,7 +499,9 @@ class BaseTrainProgram(Program):
             eval_state,
             self._eval_prng_seed,
             eval_inputs,
-            self._train_unpadded_global_batch_size,
+            BaseStepFnStaticArgs(
+                unpadded_global_batch_size=self._train_unpadded_global_batch_size
+            ),
         )
         loss = eval_outputs.loss
         weighted_scalars = eval_outputs.weighted_scalars
@@ -573,25 +588,23 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> Tuple[int, TrainState, StepFnOutput]:
     """The train step function."""
     train_step, _ = self._get_train_step(inputs)
-    return step + 1, *train_step(
-        state, prng_key, inputs, unpadded_global_batch_size
-    )
+    return step + 1, *train_step(state, prng_key, inputs, static_args)
 
   def eval_train_step(
       self,
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> StepFnOutput:
     """The eval step function on trianing inputs."""
     eval_train_step = self._get_eval_train_step(inputs)
     unused_train_state, eval_step_fn_out = eval_train_step(
-        state, prng_key, inputs, unpadded_global_batch_size
+        state, prng_key, inputs, static_args
     )
     return eval_step_fn_out
 
@@ -837,7 +850,9 @@ class BaseEvalProgram(Program):
           state,
           self._eval_prng_seed,
           eval_inputs,
-          self._eval_unpadded_global_batch_size,
+          BaseStepFnStaticArgs(
+              unpadded_global_batch_size=self._eval_unpadded_global_batch_size
+          ),
       )
       loss = eval_outputs.loss
       weighted_scalars = eval_outputs.weighted_scalars
@@ -870,15 +885,26 @@ class BaseEvalProgram(Program):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> StepFnOutput:
-    """The eval step function."""
+    """The eval step function.
+
+    Args:
+      state: The current train state.
+      prng_key: The PRNG key for this eval step.
+      inputs: The eval input data for this eval step.
+      static_args: Encapsulates any static arguments needed by the step function.
+
+    Returns:
+      A StepFnOutput instance encapsulating the output of the eval step
+      function.
+    """
 
   @abc.abstractmethod
   def eval_input_partition_spec(
       self, inputs: NestedJTensor
   ) -> Optional[NestedPartitionSpec]:
-    """The partition spec for the eval inputs."""
+    """Return the partition spec for the eval inputs."""
 
   def shutdown(self) -> None:
     self._exitstack.close()
@@ -918,12 +944,12 @@ class SingleTaskEvalProgram(BaseEvalProgram):
       state: train_states.TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: int,
+      static_args: BaseStepFnStaticArgs,
   ) -> StepFnOutput:
     """The eval step function."""
     eval_step, _ = self._get_eval_step(inputs)
     unused_train_state, eval_step_fn_out = eval_step(
-        state, prng_key, inputs, unpadded_global_batch_size
+        state, prng_key, inputs, static_args
     )
     return eval_step_fn_out
 

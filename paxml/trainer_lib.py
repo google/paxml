@@ -643,6 +643,54 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
 
 
 @flax_struct.dataclass
+class BaseStepFnStaticArgs:
+  """Dataclass encapsulating all static arguments of a step function.
+
+  We can define subclass and use it in the custom step function without changing
+  its API:
+
+    >>> @flax.struct.dataclass
+    ... class MyStaticArgs(BaseStepFnStaticArgs):
+    ...   adjust_loss: bool
+
+    >>> def my_step_fn(
+    ...     jax_task: tasks_lib.SingleTask,
+    ...     states: TrainState,
+    ...     prng_key: pytypes.PRNGKey,
+    ...     inputs: NestedMap,
+    ...     fprop_dtype: jnp.dtype,
+    ...     var_weight_hparams: NestedWeightHParams,
+    ...     static_args: MyStaticArgs,
+    ... ) -> Tuple[Optional[TrainState], StepFnOutput]:
+    ...   loss = ...
+    ...   if static_args.adjust_loss:
+    ...     loss *= 2.0
+    ...   return new_state, StepFnOutput(loss=loss, ...)
+
+    >>> partitioned_step_fn = partitioner.partition(
+    ...     my_step_fn, input_shape_dtype)
+    >>> partitioned_step_fn(
+    ...     train_state, prng_key, inputs,
+    ...     MyStaticArgs(adjust_loss=False))
+    >>> partitioned_step_fn(
+    ...     train_state, prng_key, inputs,
+    ...     MyStaticArgs(adjust_loss=True))  # Re-compilation.
+
+  Note all static arguments added as class members must be hashable, meaning
+  both __hash__ and __eq__ are implemented, and should be immutable.
+  See the description for argument static_broadcasted_argnums (pmap) and
+  static_argnums (pjit) for more information:
+
+  - pmap: https://jax.readthedocs.io/en/latest/_autosummary/jax.pmap.html
+  - pjit: https://jax.readthedocs.io/en/latest/jax.experimental.pjit.html
+  """
+
+  # The unpadded size of global batch, and the padding is on the right side of
+  # each input. Needed only when padding is used.
+  unpadded_global_batch_size: Optional[int]
+
+
+@flax_struct.dataclass
 class StepFnOutput:
   """Dataclass encapsulating the output of a step function."""
 
@@ -674,6 +722,7 @@ def train_step_single_learner(
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
+    static_args: Optional[BaseStepFnStaticArgs] = None,
     *,
     grad_fn: Optional[
         Callable[
@@ -990,6 +1039,7 @@ def eval_step_single_learner(
     inputs: Union[JTensor, NestedMap],
     fprop_dtype: jnp.dtype = jnp.float32,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
+    static_args: Optional[BaseStepFnStaticArgs] = None,
 ) -> Tuple[None, StepFnOutput]:
   """Evaluates a model for a single step.
 
@@ -1149,7 +1199,13 @@ def decode_step(
 
 
 def _decode_step_for_partitioner(
-    task, states, prng_key, inputs, fprop_dtype, var_weight_hparams
+    task,
+    states,
+    prng_key,
+    inputs,
+    fprop_dtype,
+    var_weight_hparams,
+    static_args: Optional[BaseStepFnStaticArgs] = None,
 ) -> Tuple[None, StepFnOutput]:
   """Decode step function used by the partitioner."""
   (weighted_scalars, per_example_out, updated_metrics), updated_vars = (

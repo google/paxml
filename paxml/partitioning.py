@@ -54,6 +54,8 @@ NestedPartitionSpec = pytypes.NestedPartitionSpec
 NestedShapeDtypeLike = pytypes.NestedShapeDtypeLike
 NestedShapeDtypeStruct = pytypes.NestedShapeDtypeStruct
 NestedWeightHParams = base_layer.NestedWeightHParams
+StepFnOutput = trainer_lib.StepFnOutput
+BaseStepFnStaticArgs = trainer_lib.BaseStepFnStaticArgs
 TrainState = train_states.TrainState
 TrainStateProvenance = train_states.TrainStateProvenance
 TrainStateMetadata = trainer_lib.TrainStateMetadata
@@ -184,7 +186,8 @@ class StepFn(Protocol):
       inputs: NestedJTensor,
       fprop_dtype: jnp.dtype,
       var_weight_hparams: NestedWeightHParams,
-  ) -> Tuple[Optional[TrainState], trainer_lib.StepFnOutput]:
+      static_args: Optional[BaseStepFnStaticArgs] = None,
+  ) -> Tuple[Optional[TrainState], StepFnOutput]:
     """Step function signature.
 
     Args:
@@ -194,6 +197,7 @@ class StepFn(Protocol):
       inputs: Inputs drawn from the input pipeline.
       fprop_dtype: Fprop datatype, can be either jnp.float32 or jnp.bfloat16.
       var_weight_hparams: A pytree of WeightHParams for the model variables.
+      static_args: Encapsulates any static arguments needed by the step function.
 
     Returns:
       A tuple (new_train_state, output), where:
@@ -214,16 +218,15 @@ class PartitionedStepFn(Protocol):
       train_state: TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      unpadded_global_batch_size: Optional[int] = None,
-  ) -> Tuple[Optional[TrainState], trainer_lib.StepFnOutput]:
+      static_args: Optional[BaseStepFnStaticArgs] = None,
+  ) -> Tuple[Optional[TrainState], StepFnOutput]:
     """Partitioned step function signature.
 
     Args:
       train_state: The current TrainState.
       prng_key: The PRNGKey.
       inputs: Inputs drawn from the input pipeline.
-      unpadded_global_batch_size: (Optional) The unpadded size of global batch,
-        and the padding is on the right side of each input.
+      static_args: Encapsulates any static arguments needed by the step function.
 
     Returns:
       (Same as StepFn.__call__) A tuple (new_train_state, output), where:
@@ -283,8 +286,8 @@ class Partitioner(metaclass=abc.ABCMeta):
   inputs = train_input_pipeline.get_next_padded()
   inputs = partitioner.preprocess_inputs(
       train_input_pipeline, inputs, input_pspec)
-  partitioned_step_fn(
-      train_state, train_key, inputs, unpadded_global_batch_size)
+  static_args = BaseStepFnStaticArgs(unpadded_global_batch_size=...)
+  partitioned_step_fn(train_state, train_key, inputs, static_args)
   ```
   """
 
@@ -686,7 +689,12 @@ class PmapPartitioner(Partitioner):
     # Guard the case where get_train_state_metadata isn't called.
     train_state_metadata = self.get_train_state_metadata(is_eval)
 
-    def _wrapped_step_fn(state, prng_key, inputs):
+    def _wrapped_step_fn(
+        state: TrainState,
+        prng_key: PRNGKey,
+        inputs: NestedJTensor,
+        static_args: Optional[BaseStepFnStaticArgs] = None,
+    ) -> Tuple[Optional[TrainState], StepFnOutput]:
       return step_fn(
           self._jax_task,
           state,
@@ -694,23 +702,29 @@ class PmapPartitioner(Partitioner):
           inputs,
           self._jax_task.model.fprop_dtype,
           train_state_metadata.var_weight_hparams,
+          static_args,
       )
 
     partitioned_step_fn = jax.pmap(
         _wrapped_step_fn,
+        axis_name=base_layer.PMAP_PARALLEL_AXIS_NAME,
+        static_broadcasted_argnums=(3,),  # For static_args.
         # For training, TrainState is the first argument and return value.
         # We setup donation/alias to minimize device memory usage.
         donate_argnums=() if is_eval else (0,),
-        axis_name=base_layer.PMAP_PARALLEL_AXIS_NAME,
     )
 
     # unpadded_global_batch_size is not used for pmap'ed functions, so we
     # explicitly ignore it with a wrapper.
     def _wrapped_partitioned_step(
-        state, prng_key, inputs, unpadded_global_batch_size=None
+        state,
+        prng_key,
+        inputs,
+        static_args: Optional[BaseStepFnStaticArgs] = None,
     ):
-      del unpadded_global_batch_size
-      return partitioned_step_fn(state, prng_key, inputs)
+      if static_args:
+        static_args = static_args.replace(unpadded_global_batch_size=None)
+      return partitioned_step_fn(state, prng_key, inputs, static_args)
 
     return _wrapped_partitioned_step, None  # Input partition spec.
 
@@ -940,8 +954,11 @@ class PjitPartitioner(Partitioner):
     )
 
     def _wrapped_step_fn(
-        state, prng_key, inputs, unpadded_global_batch_size=None
-    ):
+        state: TrainState,
+        prng_key: PRNGKey,
+        inputs: NestedJTensor,
+        static_args: Optional[BaseStepFnStaticArgs] = None,
+    ) -> Tuple[Optional[TrainState], StepFnOutput]:
       if use_padding:
         # When there are input padding on multi-host, we use a different device
         # order in the program's input sharding. We now make sure they are
@@ -958,7 +975,9 @@ class PjitPartitioner(Partitioner):
         # Internal uneven sharding in the step computation is supported by XLA.
         state = self._unpad_states(metadata, state)
         inputs = self._unpad_inputs(
-            inputs, unpadded_global_batch_size, input_partition_spec
+            inputs,
+            static_args.unpadded_global_batch_size if static_args else None,
+            input_partition_spec,
         )
 
       # Reshard inputs.
@@ -978,6 +997,7 @@ class PjitPartitioner(Partitioner):
           inputs,
           model_p.fprop_dtype,
           metadata.var_weight_hparams,
+          static_args,
       )
       assert len(fn_out) == 2  # Output is (updated_train_state, StepFnOutput).
       if is_eval:
@@ -1011,7 +1031,7 @@ class PjitPartitioner(Partitioner):
         # For training, TrainState is the first argument and return value. We
         # setup donation/alias to minimize device memory usage.
         donate_argnums=() if is_eval else (0,),
-        static_argnums=(3,),  # unpadded_global_batch_size is static.
+        static_argnums=(3,),  # For static_args.
         **extra_kwargs,
     )
     return trainer_lib.bind_mesh(pjitted_fn, self.global_mesh)
@@ -1321,11 +1341,14 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # unpadded_global_batch_size is not used for AOT-compiled functions, so we
     # always pass None to avoid recompilation.
     def _wrapped_partitioned_step(
-        state, prng_key, inputs, unpadded_global_batch_size=None
+        state,
+        prng_key,
+        inputs,
+        static_args: Optional[BaseStepFnStaticArgs] = None,
     ):
-      del unpadded_global_batch_size
-      # The unpadded_global_batch_size passed to partitioned_step_fn need to
-      # be the same as the one used to run compile_for_auto_sharding.
+      if static_args:
+        logging.warning('static_args is not supported for auto-sharding')
+        del static_args
       return partitioned_step_fn(state, prng_key, inputs)
 
     self._auto_sharding_result = (
