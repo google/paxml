@@ -234,9 +234,11 @@ class DefaultExecutor(base_executor.BaseExecutor):
         train_input_pipeline=train_input_for_partitioner,
         job_log_dir=job_log_dir,
     )
+    logging.info('[PAX STATUS]: Getting train state metadata.')
     train_state_metadata = partitioner.get_train_state_metadata()
 
     # JaxContext needed for shared layer lookup from global scope.
+    logging.info('[PAX STATUS]: Writing post init model hparams.')
     with base_layer.JaxContext.new_context():
       # Dump out model meta info for debugging.
       trainer_lib.write_post_init_model_hparams_file(
@@ -244,6 +246,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
       )
 
     # Restore TrainState from checkpoint or initialize it.
+    logging.info('[PAX STATUS]: Starting checkpoint load / variable init.')
     with py_utils.timeit() as checkpoint_load_timer:
       (
           partitioned_train_state,
