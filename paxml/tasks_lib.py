@@ -117,9 +117,9 @@ def is_vectorized(states: TrainState) -> bool:
   return NO_PREFIX_KEY in states.opt_states[0]
 
 
-def has_ema(task_p: pax_fiddle.Config[SingleTask]) -> bool:
+def has_ema(task: SingleTask) -> bool:
   """Determines whether ema is used or not."""
-  return task_p.train.learner.optimizer.ema_decay > 0.0
+  return task.train.learner.optimizer.ema_decay > 0.0
 
 
 def extract_ema(
@@ -702,7 +702,7 @@ class CheckpointLoadingRules(NamedTuple):
   loaded atomically (all or nothing).
 
   Attributes:
-    task_p: An `Task.HParams` used for producing checkpoints to be loaded.
+    task_p: A Task config used for producing checkpoints to be loaded.
     load_rules: List of pairs of variable-name regex patterns and variable names
       in the external checkpoint.  For each item `(pattern, source)` in the
       list, if the model to be trained has a variable that matches to the regex
@@ -727,7 +727,7 @@ class CheckpointLoadingRules(NamedTuple):
     load_ema_states: whether to load EMA state.
     partial_load_opt_states: whether to enable experimental partial opt_states
       loading from this checkpoint.
-    input_specs_provider_p: A `BaseInputSpecsProvider.HParams` used to provide
+    input_specs_provider_p: A BaseInputSpecsProvider config used to provide
       input specs information for the pre-trained model initialization.
   """
   task_p: pax_fiddle.Config[SingleTask]
@@ -1074,7 +1074,7 @@ class SingleTask(base_task.BaseTask):
       restore_checkpoint_dir: The directory from which to restore checkpoint.
       restore_checkpoint_step: If set, the checkpoint step to restore. If unset,
         it will try to restore from the latest checkpoint, if any.
-      inference_runner: an instance of BaseInferenceRunner.HParams that defines
+      inference_runner: an instance of BaseInferenceRunner config that defines
         how to run the model and the schema of the corresponding output.
       output_format: the io_utils.OutputFormatType which describes the container
         format to write to.
@@ -1082,7 +1082,7 @@ class SingleTask(base_task.BaseTask):
     """
     restore_checkpoint_dir: str = ''
     restore_checkpoint_step: Optional[int] = None
-    inference_runner: Optional[BaseInferenceRunner.HParams] = None
+    inference_runner: Optional[pax_fiddle.Config[BaseInferenceRunner]] = None
     output_format: io_utils.OutputFormatType = (
         io_utils.OutputFormatType.TFRECORD
     )

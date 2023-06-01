@@ -33,6 +33,7 @@ class OptimalScaling(LmCloudSpmd):
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     # pylint: disable=invalid-name
+    assert self.NUM_LAYERS
     self.MODEL_DIMS = self.NUM_LAYERS * 128
     self.HIDDEN_DIMS = self.MODEL_DIMS * 4
     # pylint: enable=invalid-name

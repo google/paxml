@@ -43,7 +43,6 @@ import tensorflow_datasets as tfds
 
 NestedMap = py_utils.NestedMap
 NestedNpTensor = pytypes.NestedNpTensor
-ParamsT = pytypes.HParamsT
 SummaryWriter = tf.summary.SummaryWriter
 
 MixtureRegistry = seqio.MixtureRegistry
@@ -1826,11 +1825,11 @@ def get_eval_hparams_for_seqio(
     repeat: Optional[bool] = None,
     reset_for_eval: bool = True,
 ) -> list[pax_fiddle.Config[SeqIOInput]]:
-  """Returns a list of `SeqIOInput.HParams` for SeqIO Task/Mixture for eval.
+  """Returns a list of SeqIOInput configs for SeqIO Task/Mixture for eval.
 
   This is the easiest way to configure eval hparams in datasets() (for scoring
   metrics) and decoder_datasets() (for prediction metrics) from SeqIO
-  Task/Mixture name and a few required params. A `SeqIOInput.HParams` obj is
+  Task/Mixture name and a few required params. A SeqIOInput config is
   created for each Task, i.e. Mixtures are split into component Tasks, as each
   Task is evaled separately.
 
@@ -1864,7 +1863,7 @@ def get_eval_hparams_for_seqio(
         num_infeed_hosts is 0, it will be given a default value by the trainer;
         if it is still not set during __init__, a value of 1 will be used.
     use_enumeration: whether to use enumeration in both batch generation
-      (get_next()) and metrics computation. For details, see SeqIOInput.HParams.
+      (get_next()) and metrics computation. For details, see SeqIOInput attrs.
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.

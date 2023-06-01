@@ -1484,7 +1484,7 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
 
 
 def get_train_input_specs_for_model_init(
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
     input_specs_provider: base_input.BaseInputSpecsProvider,
 ) -> NestedShapeDtypeStruct:
   """Returns the shape/dtypes needed to initialize the partitioner.
@@ -1493,7 +1493,7 @@ def get_train_input_specs_for_model_init(
   shape defined in the model) and the global batch size for the pjit case.
 
   Args:
-    task_p: The task parameters
+    task: The task parameters
     input_specs_provider: The BaseInputSpecsProvider that provides the train
       input shapes/dtypes, which will have per-device batch size for pmap, and
       per-process batch size for pjit.
@@ -1508,7 +1508,7 @@ def get_train_input_specs_for_model_init(
   )
 
   # All pjit models specify at least the ICI mesh shape.
-  if task_p.model.mesh_shape is not None:
+  if task.model.mesh_shape is not None:
     # Pjit - handle the fractional batch size case.
     batch_size = jax.tree_util.tree_leaves(train_input_specs)[0].shape[0]
     num_devices = jax.local_device_count()

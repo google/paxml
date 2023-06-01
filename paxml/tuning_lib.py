@@ -771,7 +771,7 @@ class TrialDirectoryNameGenerator:
                search_space: pg.hyper.DynamicEvaluationContext,
                combined_decision_point_names: Optional[List[str]] = None,
                total_name_length_threshold: int = 64):
-    decision_point_names = list(search_space.hyper_dict.keys())
+    decision_point_names = list(search_space.hyper_dict.keys())  # pytype: disable=attribute-error
     if combined_decision_point_names:
       assert len(decision_point_names) == 1, decision_point_names
       assert automl.COMBINED_DECISION_ATTR in decision_point_names, (
@@ -794,7 +794,7 @@ class TrialDirectoryNameGenerator:
       A list of tuple (decision name, decision value, choice index).
     """
     params = []
-    for k, hyper in self._search_space.hyper_dict.items():
+    for k, hyper in self._search_space.hyper_dict.items():  # pytype: disable=attribute-error
       v = self._search_space.evaluate(hyper)
       if isinstance(hyper, pg.hyper.CustomHyper):
         v = '(CUSTOM)'

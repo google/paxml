@@ -125,7 +125,7 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
         self.train_input.get_next(),
     )
     partitioner = partitioning.PjitPartitioner(
-        init_is_eval=False, reshard_inputs=True, task_p=self.task.hparams
+        init_is_eval=False, reshard_inputs=True, task=self.task
     )
     prng_key = jax.random.PRNGKey(0)
     partitioner.setup(self.task, prng_key, inputs_shape_dtype)

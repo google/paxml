@@ -105,19 +105,19 @@ def _wait_until_checkpoint_step(
 
 
 def _get_train_input_specs(
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
     experiment_config: base_experiment.BaseExperiment,
 ):
   """Gets the shape/dtype of the inputs to the model."""
-  if not task_p.train.always_use_train_for_model_init:
+  if not task.train.always_use_train_for_model_init:
     return None
   train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
-      task_p, instantiate(experiment_config.get_input_specs_provider_params())
+      task, instantiate(experiment_config.get_input_specs_provider_params())
   )
   if train_input_specs is None:
     raise ValueError(
         'No training input specs available, while enabling '
-        '`task_p.train.always_use_train_for_model_init` requires it.'
+        '`task.train.always_use_train_for_model_init` requires it.'
     )
   return train_input_specs
 
@@ -430,8 +430,8 @@ def evaluate(
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
-  train_input_specs = _get_train_input_specs(task_p, experiment_config)
-  prng_key = jax.random.PRNGKey(task_p.evaluate.random_seed)
+  train_input_specs = _get_train_input_specs(jax_task, experiment_config)
+  prng_key = jax.random.PRNGKey(jax_task.evaluate.random_seed)
 
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
@@ -450,7 +450,7 @@ def evaluate(
       else None,
   )
   input_for_shape = None
-  if not task_p.train.always_use_train_for_model_init:
+  if not jax_task.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
@@ -652,8 +652,8 @@ def decode(
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
-  train_input_specs = _get_train_input_specs(task_p, experiment_config)
-  prng_key = jax.random.PRNGKey(task_p.decode.random_seed)
+  train_input_specs = _get_train_input_specs(jax_task, experiment_config)
+  prng_key = jax.random.PRNGKey(jax_task.decode.random_seed)
 
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
@@ -672,7 +672,7 @@ def decode(
       else None,
   )
   input_for_shape = None
-  if not task_p.train.always_use_train_for_model_init:
+  if not jax_task.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # We assume that either eval_input or decoder_input can be used to retrieve
     # all the model variable shapes, which is needed for restoring checkpoints.
@@ -722,7 +722,7 @@ def decode(
     )
 
   eval_programs = experiment_config.eval_programs() if run_eval else []
-  if task_p.model.mesh_shape is not None:
+  if jax_task.model.mesh_shape is not None:
     decode_method = decode_spmd_model
     extra_kwargs = {}
   else:
@@ -778,8 +778,6 @@ def decode_pmap_model(
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
   """
-  task_p = jax_task.hparams
-
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
@@ -807,14 +805,14 @@ def decode_pmap_model(
   # If prng_key_fold_with_batch_index is True, we need to fold in the step
   # number before preprocessing the key, so preprocessing need to be done at
   # every step.
-  if not task_p.decode.prng_key_fold_with_batch_index:
+  if not jax_task.decode.prng_key_fold_with_batch_index:
     decode_key = partitioner.preprocess_prng_key(decode_key)
   logging.info('decoder prng_seed: %s', decode_key)
 
   decode_programs = eval_runner.decode_programs
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
-      task_p=task_p,
+      task=jax_task,
       prng_key=decode_key,
       job_log_dir=job_log_dir,
       use_pmap=True,
@@ -826,7 +824,7 @@ def decode_pmap_model(
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
-      task_p,
+      jax_task,
       job_log_dir,
       decode_once_fn,
       partitioned_train_state,
@@ -841,7 +839,7 @@ def decode_pmap_model(
 def partitioned_decode_once(
     *,
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
     prng_key: JTensor,
     job_log_dir: epath.Path,
     use_pmap: bool,
@@ -855,12 +853,12 @@ def partitioned_decode_once(
 
   Args:
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
-    task_p: Params for the task encapsulating a data parallel model.
+    task: The task encapsulating a data parallel model.
     prng_key: The prng key used for decoding.
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `output_pickle` and `enable_checkpoint_saving` should be set; otherwise,
-      `metrics_p` should be set.
+      `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
+      be set; otherwise, `metrics` should be set.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     train_state_preprocessor: A function to preprocess the train state before
@@ -887,10 +885,10 @@ def partitioned_decode_once(
           train_state=partitioned_train_state,
           summary_writers=summary_writers,
           use_pmap=use_pmap,
-          task_p=task_p,
+          task=task,
           output_pickle=output_pickle,
           enable_checkpoint_saving=enable_checkpoint_saving,
-          metrics_p=task_p.metrics,
+          metrics_p=task.metrics,
       )
     jax.monitoring.record_event_duration_secs(
       '/jax/pax/decode/duration_sec', decode_period.elapsed
@@ -915,7 +913,7 @@ def _decode_once(
     train_state: TrainState,
     summary_writers: List[SummaryWriter],
     use_pmap: bool,
-    task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]] = None,
+    task: Optional[tasks_lib.SingleTask] = None,
     output_pickle: bool = True,
     enable_checkpoint_saving: bool = True,
     metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
@@ -937,9 +935,10 @@ def _decode_once(
     train_state: A `TrainState` object.
     summary_writers: The summary writer objects to log summaries.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `task_p`, `output_pickle` and `enable_checkpoint_saving` should be set;
-      otherwise, `metrics_p` should be set.
-    task_p: Params for the task encapsulating a data parallel model.
+      `task`, `var_weight_params`, `output_pickle` and
+      `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should be
+      set.
+    task: The task encapsulating a data parallel model.
     output_pickle: Whether to write decoding results to a pickle file.
     enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     metrics_p: Parameters to configure how to aggregate the metrics.
@@ -959,9 +958,8 @@ def _decode_once(
     return ([], [], [], []), []
 
   if use_pmap:
-    assert task_p is not None
-    metrics_p = task_p.metrics
-    model_p = task_p.model
+    assert task is not None
+    metrics_p = task.metrics
   if not metrics_p:
     metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
 
@@ -990,7 +988,7 @@ def _decode_once(
         job_log_dir=job_log_dir,
         summary_writer=summary_writers[i],
         use_pmap=use_pmap,
-        task_p=task_p,
+        task=task,
         output_pickle=output_pickle,
         enable_checkpoint_saving=enable_checkpoint_saving,
         metrics_p=metrics_p,
@@ -1039,7 +1037,6 @@ def decode_spmd_model(
       has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
       should_stop_early.
   """
-  task_p = jax_task.hparams
 
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
@@ -1057,7 +1054,7 @@ def decode_spmd_model(
 
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
-      task_p=task_p,
+      task=jax_task,
       job_log_dir=job_log_dir,
       prng_key=prng_key,
       use_pmap=False,
@@ -1073,7 +1070,7 @@ def decode_spmd_model(
   _common_eval_or_decode_loop(
       EvaluationMode.DECODE,
       checkpointer,
-      task_p,
+      jax_task,
       job_log_dir,
       decode_once_fn,
       partitioned_train_state,
@@ -1093,7 +1090,7 @@ def _is_shape_dtype_struct(x):
 def _common_eval_or_decode_loop(
     mode: io_utils.EvaluationMode,
     checkpointer: _EvalCheckpointer,
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
     decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: TrainState,
@@ -1138,9 +1135,9 @@ def _common_eval_or_decode_loop(
         logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
         eval_metrics = eval_runner.run_one_step(partitioned_train_state)
 
-      exceeded_ckpt = last_checkpoint_step + task_p.train.save_interval_steps
+      exceeded_ckpt = last_checkpoint_step + task.train.save_interval_steps
       is_last_ckpt = (
-          exceeded_ckpt > task_p.train.num_train_steps or not continuous_decode
+          exceeded_ckpt > task.train.num_train_steps or not continuous_decode
       )
       if tuning_lib.should_early_stop(
           early_stopping_fn,
@@ -1155,7 +1152,7 @@ def _common_eval_or_decode_loop(
                 'tuner, while the num_train_steps is %d'
             ),
             last_checkpoint_step,
-            task_p.train.num_train_steps,
+            task.train.num_train_steps,
         )
         break
       if is_last_ckpt:
@@ -1190,10 +1187,10 @@ def infer_and_write(
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   task = instantiate(task_p)
-  model_p = task_p.model
+  model = task.model
   inputs_p = experiment_config.decoder_datasets()
-  prng_key = jax.random.PRNGKey(task_p.infer.random_seed)
-  train_input_specs = _get_train_input_specs(task_p, experiment_config)
+  prng_key = jax.random.PRNGKey(task.infer.random_seed)
+  train_input_specs = _get_train_input_specs(task, experiment_config)
 
   maybe_use_persistence_checkpointing = False
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
@@ -1208,7 +1205,7 @@ def infer_and_write(
   )
   inputs_p = [partitioner.preprocess_input_config(p) for p in inputs_p]
   input_for_shape = None
-  if not task_p.train.always_use_train_for_model_init:
+  if not task.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
@@ -1222,13 +1219,13 @@ def infer_and_write(
       job_log_dir,
       checkpoint_type,
       mode=None,
-      restore_checkpoint_dir=task_p.infer_writer.restore_checkpoint_dir,
-      restore_checkpoint_step=task_p.infer_writer.restore_checkpoint_step,
+      restore_checkpoint_dir=task.infer_writer.restore_checkpoint_dir,
+      restore_checkpoint_step=task.infer_writer.restore_checkpoint_step,
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
-  if model_p.mesh_shape is not None:
+  if model.mesh_shape is not None:
     # TODO(b/238416854): add support for SPMD models
     raise NotImplementedError('SPMD infer_and_write not implemented yet')
   else:
@@ -1246,8 +1243,7 @@ def infer_and_write_pmap(
     job_log_dir: epath.Path,
 ) -> None:
   """Runs the infer_and_write for each of the inputs given task in pmap."""
-  task_p = task.hparams
-  infer_writer_p = task_p.infer_writer
+  infer_writer_p = task.infer_writer
 
   if not inputs_p:
     return
@@ -1308,7 +1304,7 @@ def infer_and_write_pmap(
           restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
           restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,
           input_name=name,
-          model_name=task_p.model.name,
+          model_name=task.model.name,
       ).save_metadata(dirname)
 
       writer = io_utils.ShardedParallelWriter(

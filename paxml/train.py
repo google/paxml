@@ -150,10 +150,14 @@ def train_and_evaluate(
   for inp in input_p:
     if not isinstance(
         inp,
-        (base_input.BaseInput.HParams, base_input.DistributedInputHParams),
+        (
+            pax_fiddle.Config,
+            base_input.DistributedInputHParams,
+        ),
     ):
       raise ValueError(
-          f'Expecting BaseInput.HParams from datasets(), got: {inp.ToText()}'
+          'Expecting pax_fiddle.Config[BaseInput] from datasets(), got:'
+          f' {inp.ToText()}'
       )
   train_input_p = [v for v in input_p if v.is_training]
   if len(train_input_p) != 1:
@@ -182,8 +186,12 @@ def train_and_evaluate(
   else:
     decode_input_p = []
 
+  # Creates the task.
+  logging.info('[PAX STATUS]: Creating task')
+  jax_task = instantiate(task_p)
+
   checkpoint_type = checkpoint_types.retrieve_checkpoint_type(
-      maybe_use_persistence_checkpointing, task_p
+      maybe_use_persistence_checkpointing, jax_task
   )
 
   job_log_dir = epath.Path(job_log_dir)
@@ -204,9 +212,6 @@ def train_and_evaluate(
         'Checkpointing is disabled and no checkpoint will be saved to disk.'
     )
 
-  # Creates the task.
-  logging.info('[PAX STATUS]: Creating task')
-  jax_task = instantiate(task_p)
   if jax_task.early_stopping_fn is not None:
     if early_stopping_fn is None:
       early_stopping_fn = jax_task.early_stopping_fn

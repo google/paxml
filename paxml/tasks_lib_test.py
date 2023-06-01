@@ -203,7 +203,7 @@ class BaseTaskTest(test_utils.TestCase):
 
   def test_dataclass_params(self):
     dataclass_params = pax_fiddle.Config(tasks_lib.SingleTask, name='foo_task')
-    self.assertIsInstance(dataclass_params, tasks_lib.SingleTask.HParams)
+    self.assertIsInstance(dataclass_params, pax_fiddle.Config)
     self.assertIsInstance(dataclass_params.train,
                           tasks_lib.SingleTask.TrainHParams)
     self.assertIsInstance(dataclass_params.vn,

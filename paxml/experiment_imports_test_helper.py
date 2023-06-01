@@ -24,6 +24,7 @@ from paxml import base_task
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_model
+from praxis import pax_fiddle
 from praxis import py_utils
 import pyglove as pg
 
@@ -55,7 +56,11 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     self.assertNotEmpty(dataset_splits)
     for s in dataset_splits:
       self.assertIsInstance(
-          s, (base_input.BaseInput.HParams, base_input.DistributedInputHParams)
+          s,
+          (
+              pax_fiddle.Config,
+              base_input.DistributedInputHParams,
+          ),
       )
 
     # Note: Creating the input generator may require data access. Only do it

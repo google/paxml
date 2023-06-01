@@ -54,19 +54,18 @@ INFO = logging.INFO
 def _maybe_update_latest_model_step(
     train_input_p: pax_fiddle.Config[base_input.BaseInput],
     initial_global_step: Optional[int],
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
 ) -> None:
   """Updates `train_input_p` in place its latest model step."""
   if not hasattr(train_input_p, 'deterministic_input_start_index'):
     # Not deterministic seqio.
     return
-
   logging.info(
       'Attempting to use global step for deterministic seqio (@ step %r)...',
       initial_global_step,
   )
   if initial_global_step is None:
-    if task_p.train.external_checkpoint_path:
+    if task.train.external_checkpoint_path:
       logging.warning(
           'Disabling deterministic SeqIO since it will restore from external'
           ' checkpoint, and the step number is not known beforehand.'
@@ -77,8 +76,8 @@ def _maybe_update_latest_model_step(
 
   logging.info('Updating _latest_model_step for training input.')
   dp = train_input_p.deterministic_input_start_index
-  dp._latest_model_step = (
-      initial_global_step  # pylint: disable=protected-access
+  dp._latest_model_step = (  # pylint: disable=protected-access
+      initial_global_step
   )
 
 
@@ -139,7 +138,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
 
   def _maybe_create_train_input(
       self,
-      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      task: tasks_lib.SingleTask,
       step: Optional[int],
       train_input_p: pax_fiddle.Config[base_input.BaseInput],
   ) -> Tuple[
@@ -150,7 +149,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     """Optionally creates the train input for partitioner and checkpointing.
 
     Args:
-      task_p: The task config.
+      task: The task.
       step: The step number of the checkpoint to restore from. If None, means no
         checkpoint to restore.
       train_input_p: The config for the train input pipeline.
@@ -170,15 +169,15 @@ class DefaultExecutor(base_executor.BaseExecutor):
     logging.info(
         '[PAX STATUS]: Instantiating train input pipeline (%s)', train_input_p
     )
-    if not task_p.train.enable_input_checkpointing:
-      _maybe_update_latest_model_step(train_input_p, step, task_p)
+    if not task.train.enable_input_checkpointing:
+      _maybe_update_latest_model_step(train_input_p, step, task)
     train_input = instantiate(train_input_p)
 
     train_input_for_partitioner = (
-        None if task_p.train.enforce_input_specs else train_input
+        None if task.train.enforce_input_specs else train_input
     )
     train_input_for_checkpoint = (
-        train_input if task_p.train.enable_input_checkpointing else None
+        train_input if task.train.enable_input_checkpointing else None
     )
     return train_input, train_input_for_partitioner, train_input_for_checkpoint
 
@@ -204,14 +203,13 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._eval_programs = eval_programs
     self._early_stopping_fn = early_stopping_fn
     self._exit_after_ondemand_checkpoint = exit_after_ondemand_checkpoint
-    task_p = jax_task.hparams
 
     # Creates the root prng key and train input pipeline.
-    root_prng_key = jax.random.PRNGKey(task_p.train.random_seed)
+    root_prng_key = jax.random.PRNGKey(self._task.train.random_seed)
     train_input_p = partitioner.preprocess_input_config(train_input_p)
     train_input, train_input_for_partitioner, train_input_for_checkpoint = (
         self._maybe_create_train_input(
-            task_p, checkpointer.step_to_restore, train_input_p
+            self._task, checkpointer.step_to_restore, train_input_p
         )
     )
 
@@ -219,14 +217,14 @@ class DefaultExecutor(base_executor.BaseExecutor):
     # prng key.
     # TODO(laigd): let it take ShapeDtypeStruct of prng key instead.
     train_input_specs = None
-    if task_p.train.enforce_input_specs:
+    if self._task.train.enforce_input_specs:
       train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
-          task_p, input_specs_provider
+          self._task, input_specs_provider
       )
       if not train_input_specs:
         raise ValueError(
             'No training input specs available, while enabling '
-            '`task_p.train.enforce_input_specs` requires it.'
+            '`self._task.train.enforce_input_specs` requires it.'
         )
     logging.info('[PAX STATUS]: Setting up partitioner')
     partitioner.setup(
@@ -340,7 +338,7 @@ def _get_partition_decode_once_fn(
     *,
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     prng_key: jax.random.KeyArray,
-    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
     use_pmap: bool,
     train_state_preprocessor: Optional[
@@ -356,7 +354,7 @@ def _get_partition_decode_once_fn(
   Args:
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
     prng_key: The prng key used for decoding.
-    task_p: Params for the task encapsulating a data parallel model.
+    task: The task encapsulating a data parallel model.
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit).
     train_state_preprocessor: A function to preprocess the train state before
@@ -372,12 +370,12 @@ def _get_partition_decode_once_fn(
   # If prng_key_fold_with_batch_index is True, we need to fold in the step
   # number before preprocessing the key, so preprocessing need to be done at
   # every step.
-  if not task_p.decode.prng_key_fold_with_batch_index:
+  if not task.decode.prng_key_fold_with_batch_index:
     decode_key = partitioner.preprocess_prng_key(decode_key)
 
   decode_once_fn = eval_lib.partitioned_decode_once(
       decode_programs=decode_programs,
-      task_p=task_p,
+      task=task,
       job_log_dir=job_log_dir,
       prng_key=decode_key,
       use_pmap=use_pmap,
@@ -414,8 +412,7 @@ def _train_and_evaluate_common(
     ] = None,
 ):
   """Training loop code common to both pmap and spmd."""
-  task_p = task.hparams
-  train_p = task_p.train
+  train_p = task.train
   train_state_metadata = partitioner.get_train_state_metadata()
   train_input_for_checkpoint = (
       train_input if train_p.enable_input_checkpointing else None
@@ -426,7 +423,7 @@ def _train_and_evaluate_common(
         _get_partition_decode_once_fn(
             decode_programs=decode_programs,
             prng_key=prng_key,
-            task_p=task_p,
+            task=task,
             job_log_dir=job_log_dir,
             use_pmap=is_vars_replicated,
             train_state_preprocessor=decode_state_preprocessor,
@@ -600,10 +597,10 @@ def _train_and_evaluate_common(
                     has_decode_metrics=bool(decode_metrics),
                 ),
                 step_i,
-                task_p.train.num_train_steps,
-                task_p.train.eval_interval_steps,
-                task_p.train.decode_interval_steps,
-                task_p.train.save_interval_steps,
+                task.train.num_train_steps,
+                task.train.eval_interval_steps,
+                task.train.decode_interval_steps,
+                task.train.save_interval_steps,
                 train_to_end=getattr(
                     early_stopping_fn, 'train_to_end', False)
             ),

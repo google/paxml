@@ -15,6 +15,7 @@
 
 """Module defining possible checkpoint types and utility methods."""
 
+from typing import Union
 import enum
 from etils import epath
 from paxml import base_task
@@ -39,10 +40,10 @@ def is_gda_version_subdir(checkpoint_path_with_step: epath.Path) -> bool:
 
 def retrieve_checkpoint_type(
     maybe_use_persistence_checkpointing,
-    task_p: pax_fiddle.Config[base_task.BaseTask],
+    task: Union[base_task.BaseTask, pax_fiddle.Config[base_task.BaseTask]],
 ) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
-  using_pjit = task_p.model.mesh_shape is not None  # pytype: disable=attribute-error
+  using_pjit = task.model.mesh_shape is not None  # pytype: disable=attribute-error
   if using_pjit or py_utils.pmap_use_tensorstore():
     if maybe_use_persistence_checkpointing:
       return CheckpointType.PERSISTENCE

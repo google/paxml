@@ -555,7 +555,7 @@ class MultiOptimizerLearner(Learner):
     )
 
     # Include ema in the beginning before masking
-    op = self.optimizer.hparams
+    op = self.optimizer
     if op.ema_decay > 0.0:
       optimizer_chain.insert(
           0, optimizers.apply_ema_weights(decay=op.ema_decay)

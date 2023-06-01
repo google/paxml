@@ -736,7 +736,9 @@ class PjitPartitioner(Partitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      task: Union[
+          pax_fiddle.Config[tasks_lib.SingleTask], tasks_lib.SingleTask
+      ],
       device_mesh: Optional[np.ndarray] = None,
   ):
     """Constructor.
@@ -746,7 +748,7 @@ class PjitPartitioner(Partitioner):
         abstract_init_with_metadata.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
-      task_p: The params for the task, needed to create global mesh.
+      task: The config or instance for the task, needed to create global mesh.
       device_mesh: Optional custom device mesh.
     """
     super().__init__(init_is_eval)
@@ -754,19 +756,19 @@ class PjitPartitioner(Partitioner):
     logging.info('Using SPMD sharding for model parallelism.')
 
     # Creates global mesh.
-    model_p = task_p.model
-    self._mesh_names = model_p.mesh_axis_names
+    model = task.model
+    self._mesh_names = model.mesh_axis_names
     if device_mesh is None:
       logging.info('creating mesh with py_utils.create_device_mesh')
       device_mesh = py_utils.create_device_mesh(
-          model_p.ici_mesh_shape,
-          model_p.dcn_mesh_shape,
-          contiguous_submeshes=model_p.contiguous_submeshes,
+          model.ici_mesh_shape,
+          model.dcn_mesh_shape,
+          contiguous_submeshes=model.contiguous_submeshes,
       )
     else:
       logging.info('Using provided mesh for PjitPartitioner')
     logging.info('device_mesh: %s', device_mesh)
-    self._global_mesh = jax.sharding.Mesh(device_mesh, model_p.mesh_axis_names)
+    self._global_mesh = jax.sharding.Mesh(device_mesh, model.mesh_axis_names)
 
     # Pjit'ed function to preprocess the prng key.
     self._broadcast_key_fn = None
@@ -945,11 +947,11 @@ class PjitPartitioner(Partitioner):
       use_padding: bool = True,
   ) -> PartitionedStepFn:
     """Returns a step function to apply the SPMD partition (pjit)."""
-    task_p = self._jax_task.hparams
-    model_p = task_p.model
+    task = self._jax_task
+    model = task.model
     reshard_inputs_fn = functools.partial(
         trainer_lib.reshard_input_based_on_rank_fn,
-        task_p.train.inputs_split_mapping,
+        task.train.inputs_split_mapping,
         self._mesh_names,
     )
 
@@ -995,7 +997,7 @@ class PjitPartitioner(Partitioner):
           state,
           prng_key,
           inputs,
-          model_p.fprop_dtype,
+          model.fprop_dtype,
           metadata.var_weight_hparams,
           static_args,
       )
@@ -1043,7 +1045,7 @@ class PjitPartitioner(Partitioner):
       self, metadata: TrainStateMetadata, unpadded_state: TrainState
   ):
     """Pad variables to avoid uneven sharding."""
-    model_p = self._jax_task.model
+    model = self._jax_task.model
 
     # Here the metadata is derived from input_spec which includes all possible
     # inputs. Thus metadata includes the full TrainState. The unpadded_state
@@ -1067,8 +1069,8 @@ class PjitPartitioner(Partitioner):
         unpadded_state,
         partition_specs,
         state_unpadded_shapes,
-        model_p.mesh_shape,
-        model_p.mesh_axis_names,
+        model.mesh_shape,
+        model.mesh_axis_names,
     )
 
   def _unpad_states(
@@ -1183,7 +1185,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+      task: Union[
+          pax_fiddle.Config[tasks_lib.SingleTask], tasks_lib.SingleTask
+      ],
       auto_sharding_info: AutoShardingInfo,
       device_mesh: Optional[np.ndarray] = None,
   ):
@@ -1194,12 +1198,12 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         abstract_init_with_metadata.
       reshard_inputs: Whether to reshard model inputs before running the
         partitioned function. Only applicable for pjit.
-      task_p: The params for the task, needed to create global mesh.
+      task: The task, needed to create global mesh.
       auto_sharding_info: Information used for XLA auto-sharding. If None, it'll
         use the sharding information provided by the model config instead.
       device_mesh: Optional custom device mesh.
     """
-    super().__init__(init_is_eval, reshard_inputs, task_p, device_mesh)
+    super().__init__(init_is_eval, reshard_inputs, task, device_mesh)
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result: AutoShardingPjitPartitioner._AutoShardingResult = (
         None  # Cached results.
@@ -1212,9 +1216,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         train_input_pipeline
     )
     # Extra checking in auto sharding case.
-    train_input_p = train_input_pipeline.hparams
-    if train_input_p.num_infeed_hosts < jax.process_count() or (
-        train_input_p.cls.get_batch_size(train_input_p)
+    if train_input_pipeline.num_infeed_hosts < jax.process_count() or (
+        train_input_pipeline.get_batch_size(train_input_pipeline)
         < jax.local_device_count()
     ):
       raise NotImplementedError(
@@ -1464,7 +1467,6 @@ def create_partitioner(
     partitioner = PmapPartitioner(init_is_eval)
   else:
     auto_sharding_info = None
-    task_p = jax_task.hparams
     if auto_sharding_mode:
       step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
@@ -1480,8 +1482,8 @@ def create_partitioner(
           replicate_output=replicate_output,
       )
       partitioner = AutoShardingPjitPartitioner(
-          init_is_eval, reshard_inputs, task_p, auto_sharding_info
+          init_is_eval, reshard_inputs, jax_task, auto_sharding_info
       )
     else:
-      partitioner = PjitPartitioner(init_is_eval, reshard_inputs, task_p)
+      partitioner = PjitPartitioner(init_is_eval, reshard_inputs, jax_task)
   return partitioner

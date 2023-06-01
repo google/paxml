@@ -83,7 +83,7 @@ def get_eval_train_state(
   """
   task_p = task.hparams
   if use_ema:
-    if not tasks_lib.has_ema(task_p):
+    if not tasks_lib.has_ema(task):
       raise ValueError(
           'use_ema is requested but the learner does not seem to have ema '
           'enabled.'
@@ -259,7 +259,7 @@ class BaseTrainProgram(Program):
 
     # Initializes other states.
     self._train_unpadded_global_batch_size = (
-        train_input.get_global_batch_size(train_input.hparams)
+        train_input.get_global_batch_size(train_input)
     )
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
@@ -722,7 +722,7 @@ class BaseEvalProgram(Program):
     self._name = self.eval_input.name
     self._eval_unpadded_global_batch_size = (
         self._eval_input_pipeline.get_global_batch_size(
-            self._eval_input_pipeline.hparams
+            self._eval_input_pipeline
         )
     )
     self._eval_num_steps = (

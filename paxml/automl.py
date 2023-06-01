@@ -70,11 +70,11 @@ def hyperparameter_tuning(
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
     cross_step_metric_aggregator: Optional[
-        CrossStepMetricAggregator.HParams] = None,
+        pax_fiddle.Config[CrossStepMetricAggregator]] = None,
     early_stopping: Optional[
-        BaseEarlyStoppingPolicy.HParams] = None,
+        pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None,
     reward_for_nan: Optional[float] = None) -> SearchHParams:
-  """Returns a common search HParams for hyper-parameter tuning.
+  """Returns a common search config for hyper-parameter tuning.
 
   Args:
     metric: The metric to optimize.
@@ -87,7 +87,7 @@ def hyperparameter_tuning(
       RuntimeError or errors that match 'XLACompilation.*' will be treated as
       to skip.
     cross_step_metric_aggregator: An optional cross-step metric aggregator
-      hparams indicating how metrics will be aggregated at the end of the search
+      config indicating how metrics will be aggregated at the end of the search
       for computing the reward. If None, the last reported metrics will be used.
     early_stopping: An optional population-wise early stopping policy.
       If None, no population-wise early stopping policy will be used, though
@@ -98,7 +98,7 @@ def hyperparameter_tuning(
       skipped by the search algorithm.
 
   Returns:
-    A search HParams object.
+    A search config object.
   """
   return SearchHParams(
       # Use Sweeping for hyperparameter tuning.
@@ -126,9 +126,9 @@ def neural_architecture_search(
     errors_to_skip: Optional[List[
         Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
     cross_step_metric_aggregator: Optional[
-        CrossStepMetricAggregator.HParams] = None,
+        pax_fiddle.Config[CrossStepMetricAggregator]] = None,
     early_stopping: Optional[
-        BaseEarlyStoppingPolicy.HParams] = None,
+        pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None,
     reward_for_nan: Optional[float] = None
     ) -> SearchHParams:
   """Search params for Neural Architecture Search."""

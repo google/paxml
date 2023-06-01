@@ -16,8 +16,8 @@
 """Programs for decoding."""
 
 import collections
+import copy
 import functools
-import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from absl import flags
@@ -141,7 +141,7 @@ class SingleTaskDecodeProgram(programs.Program):
     self._summary_writer: SummaryWriter = None
     self._use_pmap = None
 
-    self._task_p = None
+    self._task = None
     self._output_pickle = None
     self._enable_checkpoint_saving = None
 
@@ -159,7 +159,7 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: epath.Path,
       summary_writer: SummaryWriter,
       use_pmap: bool,
-      task_p: Optional[pax_fiddle.Config[tasks_lib.SingleTask]],
+      task: Optional[tasks_lib.SingleTask],
       output_pickle: bool,
       enable_checkpoint_saving: bool,
       metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
@@ -171,10 +171,10 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: Directory for the job logs.
       summary_writer: The summary writer to log summaries.
       use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
-        `task_p`, `var_weight_params`, `output_pickle` and
-        `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should
+        `task`, `var_weight_params`, `output_pickle` and
+        `enable_checkpoint_saving` should be set; otherwise, `metrics` should
         be set.
-      task_p: Params for the task encapsulating a data parallel model.
+      task: Params for the task encapsulating a data parallel model.
       output_pickle: Whether to write decoding results to a pickle file.
       enable_checkpoint_saving: Whether to perform checkpoint saving or not.
       metrics_p: Parameters to configure how to aggregate the metrics.
@@ -185,7 +185,7 @@ class SingleTaskDecodeProgram(programs.Program):
     self._summary_writer = summary_writer
     self._use_pmap = use_pmap
 
-    self._task_p = task_p
+    self._task = task
     self._output_pickle = output_pickle
     self._enable_checkpoint_saving = enable_checkpoint_saving
 
@@ -282,15 +282,16 @@ class SingleTaskDecodeProgram(programs.Program):
       batch, tpu_unsupported_batch, inputs_partition_spec = (
           xla_passthrough.split_out_xla_unsupported_batch(
               batch,
-              partitioning_spec=None if use_pmap else self.decode_input_partition_spec(batch),
+              partitioning_spec=None
+              if use_pmap
+              else self.decode_input_partition_spec(batch),
           )
       )
       batch = partitioner.preprocess_inputs(
           decode_input, batch, inputs_partition_spec
       )
 
-      task_p = self._task_p
-      if task_p and task_p.decode.prng_key_fold_with_batch_index:
+      if self._task and self._task.decode.prng_key_fold_with_batch_index:
         # In this case, the key is a scalar we need to preprocess it
         # (broadcast/split) after folding in step_num.
         decode_key = jax.random.fold_in(prng_key, step_num)
