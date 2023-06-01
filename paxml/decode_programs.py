@@ -272,12 +272,10 @@ class SingleTaskDecodeProgram(programs.Program):
         batch = decode_input.get_next_padded()
       except (tf.errors.OutOfRangeError, StopIteration):
         decode_input.reset()
-        logging.log_if(
-            logging.ERROR,
-            'Input %s yields zero batch.',
-            step_num == 1,
-            input_name,
-        )
+        if step_num == 1:
+          logging.error('Input %s yields zero batch.', input_name)
+        else:
+          logging.info('Input %s exhausted at step %d.', input_name, step_num)
         break
       batch, tpu_unsupported_batch, inputs_partition_spec = (
           xla_passthrough.split_out_xla_unsupported_batch(
@@ -430,7 +428,7 @@ class SingleTaskDecodeProgram(programs.Program):
           write_pickle=output_pickle if use_pmap else True,
       )
 
-    msg = f'Finished decoding input batch at step {step_num} for {input_name}'
+    msg = f'Finished decoding input {input_name}'
     work_unit.set_task_status(msg)
     logging.info(msg)
 
