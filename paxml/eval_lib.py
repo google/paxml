@@ -1106,9 +1106,13 @@ def _common_eval_or_decode_loop(
     eval_runner: _EvalRunner,
     decode_inputs: Optional[Sequence[base_input.BaseInput]],
 ):
-  # checkpoint must exist at this point
-  last_checkpoint_step = checkpointer.retrieve_latest_checkpoint_step()
-  logging.info('Evaluation loop starting...')
+  # Retrieve last step from the TrainState directly in case new checkpoints
+  # have been written in the mean time.
+  last_checkpoint_step = int(
+      py_utils.maybe_unreplicate_for_fully_replicated(
+          partitioned_train_state.step))
+  logging.info('Evaluation loop starting from step `%d`...',
+               last_checkpoint_step)
   summary_base_dir = job_log_dir / 'summaries'
   if decode_inputs:
     summary_decode_dirs = [
