@@ -20,7 +20,7 @@ import contextlib
 import dataclasses
 import queue
 import time
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Tuple, Union, Mapping
 
 from absl import flags
 from absl import logging
@@ -413,7 +413,7 @@ class BaseTrainProgram(Program):
 
   def _maybe_write_summaries(
       self, step: int, new_step: int, train_outputs: StepFnOutput
-  ):
+  ) -> Optional[float]:
     # Compute steps/sec every this many steps, revisit when necessary.
     compute_steps_per_sec_interval_steps = 10
 
@@ -472,7 +472,9 @@ class BaseTrainProgram(Program):
     steps_per_sec = num_steps / duration_sec
     return steps_per_sec
 
-  def _maybe_run_eval_train(self, new_state: TrainState, new_step: int):
+  def _maybe_run_eval_train(
+      self, new_state: TrainState, new_step: int
+  ) -> Optional[Mapping[str, float]]:
     train_p = self._task.train
     eval_train_metrics = None
 
@@ -748,9 +750,7 @@ class BaseEvalProgram(Program):
         self._job_log_dir, self._name, EvaluationMode.EVAL, step
     ):
       logging.info(
-          'Eval on %s at train step %d already done, skipping.',
-          self._name,
-          step,
+          'Eval on %s (@ step %d) already done, skipping.', self._name, step
       )
       return ProgramOutput(
           state,

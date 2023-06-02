@@ -636,9 +636,8 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
 
     return jax.tree_util.tree_map(_sync_var, old_vars, new_vars,
                                   var_weight_hparams)
-  else:
-    # no synchronization is needed.
-    return new_vars
+  # no synchronization is needed.
+  return new_vars
 
 
 @flax_struct.dataclass

@@ -233,6 +233,7 @@ class SingleTaskDecodeProgram(programs.Program):
     if use_pmap:
       output_pickle = self._output_pickle
 
+    # Skip decode if already completed.
     if programs.can_load_written_outputs(
         job_log_dir, input_name, EvaluationMode.DECODE, step_i
     ):

@@ -17,6 +17,7 @@
 
 import abc
 import contextlib
+import itertools
 import functools
 import gc
 import time
@@ -239,13 +240,15 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
 
+
+  @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
   def _restore(
       self, step: int, train_state_global_shapes: TrainState
   ) -> TrainState:
     if py_utils.pmap_use_tensorstore():
       model_states = tasks_lib.restore_pmap_from_tensorstore(
-          train_state_global_shapes,
-          self.restore_checkpoint_dir,
+          global_shapes=train_state_global_shapes,
+          checkpoint_dir=self.restore_checkpoint_dir,
           step=step,
           checkpoint_type=self.checkpoint_type,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
@@ -253,8 +256,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
       )
     else:
       model_states = checkpoints.restore_checkpoint(
-          train_state_global_shapes,
-          self.restore_checkpoint_dir,
+          state_global_shapes=train_state_global_shapes,
+          checkpoint_dir=self.restore_checkpoint_dir,
           checkpoint_type=self.checkpoint_type,
           step=step,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
@@ -336,10 +339,12 @@ def _create_checkpointer(
       tensorstore_metadata_key=jax_task.hparams.train.tensorstore_metadata_key,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
+
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
   else:
     checkpointer_cls = _PmapEvalCheckpointer
+
   return checkpointer_cls(
       jax_task,
       job_log_dir,
@@ -387,9 +392,10 @@ def run_eval_loop_over_test_splits(
     eval_scoring_metrics_list.append(program_out.aux.eval_scoring_metrics)
     num_eval_steps.append(program_out.aux.num_eval_steps)
 
-  return (eval_metrics_list, eval_scoring_metrics_list, num_eval_steps)
+  return eval_metrics_list, eval_scoring_metrics_list, num_eval_steps
 
 
+@py_utils.benchmark('[PAX STATUS]: ', first_n=2)
 def evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.Path,
@@ -492,17 +498,17 @@ def evaluate(
   decode_inputs = None
   continuous_decode = True
   _common_eval_or_decode_loop(
-      EvaluationMode.EVAL,
-      checkpointer,
-      jax_task.hparams,
-      job_log_dir,
-      decode_once_fn,
-      partitioned_train_state,
-      train_state_metadata,
-      early_stopping_fn,
-      continuous_decode,
-      eval_runner,
-      decode_inputs,
+      mode=EvaluationMode.EVAL,
+      checkpointer=checkpointer,
+      task=jax_task,
+      job_log_dir=job_log_dir,
+      decode_once_fn=decode_once_fn,
+      partitioned_train_state=partitioned_train_state,
+      train_state_metadata=train_state_metadata,
+      early_stopping_fn=early_stopping_fn,
+      continuous_decode=continuous_decode,
+      eval_runner=eval_runner,
+      decode_inputs=decode_inputs,
   )
 
 
@@ -592,6 +598,7 @@ class _EvalRunner:
     )
 
 
+@py_utils.benchmark('[PAX STATUS]: ', first_n=2)
 def decode(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.PathLike,
@@ -822,17 +829,17 @@ def decode_pmap_model(
 
   decode_inputs = [p.decode_input for p in decode_programs]
   _common_eval_or_decode_loop(
-      EvaluationMode.DECODE,
-      checkpointer,
-      jax_task,
-      job_log_dir,
-      decode_once_fn,
-      partitioned_train_state,
-      train_state_metadata,
-      early_stopping_fn,
-      continuous_decode,
-      eval_runner,
-      decode_inputs,
+      mode=EvaluationMode.DECODE,
+      checkpointer=checkpointer,
+      task=jax_task,
+      job_log_dir=job_log_dir,
+      decode_once_fn=decode_once_fn,
+      partitioned_train_state=partitioned_train_state,
+      train_state_metadata=train_state_metadata,
+      early_stopping_fn=early_stopping_fn,
+      continuous_decode=continuous_decode,
+      eval_runner=eval_runner,
+      decode_inputs=decode_inputs,
   )
 
 
@@ -1051,7 +1058,6 @@ def decode_spmd_model(
       eval_key=eval_key,
   )
   decode_programs = eval_runner.decode_programs
-
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task=jax_task,
@@ -1060,25 +1066,24 @@ def decode_spmd_model(
       use_pmap=False,
   )
   trainer_lib.write_post_init_model_hparams_file(
-      jax_task.model,
-      train_state_metadata.var_weight_hparams,
-      job_log_dir / 'decoder_out',
+      model=jax_task.model,
+      var_weight_hparams=train_state_metadata.var_weight_hparams,
+      job_log_dir=job_log_dir / 'decoder_out',
       do_eval=True,
   )
 
-  decode_inputs = [p.decode_input for p in decode_programs]
   _common_eval_or_decode_loop(
-      EvaluationMode.DECODE,
-      checkpointer,
-      jax_task,
-      job_log_dir,
-      decode_once_fn,
-      partitioned_train_state,
-      train_state_metadata,
-      early_stopping_fn,
-      continuous_decode,
-      eval_runner,
-      decode_inputs,
+      mode=EvaluationMode.DECODE,
+      checkpointer=checkpointer,
+      task=jax_task,
+      job_log_dir=job_log_dir,
+      decode_once_fn=decode_once_fn,
+      partitioned_train_state=partitioned_train_state,
+      train_state_metadata=train_state_metadata,
+      early_stopping_fn=early_stopping_fn,
+      continuous_decode=continuous_decode,
+      eval_runner=eval_runner,
+      decode_inputs=[p.decode_input for p in decode_programs],
   )
 
 
@@ -1088,6 +1093,7 @@ def _is_shape_dtype_struct(x):
 
 
 def _common_eval_or_decode_loop(
+    *,
     mode: io_utils.EvaluationMode,
     checkpointer: _EvalCheckpointer,
     task: tasks_lib.SingleTask,
@@ -1168,6 +1174,7 @@ def _common_eval_or_decode_loop(
     gc.unfreeze()
 
 
+@py_utils.benchmark('[PAX STATUS]: ', first_n=2)
 def infer_and_write(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.Path,
@@ -1228,10 +1235,10 @@ def infer_and_write(
   if model.mesh_shape is not None:
     # TODO(b/238416854): add support for SPMD models
     raise NotImplementedError('SPMD infer_and_write not implemented yet')
-  else:
-    infer_and_write_pmap(
-        task, prng_key, partitioner, checkpointer, inputs_p, job_log_dir
-    )
+
+  infer_and_write_pmap(
+      task, prng_key, partitioner, checkpointer, inputs_p, job_log_dir
+  )
 
 
 def infer_and_write_pmap(
@@ -1269,14 +1276,14 @@ def infer_and_write_pmap(
     return replicated_outputs
 
   # Instantiate inputs to infer on
-  inputs = [instantiate(p) for p in inputs_p]
+  inputs: Sequence[base_input.BaseInput] = [instantiate(p) for p in inputs_p]
   trainer_lib.check_unique_names(inputs)
-  num_steps = [
-      -1 if p.reset_for_eval else p.eval_loop_num_batches for p in inputs_p
-  ]
 
-  for input_gen, num_steps in zip(inputs, num_steps):
+  for input_gen in inputs:
     name = input_gen.hparams.name
+    num_steps = (
+        -1 if input_gen.reset_for_eval else input_gen.eval_loop_num_batches
+    )
     logging.info('Starting output generation on input "%s"', name)
 
     # Feed each (device, input) pair a unique seed
@@ -1289,13 +1296,14 @@ def infer_and_write_pmap(
     # Only write from one process
     dirname = job_log_dir / 'output' / name
     fq_filename = dirname / 'output'
+
     if jax.process_index() == 0:
       # Create output dirs if DNE
       if not dirname.exists():
         dirname.mkdir(parents=True, exist_ok=True)
 
       # Write example schema, metadata, and serialized example protos
-      logging.info('writing output to %s', fq_filename)
+      logging.info('Writing output to %s', fq_filename)
       features_dict = tfds.features.FeaturesDict(
           task.inference_runner.output_schema
       )
@@ -1313,19 +1321,18 @@ def infer_and_write_pmap(
           output_format=infer_writer_p.output_format,
       )
 
-    step = 0
-    while num_steps < 0 or step < num_steps:
-      step += 1
-      logging.info('processing input batch %d', step)
+    for step in (range(num_steps) if num_steps >= 0 else itertools.count()):
+      logging.info('Evaling input batch %d', step + 1)
       try:
         batch = input_gen.get_next()
       except (tf.errors.OutOfRangeError, StopIteration):
         input_gen.reset()
         break
 
-      pmap_batch = partitioner.preprocess_inputs(input_gen, batch, None)
       outputs = infer_pmap_step(
-          replicated_model_states, output_seeds, pmap_batch
+          replicated_model_states,
+          output_seeds,
+          partitioner.preprocess_inputs(input_gen, batch, None),
       )
       # Get first device's output since it's been replicated by all-gather
       outputs = py_utils.maybe_unreplicate_for_fully_replicated(outputs)

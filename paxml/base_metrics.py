@@ -102,7 +102,7 @@ def _vmap_aggregate_metrics(f, metrics_dict):
       Aggregated metrics.
   """
   metrics = {}
-  for k in metrics_dict.keys():
+  for k in metrics_dict:
     values = jnp.stack([metric[0] for metric in metrics_dict[k]])
     weights = jnp.stack([metric[1] for metric in metrics_dict[k]])
     metrics[k] = f(values, weights)
