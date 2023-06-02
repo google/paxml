@@ -780,6 +780,12 @@ class BaseEvalProgram(Program):
     for batch in per_example_scores:
       for ex in py_utils.tree_unstack(batch, 0):
         flat_scoring_outputs.append((py_utils.get_enumeration_id(ex), ex))
+    logging.info(
+        'Finished unstacking %d batches into %d per example outputs.',
+        len(per_example_scores),
+        len(flat_scoring_outputs),
+    )
+
     eval_scoring_metrics = None
     output_dir = (
         self._job_log_dir / f'{EvaluationMode.EVAL.value}_out' / self._name
@@ -794,6 +800,10 @@ class BaseEvalProgram(Program):
           seqio_input.MetricType.SCORE,
           step,
           output_dir,
+      )
+      logging.info(
+          'Finished processing %d outputs using seqio.',
+          len(flat_scoring_outputs),
       )
 
     loss = np.array(loss)
@@ -879,7 +889,13 @@ class BaseEvalProgram(Program):
           summary_tensor_dict[k] = [v]
       for k in weighted_scalars:
         metrics[k].append(weighted_scalars[k])
-      per_example_scores.append(jax.tree_map(np.asarray, per_example_out))
+      # Use jax.device_get to overlap the device -> host memory transfer.
+      # Make a copy on the transferred tensor since running
+      # py_utils.tree_unstack() on XLA-backed numpy arrays is inefficient
+      # (b/284371615).
+      per_example_scores.append(
+          jax.tree_map(lambda x: x.copy(), jax.device_get(per_example_out))
+      )
 
     return step_num, losses, summary_tensor_dict, metrics, per_example_scores
 
