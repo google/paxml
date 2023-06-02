@@ -109,15 +109,28 @@ def _train_log_interval_steps(
     return train_p.summary_interval_steps
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ProgramOutput:
   # The train state that's potentially modified by the program.
   # For example, a train program is expected to update the state to reflect
   # optimizer updates, while a eval program is expected to keep the state as is.
   state: TrainState
-  # Auxiliary dictionary that contains any information that program intends to
-  # feedback to outer loop.
-  aux: NestedMap
+
+
+@dataclasses.dataclass(frozen=True)
+class TrainProgramOutput(ProgramOutput):
+  loss: Optional[JTensor]
+  weighted_scalars: Optional[WeightedScalars]
+  new_train_step: int
+  steps_per_sec: float
+  eval_train_metrics: Optional[Mapping[str, float]]
+
+
+@dataclasses.dataclass(frozen=True)
+class EvalProgramOutput(ProgramOutput):
+  eval_metrics: Optional[Mapping[str, float]] = None
+  eval_scoring_metrics: Optional[Mapping[str, float]] = None
+  num_eval_steps: int = 0
 
 
 class Program(metaclass=abc.ABCMeta):
@@ -276,7 +289,7 @@ class BaseTrainProgram(Program):
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
   @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
-  def run(self, state: TrainState, step: int) -> ProgramOutput:
+  def run(self, state: TrainState, step: int) -> TrainProgramOutput:
     train_p = self._task.train
     logging.log_first_n(logging.INFO, '[PAX STATUS]:  Retrieving inputs.', 5)
     model_inputs = self._train_input.get_next_padded()
@@ -346,15 +359,13 @@ class BaseTrainProgram(Program):
     ):
       eval_train_metrics = self._maybe_run_eval_train(new_state, new_step)
 
-    return ProgramOutput(
+    return TrainProgramOutput(
         new_state,
-        aux=NestedMap(
-            loss=train_outputs.loss,
-            weighted_scalars=train_outputs.weighted_scalars,
-            new_train_step=new_step,
-            steps_per_sec=steps_per_sec,
-            eval_train_metrics=eval_train_metrics,
-        ),
+        loss=train_outputs.loss,
+        weighted_scalars=train_outputs.weighted_scalars,
+        new_train_step=new_step,
+        steps_per_sec=steps_per_sec,
+        eval_train_metrics=eval_train_metrics,
     )
 
   @abc.abstractmethod
@@ -745,19 +756,14 @@ class BaseEvalProgram(Program):
     # TODO(laigd): implement and use this.
     raise NotImplementedError()
 
-  def run(self, state: TrainState, step: int) -> ProgramOutput:
+  def run(self, state: TrainState, step: int) -> EvalProgramOutput:
     if can_load_written_outputs(
         self._job_log_dir, self._name, EvaluationMode.EVAL, step
     ):
       logging.info(
           'Eval on %s (@ step %d) already done, skipping.', self._name, step
       )
-      return ProgramOutput(
-          state,
-          aux=NestedMap(
-              eval_metrics=None, eval_scoring_metrics=None, num_eval_steps=0
-          ),
-      )
+      return EvalProgramOutput(state)
 
     logging.info(
         'Starting eval %s with num_steps=%d', self._name, self._eval_num_steps
@@ -809,13 +815,11 @@ class BaseEvalProgram(Program):
     )
     _maybe_write_scoring_outputs(output_dir, step, flat_scoring_outputs)
 
-    return ProgramOutput(
+    return EvalProgramOutput(
         state,
-        aux=NestedMap(
-            eval_metrics=metric_utils.as_float_dict(metrics),
-            eval_scoring_metrics=eval_scoring_metrics,
-            num_eval_steps=num_steps,
-        ),
+        eval_metrics=metric_utils.as_float_dict(metrics),
+        eval_scoring_metrics=eval_scoring_metrics,
+        num_eval_steps=num_steps,
     )
 
   def _run_eval_loop(self, state: TrainState):

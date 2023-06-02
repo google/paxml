@@ -18,7 +18,6 @@ import os
 from typing import Any, Dict, Tuple, Union
 
 from absl.testing import absltest
-from absl.testing import parameterized
 from etils import epath
 import jax
 from jax import numpy as jnp

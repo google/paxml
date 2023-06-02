@@ -16,9 +16,9 @@
 """Programs for decoding."""
 
 import collections
-import copy
+import dataclasses
 import functools
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 from absl import flags
 from absl import logging
@@ -47,8 +47,6 @@ from praxis import py_utils
 from praxis import pytypes
 from praxis import trees
 import tensorflow.compat.v2 as tf
-
-from paxml import checkpoints  # mapped to internal
 
 
 instantiate = base_hyperparams.instantiate
@@ -81,33 +79,13 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
   return metrics
 
 
-class DecodeOutput(NestedMap):
-  """The output of a decode program."""
-
-  def __init__(
-      self,
-      *,
-      decode_metrics: Optional[Dict[str, float]],
-      processed_decode_metrics: Optional[Dict[str, float]],
-      seqio_metrics: Optional[Dict[str, float]],
-      num_decode_steps: int,
-      raw_decode_metrics: Optional[Mapping[str, clu_metrics.Metric]],
-  ):
-    """The constructor.
-
-    Args:
-      decode_metrics: Decode metrics.
-      processed_decode_metrics: Processed decode metrics.
-      seqio_metrics: Decode (seqio) metrics.
-      num_decode_steps: The number of performed decode steps.
-      raw_decode_metrics: Raw decode metrics.
-    """
-    super().__init__()
-    self.decode_metrics = decode_metrics
-    self.processed_decode_metrics = processed_decode_metrics
-    self.seqio_metrics = seqio_metrics
-    self.num_decode_steps = num_decode_steps
-    self.raw_decode_metrics = raw_decode_metrics
+@dataclasses.dataclass(frozen=True)
+class DecodeProgramOutput(programs.ProgramOutput):
+  decode_metrics: Optional[Mapping[str, float]] = None
+  processed_decode_metrics: Optional[Mapping[str, float]] = None
+  seqio_metrics: Optional[Mapping[str, float]] = None
+  num_decode_steps: int = 0
+  raw_decode_metrics: Optional[Mapping[str, clu_metrics.Metric]] = None
 
 
 class SingleTaskDecodeProgram(programs.Program):
@@ -210,7 +188,7 @@ class SingleTaskDecodeProgram(programs.Program):
     assert self._input is not None
     return self._input
 
-  def run(self, state: TrainState, train_step: int) -> programs.ProgramOutput:
+  def run(self, state: TrainState, train_step: int) -> DecodeProgramOutput:
     work_unit = platform.work_unit()
     use_pmap = self._use_pmap
     step_i = train_step
@@ -242,16 +220,8 @@ class SingleTaskDecodeProgram(programs.Program):
           input_name,
           step_i,
       )
-      return programs.ProgramOutput(
-          state=state,
-          aux=DecodeOutput(
-              decode_metrics=None,
-              processed_decode_metrics=None,
-              seqio_metrics=None,
-              num_decode_steps=0,
-              raw_decode_metrics=None,
-          ),
-      )
+      return DecodeProgramOutput(state)
+
     logging.info('Start decoding on input %s', input_name)
     step_num = 0
     # decode_metrics and process_decode_metrics work on WeightedScalars
@@ -433,22 +403,20 @@ class SingleTaskDecodeProgram(programs.Program):
     work_unit.set_task_status(msg)
     logging.info(msg)
 
-    merged_decode_metrics = metric_utils.update_float_dict(
-        metric_utils.as_float_dict(decode_metric_dict),
-        metric_utils.as_float_dict(metric_values),
-    )
-    merged_processed_decode_metrics = metric_utils.update_float_dict(
-        metric_utils.as_float_dict(processed_metric_dict),
-        metric_utils.as_float_dict(process_metric_values),
-    )
-    decode_output = DecodeOutput(
-        decode_metrics=merged_decode_metrics,
-        processed_decode_metrics=merged_processed_decode_metrics,
+    return DecodeProgramOutput(
+        state=state,
+        decode_metrics=metric_utils.update_float_dict(
+            metric_utils.as_float_dict(decode_metric_dict),
+            metric_utils.as_float_dict(metric_values),
+        ),
+        processed_decode_metrics=metric_utils.update_float_dict(
+            metric_utils.as_float_dict(processed_metric_dict),
+            metric_utils.as_float_dict(process_metric_values),
+        ),
         seqio_metrics=seqio_metric_values,
         num_decode_steps=step_num,
         raw_decode_metrics=metrics,
     )
-    return programs.ProgramOutput(state=state, aux=decode_output)
 
   def _get_decode_step(
       self, inputs: NestedJTensor

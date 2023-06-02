@@ -539,7 +539,6 @@ py_strict_test(
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
-        # Implicit absl.testing.parameterized dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.

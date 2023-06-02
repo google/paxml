@@ -17,12 +17,13 @@
 
 import abc
 import contextlib
-import itertools
+import dataclasses
 import functools
 import gc
+import itertools
 import time
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
 
 from absl import logging
 from clu import metrics as clu_metrics
@@ -305,6 +306,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
 
 
 def _create_checkpointer(
+    *,
     jax_task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
     checkpoint_type: checkpoints.CheckpointType,
@@ -358,15 +360,16 @@ def _create_checkpointer(
 
 
 def run_eval_loop_over_test_splits(
+    *,
     test_eval_programs: Sequence[programs.BaseEvalProgram],
     eval_partitioned_train_state: TrainState,
     eval_prng_seed: jax.random.KeyArray,
     step: int,
     job_log_dir: epath.Path,
 ) -> Tuple[
-    List[Optional[Dict[str, float]]],  # eval metrics.
-    List[Optional[Dict[str, float]]],  # eval scoring metrics.
-    List[int],  # performed eval steps.
+    Sequence[Optional[Mapping[str, float]]],  # eval metrics.
+    Sequence[Optional[Mapping[str, float]]],  # eval scoring metrics.
+    Sequence[int],  # performed eval steps.
 ]:
   """Run evaluation in a loop over a list of test sets.
 
@@ -383,16 +386,15 @@ def run_eval_loop_over_test_splits(
                 a list of integer as performed evaluation steps).
       Items from each list are aligned with the `model_inputs`.
   """
-  eval_metrics_list = []
-  eval_scoring_metrics_list = []
-  num_eval_steps = []
-  for eval_program in test_eval_programs:
-    program_out = eval_program.run(eval_partitioned_train_state, step)
-    eval_metrics_list.append(program_out.aux.eval_metrics)
-    eval_scoring_metrics_list.append(program_out.aux.eval_scoring_metrics)
-    num_eval_steps.append(program_out.aux.num_eval_steps)
+  _, eval_metrics, eval_scoring_metrics, num_eval_steps = zip(
+      *(
+          dataclasses.astuple(program.run(eval_partitioned_train_state, step))
+          for program in test_eval_programs
+      ),
+      strict=True,
+  )
 
-  return eval_metrics_list, eval_scoring_metrics_list, num_eval_steps
+  return eval_metrics, eval_scoring_metrics, num_eval_steps
 
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
@@ -467,10 +469,10 @@ def evaluate(
   )
 
   checkpointer = _create_checkpointer(
-      jax_task,
-      job_log_dir,
-      checkpoint_type,
-      EvaluationMode.EVAL,
+      jax_task=jax_task,
+      job_log_dir=job_log_dir,
+      checkpoint_type=checkpoint_type,
+      mode=EvaluationMode.EVAL,
       restore_checkpoint_dir=restore_checkpoint_dir,
       restore_checkpoint_step=restore_checkpoint_step,
       partitioner=partitioner,
@@ -578,11 +580,11 @@ class _EvalRunner:
       )
       eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
           run_eval_loop_over_test_splits(
-              self._eval_programs,
-              train_state.to_eval_state(),
-              self._eval_key,
-              step_i,
-              self._job_log_dir,
+              test_eval_programs=self._eval_programs,
+              eval_partitioned_train_state=train_state.to_eval_state(),
+              eval_prng_seed=self._eval_key,
+              step=step_i,
+              job_log_dir=self._job_log_dir,
           )
       )
     jax.monitoring.record_event_duration_secs(
@@ -706,12 +708,12 @@ def decode(
       else None
   )
   checkpointer = _create_checkpointer(
-      jax_task,
-      job_log_dir,
-      checkpoint_type,
-      EvaluationMode.DECODE,
-      restore_checkpoint_dir,
-      restore_checkpoint_step,
+      jax_task=jax_task,
+      job_log_dir=job_log_dir,
+      checkpoint_type=checkpoint_type,
+      mode=EvaluationMode.DECODE,
+      restore_checkpoint_dir=restore_checkpoint_dir,
+      restore_checkpoint_step=restore_checkpoint_step,
       partitioner=partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
@@ -926,9 +928,9 @@ def _decode_once(
     metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
 ) -> Tuple[
     Tuple[
-        List[Optional[Dict[str, float]]],  # decode metrics.
-        List[Optional[Dict[str, float]]],  # processed decode metrics.
-        List[Optional[Dict[str, float]]],  # decode (seqio) metrics.
+        List[Optional[Mapping[str, float]]],  # decode metrics.
+        List[Optional[Mapping[str, float]]],  # processed decode metrics.
+        List[Optional[Mapping[str, float]]],  # decode (seqio) metrics.
         List[int],  # performed decode steps.
     ],
     List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
@@ -983,11 +985,11 @@ def _decode_once(
     )
     logging.info('decode prng_key: %s', prng_key)
 
-  decode_metrics_list = []
-  processed_decode_metrics_list = []
-  seqio_metrics_list = []
+  decode_metrics = []
+  processed_decode_metrics = []
+  seqio_metrics = []
   num_decode_steps = []
-  raw_metrics_list = []
+  raw_metrics = []
 
   for i, decode_program in enumerate(decode_programs):
     decode_program.setup(
@@ -1002,19 +1004,19 @@ def _decode_once(
     )
 
   for decode_program in decode_programs:
-    decode_output = decode_program.run(train_state, step_i).aux
-    decode_metrics_list.append(decode_output.decode_metrics)
-    processed_decode_metrics_list.append(decode_output.processed_decode_metrics)
-    seqio_metrics_list.append(decode_output.seqio_metrics)
+    decode_output = decode_program.run(train_state, step_i)
+    decode_metrics.append(decode_output.decode_metrics)
+    processed_decode_metrics.append(decode_output.processed_decode_metrics)
+    seqio_metrics.append(decode_output.seqio_metrics)
     num_decode_steps.append(decode_output.num_decode_steps)
-    raw_metrics_list.append(decode_output.raw_decode_metrics)
+    raw_metrics.append(decode_output.raw_decode_metrics)
 
   return (
-      decode_metrics_list,
-      processed_decode_metrics_list,
-      seqio_metrics_list,
+      decode_metrics,
+      processed_decode_metrics,
+      seqio_metrics,
       num_decode_steps,
-  ), raw_metrics_list
+  ), raw_metrics
 
 
 def decode_spmd_model(
@@ -1226,9 +1228,9 @@ def infer_and_write(
   )
 
   checkpointer = _create_checkpointer(
-      task,
-      job_log_dir,
-      checkpoint_type,
+      jax_task=task,
+      job_log_dir=job_log_dir,
+      checkpoint_type=checkpoint_type,
       mode=None,
       restore_checkpoint_dir=task.infer_writer.restore_checkpoint_dir,
       restore_checkpoint_step=task.infer_writer.restore_checkpoint_step,

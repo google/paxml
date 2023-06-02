@@ -517,13 +517,13 @@ def _train_and_evaluate_common(
 
       program_output = train_program.run(partitioned_train_state, step_i)
       partitioned_train_state = program_output.state
-      train_weighted_scalars = program_output.aux.weighted_scalars
-      steps_per_sec = program_output.aux.steps_per_sec
-      eval_train_metrics = program_output.aux.eval_train_metrics
+      train_weighted_scalars = program_output.weighted_scalars
+      steps_per_sec = program_output.steps_per_sec
+      eval_train_metrics = program_output.eval_train_metrics
 
       # While the eval ones below are post-model weight updates, hence the step
       # counter is incremented in between.
-      step_i = program_output.aux.new_train_step
+      step_i = program_output.new_train_step
 
       eval_metrics: Optional[tuning_lib.EvalMetrics] = None
       # Run eval at regular step interval.
@@ -543,11 +543,11 @@ def _train_and_evaluate_common(
           with py_utils.timeit() as eval_period:
             eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
                 eval_lib.run_eval_loop_over_test_splits(
-                    eval_programs,
-                    eval_partitioned_train_state,
-                    eval_prng_seed,
-                    step_i,
-                    job_log_dir,
+                    test_eval_programs=eval_programs,
+                    eval_partitioned_train_state=eval_partitioned_train_state,
+                    eval_prng_seed=eval_prng_seed,
+                    step=step_i,
+                    job_log_dir=job_log_dir,
                 )
             )
           jax.monitoring.record_event_duration_secs(
