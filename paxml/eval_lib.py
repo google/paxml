@@ -386,13 +386,14 @@ def run_eval_loop_over_test_splits(
                 a list of integer as performed evaluation steps).
       Items from each list are aligned with the `model_inputs`.
   """
-  _, eval_metrics, eval_scoring_metrics, num_eval_steps = zip(
-      *(
-          dataclasses.astuple(program.run(eval_partitioned_train_state, step))
-          for program in test_eval_programs
-      ),
-      strict=True,
-  )
+  eval_metrics = []
+  eval_scoring_metrics = []
+  num_eval_steps = []
+  for program in test_eval_programs:
+    program_out = program.run(eval_partitioned_train_state, step)
+    eval_metrics.append(program_out.eval_metrics)
+    eval_scoring_metrics.append(program_out.eval_scoring_metrics)
+    num_eval_steps.append(program_out.num_eval_steps)
 
   return eval_metrics, eval_scoring_metrics, num_eval_steps
 
