@@ -1292,7 +1292,7 @@ class SingleTask(base_task.BaseTask):
 
     MAX = 'max'
     MIN = 'min'
-  # TODO(b/269191093) Should this type be relaxed to BaseLayer?
+
   model: base_model.BaseModel = None
 
   # Implementation note: `SingleTask` is not defined in the interpreter
