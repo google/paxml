@@ -444,7 +444,6 @@ class SeqIOInput(base_input.BaseInput):
   use_enumeration: bool = True
   annotate_padding_fields: bool = False
   overridden_vocab: Optional[seqio.Vocabulary] = None
-  _dataset: Any = dataclasses.field(init=False, repr=False)
   _iter: Any = dataclasses.field(init=False, repr=False)
   _cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = (
       dataclasses.field(init=False, repr=False)
@@ -485,7 +484,7 @@ class SeqIOInput(base_input.BaseInput):
     self._validate_hparams()
 
     with py_utils.timeit() as get_dataset_timer:
-      self._dataset = self._get_dataset()
+      self.dataset = self._get_dataset()
     logging.info(
         '[PAX STATUS]: SeqIO init took %d seconds (mixture=%s, split=%s)',
         get_dataset_timer.elapsed,
@@ -494,7 +493,7 @@ class SeqIOInput(base_input.BaseInput):
     )
 
     with py_utils.timeit() as np_iterator_timer:
-      self._iter = self._dataset.as_numpy_iterator()
+      self._iter = self.dataset.as_numpy_iterator()
     logging.info(
         '[PAX STATUS]: SeqIO dataset `as_numpy_iterator` call took %d seconds'
         ' (mixture=%s, split=%s)',
@@ -777,7 +776,7 @@ class SeqIOInput(base_input.BaseInput):
     return next(self._iter)
 
   def reset(self) -> None:
-    self._iter = self._dataset.as_numpy_iterator()
+    self._iter = self.dataset.as_numpy_iterator()
 
   def _get_vocab(self, key) -> seqio.Vocabulary:
     if self.overridden_vocab is not None:
@@ -1871,7 +1870,7 @@ def get_eval_hparams_for_seqio(
     check_split_exists: If set, checks for `split_name` existing as a split
     in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
     have splits specified, this can cause file operations.
-    eval_loop_num_batches: Num of batches to process per eval loop. This 
+    eval_loop_num_batches: Num of batches to process per eval loop. This
       value is ignored if reset_for_eval is set True. If None, eval will run
       on the entire dataset.
     repeat: Whether to repeat the data.
