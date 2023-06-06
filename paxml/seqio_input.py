@@ -388,6 +388,13 @@ class SeqIOInput(base_input.BaseInput):
       Note that doing so will expose raw data inputs, and user should ensure
       that data are not sensitive and/or the log_dir has the appropriate
       permissions to prevent this from happening.
+    eval_enable_cache: If true, caching will be enabled on the eval dataset.
+      Note that if caching is disabled, the evals may be non-reproducible if
+      there are random ops.
+    eval num_examples: The number of examples in the dataset. Setting this field
+    can short-circuit iterating over dataset to get count of examples. If
+    unspecified, number of examples are counted from the dataset.
+
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -464,6 +471,8 @@ class SeqIOInput(base_input.BaseInput):
   enable_symbolic_checkpointing: Optional[bool] = True
   experimental_enable_index_shuffle: Optional[bool] = True
   log_preprocessed_targets: Optional[bool] = False
+  eval_enable_cache: bool = True
+  eval_num_examples: Optional[int] = None
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -886,8 +895,24 @@ class SeqIOInput(base_input.BaseInput):
     # `reshuffle_each_iteration=True`. In general, there is no guarantee that
     # the underlying eval dataset stays unchanged across different iterations
     # of epochs.
-    ds = ds.cache()
-    local_num = _get_num_examples(ds)
+    if self.eval_enable_cache:
+      ds = ds.cache()
+
+    # local_num represents the total number of examples in eval dataset,
+    # computed as:
+    #   - eval_num_examples, if provided by the user.
+    #   - from cached statistics, if dataset is cached on directory.
+    #   - If none of the above are available, we iterate over dataset to compute
+    #     number of examples.
+    if self.eval_num_examples:
+      local_num = self.eval_num_examples
+    elif self.task_inst.cache_dir:
+      # Cached stats are only available when cache_dir is set.
+      local_num = self.task_inst.get_cached_stats(split=self.split_name)[
+          'examples'
+      ]
+    else:
+      local_num = _get_num_examples(ds)
     local_num_batches = (local_num + self.batch_size - 1) // self.batch_size
     # Find the max number of batches required across all Jax processes.
     num_batches_all = multihost_utils.process_allgather(
