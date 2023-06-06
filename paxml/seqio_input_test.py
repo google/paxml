@@ -884,10 +884,52 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         seed,
         seqio_input.MetricType.PREDICT,
         split_name='eval',
-        check_split_exists=True
+        check_split_exists=True,
     )
     # None of the tasks have 'eval' split so this should be empty.
     self.assertListEqual([p.name for p in predict_hparams], [])
+
+  def test_get_eval_hparams_for_seqio_scoring_keeps_all_lengths(self):
+    feature_lengths = {
+        'inputs': 1024,
+        'targets': 3,
+        'weights': 3,
+        'embeddings': 16,
+    }
+    self._setup_seqio_test_registry(task_feature_lengths=feature_lengths)
+    mixture_name = 'test_mixture'
+    batch_size = 32
+    seed = 123
+    score_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture_name,
+        batch_size,
+        feature_lengths,
+        seed,
+        seqio_input.MetricType.SCORE,
+        eval_metrics_retain_task_features=True,
+        feature_converter=seqio.PassThroughFeatureConverter(),
+        pass_entire_feature_lengths=True,
+    )
+    inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
+    self.assertSameElements(inp.task_feature_lengths.keys(),
+                            ['inputs', 'targets', 'weights', 'embeddings'])
+
+    score_hparams = seqio_input.get_eval_hparams_for_seqio(
+        mixture_name,
+        batch_size,
+        feature_lengths,
+        seed,
+        seqio_input.MetricType.SCORE,
+        eval_metrics_retain_task_features=False,
+        feature_converter=seqio.PassThroughFeatureConverter(),
+        pass_entire_feature_lengths=True,
+    )
+    inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
+    inp.get_next()
+    self.assertSameElements(
+        inp.task_feature_lengths.keys(),
+        ['inputs', 'targets', 'weights', 'embeddings'],
+    )
 
   def test_get_eval_hparams_for_seqio_scoring_keeps_lengths(self):
     feature_lengths = {'inputs': 1024, 'targets': 3, 'weights': 3}

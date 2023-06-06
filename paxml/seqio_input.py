@@ -1823,6 +1823,7 @@ def get_eval_hparams_for_seqio(
     eval_loop_num_batches: Optional[int] = None,
     repeat: Optional[bool] = None,
     reset_for_eval: bool = True,
+    pass_entire_feature_lengths: bool = False,
 ) -> list[pax_fiddle.Config[SeqIOInput]]:
   """Returns a list of SeqIOInput configs for SeqIO Task/Mixture for eval.
 
@@ -1876,6 +1877,8 @@ def get_eval_hparams_for_seqio(
     repeat: Whether to repeat the data.
     reset_for_eval: If set, eval will continue until tf.errors.OutOfRange is
       raised, and reset() will called for each eval.
+    pass_entire_feature_lengths: If true, updates the task_feature_lengths with
+      the remaining feature lengths in feature_lengths.
   """
   if isinstance(task_or_mixture_name, (seqio.Task, seqio.Mixture)):
     task_or_mixture = task_or_mixture_name
@@ -1922,6 +1925,12 @@ def get_eval_hparams_for_seqio(
       }
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
+
+  if pass_entire_feature_lengths:
+    remaining_feature_lengths = dict(feature_lengths)
+    del remaining_feature_lengths['inputs']
+    del remaining_feature_lengths['targets']
+    p.task_feature_lengths.update(remaining_feature_lengths)
 
   # Split hparams per tasks and filter by metric type.
   tasks: Sequence[seqio.Task] = seqio.get_subtasks(task_or_mixture)
