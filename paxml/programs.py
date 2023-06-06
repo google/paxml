@@ -81,7 +81,6 @@ def get_eval_train_state(
   Returns:
     The TrainState for evaluation, with the opt_states stripped out.
   """
-  task_p = task.hparams
   if use_ema:
     if not tasks_lib.has_ema(task):
       raise ValueError(

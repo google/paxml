@@ -21,6 +21,7 @@ from typing import Optional, Type
 
 from absl import logging
 from etils import epath
+import fiddle as fdl
 import jax
 import jax.numpy as jnp
 from paxml import base_experiment
