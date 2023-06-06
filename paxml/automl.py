@@ -788,8 +788,8 @@ def parameter_sweep(
     search_reward = None
   else:
     search_reward = pax_fiddle.Config(SingleObjective, metric=metric, goal=goal)
-  def decorator(cls):
 
+  def decorator(cls):
     class _ParameterSweeping(cls):
 
       def search(self):
@@ -798,7 +798,10 @@ def parameter_sweep(
             search_algorithm=pax_fiddle.Config(Sweeping),
             search_reward=search_reward,
             treats_early_stopped_trials_as_done=True,
-            train_to_end=True)
+            train_to_end=True,
+            # Consider making toggleable b/285879603
+            enable_dataset_tuning=True,
+        )
 
     new_cls = _ParameterSweeping
     # Create a COMBINATION property and use it to set HP attributes' values.

@@ -53,10 +53,20 @@ TrialFn = Callable[[
 SUB_EXPERIMENT_STEP_INTERVAL = 1000_000_000
 
 
+def _enable_dataset_tuning(
+    experiment_config: base_experiment.BaseExperiment,
+) -> bool:
+  try:
+    search_hparams = experiment_config.search()
+    return search_hparams.enable_dataset_tuning
+  except NotImplementedError:
+    return False
+
+
 @py_utils.benchmark('[PAX STATUS]: ')
 def get_search_space(
-    experiment_config: base_experiment.BaseExperiment
-    ) -> pg.hyper.DynamicEvaluationContext:
+    experiment_config: base_experiment.BaseExperiment,
+) -> pg.hyper.DynamicEvaluationContext:
   """Gets the search space from experiment config."""
   # Inspect the search space by evaluating the hyperparameters.
   # We include tuning parameters from both the `task` and `datasets` in the
@@ -71,11 +81,12 @@ def get_search_space(
     # for mixture weights, however, the function will not be called until
     # the input is instantiated. Therefore we instantiate them when inspecting
     # the search space. Currently we only inspect datasets for training.
-    for d in experiment_config.datasets():
-      if d.is_training:
-        _ = instantiate(d)
+    if _enable_dataset_tuning(experiment_config):
+      for d in experiment_config.datasets():
+        if d.is_training:
+          _ = instantiate(d)
 
-    _ = experiment_config.decoder_datasets()
+      _ = experiment_config.decoder_datasets()
 
   search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
   if (automl.COMBINED_DECISION_ATTR in search_space.hyper_dict

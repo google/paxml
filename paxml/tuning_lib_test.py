@@ -143,6 +143,23 @@ class TuningExperiment(base_experiment.BaseExperiment):
             automl.AverageMetricValues
         ),
         max_num_trials=10,
+        enable_dataset_tuning=True,
+    )
+
+
+class TuningExperimentDatasetTuningDisabled(TuningExperiment):
+
+  def search(self):
+    return automl.SearchHParams(
+        search_algorithm=pax_fiddle.Config(automl.RandomSearch, seed=1),
+        search_reward=pax_fiddle.Config(
+            automl.SingleObjective, metric=automl.Metric.eval('reward')
+        ),
+        cross_step_metric_aggregator=pax_fiddle.Config(
+            automl.AverageMetricValues
+        ),
+        max_num_trials=10,
+        enable_dataset_tuning=False,
     )
 
 
@@ -666,6 +683,20 @@ class TuneTest(absltest.TestCase):
     self.assertEqual([t.final_measurement.reward for t in result.trials],
                      # Used aggregator='max' for computing the reward.
                      [0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0, 0.0, 0.0])
+
+  def test_incorrectly_left_dataset_search_disabled(self):
+    job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
+    with self.assertRaisesRegex(
+        ValueError, 'Hyper primitive .* is not defined'
+    ):
+      tuning_lib.tune(
+          run_experiment,
+          TuningExperimentDatasetTuningDisabled(),
+          platform.work_unit(),
+          job_log_dir,
+          study='local_incorrectly_not_searching_dataset_params',
+          max_num_trials=5,
+      )
 
   def test_bad_running_mode(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())

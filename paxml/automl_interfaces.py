@@ -140,6 +140,8 @@ class SearchHParams:
     train_to_end: If True, training will not be stopped until it reaches
       `num_train_steps`. If False, training will be stopped when there is no
       further eval/decode steps.
+    enable_dataset_tuning: If False, skip instantiating the dataset to look for
+      tunable variables.
   """
   search_algorithm: Optional[pax_fiddle.Config[BaseAlgorithm]] = None
   search_reward: Optional[pax_fiddle.Config[BaseReward]] = None
@@ -155,6 +157,7 @@ class SearchHParams:
   add_experiment_config_to_metadata: bool = True
   treats_early_stopped_trials_as_done: bool = False
   train_to_end: bool = False
+  enable_dataset_tuning: bool = False
 
 
 class MetricType(enum.Enum):

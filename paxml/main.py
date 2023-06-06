@@ -375,8 +375,10 @@ def _setup_xm_work_unit():
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
-def run(experiment_config: base_experiment.BaseExperiment,
-        enable_checkpoint_saving: bool = True):
+def run(
+    experiment_config: base_experiment.BaseExperiment,
+    enable_checkpoint_saving: bool = True,
+):
   """Run an experiment.
 
   This function exists to provide a clear injection seam for a given run.
