@@ -906,7 +906,10 @@ class SeqIOInput(base_input.BaseInput):
     #     number of examples.
     if self.eval_num_examples:
       local_num = self.eval_num_examples
-    elif self.task_inst.cache_dir:
+    elif (
+        isinstance(self.mixture_or_task_inst, seqio.Task)
+        and self.task_inst.cache_dir
+    ):
       # Cached stats are only available when cache_dir is set.
       local_num = self.task_inst.get_cached_stats(split=self.split_name)[
           'examples'

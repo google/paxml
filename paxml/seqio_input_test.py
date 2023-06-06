@@ -771,6 +771,34 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     self.assertLen(m, 1)
     self.assertEqual(m[0]['total_score'], 3.5)
 
+  def test_instantiatee_with_mixture(self):
+    task_name = 'test_task'
+    x = [{
+        'inputs': [7, 8],
+        'targets': [3, 9],
+    }, {
+        'inputs': [15, 16, 17],
+        'targets': [29],
+    }]
+    ds = seqio.test_utils.create_default_dataset(x)
+    dataset_fn = lambda split, shuffle_files, seed=None: ds
+    _register_dummy_task(task_name, dataset_fn)
+    seqio.MixtureRegistry.add(
+        'test_eval_mixture', ['test_task'],
+        default_rate=1.0)
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
+    p.mixture_name = 'test_eval_mixture'
+    p.split_name = 'validation'
+    p.task_feature_lengths = {'inputs': 4, 'targets': 2}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=False, weights_on_targets_only=True)
+    p.batch_size = 1
+    p.is_training = False
+    p.reset_for_eval = True
+    inp = instantiate(p)
+    # Check instantiation succeeds with the mixture for eval.
+    assert(inp.mixture_or_task_inst.name == 'test_eval_mixture')
+
   @parameterized.named_parameters(
       ('log_preprocessed_targets', True),
       ('skip_log_preprocessed_targets', False),
