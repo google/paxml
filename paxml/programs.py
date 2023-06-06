@@ -665,25 +665,26 @@ def safe_write_key_value_pairs(
     logging.warning('Not serializable.')
 
 
-def _maybe_write_scoring_outputs(
+def maybe_write_eval_outputs(
+    mode: EvaluationMode,
     output_dir: epath.Path,
     step: int,
-    scoring_outputs: Sequence[Tuple[str, Any]],
+    eval_outputs: Sequence[Tuple[str, Any]],
+    write_pickle: bool = True,
 ) -> None:
-  """Writes model scoring outputs to disk from leader process."""
+  """Writes model evaluation outputs to disk from leader process."""
   if jax.process_index() != 0 or flags.FLAGS.pax_only_aggregate_summaries:
     return
 
-  fq_fname = output_dir / get_filename(step, EvaluationMode.EVAL.value)
+  fq_fname = output_dir / get_filename(step, mode.value)
   fq_fname.parent.mkdir(parents=True, exist_ok=True)
-
   logging.info(
-      'Writing eval outputs to %s with %d entries',
+      'Writing %s outputs to %s with %d entries',
+      mode.value,
       fq_fname,
-      len(scoring_outputs),
+      len(eval_outputs),
   )
-
-  safe_write_key_value_pairs(fq_fname, scoring_outputs)
+  safe_write_key_value_pairs(fq_fname, eval_outputs, write_pickle=write_pickle)
 
 
 class BaseEvalProgram(Program):
@@ -822,7 +823,9 @@ class BaseEvalProgram(Program):
     summary_utils.write_summary_entry(
         self._eval_summary_writer, step, loss, metrics, summary_tensors
     )
-    _maybe_write_scoring_outputs(output_dir, step, flat_scoring_outputs)
+    maybe_write_eval_outputs(
+        EvaluationMode.EVAL, output_dir, step, flat_scoring_outputs
+    )
 
     return EvalProgramOutput(
         state,

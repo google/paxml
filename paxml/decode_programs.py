@@ -111,11 +111,11 @@ class SingleTaskDecodeProgram(programs.Program):
     self._num_steps = (
         -1 if self._input.reset_for_eval else self._input.eval_loop_num_batches
     )
-    self._dirname = epath.Path(self._input.name)
 
     self._prng_key: PRNGKey = None
     self._job_log_dir: epath.Path = None
-    self._basedir: epath.Path = None
+    self._name: str = None
+    self._output_dir: epath.Path = None
     self._summary_writer: SummaryWriter = None
     self._use_pmap = None
 
@@ -159,7 +159,10 @@ class SingleTaskDecodeProgram(programs.Program):
     """
     self._prng_key = prng_key
     self._job_log_dir = job_log_dir
-    self._basedir = self._job_log_dir / f'{EvaluationMode.DECODE.value}_out'
+    self._name = self._input.name
+    self._output_dir = (
+        self._job_log_dir / f'{EvaluationMode.DECODE.value}_out' / self._name
+    )
     self._summary_writer = summary_writer
     self._use_pmap = use_pmap
 
@@ -191,7 +194,6 @@ class SingleTaskDecodeProgram(programs.Program):
   def run(self, state: TrainState, train_step: int) -> DecodeProgramOutput:
     work_unit = platform.work_unit()
     use_pmap = self._use_pmap
-    step_i = train_step
     partitioner = self._partitioner
     model = self._model
     job_log_dir = self._job_log_dir
@@ -200,12 +202,6 @@ class SingleTaskDecodeProgram(programs.Program):
     num_steps = self._num_steps
     summary_writer = self._summary_writer
     prng_key = self._prng_key
-    basedir = self._basedir
-    dirname = self._dirname
-    raw_filename = programs.get_filename(
-        state.step if use_pmap else step_i, EvaluationMode.DECODE.value
-    )
-    filename = basedir / dirname / raw_filename
     metrics_p = self._metrics_p
 
     if use_pmap:
@@ -213,12 +209,12 @@ class SingleTaskDecodeProgram(programs.Program):
 
     # Skip decode if already completed.
     if programs.can_load_written_outputs(
-        job_log_dir, input_name, EvaluationMode.DECODE, step_i
+        job_log_dir, input_name, EvaluationMode.DECODE, train_step
     ):
       logging.info(
           'Decoding on input %s at step %d already done, skipping.',
           input_name,
-          step_i,
+          train_step,
       )
       return DecodeProgramOutput(state)
 
@@ -251,9 +247,7 @@ class SingleTaskDecodeProgram(programs.Program):
       batch, tpu_unsupported_batch, inputs_partition_spec = (
           xla_passthrough.split_out_xla_unsupported_batch(
               batch,
-              partitioning_spec=None
-              if use_pmap
-              else self.decode_input_partition_spec(batch),
+              partitioning_spec=self.decode_input_partition_spec(batch),
           )
       )
       batch = partitioner.preprocess_inputs(
@@ -278,9 +272,8 @@ class SingleTaskDecodeProgram(programs.Program):
               )
           ),
       )
-      if not use_pmap:  # TODO(laigd): investigate if we can remove this sync.
-        # Cross host synchronization happens at this point.
-        py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
+      # Synchronize all the hosts to ensure their executions don't diverge.
+      py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
 
       # Output is fully replicated now, so it's ok to unreplicate it by
       # retrieving from device 0 only.
@@ -351,13 +344,16 @@ class SingleTaskDecodeProgram(programs.Program):
       logging.info(
           'Finished processing all %d examples.', len(processed_decodes)
       )
+      filename = self._output_dir / programs.get_filename(
+          train_step, EvaluationMode.DECODE.value
+      )
       seqio_metric_values = seqio_input.process_outputs(
           decode_input,
           processed_decodes,
           summary_writer,
           seqio_input.MetricType.PREDICT,
-          step_i,
-          basedir / dirname,
+          train_step,
+          self._output_dir,
           plain_text_output_fname=f'{filename}.txt',
       )
 
@@ -369,35 +365,28 @@ class SingleTaskDecodeProgram(programs.Program):
 
     with summary_writer.as_default():
       logging.info('Summarizing of decode_metrics.')
-      decode_metric_dict = decode_metrics.summarize(step_i, 'decode_metrics')
+      decode_metric_dict = decode_metrics.summarize(
+          train_step, 'decode_metrics'
+      )
       logging.info('Summarizing of process_decode_metrics.')
       processed_metric_dict = process_decode_metrics.summarize(
-          step_i, 'process_decode_metrics'
+          train_step, 'process_decode_metrics'
       )
       for key, tensor in all_summary_tensors.items():
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(
-            step_i, key, np.array(tensor), summary_type
+            train_step, key, np.array(tensor), summary_type
         )
-      metric_utils.write_clu_metric_summaries(metric_values, step_i)
-      metric_utils.write_clu_metric_summaries(process_metric_values, step_i)
+      metric_utils.write_clu_metric_summaries(metric_values, train_step)
+      metric_utils.write_clu_metric_summaries(process_metric_values, train_step)
 
-    if jax.process_index() == 0 and not (
-        use_pmap and flags.FLAGS.pax_only_aggregate_summaries
-    ):
-      dir_path = basedir / dirname
-      dir_path.mkdir(parents=True, exist_ok=True)
-      output_file = filename
-      logging.info(
-          'Writing decoder output to %s with %d entries',
-          output_file,
-          len(processed_decodes),
-      )
-      programs.safe_write_key_value_pairs(
-          output_file,
-          processed_decodes,
-          write_pickle=output_pickle if use_pmap else True,
-      )
+    programs.maybe_write_eval_outputs(
+        EvaluationMode.DECODE,
+        self._output_dir,
+        train_step,
+        processed_decodes,
+        write_pickle=output_pickle if use_pmap else True,
+    )
 
     msg = f'Finished decoding input {input_name}'
     work_unit.set_task_status(msg)
