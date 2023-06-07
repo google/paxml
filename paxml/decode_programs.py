@@ -122,7 +122,6 @@ class SingleTaskDecodeProgram(programs.Program):
 
     self._task = None
     self._output_pickle = None
-    self._enable_checkpoint_saving = None
 
     self._metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics] = None
 
@@ -140,7 +139,6 @@ class SingleTaskDecodeProgram(programs.Program):
       use_pmap: bool,
       task: Optional[tasks_lib.SingleTask],
       output_pickle: bool,
-      enable_checkpoint_saving: bool,
       metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
   ) -> None:
     """Sets up the program.
@@ -150,12 +148,9 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: Directory for the job logs.
       summary_writer: The summary writer to log summaries.
       use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
-        `task`, `var_weight_params`, `output_pickle` and
-        `enable_checkpoint_saving` should be set; otherwise, `metrics` should
-        be set.
+        `task` should be set; otherwise, `metrics` should be set.
       task: Params for the task encapsulating a data parallel model.
       output_pickle: Whether to write decoding results to a pickle file.
-      enable_checkpoint_saving: Whether to perform checkpoint saving or not.
       metrics_p: Parameters to configure how to aggregate the metrics.
     """
     self._prng_key = prng_key
@@ -172,8 +167,6 @@ class SingleTaskDecodeProgram(programs.Program):
 
     self._task = task
     self._output_pickle = output_pickle
-    self._enable_checkpoint_saving = enable_checkpoint_saving
-
     self._metrics_p = metrics_p
 
   def should_run(self, state: TrainState, train_step: int) -> bool:

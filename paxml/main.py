@@ -315,7 +315,6 @@ def run_experiment(
         continuous_decode=True,
         run_eval=FLAGS.eval_during_decode,
         early_stopping_fn=early_stopping_fn,
-        enable_checkpoint_saving=enable_checkpoint_saving,
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,

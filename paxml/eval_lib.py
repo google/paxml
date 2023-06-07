@@ -612,7 +612,6 @@ def decode(
     run_eval: Optional[bool] = False,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
     enable_auto_sharding: bool = False,
-    enable_checkpoint_saving: bool = True,
     output_pickle: bool = True,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
@@ -637,7 +636,6 @@ def decode(
       should_stop_early.
     enable_auto_sharding: Enables the XLA AutoSharding pass to generate SPMD
       shardings.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     output_pickle: Output .pickle file alongside the .jsonl file when decoding.
     enforce_restore_shape_check: Raises an error if restore shapes do not match
       checkpoint shapes.
@@ -763,7 +761,6 @@ def decode(
       job_log_dir=job_log_dir,
       use_pmap=True,
       output_pickle=output_pickle,
-      enable_checkpoint_saving=enable_checkpoint_saving,
   )
 
   _common_eval_or_decode_loop(
@@ -789,7 +786,6 @@ def partitioned_decode_once(
     job_log_dir: epath.Path,
     use_pmap: bool,
     output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
     train_state_preprocessor: Optional[
         Callable[[TrainState], TrainState]
     ] = None,
@@ -802,10 +798,8 @@ def partitioned_decode_once(
     prng_key: The prng key used for decoding.
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `var_weight_params`, `output_pickle` and `enable_checkpoint_saving` should
-      be set; otherwise, `metrics` should be set.
+      `task` should be set; otherwise, `metrics` should be set.
     output_pickle: Whether to write decoding results to a pickle file.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     train_state_preprocessor: A function to preprocess the train state before
       decoding.
   """
@@ -832,7 +826,6 @@ def partitioned_decode_once(
           use_pmap=use_pmap,
           task=task,
           output_pickle=output_pickle,
-          enable_checkpoint_saving=enable_checkpoint_saving,
           metrics_p=task.metrics,
       )
     jax.monitoring.record_event_duration_secs(
@@ -860,7 +853,6 @@ def _decode_once(
     use_pmap: bool,
     task: Optional[tasks_lib.SingleTask] = None,
     output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
     metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
 ) -> Tuple[
     Tuple[
@@ -880,12 +872,9 @@ def _decode_once(
     train_state: A `TrainState` object.
     summary_writers: The summary writer objects to log summaries.
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `task`, `var_weight_params`, `output_pickle` and
-      `enable_checkpoint_saving` should be set; otherwise, `metrics_p` should be
-      set.
+      `task` should be set; otherwise, `metrics_p` should be set.
     task: The task encapsulating a data parallel model.
     output_pickle: Whether to write decoding results to a pickle file.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
     metrics_p: Parameters to configure how to aggregate the metrics.
 
   Returns:
@@ -899,7 +888,7 @@ def _decode_once(
   """
   # TODO(wangpeng): Remove unnecessary `use_pmap` branchings.
 
-  if use_pmap and not decode_programs:
+  if not decode_programs:
     return ([], [], [], []), []
 
   if use_pmap:
@@ -911,14 +900,11 @@ def _decode_once(
   step_i = int(
       py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
   )
-
-  if use_pmap:
-    logging.info('step=%d', step_i)
-  else:
-    logging.info(
-        'partitioned_train_state: %s',
-        jax.tree_map(lambda x: x.shape, train_state),
-    )
+  logging.info(
+      'Start decoding at train step: %d, partitioned_train_state: %s',
+      step_i,
+      jax.tree_map(lambda x: x.shape, train_state),
+  )
 
   decode_metrics = []
   processed_decode_metrics = []
@@ -934,7 +920,6 @@ def _decode_once(
         use_pmap=use_pmap,
         task=task,
         output_pickle=output_pickle,
-        enable_checkpoint_saving=enable_checkpoint_saving,
         metrics_p=metrics_p,
     )
 
