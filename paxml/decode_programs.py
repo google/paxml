@@ -18,7 +18,7 @@
 import collections
 import dataclasses
 import functools
-from typing import Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from absl import flags
 from absl import logging
@@ -115,6 +115,7 @@ class SingleTaskDecodeProgram(programs.Program):
     self._prng_key: PRNGKey = None
     self._job_log_dir: epath.Path = None
     self._name: str = None
+    self._unpadded_global_batch_size: int = None
     self._output_dir: epath.Path = None
     self._summary_writer: SummaryWriter = None
     self._use_pmap = None
@@ -160,6 +161,9 @@ class SingleTaskDecodeProgram(programs.Program):
     self._prng_key = prng_key
     self._job_log_dir = job_log_dir
     self._name = self._input.name
+    self._unpadded_global_batch_size = self._input.get_global_batch_size(
+        self._input
+    )
     self._output_dir = (
         self._job_log_dir / f'{EvaluationMode.DECODE.value}_out' / self._name
     )
@@ -192,155 +196,41 @@ class SingleTaskDecodeProgram(programs.Program):
     return self._input
 
   def run(self, state: TrainState, train_step: int) -> DecodeProgramOutput:
-    work_unit = platform.work_unit()
     use_pmap = self._use_pmap
-    partitioner = self._partitioner
-    model = self._model
-    job_log_dir = self._job_log_dir
-    decode_input = self._input
-    input_name = self._input.name
-    num_steps = self._num_steps
-    summary_writer = self._summary_writer
-    prng_key = self._prng_key
-    metrics_p = self._metrics_p
 
     if use_pmap:
       output_pickle = self._output_pickle
 
     # Skip decode if already completed.
     if programs.can_load_written_outputs(
-        job_log_dir, input_name, EvaluationMode.DECODE, train_step
+        self._job_log_dir, self._name, EvaluationMode.DECODE, train_step
     ):
       logging.info(
           'Decoding on input %s at step %d already done, skipping.',
-          input_name,
+          self._name,
           train_step,
       )
       return DecodeProgramOutput(state)
 
-    logging.info('Start decoding on input %s', input_name)
-    step_num = 0
+    logging.info('Start decoding on input %s', self._name)
     # decode_metrics and process_decode_metrics work on WeightedScalars
     # which are string -> (value, weight) pairs where value and weight
     # scalars. These metrics are configured on the task.
-    decode_metrics = instantiate(metrics_p)
-    process_decode_metrics = instantiate(metrics_p)
+    decode_metrics = instantiate(self._metrics_p)
+    process_decode_metrics = instantiate(self._metrics_p)
 
-    # metrics and processed_metrics are dictionaries of
-    # strings -> clu_metrics.Metric objects. metrics is returned from decode()
-    # and processed_metrics is returned from process_decode_out.
-    metrics = {}
-    processed_metrics = {}
-    processed_decodes = []
-    all_summary_tensors = collections.defaultdict(list)
-    while num_steps < 0 or step_num < num_steps:
-      step_num += 1
-      try:
-        batch = decode_input.get_next_padded()
-      except (tf.errors.OutOfRangeError, StopIteration):
-        decode_input.reset()
-        if step_num == 1:
-          logging.error('Input %s yields zero batch.', input_name)
-        else:
-          logging.info('Input %s exhausted at step %d.', input_name, step_num)
-        break
-      batch, tpu_unsupported_batch, inputs_partition_spec = (
-          xla_passthrough.split_out_xla_unsupported_batch(
-              batch,
-              partitioning_spec=self.decode_input_partition_spec(batch),
-          )
-      )
-      batch = partitioner.preprocess_inputs(
-          decode_input, batch, inputs_partition_spec
-      )
-
-      if self._task and self._task.decode.prng_key_fold_with_batch_index:
-        # In this case, the key is a scalar we need to preprocess it
-        # (broadcast/split) after folding in step_num.
-        decode_key = jax.random.fold_in(prng_key, step_num)
-        decode_key = partitioner.preprocess_prng_key(decode_key)
-      else:
-        decode_key = prng_key
-
-      decode_out = self.decode_step(
-          state,
-          decode_key,
-          batch,
-          trainer_lib.BaseStepFnStaticArgs(
-              unpadded_global_batch_size=decode_input.get_global_batch_size(
-                  decode_input.hparams
-              )
-          ),
-      )
-      # Synchronize all the hosts to ensure their executions don't diverge.
-      py_utils.sync_global_devices(f'spmd_decode-{input_name}-{step_num}')
-
-      # Output is fully replicated now, so it's ok to unreplicate it by
-      # retrieving from device 0 only.
-      unreplicated_decode_out = py_utils.maybe_unreplicate_for_fully_replicated(
-          decode_out
-      )
-      del decode_out  # release Jax Arrays memory allocations
-      per_example_out = unreplicated_decode_out.per_example_out
-      weighted_scalars = unreplicated_decode_out.weighted_scalars
-      updated_metrics = unreplicated_decode_out.clu_metrics
-      summary_tensors = unreplicated_decode_out.summary_tensors
-
-      # Merge clu.metrics to update for each minibatch.
-      metrics = _merge_clu_metrics(metrics, updated_metrics)
-
-      for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
-        all_summary_tensors[key].append(tensor)
-
-      logging.info(
-          'Finished decoding input batch %d for %s', step_num, input_name
-      )
-
-      if use_pmap:
-        # we store the metric directly as it has already been aggregated in
-        # side decode_step_fun
-        decode_metrics.store(weighted_scalars)
-      elif jax.process_index() == 0:
-        # Copy the tensor from device memory to ram, since accumulating such
-        # tensor on devices may cause HBM OOM, when
-        # task_p.train.summary_accumulate_interval_steps is set.
-        # TODO(laigd): investigate whether we should apply this to pmap as well.
-        weighted_scalars = jax.tree_map(np.array, weighted_scalars)
-        decode_metrics.store(weighted_scalars)
-
-      xla_passthrough.merge_back_xla_unsupported_batch(
-          per_example_out, tpu_unsupported_batch
-      )
-
-      if jax.process_index() == 0:
-        # Run `process_decode_out` on CPU device as its implementation
-        # is not expected to be JIT friendly. Since we keep track of
-        # its outputs, we also don't want on-device allocation as
-        # would eventually lead to HBM OOM.
-        with jax.default_device(jax.devices('cpu')[0]):
-          per_example_out = jax.tree_map(np.asarray, per_example_out)
-          process_decode_output = model.process_decode_out(
-              decode_input, per_example_out
-          )
-
-        (process_weighted_scalars, processed_out, processed_metric_updates) = (
-            process_decode_output
-        )
-        processed_out = seqio_input.maybe_update_decode_output_keys(
-            processed_out, per_example_out
-        )
-
-        process_decode_metrics.store(process_weighted_scalars)
-        processed_decodes.extend(processed_out)
-        if processed_metric_updates:
-          processed_metrics = _merge_clu_metrics(
-              processed_metrics, processed_metric_updates
-          )
+    (
+        step_num,
+        metrics,
+        processed_metrics,
+        processed_decodes,
+        all_summary_tensors,
+    ) = self._run_decode_loop(state, decode_metrics, process_decode_metrics)
 
     # Now the decode loop of multiple batches on current dataset is done,
     # we start to aggregate copmuted metrics and put them in summary.
     seqio_metric_values = None
-    if seqio_input.should_process_outputs(decode_input):
+    if seqio_input.should_process_outputs(self.decode_input):
       logging.info(
           'Finished processing all %d examples.', len(processed_decodes)
       )
@@ -348,9 +238,9 @@ class SingleTaskDecodeProgram(programs.Program):
           train_step, EvaluationMode.DECODE.value
       )
       seqio_metric_values = seqio_input.process_outputs(
-          decode_input,
+          self.decode_input,
           processed_decodes,
-          summary_writer,
+          self._summary_writer,
           seqio_input.MetricType.PREDICT,
           train_step,
           self._output_dir,
@@ -363,7 +253,7 @@ class SingleTaskDecodeProgram(programs.Program):
         processed_metrics
     )
 
-    with summary_writer.as_default():
+    with self._summary_writer.as_default():
       logging.info('Summarizing of decode_metrics.')
       decode_metric_dict = decode_metrics.summarize(
           train_step, 'decode_metrics'
@@ -388,7 +278,8 @@ class SingleTaskDecodeProgram(programs.Program):
         write_pickle=output_pickle if use_pmap else True,
     )
 
-    msg = f'Finished decoding input {input_name}'
+    msg = f'Finished decoding input {self._name}'
+    work_unit = platform.work_unit()
     work_unit.set_task_status(msg)
     logging.info(msg)
 
@@ -405,6 +296,135 @@ class SingleTaskDecodeProgram(programs.Program):
         seqio_metrics=seqio_metric_values,
         num_decode_steps=step_num,
         raw_decode_metrics=metrics,
+    )
+
+  def _run_decode_loop(
+      self,
+      state: TrainState,
+      decode_metrics: base_metrics.BaseMetrics,
+      process_decode_metrics: base_metrics.BaseMetrics,
+  ) -> Tuple[
+      int,
+      Dict[str, clu_metrics.Metric],
+      Dict[str, clu_metrics.Metric],
+      List[Tuple[str, Any]],
+      Dict[str, List[JTensor]],
+  ]:
+    # metrics and processed_metrics are dictionaries of
+    # strings -> clu_metrics.Metric objects. metrics is returned from decode()
+    # and processed_metrics is returned from process_decode_out.
+    metrics = {}
+    processed_metrics = {}
+    processed_decodes = []
+    all_summary_tensors = collections.defaultdict(list)
+
+    step_num = 0
+    # self._num_steps < 0 indicates running until input out of range.
+    while self._num_steps < 0 or step_num < self._num_steps:
+      step_num += 1
+      try:
+        batch = self.decode_input.get_next_padded()
+      except (tf.errors.OutOfRangeError, StopIteration):
+        self.decode_input.reset()
+        if step_num == 1:
+          logging.error('Input %s yields zero batch.', self._name)
+        else:
+          logging.info('Input %s exhausted at step %d.', self._name, step_num)
+        break
+      batch, tpu_unsupported_batch, inputs_partition_spec = (
+          xla_passthrough.split_out_xla_unsupported_batch(
+              batch,
+              partitioning_spec=self.decode_input_partition_spec(batch),
+          )
+      )
+      batch = self._partitioner.preprocess_inputs(
+          self.decode_input, batch, inputs_partition_spec
+      )
+
+      if self._task and self._task.decode.prng_key_fold_with_batch_index:
+        # In this case, the key is a scalar and we need to preprocess it
+        # (broadcast/split) after folding in step_num.
+        decode_key = jax.random.fold_in(self._prng_key, step_num)
+        decode_key = self._partitioner.preprocess_prng_key(decode_key)
+      else:
+        decode_key = self._prng_key
+
+      decode_out = self.decode_step(
+          state,
+          decode_key,
+          batch,
+          trainer_lib.BaseStepFnStaticArgs(
+              unpadded_global_batch_size=self._unpadded_global_batch_size
+          ),
+      )
+      # Synchronize all the hosts to ensure their executions don't diverge.
+      py_utils.sync_global_devices(f'spmd_decode-{self._name}-{step_num}')
+
+      # Output is fully replicated now, so it's ok to unreplicate it by
+      # retrieving from device 0 only.
+      unreplicated_decode_out = py_utils.maybe_unreplicate_for_fully_replicated(
+          decode_out
+      )
+      del decode_out  # release Jax Arrays memory allocations
+      per_example_out = unreplicated_decode_out.per_example_out
+      weighted_scalars = unreplicated_decode_out.weighted_scalars
+      updated_metrics = unreplicated_decode_out.clu_metrics
+      summary_tensors = unreplicated_decode_out.summary_tensors
+
+      # Merge clu.metrics to update for each minibatch.
+      metrics = _merge_clu_metrics(metrics, updated_metrics)
+
+      for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
+        all_summary_tensors[key].append(tensor)
+
+      logging.info(
+          'Finished decoding input batch %d for %s', step_num, self._name
+      )
+
+      if self._use_pmap:
+        # we store the metric directly as it has already been aggregated in
+        # side decode_step_fun
+        decode_metrics.store(weighted_scalars)
+      elif jax.process_index() == 0:
+        # Copy the tensor from device memory to ram, since accumulating such
+        # tensor on devices may cause HBM OOM, when
+        # task_p.train.summary_accumulate_interval_steps is set.
+        # TODO(laigd): investigate whether we should apply this to pmap as well.
+        weighted_scalars = jax.tree_map(np.array, weighted_scalars)
+        decode_metrics.store(weighted_scalars)
+
+      xla_passthrough.merge_back_xla_unsupported_batch(
+          per_example_out, tpu_unsupported_batch
+      )
+
+      if jax.process_index() == 0:
+        # Run `process_decode_out` on CPU device as its implementation
+        # is not expected to be JIT friendly. Since we keep track of
+        # its outputs, we also don't want on-device allocation as
+        # would eventually lead to HBM OOM.
+        with jax.default_device(jax.devices('cpu')[0]):
+          per_example_out = jax.tree_map(np.asarray, per_example_out)
+          process_weighted_scalars, processed_out, processed_metric_updates = (
+              self._model.process_decode_out(self.decode_input, per_example_out)
+          )
+
+        processed_out = seqio_input.maybe_update_decode_output_keys(
+            processed_out, per_example_out
+        )
+
+        process_decode_metrics.store(process_weighted_scalars)
+        processed_decodes.extend(processed_out)
+        if processed_metric_updates:
+          processed_metrics = _merge_clu_metrics(
+              processed_metrics, processed_metric_updates
+          )
+
+    return (
+        step_num,
+        metrics,
+        processed_metrics,
+        processed_decodes,
+        all_summary_tensors,
     )
 
   def _get_decode_step(
