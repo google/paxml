@@ -720,106 +720,42 @@ def decode(
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
       wait_until_step=wait_until_step,
   )
-
-  if continuous_decode:
-    logging.info(
-        'running continuous_decode from %s', checkpointer.restore_checkpoint_dir
-    )
-  else:
-    logging.info(
-        'running decode_once restored from %s',
-        checkpointer.restore_checkpoint_dir,
-    )
-
-  eval_programs = experiment_config.eval_programs() if run_eval else []
-  if jax_task.model.mesh_shape is not None:
-    decode_method = decode_spmd_model
-    extra_kwargs = {}
-  else:
-    decode_method = decode_pmap_model
-    extra_kwargs = dict(
-        output_pickle=output_pickle,
-        enable_checkpoint_saving=enable_checkpoint_saving,
-    )
-  decode_method(
-      jax_task,
-      prng_key,
-      partitioner,
-      checkpointer,
-      decoder_inputs,
-      eval_programs,
-      job_log_dir,
-      continuous_decode,
-      early_stopping_fn,
-      **extra_kwargs,
+  logging.info(
+      'running %s from %s',
+      'continuous_decode' if continuous_decode else 'decode_once',
+      checkpointer.restore_checkpoint_dir,
   )
 
-
-# TODO(wangpeng): Merge decode_pmap_model and decode_spmd_model.
-def decode_pmap_model(
-    jax_task: tasks_lib.SingleTask,
-    prng_key: PRNGKey,
-    partitioner: partitioning.Partitioner,
-    checkpointer: _EvalCheckpointer,
-    # TODO(wangpeng): Rename to `decode_input_params`
-    input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
-    eval_programs: Sequence[programs.BaseEvalProgram],
-    job_log_dir: epath.Path,
-    continuous_decode: bool,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
-    output_pickle: bool = True,
-    enable_checkpoint_saving: bool = True,
-) -> None:
-  """Runs the decoding on the entire decoder datasets for a PMAP model.
-
-  Args:
-    jax_task: The task encapsulating a the data parallel model.
-    prng_key: Root PRNGKey for the decode pipeline.
-    partitioner: The partitioner, will be used to partition the step function.
-    checkpointer: The model checkpointing method to use.
-    input_p: List of input params to be decoded.
-    eval_programs: List of eval programs to run.
-    job_log_dir: Directory for the job logs.
-    continuous_decode: whether to continuously decode on the latest ckpt.
-    early_stopping_fn: An optional callable object for reporting metrics and
-      determining whether to early stop current training. The callable object
-      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-    output_pickle: Output .pickle file alongside the .jsonl file when decoding.
-    enable_checkpoint_saving: Whether to perform checkpoint saving or not.
-  """
+  eval_programs = experiment_config.eval_programs() if run_eval else []
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  prng_key, eval_key = jax.random.split(prng_key)
+  decode_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_programs=eval_programs,
-      decode_input_ps=input_p,
+      decode_input_ps=decoder_inputs,
       job_log_dir=job_log_dir,
       eval_key=eval_key,
   )
 
-  # JaxContext needed for parameter sharing.
-  context_p = base_layer.JaxContext.HParams(do_eval=True)
-  with base_layer.JaxContext.new_context(hparams=context_p):
-    trainer_lib.write_post_init_model_hparams_file(
-        jax_task.model,
-        train_state_metadata.var_weight_hparams,
-        job_log_dir / 'decoder_out',
-        do_eval=True,
-    )
+  trainer_lib.write_post_init_model_hparams_file(
+      model=jax_task.model,
+      var_weight_hparams=train_state_metadata.var_weight_hparams,
+      job_log_dir=job_log_dir / 'decoder_out',
+      do_eval=True,
+  )
 
-  prng_key, decode_key = jax.random.split(prng_key)
   # If prng_key_fold_with_batch_index is True, we need to fold in the step
   # number before preprocessing the key, so preprocessing need to be done at
   # every step.
+  logging.info('decoder prng_seed: %s', decode_key)
   if not jax_task.decode.prng_key_fold_with_batch_index:
     decode_key = partitioner.preprocess_prng_key(decode_key)
-  logging.info('decoder prng_seed: %s', decode_key)
 
   decode_programs = eval_runner.decode_programs
+  use_pmap = jax_task.model.mesh_shape is None
   decode_once_fn = partitioned_decode_once(
       decode_programs=decode_programs,
       task=jax_task,
@@ -830,7 +766,6 @@ def decode_pmap_model(
       enable_checkpoint_saving=enable_checkpoint_saving,
   )
 
-  decode_inputs = [p.decode_input for p in decode_programs]
   _common_eval_or_decode_loop(
       mode=EvaluationMode.DECODE,
       checkpointer=checkpointer,
@@ -842,7 +777,7 @@ def decode_pmap_model(
       early_stopping_fn=early_stopping_fn,
       continuous_decode=continuous_decode,
       eval_runner=eval_runner,
-      decode_inputs=decode_inputs,
+      decode_inputs=[p.decode_input for p in decode_programs],
   )
 
 
@@ -984,7 +919,6 @@ def _decode_once(
         'partitioned_train_state: %s',
         jax.tree_map(lambda x: x.shape, train_state),
     )
-    logging.info('decode prng_key: %s', prng_key)
 
   decode_metrics = []
   processed_decode_metrics = []
@@ -1018,76 +952,6 @@ def _decode_once(
       seqio_metrics,
       num_decode_steps,
   ), raw_metrics
-
-
-def decode_spmd_model(
-    jax_task: tasks_lib.SingleTask,
-    prng_key: PRNGKey,
-    partitioner: partitioning.Partitioner,
-    checkpointer: _EvalCheckpointer,
-    input_p: Sequence[pax_fiddle.Config[base_input.BaseInput]],
-    eval_programs: Sequence[programs.BaseEvalProgram],
-    job_log_dir: epath.Path,
-    continuous_decode: bool,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
-) -> None:
-  """Runs the decoding on the entire decoder datasets for SPMD model.
-
-  Args:
-    jax_task: The task that encapsulates an SPMD model.
-    prng_key: Root PRNGKey for the decode pipeline.
-    partitioner: The partitioner used to partition the step function.
-    checkpointer: The model checkpointing method to use.
-    input_p: List of input params to be decoded.
-    eval_programs: List of eval programs to run.
-    job_log_dir: Directory for the job logs.
-    continuous_decode: whether to continuously decode on the latest ckpt.
-    early_stopping_fn: An optional callable object for reporting metrics and
-      determining whether to early stop current training. The callable object
-      has signature: (metrics, running_mode, ckpt_step, is_final_ckpt) ->
-      should_stop_early.
-  """
-
-  partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key)
-  )
-  prng_key, eval_key = jax.random.split(prng_key)
-  eval_runner = _EvalRunner(
-      jax_task=jax_task,
-      partitioner=partitioner,
-      eval_programs=eval_programs,
-      decode_input_ps=input_p,
-      job_log_dir=job_log_dir,
-      eval_key=eval_key,
-  )
-  decode_programs = eval_runner.decode_programs
-  decode_once_fn = partitioned_decode_once(
-      decode_programs=decode_programs,
-      task=jax_task,
-      job_log_dir=job_log_dir,
-      prng_key=prng_key,
-      use_pmap=False,
-  )
-  trainer_lib.write_post_init_model_hparams_file(
-      model=jax_task.model,
-      var_weight_hparams=train_state_metadata.var_weight_hparams,
-      job_log_dir=job_log_dir / 'decoder_out',
-      do_eval=True,
-  )
-
-  _common_eval_or_decode_loop(
-      mode=EvaluationMode.DECODE,
-      checkpointer=checkpointer,
-      task=jax_task,
-      job_log_dir=job_log_dir,
-      decode_once_fn=decode_once_fn,
-      partitioned_train_state=partitioned_train_state,
-      train_state_metadata=train_state_metadata,
-      early_stopping_fn=early_stopping_fn,
-      continuous_decode=continuous_decode,
-      eval_runner=eval_runner,
-      decode_inputs=[p.decode_input for p in decode_programs],
-  )
 
 
 def _is_shape_dtype_struct(x):
