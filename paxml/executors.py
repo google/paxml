@@ -344,9 +344,6 @@ def _get_partition_decode_once_fn(
     task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
     use_pmap: bool,
-    train_state_preprocessor: Optional[
-        Callable[[TrainState], TrainState]
-    ] = None,
 ) -> Tuple[
     Callable[..., tuning_lib.DecodeMetrics],
     jax.random.KeyArray,
@@ -360,8 +357,6 @@ def _get_partition_decode_once_fn(
     task: The task encapsulating a data parallel model.
     job_log_dir: Directory for the job logs.
     use_pmap: Whether to use pmap (instead of SPMD/pjit).
-    train_state_preprocessor: A function to preprocess the train state before
-      decoding.
   """
   assert decode_programs, '`decode_programs` must not be empty'
   partitioner = decode_programs[0].partitioner
@@ -382,7 +377,6 @@ def _get_partition_decode_once_fn(
       job_log_dir=job_log_dir,
       prng_key=decode_key,
       use_pmap=use_pmap,
-      train_state_preprocessor=train_state_preprocessor,
   )
 
   decode_input_names = [p.decode_input.name for p in decode_programs]
@@ -410,9 +404,6 @@ def _train_and_evaluate_common(
     is_vars_replicated,
     train_prng_seed,
     exit_after_ondemand_checkpoint,
-    decode_state_preprocessor: Optional[
-        Callable[[TrainState], TrainState]
-    ] = None,
 ):
   """Training loop code common to both pmap and spmd."""
   train_p = task.train
@@ -429,7 +420,6 @@ def _train_and_evaluate_common(
             task=task,
             job_log_dir=job_log_dir,
             use_pmap=is_vars_replicated,
-            train_state_preprocessor=decode_state_preprocessor,
         )
     )
   else:

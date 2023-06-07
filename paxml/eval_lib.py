@@ -752,7 +752,7 @@ def decode(
       task=jax_task,
       prng_key=decode_key,
       job_log_dir=job_log_dir,
-      use_pmap=True,
+      use_pmap=use_pmap,
       output_pickle=output_pickle,
   )
 
@@ -779,9 +779,6 @@ def partitioned_decode_once(
     job_log_dir: epath.Path,
     use_pmap: bool,
     output_pickle: bool = True,
-    train_state_preprocessor: Optional[
-        Callable[[TrainState], TrainState]
-    ] = None,
 ) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
   """Returns a function that runs decode over all decoder datasets.
 
@@ -793,17 +790,11 @@ def partitioned_decode_once(
     use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
       `task` should be set; otherwise, `metrics` should be set.
     output_pickle: Whether to write decoding results to a pickle file.
-    train_state_preprocessor: A function to preprocess the train state before
-      decoding.
   """
   def decode_once_fn(
       partitioned_train_state: TrainState,
       summary_writers: List[SummaryWriter],
   ) -> tuning_lib.DecodeMetrics:
-    if train_state_preprocessor is not None:
-      partitioned_train_state = train_state_preprocessor(
-          partitioned_train_state
-      )
     with py_utils.timeit() as decode_period:
       (
           decode_metrics_list,
