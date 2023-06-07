@@ -537,35 +537,22 @@ def _train_and_evaluate_common(
         )
         # If we have eval test then also evaluate on test.
         if eval_programs:
-          logging.debug(
-              '[PAX STATUS]:  Performing eval_step() runs on test splits.'
+          logging.debug('[PAX STATUS]:  Running eval programs.')
+          eval_metrics, elapsed_secs = eval_lib.run_eval_programs(
+              eval_programs=eval_programs,
+              eval_partitioned_train_state=eval_partitioned_train_state,
+              eval_prng_seed=eval_prng_seed,
+              step=step_i,
+              job_log_dir=job_log_dir,
           )
-          with py_utils.timeit() as eval_period:
-            eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-                eval_lib.run_eval_loop_over_test_splits(
-                    test_eval_programs=eval_programs,
-                    eval_partitioned_train_state=eval_partitioned_train_state,
-                    eval_prng_seed=eval_prng_seed,
-                    step=step_i,
-                    job_log_dir=job_log_dir,
-                )
-            )
           jax.monitoring.record_event_duration_secs(
-              '/jax/pax/train/interleaved_eval_duration_sec',
-              eval_period.elapsed)
-          eval_steps_per_sec = sum(num_eval_steps) / eval_period.elapsed
-          eval_metrics = tuning_lib.EvalMetrics(
-              metrics_list=eval_metrics_list,
-              scoring_metrics_list=eval_scoring_metrics_list,
-              steps_per_sec=eval_steps_per_sec,
-              input_names=[prog.eval_input.name for prog in eval_programs],
+              '/jax/pax/train/interleaved_eval_duration_sec', elapsed_secs
           )
           logging.log_first_n(
               INFO,
-              '[PAX STATUS]:  Completed eval_step() runs on test splits in %f'
-              ' seconds.',
+              '[PAX STATUS]:  Completed running eval programs in %f seconds.',
               5,
-              eval_period.elapsed,
+              elapsed_secs,
           )
 
       decode_metrics: Optional[tuning_lib.DecodeMetrics] = None

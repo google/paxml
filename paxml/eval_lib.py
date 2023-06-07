@@ -359,43 +359,46 @@ def _create_checkpointer(
   )
 
 
-def run_eval_loop_over_test_splits(
+def run_eval_programs(
     *,
-    test_eval_programs: Sequence[programs.BaseEvalProgram],
+    eval_programs: Sequence[programs.BaseEvalProgram],
     eval_partitioned_train_state: TrainState,
     eval_prng_seed: jax.random.KeyArray,
     step: int,
     job_log_dir: epath.Path,
-) -> Tuple[
-    Sequence[Optional[Mapping[str, float]]],  # eval metrics.
-    Sequence[Optional[Mapping[str, float]]],  # eval scoring metrics.
-    Sequence[int],  # performed eval steps.
-]:
+) -> Tuple[tuning_lib.EvalMetrics, float]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
-    test_eval_programs: A list of EvalPrograms to conduct eval.
+    eval_programs: A list of EvalPrograms to conduct eval.
     eval_partitioned_train_state: Train State to use for eval.
     eval_prng_seed: RNG seed for eval programs.
     step: The step at which we are evaling the model.
     job_log_dir: Job's log directory in which scoring outputs will be written.
 
   Returns:
-    A tuple of (a list of eval metrics,
-                a list of optional scoring metrics (seqio)
-                a list of integer as performed evaluation steps).
-      Items from each list are aligned with the `model_inputs`.
+    A tuning_lib.EvalMetrics instance encapsulating the eval metrics, and the
+    time elapsed (in seconds) when running the eval programs.
   """
   eval_metrics = []
   eval_scoring_metrics = []
   num_eval_steps = []
-  for program in test_eval_programs:
-    program_out = program.run(eval_partitioned_train_state, step)
-    eval_metrics.append(program_out.eval_metrics)
-    eval_scoring_metrics.append(program_out.eval_scoring_metrics)
-    num_eval_steps.append(program_out.num_eval_steps)
 
-  return eval_metrics, eval_scoring_metrics, num_eval_steps
+  with py_utils.timeit() as period:
+    for program in eval_programs:
+      program_out = program.run(eval_partitioned_train_state, step)
+      eval_metrics.append(program_out.eval_metrics)
+      eval_scoring_metrics.append(program_out.eval_scoring_metrics)
+      num_eval_steps.append(program_out.num_eval_steps)
+
+  eval_steps_per_sec = sum(num_eval_steps) / period.elapsed
+  combined_eval_metrics = tuning_lib.EvalMetrics(
+      metrics_list=eval_metrics,
+      scoring_metrics_list=eval_scoring_metrics,
+      steps_per_sec=eval_steps_per_sec,
+      input_names=[program.eval_input.name for program in eval_programs],
+  )
+  return combined_eval_metrics, period.elapsed
 
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
@@ -575,30 +578,20 @@ class _EvalRunner:
           input_names=[],
       )
 
-    with py_utils.timeit() as eval_period:
-      step_i = int(
-          py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-      )
-      eval_metrics_list, eval_scoring_metrics_list, num_eval_steps = (
-          run_eval_loop_over_test_splits(
-              test_eval_programs=self._eval_programs,
-              eval_partitioned_train_state=train_state.to_eval_state(),
-              eval_prng_seed=self._eval_key,
-              step=step_i,
-              job_log_dir=self._job_log_dir,
-          )
-      )
+    step_i = int(
+        py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
+    )
+    eval_metrics, elapsed_secs = run_eval_programs(
+        eval_programs=self._eval_programs,
+        eval_partitioned_train_state=train_state.to_eval_state(),
+        eval_prng_seed=self._eval_key,
+        step=step_i,
+        job_log_dir=self._job_log_dir,
+    )
     jax.monitoring.record_event_duration_secs(
-      '/jax/pax/eval/duration_sec', eval_period.elapsed
+        '/jax/pax/eval/duration_sec', elapsed_secs
     )
-    return tuning_lib.EvalMetrics(
-        metrics_list=eval_metrics_list,
-        scoring_metrics_list=eval_scoring_metrics_list,
-        steps_per_sec=sum(num_eval_steps) / eval_period.elapsed,
-        input_names=[
-            program.eval_input.name for program in self._eval_programs
-        ],
-    )
+    return eval_metrics
 
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
