@@ -86,6 +86,9 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     task_p = super().task()
+    # Disable all summaries.
+    task_p.summary_verbosity = 0
+    # (Practically) disable summary writes.
     task_p.train.save_interval_steps = 100000
 
     model_p = task_p.model
