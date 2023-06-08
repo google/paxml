@@ -901,19 +901,15 @@ class SeqIOInput(base_input.BaseInput):
     # local_num represents the total number of examples in eval dataset,
     # computed as:
     #   - eval_num_examples, if provided by the user.
-    #   - from cached statistics, if dataset is cached on directory.
-    #   - If none of the above are available, we iterate over dataset to compute
+    #   - Otherwise, we iterate over dataset to compute
     #     number of examples.
+    # Note: Global cached stats are available for Task, when cache_dir is set.
+    # It needs to be investigated if local number of examples can be computed 
+    # from cached_stats using:
+    # `self.task_inst.get_cached_stats(split=self.split_name)['examples']`
+    # divided by `self.num_infeed_hosts`
     if self.eval_num_examples:
       local_num = self.eval_num_examples
-    elif (
-        isinstance(self.mixture_or_task_inst, seqio.Task)
-        and self.task_inst.cache_dir
-    ):
-      # Cached stats are only available when cache_dir is set.
-      local_num = self.task_inst.get_cached_stats(split=self.split_name)[
-          'examples'
-      ]
     else:
       local_num = _get_num_examples(ds)
     local_num_batches = (local_num + self.batch_size - 1) // self.batch_size
