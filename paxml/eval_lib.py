@@ -500,21 +500,17 @@ def evaluate(
       eval_key=eval_key,
   )
 
-  decode_once_fn = None
-  decode_inputs = None
-  continuous_decode = True
   _common_eval_or_decode_loop(
       mode=EvaluationMode.EVAL,
       checkpointer=checkpointer,
       task=jax_task,
       job_log_dir=job_log_dir,
-      decode_once_fn=decode_once_fn,
       partitioned_train_state=partitioned_train_state,
       train_state_metadata=train_state_metadata,
       early_stopping_fn=early_stopping_fn,
-      continuous_decode=continuous_decode,
+      continuous_decode=True,
       eval_runner=eval_runner,
-      decode_inputs=decode_inputs,
+      partitioner=partitioner,
   )
 
 
@@ -738,93 +734,72 @@ def decode(
       do_eval=True,
   )
 
-  # If prng_key_fold_with_batch_index is True, we need to fold in the step
-  # number before preprocessing the key, so preprocessing need to be done at
-  # every step.
-  logging.info('decoder prng_seed: %s', decode_key)
-  if not jax_task.decode.prng_key_fold_with_batch_index:
-    decode_key = partitioner.preprocess_prng_key(decode_key)
-
-  decode_programs = eval_runner.decode_programs
-  use_pmap = jax_task.model.mesh_shape is None
-  decode_once_fn = partitioned_decode_once(
-      decode_programs=decode_programs,
-      task=jax_task,
-      prng_key=decode_key,
-      job_log_dir=job_log_dir,
-      use_pmap=use_pmap,
-      output_pickle=output_pickle,
-  )
-
   _common_eval_or_decode_loop(
       mode=EvaluationMode.DECODE,
       checkpointer=checkpointer,
       task=jax_task,
       job_log_dir=job_log_dir,
-      decode_once_fn=decode_once_fn,
       partitioned_train_state=partitioned_train_state,
       train_state_metadata=train_state_metadata,
       early_stopping_fn=early_stopping_fn,
       continuous_decode=continuous_decode,
       eval_runner=eval_runner,
-      decode_inputs=[p.decode_input for p in decode_programs],
+      partitioner=partitioner,
+      decode_key=decode_key,
+      decode_output_pickle=output_pickle,
   )
 
 
-def partitioned_decode_once(
+def run_decode_programs(
     *,
+    partitioned_train_state: TrainState,
+    summary_writers: Sequence[SummaryWriter],
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     task: tasks_lib.SingleTask,
     prng_key: JTensor,
     job_log_dir: epath.Path,
-    use_pmap: bool,
     output_pickle: bool = True,
-) -> Callable[[TrainState, List[SummaryWriter]], tuning_lib.DecodeMetrics]:
+) -> tuning_lib.DecodeMetrics:
   """Returns a function that runs decode over all decoder datasets.
 
   Args:
+    partitioned_train_state: The partitioned TrainState instance.
+    summary_writers: A list of summary writers, one for each deocde program.
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
     task: The task encapsulating a data parallel model.
     prng_key: The prng key used for decoding.
     job_log_dir: Directory for the job logs.
-    use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `task` should be set; otherwise, `metrics` should be set.
     output_pickle: Whether to write decoding results to a pickle file.
   """
-  def decode_once_fn(
-      partitioned_train_state: TrainState,
-      summary_writers: List[SummaryWriter],
-  ) -> tuning_lib.DecodeMetrics:
-    with py_utils.timeit() as decode_period:
-      (
-          decode_metrics_list,
-          processed_decode_metrics_list,
-          decode_seqio_metrics_list,
-          num_decode_steps,
-      ), _ = _decode_once(
-          decode_programs=decode_programs,
-          prng_key=prng_key,
-          job_log_dir=job_log_dir,
-          train_state=partitioned_train_state,
-          summary_writers=summary_writers,
-          use_pmap=use_pmap,
-          task=task,
-          output_pickle=output_pickle,
-          metrics_p=task.metrics,
-      )
-    jax.monitoring.record_event_duration_secs(
+  use_pmap = task.model.mesh_shape is None
+  with py_utils.timeit() as decode_period:
+    (
+        decode_metrics_list,
+        processed_decode_metrics_list,
+        decode_seqio_metrics_list,
+        num_decode_steps,
+    ), _ = _decode_once(
+        decode_programs=decode_programs,
+        prng_key=prng_key,
+        job_log_dir=job_log_dir,
+        train_state=partitioned_train_state,
+        summary_writers=summary_writers,
+        use_pmap=use_pmap,
+        task=task,
+        output_pickle=output_pickle,
+        metrics_p=task.metrics,
+    )
+  jax.monitoring.record_event_duration_secs(
       '/jax/pax/decode/duration_sec', decode_period.elapsed
-    )
-    decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
-    return tuning_lib.DecodeMetrics(
-        metrics_list=decode_metrics_list,
-        processed_metrics_list=processed_decode_metrics_list,
-        seqio_metrics_list=decode_seqio_metrics_list,
-        steps_per_sec=decode_steps_per_sec,
-        input_names=[p.decode_input.name for p in decode_programs],
-    )
-
-  return decode_once_fn
+  )
+  decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
+  return tuning_lib.DecodeMetrics(
+      metrics_list=decode_metrics_list,
+      processed_metrics_list=processed_decode_metrics_list,
+      seqio_metrics_list=decode_seqio_metrics_list,
+      steps_per_sec=decode_steps_per_sec,
+      input_names=[p.decode_input.name for p in decode_programs],
+  )
 
 
 def _decode_once(
@@ -833,7 +808,7 @@ def _decode_once(
     prng_key: JTensor,
     job_log_dir: epath.Path,
     train_state: TrainState,
-    summary_writers: List[SummaryWriter],
+    summary_writers: Sequence[SummaryWriter],
     use_pmap: bool,
     task: Optional[tasks_lib.SingleTask] = None,
     output_pickle: bool = True,
@@ -934,13 +909,14 @@ def _common_eval_or_decode_loop(
     checkpointer: _EvalCheckpointer,
     task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
-    decode_once_fn: Optional[Callable[..., tuning_lib.DecodeMetrics]],
     partitioned_train_state: TrainState,
     train_state_metadata: trainer_lib.TrainStateMetadata,
     early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
     continuous_decode: bool,
     eval_runner: _EvalRunner,
-    decode_inputs: Optional[Sequence[base_input.BaseInput]],
+    partitioner: partitioning.Partitioner,
+    decode_key: Optional[PRNGKey] = None,
+    decode_output_pickle: bool = True,
 ):
   # Retrieve last step from the TrainState directly in case new checkpoints
   # have been written in the mean time.
@@ -950,16 +926,25 @@ def _common_eval_or_decode_loop(
   logging.info('Evaluation loop starting from step `%d`...',
                last_checkpoint_step)
   summary_base_dir = job_log_dir / 'summaries'
-  if decode_inputs:
-    summary_decode_dirs = [
-        summary_base_dir / f'decode_test_{inp.name}' for inp in decode_inputs
-    ]
+
+  decode_programs = eval_runner.decode_programs
+  if decode_programs:
+    assert decode_key is not None
+
+    # If prng_key_fold_with_batch_index is True, we need to fold in the step
+    # number before preprocessing the key, so preprocessing need to be done at
+    # every step.
+    logging.info('decoder prng_seed: %s', decode_key)
+    if not task.decode.prng_key_fold_with_batch_index:
+      decode_key = partitioner.preprocess_prng_key(decode_key)
+
   with contextlib.ExitStack() as exit_stack:
-    if decode_inputs:
-      summary_writers = [
-          exit_stack.enter_context(summary_utils.get_summary_writer(d))
-          for d in summary_decode_dirs
-      ]
+    # TODO(laigd): move decode summary writer creation to decode program.
+    summary_writers = []
+    for program in decode_programs:
+      d = summary_base_dir / f'decode_test_{program.decode_input.name}'
+      writer = exit_stack.enter_context(summary_utils.get_summary_writer(d))
+      summary_writers.append(writer)
     eval_runner.setup_eval_programs(summary_base_dir)
 
     # Collect then freeze GC, so that GC in the eval loop will not touch the
@@ -972,10 +957,16 @@ def _common_eval_or_decode_loop(
           job_log_dir, last_checkpoint_step, mode
       ):
         decode_metrics = None
-        if decode_inputs:
+        if decode_programs:
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
-          decode_metrics = decode_once_fn(
-              partitioned_train_state, summary_writers
+          decode_metrics = run_decode_programs(
+              partitioned_train_state=partitioned_train_state,
+              summary_writers=summary_writers,
+              decode_programs=decode_programs,
+              task=task,
+              prng_key=decode_key,
+              job_log_dir=job_log_dir,
+              output_pickle=decode_output_pickle,
           )
 
         logging.info('Evaling step %s ckpt ...', last_checkpoint_step)

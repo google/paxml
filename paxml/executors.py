@@ -337,52 +337,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
     logging.info('[PAX STATUS]: Executor shutdown complete.')
 
 
-def _get_partition_decode_once_fn(
-    *,
-    decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
-    prng_key: jax.random.KeyArray,
-    task: tasks_lib.SingleTask,
-    job_log_dir: epath.Path,
-    use_pmap: bool,
-) -> Tuple[
-    Callable[..., tuning_lib.DecodeMetrics],
-    jax.random.KeyArray,
-    Sequence[str],
-]:
-  """Returns a decode function, a new PRNG key and decode input names.
-
-  Args:
-    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
-    prng_key: The prng key used for decoding.
-    task: The task encapsulating a data parallel model.
-    job_log_dir: Directory for the job logs.
-    use_pmap: Whether to use pmap (instead of SPMD/pjit).
-  """
-  assert decode_programs, '`decode_programs` must not be empty'
-  partitioner = decode_programs[0].partitioner
-
-  prng_key, decode_key = jax.random.split(prng_key, 2)
-  logging.info(
-      'decode %s: %s', 'prng_seed' if use_pmap else 'prng_key', decode_key
-  )
-  # If prng_key_fold_with_batch_index is True, we need to fold in the step
-  # number before preprocessing the key, so preprocessing need to be done at
-  # every step.
-  if not task.decode.prng_key_fold_with_batch_index:
-    decode_key = partitioner.preprocess_prng_key(decode_key)
-
-  decode_once_fn = eval_lib.partitioned_decode_once(
-      decode_programs=decode_programs,
-      task=task,
-      job_log_dir=job_log_dir,
-      prng_key=decode_key,
-      use_pmap=use_pmap,
-  )
-
-  decode_input_names = [p.decode_input.name for p in decode_programs]
-  return decode_once_fn, prng_key, decode_input_names
-
-
 def _train_and_evaluate_common(
     *,
     task: tasks_lib.SingleTask,
@@ -413,15 +367,15 @@ def _train_and_evaluate_common(
   )
 
   if decode_programs:
-    decode_once_fn, prng_key, decode_input_names = (
-        _get_partition_decode_once_fn(
-            decode_programs=decode_programs,
-            prng_key=prng_key,
-            task=task,
-            job_log_dir=job_log_dir,
-            use_pmap=is_vars_replicated,
-        )
-    )
+    prng_key, decode_key = jax.random.split(prng_key, 2)
+    logging.info('decode prng_seed: %s', decode_key)
+    # If prng_key_fold_with_batch_index is True, we need to fold in the step
+    # number before preprocessing the key, so preprocessing need to be done at
+    # every step.
+    if not task.decode.prng_key_fold_with_batch_index:
+      decode_key = partitioner.preprocess_prng_key(decode_key)
+
+    decode_input_names = [p.decode_input.name for p in decode_programs]
   else:
     decode_input_names = []
 
@@ -555,8 +509,13 @@ def _train_and_evaluate_common(
           decode_partitioned_train_state = programs.get_eval_train_state(
               task, partitioned_train_state, task.train.decode_use_ema_states
           )
-          decode_metrics = decode_once_fn(
-              decode_partitioned_train_state, decode_summary_writers
+          decode_metrics = eval_lib.run_decode_programs(
+              partitioned_train_state=decode_partitioned_train_state,
+              summary_writers=decode_summary_writers,
+              decode_programs=decode_programs,
+              task=task,
+              prng_key=decode_key,
+              job_log_dir=job_log_dir,
           )
         jax.monitoring.record_event_duration_secs(
             '/jax/pax/train/interleaved_decode_duration_sec',
