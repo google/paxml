@@ -505,21 +505,28 @@ def _train_and_evaluate_common(
           and train_p.decode_interval_steps
           and step_i % train_p.decode_interval_steps == 0
       ):
-        with py_utils.timeit() as decode_period:
-          decode_partitioned_train_state = programs.get_eval_train_state(
-              task, partitioned_train_state, task.train.decode_use_ema_states
-          )
-          decode_metrics = eval_lib.run_decode_programs(
-              partitioned_train_state=decode_partitioned_train_state,
-              summary_writers=decode_summary_writers,
-              decode_programs=decode_programs,
-              task=task,
-              prng_key=decode_key,
-              job_log_dir=job_log_dir,
-          )
+        decode_partitioned_train_state = programs.get_eval_train_state(
+            task, partitioned_train_state, task.train.decode_use_ema_states
+        )
+        logging.debug('[PAX STATUS]:  Running decode programs.')
+        decode_metrics, elapsed_secs = eval_lib.run_decode_programs(
+            train_state=decode_partitioned_train_state,
+            summary_writers=decode_summary_writers,
+            decode_programs=decode_programs,
+            task=task,
+            prng_key=decode_key,
+            step=step_i,
+            job_log_dir=job_log_dir,
+        )
         jax.monitoring.record_event_duration_secs(
             '/jax/pax/train/interleaved_decode_duration_sec',
-            decode_period.elapsed,
+            elapsed_secs,
+        )
+        logging.log_first_n(
+            INFO,
+            '[PAX STATUS]:  Completed running decode programs in %f seconds.',
+            5,
+            elapsed_secs,
         )
       logging.log_first_n(
           INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1

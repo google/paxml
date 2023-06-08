@@ -373,7 +373,7 @@ def run_eval_programs(
     eval_programs: A list of EvalPrograms to conduct eval.
     eval_partitioned_train_state: Train State to use for eval.
     eval_prng_seed: RNG seed for eval programs.
-    step: The step at which we are evaling the model.
+    step: The training step at which we are evaling the model.
     job_log_dir: Job's log directory in which scoring outputs will be written.
 
   Returns:
@@ -752,150 +752,71 @@ def decode(
 
 def run_decode_programs(
     *,
-    partitioned_train_state: TrainState,
+    train_state: TrainState,
     summary_writers: Sequence[SummaryWriter],
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     task: tasks_lib.SingleTask,
     prng_key: JTensor,
+    step: int,
     job_log_dir: epath.Path,
     output_pickle: bool = True,
-) -> tuning_lib.DecodeMetrics:
+) -> Tuple[tuning_lib.DecodeMetrics, float]:
   """Returns a function that runs decode over all decoder datasets.
 
   Args:
-    partitioned_train_state: The partitioned TrainState instance.
+    train_state: The partitioned TrainState instance.
     summary_writers: A list of summary writers, one for each deocde program.
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
     task: The task encapsulating a data parallel model.
     prng_key: The prng key used for decoding.
+    step: The training step at which we are evaling the model.
     job_log_dir: Directory for the job logs.
     output_pickle: Whether to write decoding results to a pickle file.
-  """
-  use_pmap = task.model.mesh_shape is None
-  with py_utils.timeit() as decode_period:
-    (
-        decode_metrics_list,
-        processed_decode_metrics_list,
-        decode_seqio_metrics_list,
-        num_decode_steps,
-    ), _ = _decode_once(
-        decode_programs=decode_programs,
-        prng_key=prng_key,
-        job_log_dir=job_log_dir,
-        train_state=partitioned_train_state,
-        summary_writers=summary_writers,
-        use_pmap=use_pmap,
-        task=task,
-        output_pickle=output_pickle,
-        metrics_p=task.metrics,
-    )
-  jax.monitoring.record_event_duration_secs(
-      '/jax/pax/decode/duration_sec', decode_period.elapsed
-  )
-  decode_steps_per_sec = sum(num_decode_steps) / decode_period.elapsed
-  return tuning_lib.DecodeMetrics(
-      metrics_list=decode_metrics_list,
-      processed_metrics_list=processed_decode_metrics_list,
-      seqio_metrics_list=decode_seqio_metrics_list,
-      steps_per_sec=decode_steps_per_sec,
-      input_names=[p.decode_input.name for p in decode_programs],
-  )
-
-
-def _decode_once(
-    *,
-    decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
-    prng_key: JTensor,
-    job_log_dir: epath.Path,
-    train_state: TrainState,
-    summary_writers: Sequence[SummaryWriter],
-    use_pmap: bool,
-    task: Optional[tasks_lib.SingleTask] = None,
-    output_pickle: bool = True,
-    metrics_p: Optional[pax_fiddle.Config[base_metrics.BaseMetrics]] = None,
-) -> Tuple[
-    Tuple[
-        List[Optional[Mapping[str, float]]],  # decode metrics.
-        List[Optional[Mapping[str, float]]],  # processed decode metrics.
-        List[Optional[Mapping[str, float]]],  # decode (seqio) metrics.
-        List[int],  # performed decode steps.
-    ],
-    List[Optional[Mapping[str, clu_metrics.Metric]]],  # raw decode metrics
-]:
-  """Runs the decoding once on the entire decoder datasets for a PMAP or SPMD model.
-
-  Args:
-    decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
-    prng_key: The prng key used for decoding.
-    job_log_dir: Directory for the job logs.
-    train_state: A `TrainState` object.
-    summary_writers: The summary writer objects to log summaries.
-    use_pmap: Whether to use pmap (instead of SPMD/pjit). If this is True,
-      `task` should be set; otherwise, `metrics_p` should be set.
-    task: The task encapsulating a data parallel model.
-    output_pickle: Whether to write decoding results to a pickle file.
-    metrics_p: Parameters to configure how to aggregate the metrics.
 
   Returns:
-    A tuple of(
-        tuple of (a list of decode metrics,
-                  a list of processed decode metrics,
-                  a list of optional decoder (seqio) metrics.
-                  list of integers as performed decode steps for each input).
-        raw clu metrics).
-      Items from each list are aligned with each input from inputs.
+    A tuning_lib.DecodeMetrics instance encapsulating the decode metrics, and
+    the time elapsed (in seconds) running the decode programs.
   """
-  # TODO(wangpeng): Remove unnecessary `use_pmap` branchings.
-
-  if not decode_programs:
-    return ([], [], [], []), []
-
-  if use_pmap:
-    assert task is not None
-    metrics_p = task.metrics
+  use_pmap = task.model.mesh_shape is None
+  metrics_p = task.metrics
   if not metrics_p:
     metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
-
-  step_i = int(
-      py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-  )
-  logging.info(
-      'Start decoding at train step: %d, partitioned_train_state: %s',
-      step_i,
-      jax.tree_map(lambda x: x.shape, train_state),
-  )
 
   decode_metrics = []
   processed_decode_metrics = []
   seqio_metrics = []
   num_decode_steps = []
-  raw_metrics = []
 
-  for i, decode_program in enumerate(decode_programs):
-    decode_program.setup(
-        prng_key=prng_key,
-        job_log_dir=job_log_dir,
-        summary_writer=summary_writers[i],
-        use_pmap=use_pmap,
-        task=task,
-        output_pickle=output_pickle,
-        metrics_p=metrics_p,
-    )
+  with py_utils.timeit() as period:
+    for i, decode_program in enumerate(decode_programs):
+      decode_program.setup(
+          prng_key=prng_key,
+          job_log_dir=job_log_dir,
+          summary_writer=summary_writers[i],
+          use_pmap=use_pmap,
+          task=task,
+          output_pickle=output_pickle,
+          metrics_p=metrics_p,
+      )
 
-  for decode_program in decode_programs:
-    decode_output = decode_program.run(train_state, step_i)
-    decode_metrics.append(decode_output.decode_metrics)
-    processed_decode_metrics.append(decode_output.processed_decode_metrics)
-    seqio_metrics.append(decode_output.seqio_metrics)
-    num_decode_steps.append(decode_output.num_decode_steps)
-    raw_metrics.append(decode_output.raw_decode_metrics)
+    for decode_program in decode_programs:
+      decode_output = decode_program.run(train_state, step)
+      decode_metrics.append(decode_output.decode_metrics)
+      processed_decode_metrics.append(decode_output.processed_decode_metrics)
+      seqio_metrics.append(decode_output.seqio_metrics)
+      num_decode_steps.append(decode_output.num_decode_steps)
 
+  decode_steps_per_sec = sum(num_decode_steps) / period.elapsed
   return (
-      decode_metrics,
-      processed_decode_metrics,
-      seqio_metrics,
-      num_decode_steps,
-  ), raw_metrics
+      tuning_lib.DecodeMetrics(
+          metrics_list=decode_metrics,
+          processed_metrics_list=processed_decode_metrics,
+          seqio_metrics_list=seqio_metrics,
+          steps_per_sec=decode_steps_per_sec,
+          input_names=[p.decode_input.name for p in decode_programs],
+      ),
+      period.elapsed,
+  )
 
 
 def _is_shape_dtype_struct(x):
@@ -959,14 +880,18 @@ def _common_eval_or_decode_loop(
         decode_metrics = None
         if decode_programs:
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
-          decode_metrics = run_decode_programs(
-              partitioned_train_state=partitioned_train_state,
+          decode_metrics, elapsed_secs = run_decode_programs(
+              train_state=partitioned_train_state,
               summary_writers=summary_writers,
               decode_programs=decode_programs,
               task=task,
               prng_key=decode_key,
+              step=last_checkpoint_step,
               job_log_dir=job_log_dir,
               output_pickle=decode_output_pickle,
+          )
+          jax.monitoring.record_event_duration_secs(
+              '/jax/pax/decode/duration_sec', elapsed_secs
           )
 
         logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
