@@ -20,6 +20,6 @@ RUN pip install -r paxml/paxml/contrib/gpu/scripts_gpu/cuda_requirements.txt
 
 RUN python3 -m pip install jax==0.4.8 jaxlib==0.4.7+cuda12.cudnn88 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-ENV XLA_FLAGS="--xla_gpu_enable_triton_gemm=false --xla_gpu_enable_latency_hiding_scheduler=true ${XLA_FLAGS}"
+ENV XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true ${XLA_FLAGS}"
 
 WORKDIR /pax/paxml
