@@ -287,7 +287,7 @@ class BaseTrainProgram(Program):
 
   # TODO(laigd): further split this into smaller modules and add program APIs
   # correspondingly.
-  @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
+  @py_utils.benchmark('[PAX STATUS]: ', first_n=20)
   def run(self, state: TrainState, step: int) -> TrainProgramOutput:
     train_p = self._task.train
     logging.log_first_n(logging.INFO, '[PAX STATUS]:  Retrieving inputs.', 5)
@@ -334,7 +334,7 @@ class BaseTrainProgram(Program):
     logging.log_first_n(
         logging.INFO,
         '[PAX STATUS]: train_step() took %f seconds.',
-        5,
+        20,
         train_period.elapsed,
     )
     self._pending_train_losses.add_computation(train_outputs.loss)
@@ -383,7 +383,8 @@ class BaseTrainProgram(Program):
       state: The current train state.
       prng_key: The PRNG key for this train step.
       inputs: The data input for this train step.
-      static_args: Encapsulates any static arguments needed by the step function.
+      static_args: Encapsulates any static arguments needed by the step
+        function.
 
     Returns:
       A tuple (new_step, new_state, train_step_fn_out), where:
@@ -408,7 +409,8 @@ class BaseTrainProgram(Program):
       state: The current train state.
       prng_key: The PRNG key for this eval step.
       inputs: The training data input for this eval step.
-      static_args: Encapsulates any static arguments needed by the step function.
+      static_args: Encapsulates any static arguments needed by the step
+        function.
 
     Returns:
       A StepFnOutput instance encapsulating the output of the eval step
@@ -915,7 +917,8 @@ class BaseEvalProgram(Program):
       state: The current train state.
       prng_key: The PRNG key for this eval step.
       inputs: The eval input data for this eval step.
-      static_args: Encapsulates any static arguments needed by the step function.
+      static_args: Encapsulates any static arguments needed by the step
+        function.
 
     Returns:
       A StepFnOutput instance encapsulating the output of the eval step
