@@ -777,7 +777,6 @@ def run_decode_programs(
     A tuning_lib.DecodeMetrics instance encapsulating the decode metrics, and
     the time elapsed (in seconds) running the decode programs.
   """
-  use_pmap = task.model.mesh_shape is None
   metrics_p = task.metrics
   if not metrics_p:
     metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
@@ -793,7 +792,6 @@ def run_decode_programs(
           prng_key=prng_key,
           job_log_dir=job_log_dir,
           summary_writer=summary_writers[i],
-          use_pmap=use_pmap,
           task=task,
           output_pickle=output_pickle,
           metrics_p=metrics_p,

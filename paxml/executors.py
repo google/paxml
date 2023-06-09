@@ -354,7 +354,6 @@ def _train_and_evaluate_common(
     checkpointer,
     job_log_dir,
     eval_prng_seed,
-    # TODO(wangpeng): Rename to `use_pmap`.
     is_vars_replicated,
     train_prng_seed,
     exit_after_ondemand_checkpoint,

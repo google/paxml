@@ -118,7 +118,6 @@ class SingleTaskDecodeProgram(programs.Program):
     self._unpadded_global_batch_size: int = None
     self._output_dir: epath.Path = None
     self._summary_writer: SummaryWriter = None
-    self._use_pmap = None
 
     self._task = None
     self._output_pickle = None
@@ -136,7 +135,6 @@ class SingleTaskDecodeProgram(programs.Program):
       prng_key: JTensor,
       job_log_dir: epath.Path,
       summary_writer: SummaryWriter,
-      use_pmap: bool,
       task: Optional[tasks_lib.SingleTask],
       output_pickle: bool,
       metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
@@ -147,8 +145,6 @@ class SingleTaskDecodeProgram(programs.Program):
       prng_key: The prng key used for decoding.
       job_log_dir: Directory for the job logs.
       summary_writer: The summary writer to log summaries.
-      use_pmap: Whether to use PMAP (instead of SPMD/pjit). If this is True,
-        `task` should be set; otherwise, `metrics` should be set.
       task: Params for the task encapsulating a data parallel model.
       output_pickle: Whether to write decoding results to a pickle file.
       metrics_p: Parameters to configure how to aggregate the metrics.
@@ -163,7 +159,6 @@ class SingleTaskDecodeProgram(programs.Program):
         self._job_log_dir / f'{EvaluationMode.DECODE.value}_out' / self._name
     )
     self._summary_writer = summary_writer
-    self._use_pmap = use_pmap
 
     self._task = task
     self._output_pickle = output_pickle
@@ -189,11 +184,6 @@ class SingleTaskDecodeProgram(programs.Program):
     return self._input
 
   def run(self, state: TrainState, train_step: int) -> DecodeProgramOutput:
-    use_pmap = self._use_pmap
-
-    if use_pmap:
-      output_pickle = self._output_pickle
-
     # Skip decode if already completed.
     if programs.can_load_written_outputs(
         self._job_log_dir, self._name, EvaluationMode.DECODE, train_step
@@ -268,7 +258,7 @@ class SingleTaskDecodeProgram(programs.Program):
         self._output_dir,
         train_step,
         processed_decodes,
-        write_pickle=output_pickle if use_pmap else True,
+        write_pickle=self._output_pickle,
     )
 
     msg = f'Finished decoding input {self._name}'
@@ -374,23 +364,17 @@ class SingleTaskDecodeProgram(programs.Program):
           'Finished decoding input batch %d for %s', step_num, self._name
       )
 
-      if self._use_pmap:
-        # we store the metric directly as it has already been aggregated in
-        # side decode_step_fun
-        decode_metrics.store(weighted_scalars)
-      elif jax.process_index() == 0:
+      if jax.process_index() == 0:
         # Copy the tensor from device memory to ram, since accumulating such
         # tensor on devices may cause HBM OOM, when
         # task_p.train.summary_accumulate_interval_steps is set.
-        # TODO(laigd): investigate whether we should apply this to pmap as well.
         weighted_scalars = jax.tree_map(np.array, weighted_scalars)
         decode_metrics.store(weighted_scalars)
 
-      xla_passthrough.merge_back_xla_unsupported_batch(
-          per_example_out, tpu_unsupported_batch
-      )
+        xla_passthrough.merge_back_xla_unsupported_batch(
+            per_example_out, tpu_unsupported_batch
+        )
 
-      if jax.process_index() == 0:
         # Run `process_decode_out` on CPU device as its implementation
         # is not expected to be JIT friendly. Since we keep track of
         # its outputs, we also don't want on-device allocation as
