@@ -27,6 +27,7 @@ import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_creators
 from paxml import checkpoint_types
+from paxml import decode_programs as decode_programs_lib
 from paxml import executors
 from paxml import experiment_utils
 from paxml import partitioning
@@ -177,16 +178,6 @@ def train_and_evaluate(
   for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():  # pytype: disable=attribute-error
     logging.info('  %s', line)
 
-  logging.info('[PAX STATUS]: Initializing decoder')
-  if (
-      run_decode
-      and task_p.train.decode_interval_steps is not None
-      and task_p.train.decode_interval_steps > 0
-  ):
-    decode_input_p = experiment_config.decoder_datasets()
-  else:
-    decode_input_p = []
-
   # Creates the task.
   logging.info('[PAX STATUS]: Creating task')
   jax_task = instantiate(task_p)
@@ -239,8 +230,11 @@ def train_and_evaluate(
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
     )
 
-  # Creates the train and eval programs.
+  # Creates the train/eval/decode programs.
+  logging.info('[PAX STATUS]: Initializing train program.')
   train_program = experiment_config.train_program()
+
+  logging.info('[PAX STATUS]: Initializing eval programs.')
   eval_programs = []
   if (
       eval_on_test
@@ -248,6 +242,28 @@ def train_and_evaluate(
       and task_p.train.eval_interval_steps > 0
   ):
     eval_programs = experiment_config.eval_programs()
+
+  logging.info('[PAX STATUS]: Initializing decode programs.')
+  if (
+      run_decode
+      and task_p.train.decode_interval_steps is not None
+      and task_p.train.decode_interval_steps > 0
+  ):
+    decode_input_p = experiment_config.decoder_datasets()
+  else:
+    decode_input_p = []
+  # TODO(wangpeng): Make decode programs configurable.
+  preprocessed_decode_input_ps = [  # TODO: move this into decode program.
+      partitioner.preprocess_input_config(input_p) for input_p in decode_input_p
+  ]
+  decode_programs = [
+      decode_programs_lib.SingleTaskDecodeProgram(
+          model=jax_task.model,
+          partitioner=partitioner,
+          decode_input=instantiate(p),
+      )
+      for p in preprocessed_decode_input_ps
+  ]
 
   # Creates the executor and run the training pipeline.
   logging.info('[PAX STATUS]: Creating executor.')
@@ -263,9 +279,9 @@ def train_and_evaluate(
         partitioner,
         instantiate(experiment_config.get_input_specs_provider_params()),
         train_input_p,
-        decode_input_p,
         train_program,
         eval_programs,
+        decode_programs,
         early_stopping_fn,
         exit_after_ondemand_checkpoint=exit_after_ondemand_checkpoint,
     )

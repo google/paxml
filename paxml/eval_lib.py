@@ -363,18 +363,14 @@ def run_eval_programs(
     *,
     eval_programs: Sequence[programs.BaseEvalProgram],
     eval_partitioned_train_state: TrainState,
-    eval_prng_seed: jax.random.KeyArray,
     step: int,
-    job_log_dir: epath.Path,
 ) -> Tuple[tuning_lib.EvalMetrics, float]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
     eval_programs: A list of EvalPrograms to conduct eval.
     eval_partitioned_train_state: Train State to use for eval.
-    eval_prng_seed: RNG seed for eval programs.
     step: The training step at which we are evaling the model.
-    job_log_dir: Job's log directory in which scoring outputs will be written.
 
   Returns:
     A tuning_lib.EvalMetrics instance encapsulating the eval metrics, and the
@@ -490,14 +486,13 @@ def evaluate(
       checkpointer.get_model_states(prng_key)
   )
   eval_programs = experiment_config.eval_programs()
-  prng_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_programs=eval_programs,
       decode_input_ps=[],
       job_log_dir=job_log_dir,
-      eval_key=eval_key,
+      prng_key=prng_key,
   )
 
   _common_eval_or_decode_loop(
@@ -525,12 +520,14 @@ class _EvalRunner:
       eval_programs: Sequence[programs.BaseEvalProgram],
       decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       job_log_dir: epath.Path,
-      eval_key: PRNGKey,
+      prng_key: PRNGKey,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
     self._job_log_dir = job_log_dir
     self._eval_programs = eval_programs
+
+    decode_key, eval_key = jax.random.split(prng_key)
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
 
@@ -548,6 +545,15 @@ class _EvalRunner:
         [p.decode_input for p in self._decode_programs]
     )
 
+    if self._decode_programs:
+      # If prng_key_fold_with_batch_index is True, we need to fold in the step
+      # number before preprocessing the key, so preprocessing need to be done at
+      # every step.
+      logging.info('decoder prng_seed: %s', decode_key)
+      if not jax_task.decode.prng_key_fold_with_batch_index:
+        decode_key = partitioner.preprocess_prng_key(decode_key)
+    self._decode_key = decode_key
+
   def setup_eval_programs(self, summary_base_dir: epath.Path):
     for program in self._eval_programs:
       program.setup(
@@ -560,6 +566,18 @@ class _EvalRunner:
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
     )
+
+  def setup_decode_programs(self, decode_summary_writers, output_pickle):
+    for program, writer in zip(self._decode_programs, decode_summary_writers):
+      program.setup(
+          prng_key=self._decode_key,
+          job_log_dir=self._job_log_dir,
+          summary_writer=writer,
+          task=self._jax_task,
+          output_pickle=output_pickle,
+          metrics_p=self._jax_task.metrics
+          or pax_fiddle.Config(base_metrics.MeanMetrics),
+      )
 
   @property
   def decode_programs(self):
@@ -580,9 +598,7 @@ class _EvalRunner:
     eval_metrics, elapsed_secs = run_eval_programs(
         eval_programs=self._eval_programs,
         eval_partitioned_train_state=train_state.to_eval_state(),
-        eval_prng_seed=self._eval_key,
         step=step_i,
-        job_log_dir=self._job_log_dir,
     )
     jax.monitoring.record_event_duration_secs(
         '/jax/pax/eval/duration_sec', elapsed_secs
@@ -717,14 +733,13 @@ def decode(
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
-  decode_key, eval_key = jax.random.split(prng_key)
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_programs=eval_programs,
       decode_input_ps=decoder_inputs,
       job_log_dir=job_log_dir,
-      eval_key=eval_key,
+      prng_key=prng_key,
   )
 
   trainer_lib.write_post_init_model_hparams_file(
@@ -745,7 +760,6 @@ def decode(
       continuous_decode=continuous_decode,
       eval_runner=eval_runner,
       partitioner=partitioner,
-      decode_key=decode_key,
       decode_output_pickle=output_pickle,
   )
 
@@ -753,33 +767,20 @@ def decode(
 def run_decode_programs(
     *,
     train_state: TrainState,
-    summary_writers: Sequence[SummaryWriter],
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
-    task: tasks_lib.SingleTask,
-    prng_key: JTensor,
     step: int,
-    job_log_dir: epath.Path,
-    output_pickle: bool = True,
 ) -> Tuple[tuning_lib.DecodeMetrics, float]:
   """Returns a function that runs decode over all decoder datasets.
 
   Args:
     train_state: The partitioned TrainState instance.
-    summary_writers: A list of summary writers, one for each deocde program.
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
-    task: The task encapsulating a data parallel model.
-    prng_key: The prng key used for decoding.
     step: The training step at which we are evaling the model.
-    job_log_dir: Directory for the job logs.
-    output_pickle: Whether to write decoding results to a pickle file.
 
   Returns:
     A tuning_lib.DecodeMetrics instance encapsulating the decode metrics, and
     the time elapsed (in seconds) running the decode programs.
   """
-  metrics_p = task.metrics
-  if not metrics_p:
-    metrics_p = pax_fiddle.Config(base_metrics.MeanMetrics)
 
   decode_metrics = []
   processed_decode_metrics = []
@@ -787,16 +788,6 @@ def run_decode_programs(
   num_decode_steps = []
 
   with py_utils.timeit() as period:
-    for i, decode_program in enumerate(decode_programs):
-      decode_program.setup(
-          prng_key=prng_key,
-          job_log_dir=job_log_dir,
-          summary_writer=summary_writers[i],
-          task=task,
-          output_pickle=output_pickle,
-          metrics_p=metrics_p,
-      )
-
     for decode_program in decode_programs:
       decode_output = decode_program.run(train_state, step)
       decode_metrics.append(decode_output.decode_metrics)
@@ -834,7 +825,6 @@ def _common_eval_or_decode_loop(
     continuous_decode: bool,
     eval_runner: _EvalRunner,
     partitioner: partitioning.Partitioner,
-    decode_key: Optional[PRNGKey] = None,
     decode_output_pickle: bool = True,
 ):
   # Retrieve last step from the TrainState directly in case new checkpoints
@@ -847,16 +837,6 @@ def _common_eval_or_decode_loop(
   summary_base_dir = job_log_dir / 'summaries'
 
   decode_programs = eval_runner.decode_programs
-  if decode_programs:
-    assert decode_key is not None
-
-    # If prng_key_fold_with_batch_index is True, we need to fold in the step
-    # number before preprocessing the key, so preprocessing need to be done at
-    # every step.
-    logging.info('decoder prng_seed: %s', decode_key)
-    if not task.decode.prng_key_fold_with_batch_index:
-      decode_key = partitioner.preprocess_prng_key(decode_key)
-
   with contextlib.ExitStack() as exit_stack:
     # TODO(laigd): move decode summary writer creation to decode program.
     summary_writers = []
@@ -865,6 +845,7 @@ def _common_eval_or_decode_loop(
       writer = exit_stack.enter_context(summary_utils.get_summary_writer(d))
       summary_writers.append(writer)
     eval_runner.setup_eval_programs(summary_base_dir)
+    eval_runner.setup_decode_programs(summary_writers, decode_output_pickle)
 
     # Collect then freeze GC, so that GC in the eval loop will not touch the
     # python objects used to initialize the model. Unfreeze at the end of the
@@ -880,13 +861,8 @@ def _common_eval_or_decode_loop(
           logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
           decode_metrics, elapsed_secs = run_decode_programs(
               train_state=partitioned_train_state,
-              summary_writers=summary_writers,
               decode_programs=decode_programs,
-              task=task,
-              prng_key=decode_key,
               step=last_checkpoint_step,
-              job_log_dir=job_log_dir,
-              output_pickle=decode_output_pickle,
           )
           jax.monitoring.record_event_duration_secs(
               '/jax/pax/decode/duration_sec', elapsed_secs

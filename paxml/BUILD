@@ -483,6 +483,7 @@ pytype_strict_library(
         ":base_experiment",
         ":checkpoint_creators",
         ":checkpoint_types",
+        ":decode_programs",
         ":executors",
         ":experiment_utils",
         ":partitioning",
@@ -761,6 +762,7 @@ pytype_strict_library(
     srcs = ["executors.py"],
     deps = [
         ":base_executor",
+        ":base_metrics",
         ":decode_programs",
         ":eval_lib",
         ":partitioning",

@@ -24,6 +24,7 @@ from absl import logging
 from etils import epath
 import jax
 from paxml import base_executor
+from paxml import base_metrics
 from paxml import decode_programs as decode_programs_lib
 from paxml import eval_lib
 from paxml import partitioning
@@ -132,9 +133,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._partitioned_train_state = None
     self._train_state_provenance = None
     self._total_num_params = None
-    self._prng_key = None
     self._train_prng_seed = None
     self._eval_prng_seed = None
+    self._decode_prng_seed = None
 
   def _maybe_create_train_input(
       self,
@@ -189,9 +190,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
       partitioner: partitioning.Partitioner,
       input_specs_provider: base_input.BaseInputSpecsProvider,
       train_input_p: pax_fiddle.Config[base_input.BaseInput],
-      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
+      decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
       early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
       exit_after_ondemand_checkpoint: bool = False,
   ):
@@ -201,6 +202,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._partitioner = partitioner
     self._train_program = train_program
     self._eval_programs = eval_programs
+    self._decode_programs = decode_programs
     self._early_stopping_fn = early_stopping_fn
     self._exit_after_ondemand_checkpoint = exit_after_ondemand_checkpoint
 
@@ -269,42 +271,28 @@ class DefaultExecutor(base_executor.BaseExecutor):
       )
 
     # Splits the key.
-    prng_key, train_prng_seed, eval_prng_seed = jax.random.split(
+    train_prng_seed, eval_prng_seed, decode_prng_seed = jax.random.split(
         root_prng_key, 3
     )
     logging.info('train prng seed: %s', train_prng_seed)
     logging.info('eval prng seed: %s', eval_prng_seed)
+    logging.info('decode prng seed: %s', decode_prng_seed)
     train_prng_seed = partitioner.preprocess_prng_key(train_prng_seed)
     eval_prng_seed = partitioner.preprocess_prng_key(eval_prng_seed)
+    # If prng_key_fold_with_batch_index is True, we need to fold in the step
+    # number before preprocessing the key, so preprocessing need to be done at
+    # every step.
+    if not self._task.decode.prng_key_fold_with_batch_index:
+      decode_prng_seed = partitioner.preprocess_prng_key(decode_prng_seed)
 
     # Sets the lazily initialized states.
     self._train_input_pipeline = train_input
     self._partitioned_train_state = partitioned_train_state
     self._train_state_provenance = train_state_provenance
     self._total_num_params = total_num_params
-    self._prng_key = prng_key
     self._train_prng_seed = train_prng_seed
     self._eval_prng_seed = eval_prng_seed
-    self._decode_programs = self._create_decode_programs(decode_input_ps)
-
-  def _create_decode_programs(self, decode_input_ps):
-    preprocessed_decode_input_ps = [
-        self._partitioner.preprocess_input_config(input_p)
-        for input_p in decode_input_ps
-    ]
-
-    # TODO(wangpeng): Make decode programs configurable.
-    create_decode_program = functools.partial(
-        decode_programs_lib.SingleTaskDecodeProgram,
-        model=self._task.model,
-        partitioner=self._partitioner,
-    )
-    decode_programs = [
-        create_decode_program(decode_input=instantiate(p))
-        for p in preprocessed_decode_input_ps
-    ]
-    trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
-    return decode_programs
+    self._decode_prng_seed = decode_prng_seed
 
   def start(self):
     logging.info('Starting executor.')
@@ -316,7 +304,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
         train_input=self._train_input_pipeline,
         partitioned_train_state=self._partitioned_train_state,
         train_state_provenance=self._train_state_provenance,
-        prng_key=self._prng_key,
         eval_programs=self._eval_programs,
         decode_programs=self._decode_programs,
         total_num_params=self._total_num_params,
@@ -324,6 +311,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
         checkpointer=self._checkpointer,
         job_log_dir=self._job_log_dir,
         eval_prng_seed=self._eval_prng_seed,
+        decode_prng_seed=self._decode_prng_seed,
         exit_after_ondemand_checkpoint=self._exit_after_ondemand_checkpoint,
         is_vars_replicated=is_vars_replicated,
         train_prng_seed=self._train_prng_seed,
@@ -333,6 +321,8 @@ class DefaultExecutor(base_executor.BaseExecutor):
     logging.info('[PAX STATUS]: Shutting down executor.')
     self._train_program.shutdown()
     for program in self._eval_programs:
+      program.shutdown()
+    for program in self._decode_programs:
       program.shutdown()
     logging.info('[PAX STATUS]: Executor shutdown complete.')
 
@@ -345,7 +335,6 @@ def _train_and_evaluate_common(
     train_input: base_input.BaseInput,
     partitioned_train_state: TrainState,
     train_state_provenance: TrainStateProvenance,
-    prng_key,
     # TODO(hthu): Take a more generalized form of EvalProgram interface.
     eval_programs: Sequence[programs.BaseEvalProgram],
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
@@ -354,6 +343,7 @@ def _train_and_evaluate_common(
     checkpointer,
     job_log_dir,
     eval_prng_seed,
+    decode_prng_seed,
     is_vars_replicated,
     train_prng_seed,
     exit_after_ondemand_checkpoint,
@@ -366,14 +356,6 @@ def _train_and_evaluate_common(
   )
 
   if decode_programs:
-    prng_key, decode_key = jax.random.split(prng_key, 2)
-    logging.info('decode prng_seed: %s', decode_key)
-    # If prng_key_fold_with_batch_index is True, we need to fold in the step
-    # number before preprocessing the key, so preprocessing need to be done at
-    # every step.
-    if not task.decode.prng_key_fold_with_batch_index:
-      decode_key = partitioner.preprocess_prng_key(decode_key)
-
     decode_input_names = [p.decode_input.name for p in decode_programs]
   else:
     decode_input_names = []
@@ -408,7 +390,18 @@ def _train_and_evaluate_common(
     )
     for program in eval_programs:
       program.setup(task, partitioner, job_log_dir, eval_prng_seed)
-    trainer_lib.check_unique_names([prog.eval_input for prog in eval_programs])
+    # TODO(laigd): move summary writer creation to decode program.
+    for program, writer in zip(decode_programs, decode_summary_writers):
+      program.setup(
+          prng_key=decode_prng_seed,
+          job_log_dir=job_log_dir,
+          summary_writer=writer,
+          task=task,
+          output_pickle=True,
+          metrics_p=task.metrics or pax_fiddle.Config(base_metrics.MeanMetrics),
+      )
+    trainer_lib.check_unique_names([p.eval_input for p in eval_programs])
+    trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
 
     train_summary_writer = train_program.summary_writer
     # This only prints the view from the first host machine.
@@ -484,9 +477,7 @@ def _train_and_evaluate_common(
           eval_metrics, elapsed_secs = eval_lib.run_eval_programs(
               eval_programs=eval_programs,
               eval_partitioned_train_state=eval_partitioned_train_state,
-              eval_prng_seed=eval_prng_seed,
               step=step_i,
-              job_log_dir=job_log_dir,
           )
           jax.monitoring.record_event_duration_secs(
               '/jax/pax/train/interleaved_eval_duration_sec', elapsed_secs
@@ -510,12 +501,8 @@ def _train_and_evaluate_common(
         logging.debug('[PAX STATUS]:  Running decode programs.')
         decode_metrics, elapsed_secs = eval_lib.run_decode_programs(
             train_state=decode_partitioned_train_state,
-            summary_writers=decode_summary_writers,
             decode_programs=decode_programs,
-            task=task,
-            prng_key=decode_key,
             step=step_i,
-            job_log_dir=job_log_dir,
         )
         jax.monitoring.record_event_duration_secs(
             '/jax/pax/train/interleaved_decode_duration_sec',
