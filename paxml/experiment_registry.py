@@ -17,6 +17,7 @@
 import collections
 import functools
 import importlib
+import sys
 import traceback
 from typing import Dict, List, Mapping, Optional
 
@@ -124,7 +125,8 @@ class _ExperimentRegistryHelper:
     # Use print - absl.logging doesn't work since this happens before main.
     print(
         'Registered experiment `%s`%s' %
-        (canonical_key, ' (overwritten)' if preexisting else ''))
+        (canonical_key, ' (overwritten)' if preexisting else ''),
+        file=sys.stderr)
     if preexisting:
       # No need to update secondary keys.
       return experiment_class
