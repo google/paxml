@@ -87,7 +87,6 @@ class DecodeProgramOutput(programs.ProgramOutput):
   processed_decode_metrics: Optional[Mapping[str, float]] = None
   seqio_metrics: Optional[Mapping[str, float]] = None
   num_decode_steps: int = 0
-  raw_decode_metrics: Optional[Mapping[str, clu_metrics.Metric]] = None
 
 
 class SingleTaskDecodeProgram(programs.Program):
@@ -276,7 +275,6 @@ class SingleTaskDecodeProgram(programs.Program):
         ),
         seqio_metrics=seqio_metric_values,
         num_decode_steps=step_num,
-        raw_decode_metrics=metrics,
     )
 
   def _run_decode_loop(
