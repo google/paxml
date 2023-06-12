@@ -253,16 +253,9 @@ def train_and_evaluate(
   else:
     decode_input_p = []
   # TODO(wangpeng): Make decode programs configurable.
-  preprocessed_decode_input_ps = [  # TODO: move this into decode program.
-      partitioner.preprocess_input_config(input_p) for input_p in decode_input_p
-  ]
   decode_programs = [
-      decode_programs_lib.SingleTaskDecodeProgram(
-          model=jax_task.model,
-          partitioner=partitioner,
-          decode_input=instantiate(p),
-      )
-      for p in preprocessed_decode_input_ps
+      decode_programs_lib.SingleTaskDecodeProgram(input_p)
+      for input_p in decode_input_p
   ]
 
   # Creates the executor and run the training pipeline.

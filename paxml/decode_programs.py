@@ -16,6 +16,7 @@
 """Programs for decoding."""
 
 import collections
+import contextlib
 import dataclasses
 import functools
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -50,6 +51,7 @@ import tensorflow.compat.v2 as tf
 
 
 instantiate = base_hyperparams.instantiate
+BaseMetrics = base_metrics.BaseMetrics
 EvaluationMode = io_utils.EvaluationMode
 JTensor = pytypes.JTensor
 Metrics = pytypes.Metrics
@@ -91,38 +93,27 @@ class DecodeProgramOutput(programs.ProgramOutput):
 class SingleTaskDecodeProgram(programs.Program):
   """Decode program that assumes a single task on a single dataset."""
 
-  def __init__(
-      self,
-      *,
-      model: base_model.BaseModel,
-      partitioner: partitioning.Partitioner,
-      decode_input: base_input.BaseInput,
-  ):
-    """The constructor.
+  def __init__(self, input_p: pax_fiddle.Config[base_input.BaseInput]):
+    self._input_p = input_p
 
-    Args:
-      model: The model to be used for decoding.
-      partitioner: The partitioner used to partition the decode function.
-      decode_input: The instantiated input to be decoded.
-    """
-    self._model = model
-    self._partitioner = partitioner
-    self._input = decode_input
-    self._num_steps = (
-        -1 if self._input.reset_for_eval else self._input.eval_loop_num_batches
-    )
-
-    self._prng_key: PRNGKey = None
+    # States to set in self.setup()
+    self._task: tasks_lib.SingleTask = None
+    self._partitioner: partitioning.Partitioner = None
     self._job_log_dir: epath.Path = None
+    self._prng_key: PRNGKey = None
+    self._output_pickle = True
+
+    # States to initialize lazily in self.setup()
+    self._input = None
     self._name: str = None
     self._unpadded_global_batch_size: int = None
+    self._num_steps: int = None
     self._output_dir: epath.Path = None
     self._summary_writer: SummaryWriter = None
+    self._metrics_p: pax_fiddle.Config[Any] = None
 
-    self._task = None
-    self._output_pickle = None
-
-    self._metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics] = None
+    # Used to enter context of the summary writer at .setup().
+    self._exitstack = contextlib.ExitStack()
 
     # Decode step function information.
     self._decode_step_created = False
@@ -131,52 +122,59 @@ class SingleTaskDecodeProgram(programs.Program):
 
   def setup(
       self,
-      *,
-      prng_key: JTensor,
+      task: tasks_lib.SingleTask,
+      partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
-      summary_writer: SummaryWriter,
-      task: Optional[tasks_lib.SingleTask],
-      output_pickle: bool,
-      metrics_p: pax_fiddle.Config[base_metrics.BaseMetrics],
+      decode_prng_seed: PRNGKey,
+      output_pickle: bool = True,
   ) -> None:
     """Sets up the program.
 
     Args:
-      prng_key: The prng key used for decoding.
+      task: The jax task.
+      partitioner: The partitioner used to partition the decode function.
       job_log_dir: Directory for the job logs.
-      summary_writer: The summary writer to log summaries.
-      task: Params for the task encapsulating a data parallel model.
+      decode_prng_seed: The prng key used for decoding.
       output_pickle: Whether to write decoding results to a pickle file.
-      metrics_p: Parameters to configure how to aggregate the metrics.
     """
-    self._prng_key = prng_key
+    self._task = task
+    self._partitioner = partitioner
     self._job_log_dir = job_log_dir
+    self._prng_key = decode_prng_seed
+    self._output_pickle = output_pickle
+
+    # Creates the decode input pipeline.
+    self._input_p = self._partitioner.preprocess_input_config(self._input_p)
+    logging.info(
+        '[PAX STATUS]: Initializing decode input pipeline : %s', self._input_p
+    )
+    self._input = instantiate(self._input_p)
+
+    # Creates other states.
     self._name = self._input.name
     self._unpadded_global_batch_size = self._input.get_global_batch_size(
         self._input
     )
-    self._output_dir = (
-        self._job_log_dir / f'{EvaluationMode.DECODE.value}_out' / self._name
+    self._num_steps = (
+        -1 if self._input.reset_for_eval else self._input.eval_loop_num_batches
     )
-    self._summary_writer = summary_writer
+    self._output_dir = (
+        job_log_dir / f'{EvaluationMode.DECODE.value}_out' / self._name
+    )
+    self._metrics_p = task.metrics or pax_fiddle.Config(
+        base_metrics.MeanMetrics
+    )
 
-    self._task = task
-    self._output_pickle = output_pickle
-    self._metrics_p = metrics_p
+    # Creates the decode summary writer.
+    summary_base_dir = programs.get_summary_base_dir(job_log_dir)
+    summary_dir = summary_base_dir / f'decode_test_{self._input.name}'
+    self._summary_writer = self._exitstack.enter_context(
+        summary_utils.get_summary_writer(summary_dir)
+    )
 
   def should_run(self, state: TrainState, train_step: int) -> bool:
     # TODO(wangpeng): Implement and use it.
     raise NotImplementedError()
-
-  @property
-  def model(self):
-    assert self._model is not None
-    return self._model
-
-  @property
-  def partitioner(self):
-    assert self._partitioner is not None
-    return self._partitioner
 
   @property
   def decode_input(self):
@@ -284,8 +282,8 @@ class SingleTaskDecodeProgram(programs.Program):
   def _run_decode_loop(
       self,
       state: TrainState,
-      decode_metrics: base_metrics.BaseMetrics,
-      process_decode_metrics: base_metrics.BaseMetrics,
+      decode_metrics: BaseMetrics,
+      process_decode_metrics: BaseMetrics,
   ) -> Tuple[
       int,
       Dict[str, clu_metrics.Metric],
@@ -382,7 +380,9 @@ class SingleTaskDecodeProgram(programs.Program):
         with jax.default_device(jax.devices('cpu')[0]):
           per_example_out = jax.tree_map(np.asarray, per_example_out)
           process_weighted_scalars, processed_out, processed_metric_updates = (
-              self._model.process_decode_out(self.decode_input, per_example_out)
+              self._task.model.process_decode_out(
+                  self.decode_input, per_example_out
+              )
           )
 
         processed_out = seqio_input.maybe_update_decode_output_keys(
@@ -441,4 +441,4 @@ class SingleTaskDecodeProgram(programs.Program):
     return input_partition_spec
 
   def shutdown(self) -> None:
-    pass
+    self._exitstack.close()

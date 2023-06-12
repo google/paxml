@@ -94,7 +94,7 @@ def get_eval_train_state(
   return eval_state
 
 
-def _summary_base_dir(job_log_dir: epath.Path) -> epath.Path:
+def get_summary_base_dir(job_log_dir: epath.Path) -> epath.Path:
   return job_log_dir / 'summaries'
 
 
@@ -196,7 +196,7 @@ class BaseTrainProgram(Program):
     # States to initialize lazily in self.setup().
     self._train_unpadded_global_batch_size: int = None
     self._profiler: profiling.Profiler = None
-    self._train_summary_writer = None
+    self._train_summary_writer: SummaryWriter = None
     self._train_summary_handler: summary_utils.SummaryHandler = None
     self._eval_train_summary_handler: summary_utils.SummaryHandler = None
     self._train_summary_last_time = None
@@ -241,7 +241,7 @@ class BaseTrainProgram(Program):
     self._initial_step = init_step
 
     # Creates the train summary writer and handler.
-    summary_base_dir = _summary_base_dir(job_log_dir)
+    summary_base_dir = get_summary_base_dir(job_log_dir)
     summary_train_dir = summary_base_dir / 'train'
     self._train_summary_writer = self._exitstack.enter_context(
         summary_utils.get_summary_writer(summary_train_dir)
@@ -705,7 +705,7 @@ class BaseEvalProgram(Program):
     self._name: str = None
     self._eval_unpadded_global_batch_size: int = None
     self._eval_num_steps: int = None
-    self._eval_summary_writer = None
+    self._eval_summary_writer: SummaryWriter = None
 
     # Used to enter context of the summary writer at .setup().
     self._exitstack = contextlib.ExitStack()
@@ -721,7 +721,6 @@ class BaseEvalProgram(Program):
       partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
       eval_prng_seed: PRNGKey,
-      summary_base_dir: Optional[epath.Path] = None,
   ) -> None:
     self._task = task
     self._partitioner = partitioner
@@ -747,8 +746,7 @@ class BaseEvalProgram(Program):
     )
 
     # Creates the eval summary writer.
-    if not summary_base_dir:
-      summary_base_dir = _summary_base_dir(job_log_dir)
+    summary_base_dir = get_summary_base_dir(job_log_dir)
     summary_dir = summary_base_dir / f'eval_test_{self.eval_input.name}'
     self._eval_summary_writer = self._exitstack.enter_context(
         summary_utils.get_summary_writer(summary_dir)

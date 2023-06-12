@@ -532,18 +532,10 @@ class _EvalRunner:
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
 
     # TODO(wangpeng): Make decode programs configurable.
-    create_decode_program = functools.partial(
-        decode_programs_lib.SingleTaskDecodeProgram,
-        model=jax_task.model,
-        partitioner=partitioner,
-    )
     self._decode_programs = [
-        create_decode_program(decode_input=instantiate(p))
-        for p in decode_input_ps
+        decode_programs_lib.SingleTaskDecodeProgram(input_p)
+        for input_p in decode_input_ps
     ]
-    trainer_lib.check_unique_names(
-        [p.decode_input for p in self._decode_programs]
-    )
 
     if self._decode_programs:
       # If prng_key_fold_with_batch_index is True, we need to fold in the step
@@ -554,30 +546,27 @@ class _EvalRunner:
         decode_key = partitioner.preprocess_prng_key(decode_key)
     self._decode_key = decode_key
 
-  def setup_eval_programs(self, summary_base_dir: epath.Path):
+  def setup_eval_programs(self):
     for program in self._eval_programs:
       program.setup(
-          self._jax_task,
-          self._partitioner,
-          self._job_log_dir,
-          self._eval_key,
-          summary_base_dir=summary_base_dir,
+          self._jax_task, self._partitioner, self._job_log_dir, self._eval_key
       )
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
     )
 
-  def setup_decode_programs(self, decode_summary_writers, output_pickle):
-    for program, writer in zip(self._decode_programs, decode_summary_writers):
+  def setup_decode_programs(self, output_pickle):
+    for program in self._decode_programs:
       program.setup(
-          prng_key=self._decode_key,
-          job_log_dir=self._job_log_dir,
-          summary_writer=writer,
-          task=self._jax_task,
+          self._jax_task,
+          self._partitioner,
+          self._job_log_dir,
+          self._decode_key,
           output_pickle=output_pickle,
-          metrics_p=self._jax_task.metrics
-          or pax_fiddle.Config(base_metrics.MeanMetrics),
       )
+    trainer_lib.check_unique_names(
+        [p.decode_input for p in self._decode_programs]
+    )
 
   @property
   def decode_programs(self):
@@ -701,10 +690,6 @@ def decode(
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
   )
-  # TODO(laigd): move this to decode program when ready.
-  decoder_inputs = [
-      partitioner.preprocess_input_config(p) for p in decoder_inputs
-  ]
 
   wait_until_step = (
       jax_task.hparams.train.decode_start_after_n_steps
@@ -834,74 +819,63 @@ def _common_eval_or_decode_loop(
           partitioned_train_state.step))
   logging.info('Evaluation loop starting from step `%d`...',
                last_checkpoint_step)
-  summary_base_dir = job_log_dir / 'summaries'
 
-  decode_programs = eval_runner.decode_programs
-  with contextlib.ExitStack() as exit_stack:
-    # TODO(laigd): move decode summary writer creation to decode program.
-    summary_writers = []
-    for program in decode_programs:
-      d = summary_base_dir / f'decode_test_{program.decode_input.name}'
-      writer = exit_stack.enter_context(summary_utils.get_summary_writer(d))
-      summary_writers.append(writer)
-    eval_runner.setup_eval_programs(summary_base_dir)
-    eval_runner.setup_decode_programs(summary_writers, decode_output_pickle)
+  eval_runner.setup_eval_programs()
+  eval_runner.setup_decode_programs(decode_output_pickle)
 
-    # Collect then freeze GC, so that GC in the eval loop will not touch the
-    # python objects used to initialize the model. Unfreeze at the end of the
-    # loop.
-    gc.collect()
-    gc.freeze()
-    while True:
-      with io_utils.checkpoint_progress(
-          job_log_dir, last_checkpoint_step, mode
-      ):
-        decode_metrics = None
-        if decode_programs:
-          logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
-          decode_metrics, elapsed_secs = run_decode_programs(
-              train_state=partitioned_train_state,
-              decode_programs=decode_programs,
-              step=last_checkpoint_step,
-          )
-          jax.monitoring.record_event_duration_secs(
-              '/jax/pax/decode/duration_sec', elapsed_secs
-          )
-
-        logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
-        eval_metrics = eval_runner.run_one_step(partitioned_train_state)
-
-      exceeded_ckpt = last_checkpoint_step + task.train.save_interval_steps
-      is_last_ckpt = (
-          exceeded_ckpt > task.train.num_train_steps or not continuous_decode
-      )
-      if tuning_lib.should_early_stop(
-          early_stopping_fn,
-          last_checkpoint_step,
-          is_last_ckpt,
-          eval_metrics=eval_metrics,
-          decode_metrics=decode_metrics,
-      ):
-        logging.info(
-            (
-                'Early stopped at checkpoint step %d by the'
-                'tuner, while the num_train_steps is %d'
-            ),
-            last_checkpoint_step,
-            task.train.num_train_steps,
+  # Collect then freeze GC, so that GC in the eval loop will not touch the
+  # python objects used to initialize the model. Unfreeze at the end of the
+  # loop.
+  gc.collect()
+  gc.freeze()
+  while True:
+    with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step, mode):
+      decode_metrics = None
+      if eval_runner.decode_programs:
+        logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
+        decode_metrics, elapsed_secs = run_decode_programs(
+            train_state=partitioned_train_state,
+            decode_programs=eval_runner.decode_programs,
+            step=last_checkpoint_step,
         )
-        break
-      if is_last_ckpt:
-        break
-      # Release partitioned_train_state.
-      jax.tree_util.tree_map(lambda x: x.delete(), partitioned_train_state)
-      del partitioned_train_state
-      new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
-      partitioned_train_state = checkpointer.load_checkpoint_for_step(
-          new_checkpoint_step, train_state_metadata
+        jax.monitoring.record_event_duration_secs(
+            '/jax/pax/decode/duration_sec', elapsed_secs
+        )
+
+      logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
+      eval_metrics = eval_runner.run_one_step(partitioned_train_state)
+
+    exceeded_ckpt = last_checkpoint_step + task.train.save_interval_steps
+    is_last_ckpt = (
+        exceeded_ckpt > task.train.num_train_steps or not continuous_decode
+    )
+    if tuning_lib.should_early_stop(
+        early_stopping_fn,
+        last_checkpoint_step,
+        is_last_ckpt,
+        eval_metrics=eval_metrics,
+        decode_metrics=decode_metrics,
+    ):
+      logging.info(
+          (
+              'Early stopped at checkpoint step %d by the'
+              'tuner, while the num_train_steps is %d'
+          ),
+          last_checkpoint_step,
+          task.train.num_train_steps,
       )
-      last_checkpoint_step = new_checkpoint_step
-    gc.unfreeze()
+      break
+    if is_last_ckpt:
+      break
+    # Release partitioned_train_state.
+    jax.tree_util.tree_map(lambda x: x.delete(), partitioned_train_state)
+    del partitioned_train_state
+    new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
+    partitioned_train_state = checkpointer.load_checkpoint_for_step(
+        new_checkpoint_step, train_state_metadata
+    )
+    last_checkpoint_step = new_checkpoint_step
+  gc.unfreeze()
 
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)

@@ -82,34 +82,6 @@ def _maybe_update_latest_model_step(
   )
 
 
-class _DecodeSummaryWriters(contextlib.ExitStack):
-  """Manage decode summary writers."""
-
-  _exit_callbacks = []
-
-  def __init__(
-      self, job_log_dir: epath.Path, decode_input_names: Sequence[str]
-  ):
-    """Initialize context manager.
-
-    Args:
-      job_log_dir: Directory for the job logs.
-      decode_input_names: list of names for the decode input pipelines.
-    """
-    super().__init__()
-    self.summary_decode_dirs = [
-        job_log_dir / 'summaries' / f'decode_test_{name}'
-        for name in decode_input_names
-    ]
-
-  def __enter__(self) -> Sequence[SummaryWriter]:
-    self.decode_summary_writers = [
-        self.enter_context(summary_utils.get_summary_writer(d))
-        for d in self.summary_decode_dirs
-    ]
-    return self.decode_summary_writers
-
-
 class DefaultExecutor(base_executor.BaseExecutor):
   """The default executor for running programs."""
 
@@ -354,12 +326,6 @@ def _train_and_evaluate_common(
   train_input_for_checkpoint = (
       train_input if train_p.enable_input_checkpointing else None
   )
-
-  if decode_programs:
-    decode_input_names = [p.decode_input.name for p in decode_programs]
-  else:
-    decode_input_names = []
-
   initial_global_step = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
           partitioned_train_state.step
@@ -373,195 +339,183 @@ def _train_and_evaluate_common(
     )
 
   logging.info('[PAX STATUS]: Starting training loop.')
-  with _DecodeSummaryWriters(
-      job_log_dir, decode_input_names
-  ) as decode_summary_writers:
-    step_i = initial_global_step
+  step_i = initial_global_step
 
-    # Sets up the programs.
-    train_program.setup(
-        task,
-        train_input,
-        partitioner,
-        job_log_dir,
-        train_prng_seed,
-        eval_prng_seed,
+  # Sets up the programs.
+  train_program.setup(
+      task,
+      train_input,
+      partitioner,
+      job_log_dir,
+      train_prng_seed,
+      eval_prng_seed,
+      step_i,
+  )
+  for program in eval_programs:
+    program.setup(task, partitioner, job_log_dir, eval_prng_seed)
+  for program in decode_programs:
+    program.setup(task, partitioner, job_log_dir, decode_prng_seed)
+  trainer_lib.check_unique_names([p.eval_input for p in eval_programs])
+  trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
+
+  train_summary_writer = train_program.summary_writer
+  # This only prints the view from the first host machine.
+  summary_utils.write_model_structure(
+      train_summary_writer, partitioned_train_state, is_vars_replicated
+  )
+  # train_state_provenance is None when model restored from checkpoint
+  if train_state_provenance:
+    summary_utils.write_model_provenance(
+        train_summary_writer, train_state_provenance
+    )
+  summary_utils.write_total_num_params(train_summary_writer, total_num_params)
+  summary_utils.write_global_batch_size(
+      train_summary_writer, train_program.train_unpadded_global_batch_size
+  )
+
+  # Start the train loop. Make sure all at the same step.
+  py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
+  # Collect then freeze GC, so that GC in the training loop will not touch the
+  # python objects used to initialize the model. Unfreeze at the end of the
+  # loop.
+  gc.collect()
+  gc.freeze()
+  while True:
+    logging.log_first_n(INFO, '[PAX STATUS]: Beginning step `%d`.', 5, step_i)
+    checkpointer.save_if_needed(
         step_i,
+        partitioned_train_state,
+        train_state_metadata.unpadded_global_shapes,
+        train_state_metadata.partition_specs,
+        train_input_for_checkpoint,
     )
-    for program in eval_programs:
-      program.setup(task, partitioner, job_log_dir, eval_prng_seed)
-    # TODO(laigd): move summary writer creation to decode program.
-    for program, writer in zip(decode_programs, decode_summary_writers):
-      program.setup(
-          prng_key=decode_prng_seed,
-          job_log_dir=job_log_dir,
-          summary_writer=writer,
-          task=task,
-          output_pickle=True,
-          metrics_p=task.metrics or pax_fiddle.Config(base_metrics.MeanMetrics),
-      )
-    trainer_lib.check_unique_names([p.eval_input for p in eval_programs])
-    trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
+    if exit_after_ondemand_checkpoint and checkpointer.reached_preemption(
+        step_i
+    ):
+      checkpointer.wait_until_finished()
+      exit(1)
 
-    train_summary_writer = train_program.summary_writer
-    # This only prints the view from the first host machine.
-    summary_utils.write_model_structure(
-        train_summary_writer, partitioned_train_state, is_vars_replicated
-    )
-    # train_state_provenance is None when model restored from checkpoint
-    if train_state_provenance:
-      summary_utils.write_model_provenance(
-          train_summary_writer, train_state_provenance
-      )
-    summary_utils.write_total_num_params(train_summary_writer, total_num_params)
-    summary_utils.write_global_batch_size(
-        train_summary_writer, train_program.train_unpadded_global_batch_size
-    )
-
-    # Start the train loop. Make sure all at the same step.
-    py_utils.sync_global_devices(f'Start training loop from step: {step_i}')
-    # Collect then freeze GC, so that GC in the training loop will not touch the
-    # python objects used to initialize the model. Unfreeze at the end of the
-    # loop.
-    gc.collect()
-    gc.freeze()
-    while True:
-      logging.log_first_n(INFO, '[PAX STATUS]: Beginning step `%d`.', 5, step_i)
-      checkpointer.save_if_needed(
+    if not train_program.should_run(partitioned_train_state, step_i):
+      logging.info(
+          (
+              'Training loop completed (step (`%d`) greater than '
+              'num_train_step (`%d`).'
+          ),
           step_i,
-          partitioned_train_state,
-          train_state_metadata.unpadded_global_shapes,
-          train_state_metadata.partition_specs,
-          train_input_for_checkpoint,
+          train_p.num_train_steps,
       )
-      if exit_after_ondemand_checkpoint and checkpointer.reached_preemption(
-          step_i
-      ):
-        checkpointer.wait_until_finished()
-        exit(1)
+      break
 
-      if not train_program.should_run(partitioned_train_state, step_i):
+    program_output = train_program.run(partitioned_train_state, step_i)
+    partitioned_train_state = program_output.state
+    train_weighted_scalars = program_output.weighted_scalars
+    steps_per_sec = program_output.steps_per_sec
+    eval_train_metrics = program_output.eval_train_metrics
+
+    # While the eval ones below are post-model weight updates, hence the step
+    # counter is incremented in between.
+    step_i = program_output.new_train_step
+
+    eval_metrics: Optional[tuning_lib.EvalMetrics] = None
+    # Run eval at regular step interval.
+    if (
+        train_p.eval_interval_steps
+        and step_i % train_p.eval_interval_steps == 0
+    ):
+      logging.log_first_n(INFO, '[PAX STATUS]:  Starting eval_step().', 5)
+      eval_partitioned_train_state = programs.get_eval_train_state(
+          task, partitioned_train_state, task.train.eval_use_ema_states
+      )
+      # If we have eval test then also evaluate on test.
+      if eval_programs:
+        logging.debug('[PAX STATUS]:  Running eval programs.')
+        eval_metrics, elapsed_secs = eval_lib.run_eval_programs(
+            eval_programs=eval_programs,
+            eval_partitioned_train_state=eval_partitioned_train_state,
+            step=step_i,
+        )
+        jax.monitoring.record_event_duration_secs(
+            '/jax/pax/train/interleaved_eval_duration_sec', elapsed_secs
+        )
+        logging.log_first_n(
+            INFO,
+            '[PAX STATUS]:  Completed running eval programs in %f seconds.',
+            5,
+            elapsed_secs,
+        )
+
+    decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
+    if (
+        decode_programs
+        and train_p.decode_interval_steps
+        and step_i % train_p.decode_interval_steps == 0
+    ):
+      decode_partitioned_train_state = programs.get_eval_train_state(
+          task, partitioned_train_state, task.train.decode_use_ema_states
+      )
+      logging.debug('[PAX STATUS]:  Running decode programs.')
+      decode_metrics, elapsed_secs = eval_lib.run_decode_programs(
+          train_state=decode_partitioned_train_state,
+          decode_programs=decode_programs,
+          step=step_i,
+      )
+      jax.monitoring.record_event_duration_secs(
+          '/jax/pax/train/interleaved_decode_duration_sec',
+          elapsed_secs,
+      )
+      logging.log_first_n(
+          INFO,
+          '[PAX STATUS]:  Completed running decode programs in %f seconds.',
+          5,
+          elapsed_secs,
+      )
+    logging.log_first_n(
+        INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1
+    )
+
+    if early_stopping_fn is not None:
+      if tuning_lib.should_early_stop(
+          early_stopping_fn,
+          step_i,
+          is_last_ckpt=tuning_lib.is_last_checkpoint(
+              RunningMode.detect(
+                  has_train_metrics=True,
+                  has_eval_metrics=bool(eval_metrics),
+                  has_decode_metrics=bool(decode_metrics),
+              ),
+              step_i,
+              task.train.num_train_steps,
+              task.train.eval_interval_steps,
+              task.train.decode_interval_steps,
+              task.train.save_interval_steps,
+              train_to_end=getattr(early_stopping_fn, 'train_to_end', False),
+          ),
+          train_weighted_scalars=train_weighted_scalars,
+          eval_train_metrics=eval_train_metrics,
+          eval_metrics=eval_metrics,
+          decode_metrics=decode_metrics,
+          train_steps_per_sec=steps_per_sec,
+          num_params=total_num_params,
+      ):
         logging.info(
             (
-                'Training loop completed (step (`%d`) greater than '
-                'num_train_step (`%d`).'
+                'Training loop is early stopped at step `%d` by the '
+                'tuner, while num_train_step is `%d`.'
             ),
             step_i,
             train_p.num_train_steps,
         )
         break
+  gc.unfreeze()
 
-      program_output = train_program.run(partitioned_train_state, step_i)
-      partitioned_train_state = program_output.state
-      train_weighted_scalars = program_output.weighted_scalars
-      steps_per_sec = program_output.steps_per_sec
-      eval_train_metrics = program_output.eval_train_metrics
+  logging.info('[PAX STATUS]: Saving checkpoint for final step.')
+  checkpointer.save_final(
+      step_i,
+      partitioned_train_state=partitioned_train_state,
+      train_state_unpadded_shape_dtype_struct=train_state_metadata.unpadded_global_shapes,
+      train_state_pspecs=train_state_metadata.partition_specs,
+      train_input_pipeline=train_input_for_checkpoint,
+  )
 
-      # While the eval ones below are post-model weight updates, hence the step
-      # counter is incremented in between.
-      step_i = program_output.new_train_step
-
-      eval_metrics: Optional[tuning_lib.EvalMetrics] = None
-      # Run eval at regular step interval.
-      if (
-          train_p.eval_interval_steps
-          and step_i % train_p.eval_interval_steps == 0
-      ):
-        logging.log_first_n(INFO, '[PAX STATUS]:  Starting eval_step().', 5)
-        eval_partitioned_train_state = programs.get_eval_train_state(
-            task, partitioned_train_state, task.train.eval_use_ema_states
-        )
-        # If we have eval test then also evaluate on test.
-        if eval_programs:
-          logging.debug('[PAX STATUS]:  Running eval programs.')
-          eval_metrics, elapsed_secs = eval_lib.run_eval_programs(
-              eval_programs=eval_programs,
-              eval_partitioned_train_state=eval_partitioned_train_state,
-              step=step_i,
-          )
-          jax.monitoring.record_event_duration_secs(
-              '/jax/pax/train/interleaved_eval_duration_sec', elapsed_secs
-          )
-          logging.log_first_n(
-              INFO,
-              '[PAX STATUS]:  Completed running eval programs in %f seconds.',
-              5,
-              elapsed_secs,
-          )
-
-      decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
-      if (
-          decode_programs
-          and train_p.decode_interval_steps
-          and step_i % train_p.decode_interval_steps == 0
-      ):
-        decode_partitioned_train_state = programs.get_eval_train_state(
-            task, partitioned_train_state, task.train.decode_use_ema_states
-        )
-        logging.debug('[PAX STATUS]:  Running decode programs.')
-        decode_metrics, elapsed_secs = eval_lib.run_decode_programs(
-            train_state=decode_partitioned_train_state,
-            decode_programs=decode_programs,
-            step=step_i,
-        )
-        jax.monitoring.record_event_duration_secs(
-            '/jax/pax/train/interleaved_decode_duration_sec',
-            elapsed_secs,
-        )
-        logging.log_first_n(
-            INFO,
-            '[PAX STATUS]:  Completed running decode programs in %f seconds.',
-            5,
-            elapsed_secs,
-        )
-      logging.log_first_n(
-          INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1
-      )
-
-      if early_stopping_fn is not None:
-        if tuning_lib.should_early_stop(
-            early_stopping_fn,
-            step_i,
-            is_last_ckpt=tuning_lib.is_last_checkpoint(
-                RunningMode.detect(
-                    has_train_metrics=True,
-                    has_eval_metrics=bool(eval_metrics),
-                    has_decode_metrics=bool(decode_metrics),
-                ),
-                step_i,
-                task.train.num_train_steps,
-                task.train.eval_interval_steps,
-                task.train.decode_interval_steps,
-                task.train.save_interval_steps,
-                train_to_end=getattr(
-                    early_stopping_fn, 'train_to_end', False)
-            ),
-            train_weighted_scalars=train_weighted_scalars,
-            eval_train_metrics=eval_train_metrics,
-            eval_metrics=eval_metrics,
-            decode_metrics=decode_metrics,
-            train_steps_per_sec=steps_per_sec,
-            num_params=total_num_params,
-        ):
-          logging.info(
-              (
-                  'Training loop is early stopped at step `%d` by the '
-                  'tuner, while num_train_step is `%d`.'
-              ),
-              step_i,
-              train_p.num_train_steps,
-          )
-          break
-    gc.unfreeze()
-
-    logging.info('[PAX STATUS]: Saving checkpoint for final step.')
-    checkpointer.save_final(
-        step_i,
-        partitioned_train_state=partitioned_train_state,
-        train_state_unpadded_shape_dtype_struct=train_state_metadata.unpadded_global_shapes,
-        train_state_pspecs=train_state_metadata.partition_specs,
-        train_input_pipeline=train_input_for_checkpoint,
-    )
-
-    checkpointer.wait_until_finished()
-    logging.info('[PAX STATUS]: Final checkpoint saved.')
+  checkpointer.wait_until_finished()
+  logging.info('[PAX STATUS]: Final checkpoint saved.')
