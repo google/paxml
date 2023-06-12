@@ -729,7 +729,7 @@ traitlets==5.9.0
     #   nbformat
     #   notebook
     #   qtconsole
-transformers==4.27.4
+transformers==4.30.0
     # via t5
 typing-extensions==4.5.0
     # via
