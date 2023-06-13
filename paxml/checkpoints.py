@@ -433,9 +433,10 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   ):
     """Skip writing msgpack file for Pax since this file would be unused."""
     if self._use_ocdbt:
-      await super()._write_aggregate_file(
+      return await super()._write_aggregate_file(
           directory, item, param_infos, save_args
       )
+    return orbax.checkpoint.future.NoopFuture()
 
   async def async_save(
       self,
