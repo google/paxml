@@ -393,8 +393,12 @@ subclass is a `SingleTask` which requires the following Hparams:
 ```
 
 ## Pax on Multislice
-The multislice configs in this repo refer to [1. Singlie slice configs]https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py for syntax / model architecture
-and [2. MaxText repo]https://github.com/google/maxtexthttps://github.com/google/maxtext for config values. More details on how the MaxText variable names to Pax are described [here](https://docs.google.com/spreadsheets/d/1X_F88Vh71UKvFGgkZ36M6BcLevh0bzmZMXf24s7Z6UU/edit#gid=673705132).
+The multislice configs in this repo refer to 
+[1. Singlie slice configs](https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py)
+ for syntax / model architecture
+and 
+[2. MaxText repo](https://github.com/google/maxtexthttps://github.com/google/maxtext)
+ for config values. More details on how the MaxText variable names to Pax are described [here](https://docs.google.com/spreadsheets/d/1X_F88Vh71UKvFGgkZ36M6BcLevh0bzmZMXf24s7Z6UU/edit#gid=673705132).
 
 ### Setting up Cloud TPU VMs using Queued Resources
 
