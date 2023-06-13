@@ -695,7 +695,7 @@ toml==0.10.2
     #   tfds-nightly
 toolz==0.12.0
     # via chex
-tornado==6.2
+tornado==6.3.2
     # via
     #   ipykernel
     #   jupyter-client
