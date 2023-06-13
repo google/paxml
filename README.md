@@ -392,6 +392,68 @@ subclass is a `SingleTask` which requires the following Hparams:
       vn: HParams to control variational noise.
 ```
 
+## Pax on Multislice
+The multislice configs in this repo refer to [1. Singlie slice configs]https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py for syntax / model architecture
+and [2. MaxText repo]https://github.com/google/maxtexthttps://github.com/google/maxtext for config values. More details on how the MaxText variable names to Pax are described [here](https://docs.google.com/spreadsheets/d/1X_F88Vh71UKvFGgkZ36M6BcLevh0bzmZMXf24s7Z6UU/edit#gid=673705132).
+
+### Setting up Cloud TPU VMs using Queued Resources
+
+We refer to
+[this page](https://cloud.google.com/tpu/docs/queued-resources)
+for more exhaustive documentation about using Queued Resources for a multi-slice Cloud TPU project. The
+following shows the steps needed to set up TPUs for running example configs in this repo.
+
+```bash
+export ZONE=us-central2-b
+export VERSION=tpu-vm-v4-base
+export PROJECT=<your-project>
+export ACCELERATOR=v4-128 # or v4-384 depending on which config you run
+```
+
+Say, for running `C4Spmd22BAdam2xv4_128` on 2 slices of v4-128, you'd need to set up TPUs the following way:
+```bash
+export TPU_PREFIX=v4-128 # New TPUs will be created based off this prefix
+QR_ID=$TPU_PREFIX
+NODE_COUNT=<number-of-slices> # 1, 2, or 4 depending on which config you run
+
+#create a TPU VM
+gcloud alpha compute tpus queued-resources create $QR_ID --accelerator-type=$ACCELERATOR --runtime-version=tpu-vm-v4-base --node-count=$NODE_COUNT --node-prefix=$TPU_PREFIX
+```
+
+
+### Installing Pax
+
+The setup commands described earlier need to be run on ALL workers in ALL slices. You can 1) ssh into each worker individually; or 2) use for loop as the following to do so.
+
+```bash
+for ((i=0; i<$NODE_COUNT; i++))
+do
+    gcloud compute tpus tpu-vm ssh $TPU_PREFIX-$i --zone=us-central2-b --worker=all --command="pip install paxml && pip install orbax==0.1.1 && pip install \"jax[tpu]\" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html"
+done
+```
+
+### Run a test model
+In order to run the multislice configs, open the same number of terminals as your $NODE_COUNT. For our experiments on `C4Spmd22BAdam2xv4_128`, open two.
+Run each of these commands indvidually from each terminal.
+
+From Terminal 0, run
+```bash
+export EXP_NAME=C4Spmd22BAdam2xv4_128 && gcloud compute tpus tpu-vm ssh $TPU_PREFIX-0 --zone=us-central2-b --worker=all --command="JAX_USE_PJRT_C_API_ON_TPU=1  python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py --exp=tasks.lm.params.c4_maxtext.${EXP_NAME} --job_log_dir=gs://<your-bucket>"
+
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.lm_cloud.LmCloudSpmd2BLimitSteps \
+--job_log_dir=gs://<your-bucket>
+```
+
+From Terminal 1, concurrently run
+```bash
+export EXP_NAME=C4Spmd22BAdam2xv4_128 && gcloud compute tpus tpu-vm ssh $TPU_PREFIX-1 --zone=us-central2-b --worker=all --command="JAX_USE_PJRT_C_API_ON_TPU=1  python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py --exp=tasks.lm.params.c4_maxtext.${EXP_NAME} --job_log_dir=gs://<your-bucket>"
+
+python3 .local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.lm_cloud.LmCloudSpmd2BLimitSteps \
+--job_log_dir=gs://<your-bucket>
+```
+
 ## Releases
 PyPI Version | Commit
 ------------ | ----------------------------------------
@@ -412,3 +474,4 @@ PyPI Version | Commit
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
+
