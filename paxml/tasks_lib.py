@@ -184,7 +184,7 @@ def extract_ema(
         model_states.mdl_vars,
         is_leaf=py_utils.is_bprop_masked_node,
     )
-  return TrainState(step=model_states.step, mdl_vars=extracted, opt_states={})
+  return TrainState(step=model_states.step, mdl_vars=extracted, opt_states=[])
 
 
 def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:

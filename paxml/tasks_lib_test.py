@@ -1292,6 +1292,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         train_state.mdl_vars['params']['var01'],
         extracted.mdl_vars['params']['var01'],
     )
+    self.assertIsInstance(extracted.opt_states, list)
 
 if __name__ == '__main__':
   absltest.main()
