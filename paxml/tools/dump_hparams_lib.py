@@ -75,13 +75,6 @@ def _write_post_init_model_hparams_file(model_param, filepath,
                                input_specs)
 
   hyper_params = model.abstract_init_with_mdl_config(input_specs)
-
-  # unpack the hyper-params.
-  hyper_params = jax.tree_map(
-      lambda x: x.meta,
-      hyper_params,
-      is_leaf=lambda x: isinstance(x, base_layer.WrappedHParams))
-
   params_inits = model.abstract_init_with_metadata(input_specs)
 
   with tf.io.gfile.GFile(filepath, 'w') as fout:
