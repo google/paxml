@@ -1,4 +1,4 @@
-ARG cpu_base_image="ubuntu:20.04"
+ARG cpu_base_image="ubuntu:22.04"
 ARG base_image=$cpu_base_image
 FROM $base_image
 
@@ -6,13 +6,13 @@ LABEL maintainer="Pax team <pax-dev@google.com>"
 
 # Re-declare args because the args declared before FROM can't be used in any
 # instruction after a FROM.
-ARG cpu_base_image="ubuntu:20.04"
+ARG cpu_base_image="ubuntu:22.04"
 ARG base_image=$cpu_base_image
 ARG praxis_version
 ARG wheel_folder
 ENV WHEEL_FOLDER $wheel_folder
 ENV PYTHON_VERSION="3"
-ENV PYTHON_MINOR_VERSION="8"
+ENV PYTHON_MINOR_VERSION="10"
 
 # Pick up some TF dependencies
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends software-properties-common
@@ -29,16 +29,15 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y --no-install-rec
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Install python 3.8
-RUN add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && apt-get install -y \
-    python3.8 python3.8-dev python3-pip python3.8-venv && \
+# Install python 3.10
+RUN apt-get update && apt-get install -y \
+    python3 python3-dev python3-pip python3-venv && \
     rm -rf /var/lib/apt/lists/* && \
-    python3.8 -m pip install pip --upgrade && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.8 0
+    python3.10 -m pip install pip --upgrade && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 0
 
-# Make python3.8 the default python version
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 0
+# Make python3.10 the default python version
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 0
 
 ARG bazel_version=5.1.1
 # This is to install bazel, for development purposes.

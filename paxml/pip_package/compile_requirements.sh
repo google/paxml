@@ -28,9 +28,9 @@ cp ../../praxis/pip_package/requirements.in $TMP_FOLDER/praxis-requirements.in
 cp ./compile_requirements_helper.sh $TMP_FOLDER/
 sed -i 's/praxis/#praxis/' $TMP_FOLDER/paxml-requirements.in
 
-docker pull gcr.io/pax-on-cloud-project/paxml_nightly_3.8:latest
+docker pull gcr.io/pax-on-cloud-project/paxml_nightly_3.10:latest
 docker run --rm -a stdin -a stdout -a stderr -v $TMP_FOLDER:/tmp/requirements \
-  --name container1 gcr.io/pax-on-cloud-project/paxml_nightly_3.8:latest \
+  --name container1 gcr.io/pax-on-cloud-project/paxml_nightly_3.10:latest \
   bash /tmp/requirements/compile_requirements_helper.sh
 
 cp $TMP_FOLDER/paxml-requirements.txt ../../paxml/pip_package/requirements.txt

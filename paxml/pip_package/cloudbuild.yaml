@@ -15,7 +15,7 @@ steps:
   args: ['-c', 'source paxml/pip_package/collect_wheels.sh && collect_wheels ${_RELEASE_VERSION} ${_WHEEL_FOLDER}']
 
 substitutions:
-    _PYTHON_VERSION: '3.8'
+    _PYTHON_VERSION: '3.10'
     _RELEASE_VERSION: 'nightly'  # or rX.Y
     _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
     _WHEEL_FOLDER: '/tmp/wheels'

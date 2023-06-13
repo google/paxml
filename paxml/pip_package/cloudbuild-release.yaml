@@ -16,7 +16,7 @@ steps:
   args: ['-c', 'mv ${_WHEEL_FOLDER}/*.whl .']
 
 substitutions:
-    _PYTHON_VERSION: '3.8'
+    _PYTHON_VERSION: '3.10'
     _RELEASE_VERSION: '1.0.0'  # or rX.Y
     _PRAXIS_VERSION: '1.0.0'  # or rX.Y
     _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
