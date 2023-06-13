@@ -398,7 +398,7 @@ The multislice configs in this repo refer to
  for syntax / model architecture
 and 
 [2. MaxText repo](https://github.com/google/maxtexthttps://github.com/google/maxtext)
- for config values. More details on how the MaxText variable names to Pax are described [here](https://docs.google.com/spreadsheets/d/1X_F88Vh71UKvFGgkZ36M6BcLevh0bzmZMXf24s7Z6UU/edit#gid=673705132).
+ for config values.
 
 We provide example runs under `c4_multislice.py` as a starting point for Pax on multislice.
 
@@ -459,6 +459,29 @@ python3 .local/lib/python3.8/site-packages/paxml/main.py \
 --exp=tasks.lm.params.lm_cloud.LmCloudSpmd2BLimitSteps \
 --job_log_dir=gs://<your-bucket>
 ```
+
+### MaxText to Pax
+This table covers details on how the MaxText variable names have been translated to Pax. 
+Note that MaxText has a "scale" which is multiplied to several parameters (base_num_decoder_layers, base_emb_dim, base_mlp_dim, base_num_heads) for final values.
+Another thing to mention is while Pax covers DCN and ICN MESH_SHAPE as an array, in MaxText there are separate variables for data_parallelism, fsdp_parallelism and tensor_parallelism. Since these values are set as 1 by default, only the variables with value greater than 1 are recorded in this translation table.
+
+| Pax C4Spmd22BAdam2xv4_128 |              | MaxText  2xv4-128.sh            |          | after scale is applied |
+|---------------------------|--------------|---------------------------------|----------|-----------------------:|
+|                           |              | scale                           |        3 |                        |
+| NUM_LAYERS                |           48 | base_num_decoder_layers         |       16 |                     48 |
+| MODEL_DIMS                |         6144 | base_emb_dim                    |     2048 |                   6144 |
+| HIDDEN_DIMS               |        24576 | MODEL_DIMS * 4 (= base_mlp_dim) |     8192 |                  24576 |
+| NUM_HEADS                 |           24 | base_num_heads                  |        8 |                     24 |
+| DIMS_PER_HEAD             |          256 | head_dim                        |      256 |                        |
+| PERCORE_BATCH_SIZE        |           16 | per_device_batch_size           |       16 |                        |
+| MAX_SEQ_LEN               |         1024 | max_target_length               |     1024 |                        |
+| VOCAB_SIZE                |        32768 | vocab_size                      |    32768 |                        |
+| FPROP_DTYPE               | jnp.bfloat16 | dtype                           | bfloat16 |                        |
+| USE_REPEATED_LAYER        |     TRUE     |                                 |          |                        |
+| SUMMARY_INTERVAL_STEPS    |           10 |                                 |          |                        |
+| ICI_MESH_SHAPE            | [1, 64, 1]   | ici_fsdp_parallelism            |       64 |                        |
+| DCN_MESH_SHAPE            | [2, 1, 1]    | dcn_data_parallelism            |        2 |                        |
+
 
 ## Releases
 PyPI Version | Commit
