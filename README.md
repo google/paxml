@@ -429,7 +429,7 @@ gcloud alpha compute tpus queued-resources create $QR_ID --accelerator-type=$ACC
 
 ### Installing Pax
 
-The setup commands described earlier need to be run on ALL workers in ALL slices. You can 1) ssh into each worker individually; or 2) use for loop as the following to do so.
+The setup commands described earlier need to be run on ALL workers in ALL slices. You can 1) ssh into each worker individually; or 2) use for loop as the following command.
 
 ```bash
 for ((i=0; i<$NODE_COUNT; i++))
@@ -462,10 +462,12 @@ python3 .local/lib/python3.8/site-packages/paxml/main.py \
 
 ### MaxText to Pax
 This table covers details on how the MaxText variable names have been translated to Pax. 
+
 Note that MaxText has a "scale" which is multiplied to several parameters (base_num_decoder_layers, base_emb_dim, base_mlp_dim, base_num_heads) for final values.
+
 Another thing to mention is while Pax covers DCN and ICN MESH_SHAPE as an array, in MaxText there are separate variables for data_parallelism, fsdp_parallelism and tensor_parallelism. Since these values are set as 1 by default, only the variables with value greater than 1 are recorded in this translation table.
 
-| Pax C4Spmd22BAdam2xv4_128 |              | MaxText  2xv4-128.sh            |          | after scale is applied |
+| Pax C4Spmd22BAdam2xv4_128 |              | MaxText  2xv4-128.sh            |          | (after scale is applied) |
 |---------------------------|--------------|---------------------------------|----------|-----------------------:|
 |                           |              | scale                           |        3 |                        |
 | NUM_LAYERS                |           48 | base_num_decoder_layers         |       16 |                     48 |
