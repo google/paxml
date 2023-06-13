@@ -400,6 +400,8 @@ and
 [2. MaxText repo](https://github.com/google/maxtexthttps://github.com/google/maxtext)
  for config values. More details on how the MaxText variable names to Pax are described [here](https://docs.google.com/spreadsheets/d/1X_F88Vh71UKvFGgkZ36M6BcLevh0bzmZMXf24s7Z6UU/edit#gid=673705132).
 
+We provide example runs under `c4_multislice.py` as a starting point for Pax on multislice.
+
 ### Setting up Cloud TPU VMs using Queued Resources
 
 We refer to
