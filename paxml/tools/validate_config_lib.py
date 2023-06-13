@@ -68,25 +68,14 @@ def _hparams_post_init(model_param, input_specs) -> None:
   """Calls post-init of model hparams."""
   model = instantiate(model_param)
 
-  prng_key = jax.random.PRNGKey(seed=123)
-
-  def gen_post_init_hparams(prng_key):
-    return model.apply(
-        {},
-        rngs={base_layer.PARAMS: prng_key},
-        method=model.post_init_hparams,
-        mutable=True,
-    )[1]
-
-  variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
-  assert base_layer.HYPER_PARAMS in variables_abstract
-
   # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
   # (and check for dcn_mesh_shape too).
   if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
     input_specs = jax.tree_map(
         py_utils.get_global_input_shape_dtype, input_specs
     )
+
+  _ = model.abstract_init_with_mdl_config(input_specs)
   _ = model.abstract_init_with_metadata(input_specs)
 
 

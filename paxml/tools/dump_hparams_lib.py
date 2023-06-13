@@ -68,34 +68,27 @@ def _write_post_init_model_hparams_file(model_param, filepath,
   """Dumps post init model hparams file."""
   model = instantiate(model_param)
 
-  prng_key = jax.random.PRNGKey(seed=123)
+  # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
+  # (and check for dcn_mesh_shape too).
+  if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
+    input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
+                               input_specs)
 
-  def gen_post_init_hparams(prng_key):
-    return model.apply({},
-                       rngs={base_layer.PARAMS: prng_key},
-                       method=model.post_init_hparams,
-                       mutable=True)[1]
+  hyper_params = model.abstract_init_with_mdl_config(input_specs)
 
-  variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
-  assert base_layer.HYPER_PARAMS in variables_abstract
-
+  # unpack the hyper-params.
   hyper_params = jax.tree_map(
       lambda x: x.meta,
-      variables_abstract[base_layer.HYPER_PARAMS],
+      hyper_params,
       is_leaf=lambda x: isinstance(x, base_layer.WrappedHParams))
 
-  with tf.io.gfile.GFile(filepath, 'w') as fout:
+  params_inits = model.abstract_init_with_metadata(input_specs)
 
+  with tf.io.gfile.GFile(filepath, 'w') as fout:
     hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
     fout.write(hyper_params_dump)
     fout.write('\n\n')
 
-    # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
-    # (and check for dcn_mesh_shape too).
-    if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
-      input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                 input_specs)
-    params_inits = model.abstract_init_with_metadata(input_specs)
     params_inits_text = base_hyperparams.nested_struct_to_text(params_inits)
     fout.write(params_inits_text)
 
