@@ -16,7 +16,7 @@
 """Program executor that drives the training/evaluation loops."""
 
 import abc
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
 from etils import epath
 from paxml import partitioning
@@ -47,7 +47,7 @@ class BaseExecutor(metaclass=abc.ABCMeta):
       eval_programs: Sequence[programs.BaseEvalProgram],
       # TODO(laigd): this shouldn't be part of the executor API, consider adding
       # a dedicated executor for auto-tuning and get rid of this instead.
-      early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+      early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
   ) -> None:
     """Sets up the programs and the executor."""
 

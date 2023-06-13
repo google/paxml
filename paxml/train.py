@@ -17,11 +17,10 @@
 
 import contextlib
 import typing
-from typing import Optional, Type
+from typing import Type
 
 from absl import logging
 from etils import epath
-import fiddle as fdl
 import jax
 import jax.numpy as jnp
 from paxml import base_experiment
@@ -75,7 +74,8 @@ def write_hparams_file(
         )
         hparams_file.write('\n\n')
       hparams_file.write(
-          base_hyperparams.nested_struct_to_text(model_config.task()))
+          base_hyperparams.nested_struct_to_text(model_config.task())
+      )
 
 
 def write_experiment_class_vars_file(
@@ -99,9 +99,9 @@ def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.PathLike,
     maybe_use_persistence_checkpointing: bool,
-    eval_on_test: Optional[bool],
-    checkpoint_todelete_subdir: Optional[str] = None,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    eval_on_test: bool | None,
+    checkpoint_todelete_subdir: str | None = None,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None = None,
     run_decode: bool = False,
     enable_auto_sharding: bool = False,
     enable_async_checkpointing: bool = False,
