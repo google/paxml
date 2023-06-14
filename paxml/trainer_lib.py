@@ -1403,32 +1403,6 @@ def reshard_input_based_on_rank_fn(
     return x
 
 
-def infer_partition_spec_based_on_rank_fn(
-    mapping_dict: Dict[str, base_layer.SplitDimsMapping],
-    mesh_names: Sequence[str],
-    x: JTensor,
-) -> Optional[jax.sharding.PartitionSpec]:
-  """Infers PartitionSpec of input from the rank of corresponding JTensors.
-
-  Args:
-    mapping_dict: Dictionary which contains the split mapping for different
-      shapes. For n-d shape, it must have an entry f'map_{n}d' which tells us
-      how to partition tensors of this dimension.
-    mesh_names: List of mesh axis names.
-    x: JTensor which to shard.
-
-  Returns:
-    PartitionSpec or None (if everything is replicated).
-  """
-  key = f'map_{len(x.shape)}d'
-  if key not in mapping_dict:
-    raise ValueError(f'Split mapping must be provided for {len(x.shape)}-d'
-                     f'in the form of key map_{len(x.shape)} in'
-                     f'{mapping_dict}.')
-  if mapping_dict[key] is not None:
-    return base_layer.to_partition_spec(mapping_dict[key], mesh_names)
-
-
 def get_inputs_shape_dtype(
     input_p: pax_fiddle.Config[base_input.BaseInput],
 ) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
