@@ -55,7 +55,6 @@ retrieve_latest_checkpoint_step_if_exists = (
 retrieve_checkpoint_type = checkpoint_types.retrieve_checkpoint_type
 make_checkpoint_step_dir = checkpoint_paths.make_checkpoint_step_dir
 get_step_from_checkpoint_asset = checkpoint_paths.get_step_from_checkpoint_asset
-maybe_update_checkpoint_type = checkpoint_types.maybe_update_checkpoint_type
 is_checkpoint_asset = checkpoint_paths.is_checkpoint_asset
 
 
@@ -68,7 +67,7 @@ def get_checkpointer(
   """Creates an appropriate Checkpointer for given CheckpointType."""
   if async_checkpointer is not None:
     return async_checkpointer
-  if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
+  if checkpoint_type == CheckpointType.GDA:
     checkpointer = orbax.checkpoint.Checkpointer(
         PaxCheckpointHandler(
             enforce_restore_shape_check=enforce_restore_shape_check,
@@ -225,7 +224,7 @@ def restore_checkpoint(
           f'No checkpoints were found in directory {checkpoint_dir=!r}'
       )
   restore_args = None
-  if checkpoint_type in {CheckpointType.GDA, CheckpointType.GDA_VERSION_SUBDIR}:
+  if checkpoint_type == CheckpointType.GDA:
     restore_args = {
         'specs': state_specs,
         'mesh': global_mesh,

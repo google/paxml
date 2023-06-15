@@ -1637,7 +1637,6 @@ class SingleTask(base_task.BaseTask):
     """Applies one CheckpointLoadingRules to train_state."""
     uses_gda = checkpoint_type in {
         CheckpointType.GDA,
-        CheckpointType.GDA_VERSION_SUBDIR,
         CheckpointType.PERSISTENCE,
     }
     if uses_gda:
@@ -1712,7 +1711,6 @@ class SingleTask(base_task.BaseTask):
         ckpt_task.model.ici_mesh_shape is None):
       assert checkpoint_type in {
           CheckpointType.GDA,
-          CheckpointType.GDA_VERSION_SUBDIR,
           CheckpointType.PERSISTENCE,
       }
       loaded_train_state = restore_pmap_from_tensorstore(

@@ -71,11 +71,12 @@ def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
 def checkpoint_name(
     step: int,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+    use_digit_step_subdirectory: bool = False,
 ) -> str:
+  if use_digit_step_subdirectory:
+    return str(step)
   if checkpoint_type == CheckpointType.FLAX:
     return f'{CHECKPOINT_PREFIX}{step}'
-  elif checkpoint_type == CheckpointType.GDA_VERSION_SUBDIR:
-    return str(step)
   else:
     return f'{CHECKPOINT_PREFIX}{step:08d}'
 
@@ -84,13 +85,20 @@ def make_checkpoint_step_dir(
     checkpoint_dir: epath.Path,
     step: int,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+    use_digit_step_subdirectory: bool = False,
 ) -> epath.Path:
-  return checkpoint_dir / checkpoint_name(step, checkpoint_type=checkpoint_type)
+  """Returns a checkpoint step directory."""
+  return checkpoint_dir / checkpoint_name(
+      step,
+      checkpoint_type=checkpoint_type,
+      use_digit_step_subdirectory=use_digit_step_subdirectory,
+  )
 
 
 def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
   checkpoint_dir = epath.Path(checkpoint_dir)
-  if checkpoint_types.is_gda_version_subdir(checkpoint_dir):
+  # For supporting digit step-like subdirectories.
+  if checkpoint_dir.name.isdigit():
     return int(checkpoint_dir.name)
   if is_tmp_checkpoint_asset(checkpoint_dir):
     return int(checkpoint_dir.suffix[len(CHECKPOINT_PREFIX) :])

@@ -31,11 +31,6 @@ class CheckpointType(str, enum.Enum):
   FLAX = 'flax'
   GDA = 'gda'
   PERSISTENCE = 'persistence'
-  GDA_VERSION_SUBDIR = 'gda_version_subdir'
-
-
-def is_gda_version_subdir(checkpoint_path_with_step: epath.Path) -> bool:
-  return checkpoint_path_with_step.name.isdigit()
 
 
 def retrieve_checkpoint_type(
@@ -52,24 +47,3 @@ def retrieve_checkpoint_type(
   else:
     # pmap uses FLAX, Persistence-based or not.
     return CheckpointType.FLAX
-
-
-def maybe_update_checkpoint_type(
-    user_specified_type: CheckpointType,
-    checkpoint_path_with_step: epath.Path,
-) -> CheckpointType:
-  """Returns the GDA checkpoint type that matches the provided path.
-
-  Args:
-    user_specified_type: CheckpointType of the checkpoint provided by the user.
-    checkpoint_path_with_step: Absolute path to the checkpoint directory that
-      includes the step number e.g. "/some/path/checkpoints/checkpoint_001".
-
-  Returns:
-    The updated CheckpointType matching the provided absolute path.
-  """
-  if user_specified_type != CheckpointType.GDA:
-    return user_specified_type
-  if is_gda_version_subdir(checkpoint_path_with_step):
-    return CheckpointType.GDA_VERSION_SUBDIR
-  return CheckpointType.GDA

@@ -16,6 +16,7 @@
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
 import dataclasses
+import os
 import typing
 from typing import Any, Mapping, Optional, Sequence, Union
 
@@ -50,11 +51,17 @@ CheckpointType = checkpoint_types.CheckpointType
 
 
 def _get_checkpoint_version(
-    checkpoint_type: CheckpointType, directory: epath.Path, step: int
+    checkpoint_type: CheckpointType,
+    directory: epath.Path,
+    step: int,
+    use_digit_step_subdirectory: bool = False,
 ) -> float:
   """Gets checkpoint version from saved metadata."""
   checkpoint_step_dir = checkpoint_paths.make_checkpoint_step_dir(
-      directory, step, checkpoint_type=checkpoint_type
+      directory,
+      step,
+      checkpoint_type=checkpoint_type,
+      use_digit_step_subdirectory=use_digit_step_subdirectory,
   )
   version = 0.0
   # Necessary because some checkpoints do not conform to Orbax directory
@@ -117,6 +124,11 @@ def _is_legacy_flax_checkpoint(path: epath.Path) -> bool:
   )
 
 
+def _has_digit_step_subdirectory(directory) -> bool:
+  """Indicates whether the checkpoints have digit-like step subdirectories."""
+  return False  # mapped to internal digit step impl.
+
+
 @dataclasses.dataclass
 class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
   """Options for constructing OrbaxCheckpointManager.
@@ -171,28 +183,17 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     # specific version may impact the checkpoint format, so it must be known in
     # advance of any operations.
     self._directory = epath.Path(directory)
+    self._use_digit_step_subdirectory = _has_digit_step_subdirectory(
+        self._directory
+    )
     if self._directory.exists():
       step = self.any_step()
       if step is not None:
-        # Account for trying to actually load GDA_VERSION_SUBDIR instead of GDA.
-        if checkpoint_type == CheckpointType.GDA:
-          if (
-              not checkpoint_paths.make_checkpoint_step_dir(
-                  self._directory, step, checkpoint_type=CheckpointType.GDA
-              ).exists()
-              and checkpoint_paths.make_checkpoint_step_dir(
-                  self._directory,
-                  step,
-                  checkpoint_type=CheckpointType.GDA_VERSION_SUBDIR,
-              ).exists()
-          ):
-            logging.info(
-                'Updated checkpoint_type from GDA to GDA_VERSION_SUBDIR'
-            )
-            self._checkpoint_type = CheckpointType.GDA_VERSION_SUBDIR
-
         version = _get_checkpoint_version(
-            self._checkpoint_type, self._directory, step
+            self._checkpoint_type,
+            self._directory,
+            step,
+            use_digit_step_subdirectory=self._use_digit_step_subdirectory,
         )
         logging.info(
             'Found existing checkpoint with version: %s, step: %s',
@@ -244,7 +245,9 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
 
   def _checkpoint_name(self, step: int) -> str:
     return checkpoint_paths.checkpoint_name(
-        step, checkpoint_type=self._checkpoint_type
+        step,
+        checkpoint_type=self._checkpoint_type,
+        use_digit_step_subdirectory=self._use_digit_step_subdirectory,
     )
 
   def reached_preemption(self, step: int) -> bool:
@@ -253,6 +256,12 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
 
   def should_save(self, step: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
+    if self._use_digit_step_subdirectory:
+      raise NotImplementedError(
+          'Checkpoints with digit step subdirectories do not support the '
+          'saving mode.'
+      )
+
     # Whether to save an on-demand checkpoint due to preemption
     if self.reached_preemption(step):
       return True
@@ -270,6 +279,23 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
         and step % self._options.save_interval_steps == 0
     )
 
+  def delete(self, step: int):
+    """Deletes a step checkpoint."""
+    if self._use_digit_step_subdirectory:
+      raise NotImplementedError(
+          'Checkpoints with digit step subdirectories do not support deletions.'
+      )
+    super().delete(step)
+
+  def save(self, *args, **kwargs) -> bool:
+    """Saves the provided items."""
+    if self._use_digit_step_subdirectory:
+      raise NotImplementedError(
+          'Checkpoints with digit step subdirectories do not support the '
+          'saving mode.'
+      )
+    return super().save(*args, **kwargs)
+
   def _get_save_directory(
       self,
       step: int,
@@ -280,7 +306,10 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     """Returns the standardized path to a save directory for a single item."""
     if tmp_directory is None:
       step_dir = checkpoint_paths.make_checkpoint_step_dir(
-          directory, step, checkpoint_type=self._checkpoint_type
+          directory,
+          step,
+          checkpoint_type=self._checkpoint_type,
+          use_digit_step_subdirectory=self._use_digit_step_subdirectory,
       )
     else:
       step_dir = tmp_directory

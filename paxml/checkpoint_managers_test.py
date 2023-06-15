@@ -256,10 +256,7 @@ class CheckpointManagerTest(parameterized.TestCase):
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh
-    if checkpoint_type in {
-        CheckpointType.GDA,
-        CheckpointType.GDA_VERSION_SUBDIR,
-    }:
+    if checkpoint_type == CheckpointType.GDA:
       restore_kwargs = {
           'specs': state_specs,
           'mesh': global_mesh,
@@ -1034,11 +1031,17 @@ class CheckpointManagerTest(parameterized.TestCase):
       )
     expected = self.train_state
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
-    checkpoint_manager = self.create_checkpoint_manager(
-        checkpoint_managers.CheckpointManagerOptions(),
-        checkpoint_type=CheckpointType.GDA,
-        train_input_pipeline=train_input_pipeline,
-    )
+    with mock.patch.object(
+        checkpoint_managers,
+        '_has_digit_step_subdirectory',
+        return_value=remove_checkpoint_prefix,
+    ) as mock_has_digit:
+      checkpoint_manager = self.create_checkpoint_manager(
+          checkpoint_managers.CheckpointManagerOptions(),
+          checkpoint_type=CheckpointType.GDA,
+          train_input_pipeline=train_input_pipeline,
+      )
+      mock_has_digit.assert_called_once()
     self.assertEqual(checkpoint_manager.all_steps(), [0])
 
     restored = checkpoint_manager.restore(

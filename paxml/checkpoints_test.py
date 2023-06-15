@@ -150,31 +150,6 @@ class CheckpointsTest(parameterized.TestCase):
 
     self.assertIsNone(checkpoints.latest_checkpoint_if_exists(self.directory))
 
-  @parameterized.parameters(
-      (
-          checkpoint_types.CheckpointType.UNSPECIFIED,
-          epath.Path('/tmp/checkpoints/1234'),
-          checkpoint_types.CheckpointType.UNSPECIFIED,
-      ),
-      (
-          checkpoint_types.CheckpointType.GDA,
-          epath.Path('/tmp/checkpoint_1234'),
-          checkpoint_types.CheckpointType.GDA,
-      ),
-      (
-          checkpoint_types.CheckpointType.GDA,
-          epath.Path('/tmp/checkpoints/1234'),
-          checkpoint_types.CheckpointType.GDA_VERSION_SUBDIR,
-      ),
-  )
-  def test_maybe_update_checkpoint_type(
-      self, specified_format, path, expected_format
-  ):
-    self.assertEqual(
-        checkpoint_types.maybe_update_checkpoint_type(specified_format, path),
-        expected_format,
-    )
-
   def test_retrieve_latest_checkpoint_step_no_checkpoint_raises_exception(self):
     checkpoint_dir = epath.Path(self.create_tempdir('random').full_path)
     with self.assertRaisesWithLiteralMatch(
