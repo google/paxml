@@ -123,3 +123,46 @@ class LGDenseLmTiny(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
     task_p.train.learner.repeat_prefix_sep = '_'
     task_p.train.num_train_steps = 200
     return task_p
+  
+@experiment_registry.register
+class LGDenseLmV432(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
+  """Base config for an SPMD model."""
+
+  NUM_LAYERS = 24
+  MODEL_DIMS = 1536
+  HIDDEN_DIMS = MODEL_DIMS * 4
+#   ACTIVATION_CLS = layers.GELU
+#   USE_GATED_ACTIVATION = False
+  NUM_HEADS = 16
+  DIMS_PER_HEAD = MODEL_DIMS // NUM_HEADS
+  VOCAB_SIZE = 32000
+  PERCORE_BATCH_SIZE = 4
+
+  USE_REPEATED_LAYER = False
+  COMBINE_QKV = False
+  RELATIVE_BIAS = True
+  TRAINABLE_POSITION_EMB = True
+
+
+  LEARNING_RATE = 1.0
+  WEIGHT_DECAY = 0.8
+  CLIP_GRADIENT_NORM_TO_VALUE = 1.0
+
+  # Autodiff remat.
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+  CHECKPOINT_EVERY_N_STEPS = 10
+  SUMMARY_INTERVAL_STEPS = 1
+  CHECKPOINT_MAX_TO_KEEP = 100
+  EVAL_INTERVAL_STEPS = 5
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    """Returns the task parameters."""
+    task_p = super().task()
+    model_params.set_default_adafactor(
+        task_p, self.LEARNING_RATE, self.WEIGHT_DECAY, 
+        # decay_end=self.DECAY_END,
+         clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE)
+    task_p.train.learner.repeat_prefix_sep = '_'
+    task_p.train.num_train_steps = 200
+    return task_p

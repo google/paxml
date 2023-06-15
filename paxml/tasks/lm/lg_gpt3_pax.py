@@ -177,6 +177,7 @@ class DenseLMTemplateLG(base_experiment.BaseExperiment):
   HIDDEN_DIMS = MODEL_DIMS * 4 # originally was 32 * 1024 
   FPROP_DTYPE = jnp.bfloat16 #?
   PACKED_INPUT = True #?
+  PERCORE_BATCH_SIZE = 0.0625
 
   USE_REPEATED_LAYER = True
   SEPARATE_EMBEDDING = False #?
