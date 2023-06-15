@@ -201,6 +201,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
     )
     if self.use_ema:
       partitioned_train_state = tasks_lib.extract_ema(partitioned_train_state)
+    else:
+      partitioned_train_state = partitioned_train_state.to_eval_state()
     return partitioned_train_state
 
   def load_checkpoint_for_step(
@@ -241,7 +243,6 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
 
 class _PmapEvalCheckpointer(_EvalCheckpointer):
 
-
   @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
   def _restore(
       self, step: int, train_state_global_shapes: TrainState
@@ -265,6 +266,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
       )
     if self.use_ema:
+      # Note: extract_ema() will remove the opt_states.
       model_states = tasks_lib.extract_ema(model_states)
     else:
       model_states = model_states.to_eval_state()
@@ -362,14 +364,14 @@ def _create_checkpointer(
 def run_eval_programs(
     *,
     eval_programs: Sequence[programs.BaseEvalProgram],
-    eval_partitioned_train_state: TrainState,
+    train_state: TrainState,
     step: int,
 ) -> Tuple[tuning_lib.EvalMetrics, float]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
     eval_programs: A list of EvalPrograms to conduct eval.
-    eval_partitioned_train_state: Train State to use for eval.
+    train_state: Train State to use for eval.
     step: The training step at which we are evaling the model.
 
   Returns:
@@ -382,7 +384,7 @@ def run_eval_programs(
 
   with py_utils.timeit() as period:
     for program in eval_programs:
-      program_out = program.run(eval_partitioned_train_state, step)
+      program_out = program.run(train_state, step)
       eval_metrics.append(program_out.eval_metrics)
       eval_scoring_metrics.append(program_out.eval_scoring_metrics)
       num_eval_steps.append(program_out.num_eval_steps)
@@ -569,30 +571,12 @@ class _EvalRunner:
     )
 
   @property
+  def eval_programs(self):
+    return self._eval_programs
+
+  @property
   def decode_programs(self):
     return self._decode_programs
-
-  def run_one_step(self, train_state):
-    if not self._eval_programs:
-      return tuning_lib.EvalMetrics(
-          metrics_list=[],
-          scoring_metrics_list=[],
-          steps_per_sec=0,
-          input_names=[],
-      )
-
-    step_i = int(
-        py_utils.maybe_unreplicate_for_fully_replicated(train_state.step)
-    )
-    eval_metrics, elapsed_secs = run_eval_programs(
-        eval_programs=self._eval_programs,
-        eval_partitioned_train_state=train_state.to_eval_state(),
-        step=step_i,
-    )
-    jax.monitoring.record_event_duration_secs(
-        '/jax/pax/eval/duration_sec', elapsed_secs
-    )
-    return eval_metrics
 
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
@@ -751,15 +735,15 @@ def decode(
 
 def run_decode_programs(
     *,
-    train_state: TrainState,
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
+    train_state: TrainState,
     step: int,
 ) -> Tuple[tuning_lib.DecodeMetrics, float]:
   """Returns a function that runs decode over all decoder datasets.
 
   Args:
-    train_state: The partitioned TrainState instance.
     decode_programs: A list of `SingleTaskDecodeProgram`s to do the decoding.
+    train_state: The partitioned TrainState instance.
     step: The training step at which we are evaling the model.
 
   Returns:
@@ -791,11 +775,6 @@ def run_decode_programs(
       ),
       period.elapsed,
   )
-
-
-def _is_shape_dtype_struct(x):
-  """Indicates whether the input is of type ShapeDtypeStruct or not."""
-  return isinstance(x, jax.ShapeDtypeStruct)
 
 
 def _common_eval_or_decode_loop(
@@ -842,8 +821,17 @@ def _common_eval_or_decode_loop(
             '/jax/pax/decode/duration_sec', elapsed_secs
         )
 
-      logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
-      eval_metrics = eval_runner.run_one_step(partitioned_train_state)
+      eval_metrics = None
+      if eval_runner.eval_programs:
+        logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
+        eval_metrics, elapsed_secs = run_eval_programs(
+            eval_programs=eval_runner.eval_programs,
+            train_state=partitioned_train_state,
+            step=last_checkpoint_step,
+        )
+        jax.monitoring.record_event_duration_secs(
+            '/jax/pax/eval/duration_sec', elapsed_secs
+        )
 
     exceeded_ckpt = last_checkpoint_step + task.train.save_interval_steps
     is_last_ckpt = (

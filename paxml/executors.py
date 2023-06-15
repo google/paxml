@@ -431,7 +431,7 @@ def _train_and_evaluate_common(
         logging.debug('[PAX STATUS]:  Running eval programs.')
         eval_metrics, elapsed_secs = eval_lib.run_eval_programs(
             eval_programs=eval_programs,
-            eval_partitioned_train_state=eval_partitioned_train_state,
+            train_state=eval_partitioned_train_state,
             step=step_i,
         )
         jax.monitoring.record_event_duration_secs(
@@ -455,8 +455,8 @@ def _train_and_evaluate_common(
       )
       logging.debug('[PAX STATUS]:  Running decode programs.')
       decode_metrics, elapsed_secs = eval_lib.run_decode_programs(
-          train_state=decode_partitioned_train_state,
           decode_programs=decode_programs,
+          train_state=decode_partitioned_train_state,
           step=step_i,
       )
       jax.monitoring.record_event_duration_secs(
