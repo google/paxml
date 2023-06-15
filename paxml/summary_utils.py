@@ -616,12 +616,16 @@ class SummaryHandler:
     should_accumulate = self.should_accumulate(step)
     should_write_summary = self.should_write(step)
     should_log = self.should_log(step)
-    if should_log or should_accumulate or should_write_summary:
-      loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-      weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-          weighted_scalars)
-      summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-          summary_tensors)
+    if not (should_log or should_accumulate or should_write_summary):
+      # Nothing to do, return immediately to avoid unnecessary work.
+      return False
+    loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
+    weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+        weighted_scalars
+    )
+    summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
+        summary_tensors
+    )
     if per_example_out and should_log:
       per_example_out = py_utils.maybe_unreplicate_for_first_shard(
           per_example_out)
