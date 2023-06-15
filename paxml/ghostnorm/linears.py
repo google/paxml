@@ -25,7 +25,7 @@ from praxis.layers import base_ops
 JTensor = pytypes.JTensor
 
 
-def make_last_dim_projector(einsum: base_ops.Einsum):
+def make_last_dim_projector(einsum: base_ops.EinsumOp):
   """Constructs an operator that does last-dim projection given an einsum."""
 
   project_with_einsum = lambda x, w: einsum('...y, yz -> ...z', x, w)
