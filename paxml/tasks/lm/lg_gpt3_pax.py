@@ -180,17 +180,19 @@ class DenseLMTemplateLG(base_experiment.BaseExperiment):
   PERCORE_BATCH_SIZE = 0.0625
 
   USE_REPEATED_LAYER = True
-  SEPARATE_EMBEDDING = False #?
+  SEPARATE_EMBEDDING = False #since we want shared embedding between input and unembedding
   TRAINABLE_POSITION_EMB = True  
   TRAINABLE_PE_MAX_SEQ_LEN = 16 * 1024 #?
-  RELATIVE_BIAS = False #?
+  RELATIVE_BIAS = True #Lingvo TF config is using relative bias wrb
   USE_ROTARY_POSITION_EMB = False #?
   NORM_POLICY = 'pre' #?
   ENABLE_DCONV = False #?
-  COMBINE_QKV = True #?
+  COMBINE_QKV = False #lingvo TF config is using separate QKV
   ACTIVATION_CLS = activations.GELU #.ReLU
   USE_GATED_ACTIVATION = True
   DECAY_END = 100000 #?
+
+  USE_BIAS = False
 
   # optimizer related
   DROPOUT_PROB = 0.0 #?
@@ -275,7 +277,7 @@ class DenseLMTemplateLG(base_experiment.BaseExperiment):
     )
     transformer_layer_p.tr_atten_tpl.atten_logit_cap = self.ATTEN_LOGIT_CAP
     transformer_layer_p.norm_policy = self.NORM_POLICY
-    transformer_layer_p.tr_atten_tpl.use_bias = False
+    transformer_layer_p.tr_atten_tpl.use_bias = self.USE_BIAS
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
     transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
         self.ACTIVATION_CLS

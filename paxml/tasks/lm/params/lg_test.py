@@ -141,7 +141,7 @@ class LGDenseLmV432(lg_gpt3_pax.DenseLMTemplateLG, LGSyntheticDataset):
   USE_REPEATED_LAYER = False
   COMBINE_QKV = False
   RELATIVE_BIAS = True
-  TRAINABLE_POSITION_EMB = True
+  TRAINABLE_POSITION_EMB = False
 
 
   LEARNING_RATE = 1.0
