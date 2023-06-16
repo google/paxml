@@ -463,10 +463,15 @@ def main(argv: Sequence[str]) -> None:
 
   if FLAGS.exp is not None:
     experiment_config = get_experiment(FLAGS.exp)()
-  else:
+  elif absl_flags.fdl_flags_supplied():
     cfg = absl_flags.create_buildable_from_flags(
         module=None, allow_imports=True)
     experiment_config = pax_fiddle.build(cfg)
+  else:
+    raise app.UsageError(
+        'No experiment provided. '
+        'At least one of --exp, --fdl_config, or --fdl_config_file is required.'
+    )
 
   experiment_config.validate()
   run(experiment_config=experiment_config,
