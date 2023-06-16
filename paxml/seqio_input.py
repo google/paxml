@@ -700,9 +700,11 @@ class SeqIOInput(base_input.BaseInput):
           trim_output_features=self.trim_output_features,
           try_in_mem_cache=self.try_in_mem_cache,
       )
-      if not self.use_enumeration:
+      if self.use_enumeration:
+        ds_shard = _enumerate_dataset(ds_shard, self.is_training, shard_info)
+      else:
         sharded_datasets_converted.append(
-            self.feature_converter(ds_shard, self.task_feature_lengths)  # pylint: disable=not-callable
+            self.feature_converter(ds_shard, self.task_feature_lengths)
         )
       shard_num_examples = _get_num_examples(ds_shard)
       if shard_num_examples > largest_shard:
@@ -727,11 +729,7 @@ class SeqIOInput(base_input.BaseInput):
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
     ).repeat(num_epochs)
-    if self.use_enumeration:
-      self.targets_ds = _enumerate_dataset(
-          self.targets_ds, self.is_training, shard_info
-      )
-    else:
+    if not self.use_enumeration:
       self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
           sharded_datasets_converted, choice_dataset
       ).repeat(num_epochs)
@@ -907,7 +905,7 @@ class SeqIOInput(base_input.BaseInput):
     #   - Otherwise, we iterate over dataset to compute
     #     number of examples.
     # Note: Global cached stats are available for Task, when cache_dir is set.
-    # It needs to be investigated if local number of examples can be computed
+    # It needs to be investigated if local number of examples can be computed 
     # from cached_stats using:
     # `self.task_inst.get_cached_stats(split=self.split_name)['examples']`
     # divided by `self.num_infeed_hosts`
