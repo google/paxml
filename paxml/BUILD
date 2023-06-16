@@ -151,6 +151,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
+        "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:trees",

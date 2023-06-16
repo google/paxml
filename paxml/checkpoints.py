@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import abc
+import os
 from typing import Any, Optional, Sequence, Tuple, cast
 
 from absl import logging
@@ -31,6 +32,7 @@ from paxml import checkpoint_managers
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
 from paxml import train_states
+from praxis import base_input
 from praxis import py_utils
 from praxis import pytypes
 from praxis import trees
@@ -679,7 +681,7 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
   input._iter like other implementations of DatasetCheckpointHandler.
   """
 
-  def save(self, directory: epath.Path, item: Any):
+  def save(self, directory: epath.Path, item: base_input.BaseInput):
     """Saves the given item.
 
     Args:
@@ -689,10 +691,14 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
     checkpoint_path = (
         directory / f'process_{jax.process_index()}-of-{jax.process_count()}'
     )
+    dirname = os.path.dirname(checkpoint_path)
+    epath.Path(dirname).mkdir(parents=True, exist_ok=True)
     item.save(checkpoint_path)
     multihost_utils.sync_global_devices('BaseInputCheckpointHandler:save')
 
-  def restore(self, directory: epath.Path, item: Any = None) -> None:
+  def restore(
+      self, directory: epath.Path, item: Optional[base_input.BaseInput] = None
+  ) -> None:
     """Restores the given item.
 
     Args:
