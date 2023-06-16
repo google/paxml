@@ -631,21 +631,16 @@ class SummaryHandler:
           per_example_out)
 
     if self._summary_pool:
-      # Copy the values from device to host first. We dispatch the copies in the
-      # main thread to speedup the summary writing and GC of TPU HBM.
-      for tensor in jax.tree_util.tree_leaves(
-          (loss, weighted_scalars, summary_tensors)
-      ):
-        tensor.copy_to_host_async()
 
       def process_fn():
-        loss_copy, weighted_scalars_copy, summary_tensors_copy = jax.tree_map(
-            np.asarray, (loss, weighted_scalars, summary_tensors)
+        # Copy the values from device to host first.
+        (loss_copy, weighted_scalars_copy, summary_tensors_copy) = (
+            jax.device_get((loss, weighted_scalars, summary_tensors))
         )
         per_example_out_copy = None
         if per_example_out and should_log:
-          per_example_out_copy = jax.tree_util.tree_map(jax.device_get,
-                                                        per_example_out)
+          per_example_out_copy = jax.device_get(per_example_out)
+
         # pytype: disable=wrong-arg-types
         self._process(step, loss_copy, weighted_scalars_copy,
                       summary_tensors_copy, per_example_out_copy, steps_per_sec,
