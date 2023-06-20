@@ -30,6 +30,7 @@ pytype_library(
     srcs = [
         "bert.py",
         "c4.py",
+        "c4_multislice.py",
         "lm_cloud.py",
         "nvidia.py",
         "optimal_scaling.py",

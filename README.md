@@ -462,6 +462,124 @@ subclass is a `SingleTask` which requires the following Hparams:
       vn: HParams to control variational noise.
 ```
 
+## Pax on Multislice
+The multislice configs in this repo refer to
+[1. Singlie slice configs](https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py)
+for syntax / model architecture
+and
+[2. MaxText repo](https://github.com/google/maxtexthttps://github.com/google/maxtext)
+for config values.
+
+
+We provide example runs under c4_multislice.py` as a starting point for Pax on multislice.
+
+
+### Setting up Cloud TPU VMs using Queued Resources
+
+
+We refer to
+[this page](https://cloud.google.com/tpu/docs/queued-resources)
+for more exhaustive documentation about using Queued Resources for a multi-slice Cloud TPU project. The
+following shows the steps needed to set up TPUs for running example configs in this repo.
+
+
+```bash
+export ZONE=us-central2-b
+export VERSION=tpu-vm-v4-base
+export PROJECT=<your-project>
+export ACCELERATOR=v4-128 # or v4-384 depending on which config you run
+```
+
+
+Say, for running `C4Spmd22BAdam2xv4_128` on 2 slices of v4-128, you'd need to set up TPUs the following way:
+
+```bash
+export TPU_PREFIX=<your-prefix> # New TPUs will be created based off this prefix
+export QR_ID=$TPU_PREFIX
+export NODE_COUNT=<number-of-slices> # 1, 2, or 4 depending on which config you run
+
+
+#create a TPU VM
+gcloud alpha compute tpus queued-resources create $QR_ID --accelerator-type=$ACCELERATOR --runtime-version=tpu-vm-v4-base --node-count=$NODE_COUNT --node-prefix=$TPU_PREFIX
+```
+
+
+
+
+### Installing Pax
+
+
+The setup commands described earlier need to be run on ALL workers in ALL slices. You can 1) ssh into each worker and each slice individually; or 2) use for loop with `--worker=all` flag as the following command.
+
+
+```bash
+for ((i=0; i<$NODE_COUNT; i++))
+do
+gcloud compute tpus tpu-vm ssh $TPU_PREFIX-$i --zone=us-central2-b --worker=all --command="pip install paxml && pip install orbax==0.1.1 && pip install \"jax[tpu]\" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html"
+done
+```
+
+
+### Run a test multislice model
+In order to run the multislice configs, open the same number of terminals as your $NODE_COUNT. For our experiments on 2 slices(`C4Spmd22BAdam2xv4_128`), open two terminals. Then, run each of these commands individually from each terminal.
+
+From Terminal 0, run training command for slice 0 as follows:
+
+```bash
+export TPU_PREFIX=<your-prefix>
+export EXP_NAME=C4Spmd22BAdam2xv4_128
+export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\" 
+gcloud compute tpus tpu-vm ssh $TPU_PREFIX-0 --zone=us-central2-b --worker=all \
+--command="LIBTPU_INIT_ARGS=$LIBTPU_INIT_ARGS JAX_USE_PJRT_C_API_ON_TPU=1 \
+python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.c4_multislice.${EXP_NAME} --job_log_dir=gs://<your-bucket>"
+```
+
+
+From Terminal 1, concurrently run training command for slice 1 as follows:
+
+```bash
+export TPU_PREFIX=<your-prefix>
+export EXP_NAME=C4Spmd22BAdam2xv4_128
+export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\" 
+gcloud compute tpus tpu-vm ssh $TPU_PREFIX-1 --zone=us-central2-b --worker=all \
+--command="LIBTPU_INIT_ARGS=$LIBTPU_INIT_ARGS JAX_USE_PJRT_C_API_ON_TPU=1 \
+python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py \
+--exp=tasks.lm.params.c4_multislice.${EXP_NAME} --job_log_dir=gs://<your-bucket>"
+```
+
+
+
+### MaxText to Pax
+This table covers details on how the MaxText variable names have been translated to Pax.
+
+
+Note that MaxText has a "scale" which is multiplied to several parameters (base_num_decoder_layers, base_emb_dim, base_mlp_dim, base_num_heads) for final values.
+
+
+Another thing to mention is while Pax covers DCN and ICN MESH_SHAPE as an array, in MaxText there are separate variables of data_parallelism, fsdp_parallelism and tensor_parallelism for DCN and ICI. Since these values are set as 1 by default, only the variables with value greater than 1 are recorded in this translation table.
+
+That is, `ICI_MESH_SHAPE = [ici_data_parallelism, ici_fsdp_parallelism, ici_tensor_parallelism]` and `DCN_MESH_SHAPE = [dcn_data_parallelism, dcn_fsdp_parallelism, dcn_tensor_parallelism]`
+
+
+| Pax C4Spmd22BAdam2xv4_128 | | MaxText 2xv4-128.sh | | (after scale is applied) |
+|---------------------------|--------------|---------------------------------|----------|-----------------------:|
+| | | scale (applied to next 4 variables) | 3 | |
+| NUM_LAYERS | 48 | base_num_decoder_layers | 16 | 48 |
+| MODEL_DIMS | 6144 | base_emb_dim | 2048 | 6144 |
+| HIDDEN_DIMS | 24576 | MODEL_DIMS * 4 (= base_mlp_dim) | 8192 | 24576 |
+| NUM_HEADS | 24 | base_num_heads | 8 | 24 |
+| DIMS_PER_HEAD | 256 | head_dim | 256 | |
+| PERCORE_BATCH_SIZE | 16 | per_device_batch_size | 16 | |
+| MAX_SEQ_LEN | 1024 | max_target_length | 1024 | |
+| VOCAB_SIZE | 32768 | vocab_size | 32768 | |
+| FPROP_DTYPE | jnp.bfloat16 | dtype | bfloat16 | |
+| USE_REPEATED_LAYER | TRUE | | | |
+| SUMMARY_INTERVAL_STEPS | 10 | | | |
+| ICI_MESH_SHAPE | [1, 64, 1] | ici_fsdp_parallelism | 64 | |
+| DCN_MESH_SHAPE | [2, 1, 1] | dcn_data_parallelism | 2 | |
+
+
 ## Releases
 PyPI Version | Commit
 ------------ | ----------------------------------------
