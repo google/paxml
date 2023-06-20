@@ -707,6 +707,7 @@ pytype_strict_library(
     name = "base_executor",
     srcs = ["base_executor.py"],
     deps = [
+        ":decode_programs",
         ":partitioning",
         ":programs",
         ":tasks_lib",

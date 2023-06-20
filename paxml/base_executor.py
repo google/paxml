@@ -19,6 +19,7 @@ import abc
 from typing import Any, Sequence
 
 from etils import epath
+from paxml import decode_programs as decode_program_lib
 from paxml import partitioning
 from paxml import programs
 from paxml import tasks_lib
@@ -32,22 +33,20 @@ class BaseExecutor(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def setup(
       self,
-      task: tasks_lib.SingleTask,
+      jax_task: tasks_lib.SingleTask,
       job_log_dir: epath.Path,
       checkpointer: Any,
       partitioner: partitioning.Partitioner,
       input_specs_provider: base_input.BaseInputSpecsProvider,
-      # TODO(laigd): there is inconsistency between how we pass
-      # train/eval/decode inputs and programs.
-      # 1) Encapsulate train_input_p in train_program and don't pass it here.
-      # 2) Migrate decode pipeline to decode_programs.
+      # TODO(laigd): encapsulate train_input_p in train_program.
       train_input_p: pax_fiddle.Config[base_input.BaseInput],
-      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
+      decode_programs: Sequence[decode_program_lib.SingleTaskDecodeProgram],
       # TODO(laigd): this shouldn't be part of the executor API, consider adding
       # a dedicated executor for auto-tuning and get rid of this instead.
       early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
+      exit_after_ondemand_checkpoint: bool = False,
   ) -> None:
     """Sets up the programs and the executor."""
 
