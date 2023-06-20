@@ -346,8 +346,8 @@ class SeqIOInput(base_input.BaseInput):
       changes before the cache is applied.
     trim_output_features: If True, it trims output features to be less than the
       length given by `sequence_length`.
-    try_in_mem_cache: If True, caches sufficiently small datasets in memory
-      for efficiency.
+    try_in_mem_cache: If True, caches sufficiently small datasets in memory for
+      efficiency.
     eval_auto_pad: Only used when p.is_training=False. Automatically pad the
       data to multiples of global batch size, using the first example in the
       data. Padded entries will have batch_input.eval_sample_weight == 0.0.
@@ -391,10 +391,14 @@ class SeqIOInput(base_input.BaseInput):
     eval_enable_cache: If true, caching will be enabled on the eval dataset.
       Note that if caching is disabled, the evals may be non-reproducible if
       there are random ops.
-    eval num_examples: The number of examples in the dataset. Setting this field
-    can short-circuit iterating over dataset to get count of examples. If
-    unspecified, number of examples are counted from the dataset.
-
+    eval_num_examples: The number of examples in the dataset. Setting this field
+      can short-circuit iterating over dataset to get count of examples. If
+      unspecified, number of examples are counted from the dataset.
+    warm_start: Whether to start background threads of asynchronous
+      transformations upon iterator creation, as opposed to during the first
+      call to `next()`. This improves the latency of the initial
+      'get_next_padded()' calls at the expense of requiring more memory to hold
+      prefetched elements between the time of iterator construction and usage.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -474,6 +478,7 @@ class SeqIOInput(base_input.BaseInput):
   log_preprocessed_targets: Optional[bool] = False
   eval_enable_cache: bool = True
   eval_num_examples: Optional[int] = None
+  warm_start: bool = False  # TODO(b/279788824): Enable this option by default.
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -488,8 +493,7 @@ class SeqIOInput(base_input.BaseInput):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
       self.input_random_seed = 42
-    if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
-      self.configure_symbolic_checkpointing()
+    self.configure_tf_data_options()
     super().__post_init__()
     self._validate_hparams()
 
@@ -610,17 +614,27 @@ class SeqIOInput(base_input.BaseInput):
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
 
-  def configure_symbolic_checkpointing(self):
+  def configure_tf_data_options(self):
     read_config = tfds.ReadConfig()
     options = tf.data.Options()
-    options.experimental_symbolic_checkpoint = True
-    read_config.experimental_index_shuffle = (
-        self.experimental_enable_index_shuffle
-    )
+
+    # tf.data `warm_start` feature is newly added and only available on TF
+    # nightly, but not the latest stable version(2.12).
+    # TODO(rxsang): Remove checking `hasattr` once TF2.13 is released.
+    if self.warm_start and (
+        hasattr(options.experimental_optimization, 'warm_start')
+    ):
+      options.experimental_optimization.warm_start = True
+
+    if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
+      options.experimental_symbolic_checkpoint = True
+      read_config.experimental_index_shuffle = (
+          self.experimental_enable_index_shuffle
+      )
+      # Disable readahead for random access used by index shuffle.
+      if self.experimental_enable_index_shuffle:
+        read_config.override_readahead = tfds.Readahead.DISABLE
     read_config.options = options
-    # Disable readahead for random access used by index shuffle.
-    if self.experimental_enable_index_shuffle:
-      read_config.override_readahead = tfds.Readahead.DISABLE
     seqio.set_tfds_read_config_override(read_config)
 
   def _get_num_eval_examples(self) -> int:
@@ -905,7 +919,7 @@ class SeqIOInput(base_input.BaseInput):
     #   - Otherwise, we iterate over dataset to compute
     #     number of examples.
     # Note: Global cached stats are available for Task, when cache_dir is set.
-    # It needs to be investigated if local number of examples can be computed 
+    # It needs to be investigated if local number of examples can be computed
     # from cached_stats using:
     # `self.task_inst.get_cached_stats(split=self.split_name)['examples']`
     # divided by `self.num_infeed_hosts`
