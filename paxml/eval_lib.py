@@ -713,7 +713,7 @@ def decode(
 
   trainer_lib.write_post_init_model_hparams_file(
       model=jax_task.model,
-      var_weight_hparams=train_state_metadata.var_weight_hparams,
+      train_state_metadata=train_state_metadata,
       job_log_dir=job_log_dir / 'decoder_out',
       do_eval=True,
   )

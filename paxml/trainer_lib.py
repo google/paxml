@@ -175,7 +175,7 @@ EarlyStoppingFn = tasks_lib.EarlyStoppingFn
 
 def write_post_init_model_hparams_file(
     model: base_model.BaseModel,
-    var_weight_hparams: NestedWeightHParams,
+    train_state_metadata: TrainStateMetadata,
     job_log_dir: epath.Path,
     do_eval: bool = False,
 ) -> None:
@@ -188,7 +188,7 @@ def write_post_init_model_hparams_file(
 
   Args:
     model: A BaseModel
-    var_weight_hparams: A pytree of WeightHParams
+    train_state_metadata: An instance of TrainStateMetadata.
     job_log_dir: The root dir for the training job.
     do_eval: whether this is in eval mode.
   """
@@ -196,36 +196,17 @@ def write_post_init_model_hparams_file(
     params_fpath = job_log_dir / 'post_init_model_params.txt'
     logging.info('post_init_model_params: %s', params_fpath)
     job_log_dir.mkdir(parents=True, exist_ok=True)
-    context_p = base_layer.JaxContext.HParams(do_eval=do_eval)
+    hyper_params = model.abstract_init_with_mdl_config(
+        train_state_metadata.input_shape_dtype, do_eval=do_eval
+    )
     with params_fpath.open('w') as params_file:
-      prng_key = jax.random.PRNGKey(seed=123)
-
-      def gen_post_init_hparams(prng_key):
-        with base_layer.JaxContext.new_context(hparams=context_p):
-          return model.apply(
-              {},
-              rngs={base_layer.PARAMS: prng_key},
-              method=model.post_init_hparams,
-              mutable=True,
-          )[1]
-
-      with py_utils.logging_verbosity_level('FATAL'):
-        variables_abstract = jax.eval_shape(gen_post_init_hparams, prng_key)
-      assert base_layer.HYPER_PARAMS in variables_abstract
-
-      hyper_params = jax.tree_map(
-          lambda x: x.meta,
-          variables_abstract[base_layer.HYPER_PARAMS],
-          is_leaf=lambda x: isinstance(x, base_layer.WrappedHParams))
-
       hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
       params_file.write(hyper_params_dump)
       params_file.write('\n\n')
-
-      if var_weight_hparams:
-        params_inits_text = base_hyperparams.nested_struct_to_text(
-            var_weight_hparams)
-        params_file.write(params_inits_text)
+      params_inits_text = base_hyperparams.nested_struct_to_text(
+          train_state_metadata.var_weight_hparams
+      )
+      params_file.write(params_inits_text)
 
 
 def write_train_provenance_file(

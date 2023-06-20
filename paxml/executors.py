@@ -216,7 +216,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     with base_layer.JaxContext.new_context():
       # Dump out model meta info for debugging.
       trainer_lib.write_post_init_model_hparams_file(
-          jax_task.model, train_state_metadata.var_weight_hparams, job_log_dir
+          jax_task.model, train_state_metadata, job_log_dir
       )
 
     # Restore TrainState from checkpoint or initialize it.
