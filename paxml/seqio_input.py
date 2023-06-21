@@ -478,7 +478,7 @@ class SeqIOInput(base_input.BaseInput):
   log_preprocessed_targets: Optional[bool] = False
   eval_enable_cache: bool = True
   eval_num_examples: Optional[int] = None
-  warm_start: bool = False  # TODO(b/279788824): Enable this option by default.
+  warm_start: bool = True
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
