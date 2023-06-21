@@ -168,6 +168,7 @@ def restore_checkpoint(
     enforce_restore_shape_check: bool = False,
     state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
     tensorstore_use_ocdbt: bool = False,
+    restore_transformations: Optional[dict[str, Any]] = None,
 ) -> train_states.TrainState:
   """Restores a checkpoint from the provided base directory.
 
@@ -188,6 +189,12 @@ def restore_checkpoint(
     state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the unpadded
       state.
     tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
+    restore_transformations: Orbax-style transformations. See Orbax
+      documentation. `tensorstore_use_ocdbt` must be enabled. Note that some
+      shape checking may be disabled when using this option. Use
+      `enforce_restore_shape_check` to counteract this, though this may not
+      necessarily be suitable for all cases, particularly when
+      padding/truncating is involved.
 
   Returns:
     A restored `TrainState` instance.
@@ -230,6 +237,7 @@ def restore_checkpoint(
     restore_args = {
         'specs': state_specs,
         'mesh': global_mesh,
+        'transforms': restore_transformations,
     }
   return checkpoint_manager.restore(
       step,

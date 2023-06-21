@@ -594,6 +594,7 @@ def restore_pmap_from_tensorstore(
     checkpoint_type=CheckpointType.GDA,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
+    restore_transformations: Optional[dict[str, Any]] = None,
 ):
   """Restores pmap checkpoints from tensorstore.
 
@@ -643,6 +644,7 @@ def restore_pmap_from_tensorstore(
         step=step,
         enforce_restore_shape_check=enforce_restore_shape_check,
         tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+        restore_transformations=restore_transformations,
     )
   if global_mesh is not None:
     return fully_replicated_gda_model_states

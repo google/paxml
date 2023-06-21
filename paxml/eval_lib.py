@@ -138,7 +138,9 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       restore_checkpoint_step: int,
       partitioner: partitioning.Partitioner,
       enforce_restore_shape_check: bool = False,
+      tensorstore_use_ocdbt: bool = False,
       ocdbt_coordinator_server: Optional[Any] = None,
+      restore_transformations: Optional[dict[str, Any]] = None,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -148,7 +150,9 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.restore_checkpoint_step: int = restore_checkpoint_step
     self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
     self._enforce_restore_shape_check = enforce_restore_shape_check
+    self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
+    self._restore_transformations = restore_transformations
 
   def retrieve_latest_checkpoint_step(self) -> int:
     return checkpoints.retrieve_latest_checkpoint_step(
@@ -194,7 +198,8 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
         state_specs=train_state_metadata.partition_specs,
         step=step,
         enforce_restore_shape_check=self._enforce_restore_shape_check,
-        tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
+        tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+        restore_transformations=self._restore_transformations,
     )
     py_utils.sync_global_devices(
         f'checkpointer:restored:{self.restore_checkpoint_dir}'
@@ -254,7 +259,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           step=step,
           checkpoint_type=self.checkpoint_type,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
-          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
+          tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+          restore_transformations=self._restore_transformations,
       )
     else:
       model_states = checkpoints.restore_checkpoint(
@@ -263,7 +269,8 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
           checkpoint_type=self.checkpoint_type,
           step=step,
           enforce_restore_shape_check=self._enforce_restore_shape_check,
-          tensorstore_use_ocdbt=(self._ocdbt_coordinator_server is not None),
+          tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
+          restore_transformations=self._restore_transformations,
       )
     if self.use_ema:
       # Note: extract_ema() will remove the opt_states.
@@ -344,6 +351,8 @@ def _create_checkpointer(
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
 
+  restore_transformations = jax_task.train.restore_transformations
+
   if jax_task.hparams.model.mesh_shape is not None:
     checkpointer_cls = _SpmdEvalCheckpointer
   else:
@@ -357,7 +366,9 @@ def _create_checkpointer(
       restore_checkpoint_step,
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
+      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
       ocdbt_coordinator_server=ocdbt_coordinator_server,
+      restore_transformations=restore_transformations,
   )
 
 
