@@ -108,10 +108,53 @@ class StandardGradient(BaseStochasticGradient):
     return (values, aux), grads
 
 
+class PercoreClippedGradient(BaseStochasticGradient):
+  """Per-core clipped gradient function.
+
+  Efficient implementation of per-core clipping, whose running time matches
+  non-private baseline.
+
+  Experimental results:
+    Non-private baseline: http://tb/4569190445426541226
+    PercoreClippedGradient: http://tb/1885364525575923265
+    MicrobatchDpSgdStochasticGradient: http://tb/2683981470965501622
+  """
+
+  l2_norm_clip: float = 0.0
+
+  def grad_fn(
+      self,
+      loss_fn: Callable[..., Any],
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+      prng_key: PRNGKey,
+  ) -> Tuple[Any, Any]:
+    assert (
+        self.l2_norm_clip > 0.0
+    ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
+
+    # Obtain the per-core mean gradient.
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
+    (values, aux), grads = grad_fn(
+        mdl_vars_grad, mdl_vars_nograd_and_inputs, prng_key
+    )
+    aux = self.process_aux_info(aux)
+
+    # Clip the per-core mean gradient.
+    grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
+    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    clipped_flat, _ = optax.per_example_global_norm_clip(
+        grads=grads_flat, l2_norm_clip=aux.loss_weight * self.l2_norm_clip
+    )
+    clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
+
+    return (values, aux), clipped
+
+
 class DpSgdStochasticGradient(BaseStochasticGradient):
   """DP-SGD stochastic gradient function."""
   # Standard DP-SGD hyperparameters.
-  l2_norm_clip: Optional[float] = None
+  l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
 
   # Number of examples to process at one time. If set to `None`,
@@ -181,6 +224,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
               mdl_vars_grad: NestedJTensor,
               mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
               prng_key: PRNGKey) -> Tuple[Any, Any]:
+    assert (
+        self.l2_norm_clip > 0.0
+    ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
 
     mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
     inputs = self._prepare_inputs(inputs)
