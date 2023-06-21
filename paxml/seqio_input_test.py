@@ -679,51 +679,62 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     self.assertLen(m, 1)
     self.assertEqual(m[0]['accuracy'], ['ex target', 'ex pred'])
 
-  def test_compute_metrics_eval_num_batches(self):
+  @parameterized.named_parameters(
+      ('repeat', True, 10, 1),
+      ('repeat_multihost', True, 10, 4),
+      ('no_repeat', False, 2, 1),
+      ('no_repeat_multihost', False, 2, 2),
+  )
+  def test_compute_metrics_eval_num_batches(
+      self, is_repeat, eval_loop_num_batches, num_hosts
+  ):
     task_name = 'compute_metrics_eval_num_batches'
+    # Create dataset with 13 examples
     ds = tf.data.Dataset.from_tensors({
         'inputs': [7, 8],
         'targets': [3, 9],
         'targets_pretokenized': 'ex target',
-    }).repeat(6)
+    }).repeat(13)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
-    p = pax_fiddle.Config(seqio_input.SeqIOInput)
-    p.mixture_name = task_name
-    p.split_name = 'validation'
-    p.task_feature_lengths = {'inputs': 4, 'targets': 1}
-    p.feature_converter = seqio_input.SequenceModelFeatures(pack=False)
-    p.batch_size = 1
-    p.is_training = False
-    p.eval_metrics_targets_length = 3
-    p.reset_for_eval = False
-    p.eval_loop_num_batches = 3
-    inp = instantiate(p)
-    vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
-    vocab.decode = mock.Mock(return_value='blahhh')
-    enumerated_ds = seqio_input._enumerate_dataset(
-        ds, p.is_training, shard_info=None
-    )
-    enumerated_iter = enumerated_ds.as_numpy_iterator()
     decoder_outputs = []
-    for _ in range(len(ds)):
-      ex = next(enumerated_iter)
-      enum_id = py_utils.get_enumeration_id(ex)
-      decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
+    # simulate multi-host setup by iterating on multiple input generators
+    for host_index in range(num_hosts):
+      p = pax_fiddle.Config(
+          seqio_input.SeqIOInput,
+          mixture_name=task_name,
+          split_name='validation',
+          repeat=is_repeat,
+          num_infeed_hosts=num_hosts,
+          task_feature_lengths={'inputs': 1, 'targets': 1},
+          # pack=False because we skip metrics computation when pack=True
+          feature_converter=seqio_input.SequenceModelFeatures(pack=False),
+          batch_size=3,
+          is_training=False,
+          reset_for_eval=False,
+          eval_loop_num_batches=eval_loop_num_batches,
+          infeed_host_index=host_index,
+      )
+      inp = instantiate(p)
+      inp_iter = inp._iter
+      # Create fake decoded outputs
+      for _ in range(eval_loop_num_batches):
+        batch = next(inp_iter)
+        for ex in py_utils.tree_unstack(batch, 0):
+          enum_id = py_utils.get_enumeration_id(ex)
+          decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
+    # Init input targets
+    inp._gen_targets_artifacts()
+    # Compute metrics
     m = inp.compute_metrics(decoder_outputs)
     metric_output = m[0]['accuracy']
-    self.assertLen(metric_output, 6)
-    self.assertEqual(
-        metric_output,
-        [
-            'ex target',
-            'ex target',
-            'ex target',
-            'ex pred',
-            'ex pred',
-            'ex pred',
-        ],
-    )
+    # Dummy metric = {'accuracy': targets + predictions}
+    num_eval_examples = inp._num_eval_examples
+    self.assertLen(metric_output, num_eval_examples * 2)
+    expected_output = ['ex target'] * num_eval_examples + [
+        'ex pred'
+    ] * num_eval_examples
+    self.assertEqual(metric_output, expected_output)
 
   def _construct_scoring_task_enum_fields(
       self,

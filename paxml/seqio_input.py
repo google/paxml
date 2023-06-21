@@ -714,39 +714,45 @@ class SeqIOInput(base_input.BaseInput):
           trim_output_features=self.trim_output_features,
           try_in_mem_cache=self.try_in_mem_cache,
       )
+      if self.should_repeat:
+        # repeats the sharded dataset before adding enum fields
+        num_epochs = -1
+        # repeats the interleaving shards after adding enum fields
+        largest_shard = -1
+      else:
+        num_epochs = 1
+        # Interleave sharded dataset so it can be read sequentially on single
+        # host. The shards may be uneven so we need to repeat based on the
+        # largest shard to avoid missing any data.
+        shard_num_examples = _get_num_examples(ds_shard)
+        if shard_num_examples > largest_shard:
+          largest_shard = shard_num_examples
+        logging.info(
+            'Targets shard %d/%d is not repeated; has %d examples',
+            host_idx,
+            self.num_infeed_hosts,
+            shard_num_examples,
+        )
+        self._len_full_ds += shard_num_examples
+      ds_shard = ds_shard.repeat(num_epochs)
       if self.use_enumeration:
         ds_shard = _enumerate_dataset(ds_shard, self.is_training, shard_info)
       else:
         sharded_datasets_converted.append(
             self.feature_converter(ds_shard, self.task_feature_lengths)
         )
-      shard_num_examples = _get_num_examples(ds_shard)
-      if shard_num_examples > largest_shard:
-        largest_shard = shard_num_examples
-      logging.info(
-          'Targets shard %d/%d has %d examples',
-          host_idx,
-          self.num_infeed_hosts,
-          shard_num_examples,
-      )
-      self._len_full_ds += shard_num_examples
       sharded_datasets.append(ds_shard)
 
-    # Interleave sharded dataset so it can be read sequentially on
-    # single host. The shards may be uneven so we need to repeat based on the
-    # largest shard to avoid missing any data.
     choice_dataset = tf.data.Dataset.range(self.num_infeed_hosts).repeat(
         largest_shard
     )
-    # Set num_epoch=-1 to repeat the dataset indefinitely.
-    num_epochs = -1 if self.should_repeat else 1
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
-    ).repeat(num_epochs)
+    )
     if not self.use_enumeration:
       self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
           sharded_datasets_converted, choice_dataset
-      ).repeat(num_epochs)
+      )
 
   def _gen_filtered_artifacts(self) -> None:
     """Create filtered targets artifacts."""
