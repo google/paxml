@@ -1250,10 +1250,20 @@ class SingleTask(base_task.BaseTask):
       prng_key_fold_with_batch_index: if True, folds the decode prng key per
         decoding batch index.
       random_seed: Random seed to use at the beginning of the decoding.
+      profiler_num_steps: The number of steps to be captured by the profiler
+        based on the step time estimate.
+      profiler_min_duration_sec: The minimum duration to be captured by the
+        profiler in seconds. This is used when the estimate step duration times
+        profiler_num_steps is smaller than this value.
+      profiler_max_num_hosts: If set, limit profiling only on the specified
+        number of hosts.
     """
 
     prng_key_fold_with_batch_index: bool = False
     random_seed: int = 1234
+    profiler_num_steps: int = 0
+    profiler_min_duration_sec: float = 1.0
+    profiler_max_num_hosts: Optional[int] = None
 
   DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
 

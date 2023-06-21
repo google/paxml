@@ -581,6 +581,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//paxml:checkpoints",
+        "//paxml:profiling",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",

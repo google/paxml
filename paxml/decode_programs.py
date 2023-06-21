@@ -49,6 +49,8 @@ from praxis import pytypes
 from praxis import trees
 import tensorflow.compat.v2 as tf
 
+from paxml import profiling  # mapped to internal
+
 
 instantiate = base_hyperparams.instantiate
 BaseMetrics = base_metrics.BaseMetrics
@@ -296,46 +298,56 @@ class SingleTaskDecodeProgram(programs.Program):
     processed_metrics = {}
     processed_decodes = []
     all_summary_tensors = collections.defaultdict(list)
+    # profile xprof for decoding.
+    if self._task.decode.profiler_num_steps > 0:
+      profiler = profiling.Profiler(
+          num_steps=self._task.decode.profiler_num_steps,
+          min_duration_sec=self._task.decode.profiler_min_duration_sec,
+          max_num_hosts=self._task.decode.profiler_max_num_hosts,
+      )
+      profiler.capture_async()
 
     step_num = 0
     # self._num_steps < 0 indicates running until input out of range.
     while self._num_steps < 0 or step_num < self._num_steps:
       step_num += 1
-      try:
-        batch = self.decode_input.get_next_padded()
-      except (tf.errors.OutOfRangeError, StopIteration):
-        self.decode_input.reset()
-        if step_num == 1:
-          logging.error('Input %s yields zero batch.', self._name)
+      # Instrument decode step.
+      with jax.profiler.StepTraceAnnotation('decode', step_num=step_num):
+        try:
+          batch = self.decode_input.get_next_padded()
+        except (tf.errors.OutOfRangeError, StopIteration):
+          self.decode_input.reset()
+          if step_num == 1:
+            logging.error('Input %s yields zero batch.', self._name)
+          else:
+            logging.info('Input %s exhausted at step %d.', self._name, step_num)
+          break
+        batch, tpu_unsupported_batch, inputs_partition_spec = (
+            xla_passthrough.split_out_xla_unsupported_batch(
+                batch,
+                partitioning_spec=self.decode_input_partition_spec(batch),
+            )
+        )
+        batch = self._partitioner.preprocess_inputs(
+            self.decode_input, batch, inputs_partition_spec
+        )
+
+        if self._task and self._task.decode.prng_key_fold_with_batch_index:
+          # In this case, the key is a scalar and we need to preprocess it
+          # (broadcast/split) after folding in step_num.
+          decode_key = jax.random.fold_in(self._prng_key, step_num)
+          decode_key = self._partitioner.preprocess_prng_key(decode_key)
         else:
-          logging.info('Input %s exhausted at step %d.', self._name, step_num)
-        break
-      batch, tpu_unsupported_batch, inputs_partition_spec = (
-          xla_passthrough.split_out_xla_unsupported_batch(
-              batch,
-              partitioning_spec=self.decode_input_partition_spec(batch),
-          )
-      )
-      batch = self._partitioner.preprocess_inputs(
-          self.decode_input, batch, inputs_partition_spec
-      )
+          decode_key = self._prng_key
 
-      if self._task and self._task.decode.prng_key_fold_with_batch_index:
-        # In this case, the key is a scalar and we need to preprocess it
-        # (broadcast/split) after folding in step_num.
-        decode_key = jax.random.fold_in(self._prng_key, step_num)
-        decode_key = self._partitioner.preprocess_prng_key(decode_key)
-      else:
-        decode_key = self._prng_key
-
-      decode_out = self.decode_step(
-          state,
-          decode_key,
-          batch,
-          trainer_lib.BaseStepFnStaticArgs(
-              unpadded_global_batch_size=self._unpadded_global_batch_size
-          ),
-      )
+        decode_out = self.decode_step(
+            state,
+            decode_key,
+            batch,
+            trainer_lib.BaseStepFnStaticArgs(
+                unpadded_global_batch_size=self._unpadded_global_batch_size
+            ),
+        )
       # Synchronize all the hosts to ensure their executions don't diverge.
       py_utils.sync_global_devices(f'spmd_decode-{self._name}-{step_num}')
 
