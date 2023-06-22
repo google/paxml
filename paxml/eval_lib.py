@@ -30,8 +30,10 @@ from clu import metrics as clu_metrics
 from etils import epath
 import jax
 import numpy as np
+from orbax.checkpoint import checkpoint_utils as orbax_checkpoint_utils
 from paxml import base_experiment
 from paxml import base_metrics
+from paxml import checkpoint_paths
 from paxml import decode_programs as decode_programs_lib
 from paxml import io_utils
 from paxml import partitioning
@@ -81,29 +83,6 @@ def _get_dir_names(
 ) -> Sequence[epath.Path]:
   """Returns a list of same length for parent dir names for each dataset."""
   return [epath.Path(p.name) for p in inputs]
-
-
-def _wait_until_checkpoint_step(
-    checkpoint_dir: epath.Path, step: int, sleep_interval: int
-) -> int:
-  """Waits until a checkpoint for the given step is in checkpoint_dir."""
-  with py_utils.timeit() as wait_period:
-    while True:
-      cur_step = checkpoints.retrieve_latest_checkpoint_step_if_exists(
-          checkpoint_dir
-      )
-      if cur_step is not None and step <= cur_step:
-        break
-      logging.info(
-          'Sleeping waiting for a new checkpoint, the current step is %s',
-          cur_step if cur_step is not None else 'None',
-      )
-      time.sleep(sleep_interval)
-  logging.info('Found new checkpoint at step: %d', cur_step)
-  jax.monitoring.record_event_duration_secs(
-      '/jax/pax/eval_or_decode/wait_duration_sec', wait_period.elapsed
-  )
-  return cur_step
 
 
 def _get_train_input_specs(
@@ -157,11 +136,6 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   def retrieve_latest_checkpoint_step(self) -> int:
     return checkpoints.retrieve_latest_checkpoint_step(
         self.restore_checkpoint_dir
-    )
-
-  def wait_for_new_step(self, last_checkpoint_step: int) -> int:
-    return _wait_until_checkpoint_step(
-        self.restore_checkpoint_dir, last_checkpoint_step + 1, sleep_interval=60
     )
 
   @abc.abstractmethod
@@ -337,9 +311,20 @@ def _create_checkpointer(
         wait_until_step,
         restore_checkpoint_dir,
     )
-    _wait_until_checkpoint_step(
-        restore_checkpoint_dir, wait_until_step, sleep_interval=300
-    )
+    # Note: there could still potentially be concurrency issues since the lock
+    # will be released, but we do not consider that to be an issue since the
+    # first checkpoint is not likely to be cleaned up immediately.
+    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+        restore_checkpoint_dir,
+        until_step=wait_until_step,
+        seconds_to_sleep=300,
+        timeout=1200,
+        step_prefix=checkpoint_paths.checkpoint_prefix(checkpoint_type),
+        step_format_fixed_length=checkpoint_paths.checkpoint_name_fixed_length(
+            checkpoint_type
+        ),
+    ):
+      pass
 
   if restore_checkpoint_step is None and mode is not None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
@@ -788,6 +773,43 @@ def run_decode_programs(
   )
 
 
+def _eval_or_decode(
+    *,
+    step: int,
+    partitioned_train_state: TrainState,
+    mode: io_utils.EvaluationMode,
+    job_log_dir: epath.Path,
+    eval_runner: _EvalRunner,
+) -> Tuple[
+    Optional[tuning_lib.EvalMetrics], Optional[tuning_lib.DecodeMetrics]
+]:
+  with io_utils.checkpoint_progress(job_log_dir, step, mode):
+    decode_metrics = None
+    if eval_runner.decode_programs:
+      logging.info('Decoding step %s ckpt ...', step)
+      decode_metrics, elapsed_secs = run_decode_programs(
+          train_state=partitioned_train_state,
+          decode_programs=eval_runner.decode_programs,
+          step=step,
+      )
+      jax.monitoring.record_event_duration_secs(
+          '/jax/pax/decode/duration_sec', elapsed_secs
+      )
+
+    eval_metrics = None
+    if eval_runner.eval_programs:
+      logging.info('Evaling step %s ckpt ...', step)
+      eval_metrics, elapsed_secs = run_eval_programs(
+          eval_programs=eval_runner.eval_programs,
+          train_state=partitioned_train_state,
+          step=step,
+      )
+      jax.monitoring.record_event_duration_secs(
+          '/jax/pax/eval/duration_sec', elapsed_secs
+      )
+  return eval_metrics, decode_metrics
+
+
 def _common_eval_or_decode_loop(
     *,
     mode: io_utils.EvaluationMode,
@@ -802,6 +824,16 @@ def _common_eval_or_decode_loop(
     partitioner: partitioning.Partitioner,
     decode_output_pickle: bool = True,
 ):
+  step_prefix = checkpoint_paths.checkpoint_prefix(checkpointer.checkpoint_type)
+  step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
+      checkpointer.checkpoint_type
+  )
+  # If preemption happened during evaluation, some checkpoints may be locked.
+  orbax_checkpoint_utils.unlock_existing_checkpoints(
+      checkpointer.restore_checkpoint_dir,
+      step_prefix=step_prefix,
+      step_format_fixed_length=step_format_fixed_length,
+  )
   # Retrieve last step from the TrainState directly in case new checkpoints
   # have been written in the mean time.
   last_checkpoint_step = int(
@@ -818,32 +850,16 @@ def _common_eval_or_decode_loop(
   # loop.
   gc.collect()
   gc.freeze()
+
+  eval_metrics, decode_metrics = _eval_or_decode(
+      step=last_checkpoint_step,
+      partitioned_train_state=partitioned_train_state,
+      mode=mode,
+      job_log_dir=job_log_dir,
+      eval_runner=eval_runner,
+  )
+
   while True:
-    with io_utils.checkpoint_progress(job_log_dir, last_checkpoint_step, mode):
-      decode_metrics = None
-      if eval_runner.decode_programs:
-        logging.info('Decoding step %s ckpt ...', last_checkpoint_step)
-        decode_metrics, elapsed_secs = run_decode_programs(
-            train_state=partitioned_train_state,
-            decode_programs=eval_runner.decode_programs,
-            step=last_checkpoint_step,
-        )
-        jax.monitoring.record_event_duration_secs(
-            '/jax/pax/decode/duration_sec', elapsed_secs
-        )
-
-      eval_metrics = None
-      if eval_runner.eval_programs:
-        logging.info('Evaling step %s ckpt ...', last_checkpoint_step)
-        eval_metrics, elapsed_secs = run_eval_programs(
-            eval_programs=eval_runner.eval_programs,
-            train_state=partitioned_train_state,
-            step=last_checkpoint_step,
-        )
-        jax.monitoring.record_event_duration_secs(
-            '/jax/pax/eval/duration_sec', elapsed_secs
-        )
-
     exceeded_ckpt = last_checkpoint_step + task.train.save_interval_steps
     is_last_ckpt = (
         exceeded_ckpt > task.train.num_train_steps or not continuous_decode
@@ -866,13 +882,30 @@ def _common_eval_or_decode_loop(
       break
     if is_last_ckpt:
       break
-    # Release partitioned_train_state.
+
+    # Release previous partitioned_train_state.
     jax.tree_util.tree_map(lambda x: x.delete(), partitioned_train_state)
     del partitioned_train_state
-    new_checkpoint_step = checkpointer.wait_for_new_step(last_checkpoint_step)
-    partitioned_train_state = checkpointer.load_checkpoint_for_step(
-        new_checkpoint_step, train_state_metadata
-    )
+
+    # Use context manager to wait for new checkpoint and lock it to prevent
+    # cleanup by the training thread.
+    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+        checkpointer.restore_checkpoint_dir,
+        until_step=last_checkpoint_step + 1,
+        seconds_to_sleep=60,
+        step_prefix=step_prefix,
+        step_format_fixed_length=step_format_fixed_length,
+    ) as new_checkpoint_step:
+      partitioned_train_state = checkpointer.load_checkpoint_for_step(
+          new_checkpoint_step, train_state_metadata
+      )
+      eval_metrics, decode_metrics = _eval_or_decode(
+          step=new_checkpoint_step,
+          partitioned_train_state=partitioned_train_state,
+          mode=mode,
+          job_log_dir=job_log_dir,
+          eval_runner=eval_runner,
+      )
     last_checkpoint_step = new_checkpoint_step
   gc.unfreeze()
 

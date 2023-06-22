@@ -28,7 +28,9 @@ from paxml import checkpoint_version
 from praxis import pytypes
 
 
-CHECKPOINT_PREFIX = 'checkpoint_'
+_CHECKPOINT_PREFIX = 'checkpoint'
+CHECKPOINT_PREFIX = f'{_CHECKPOINT_PREFIX}_'
+_STEP_FORMAT_FIXED_LENGTH = 8
 STATE_ITEM_NAME = 'state'
 INPUT_ITEM_NAME = 'train_input'
 TMP_PREFIX = 'tmp_'
@@ -49,6 +51,35 @@ PyTree = Any
 AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
 Checkpointer = orbax.checkpoint.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
+
+
+def checkpoint_prefix(
+    checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+) -> Optional[str]:
+  """Checkpoint prefix, or None if no prefix is applied.
+
+  The return type is optional to future-proof against instances where the
+  prefix may be None.
+
+  Args:
+    checkpoint_type: CheckpointType.
+
+  Returns:
+    prefix or None if no prefix is applied.
+  """
+  del checkpoint_type
+  return _CHECKPOINT_PREFIX
+
+
+def checkpoint_name_fixed_length(
+    checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
+) -> Optional[int]:
+  """Length of the fixed width step format, or None if not used."""
+  return (
+      None
+      if checkpoint_type == CheckpointType.FLAX
+      else _STEP_FORMAT_FIXED_LENGTH
+  )
 
 
 def is_checkpoint_asset(x: epath.Path) -> bool:
