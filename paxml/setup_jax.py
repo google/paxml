@@ -51,10 +51,6 @@ def setup_jax(
 
   # Log tracing and compilation time.
   jax.config.update('jax_log_compiles', True)
-  # We use xmap only with SPMD.
-  jax.config.update('experimental_xmap_spmd_lowering', True)
-  # Use the manual partitioning lowering of xmap to avoid vectorization.
-  jax.config.update('experimental_xmap_spmd_lowering_manual', True)
 
   # Allow users to configure JAX traceback filtering.
   # https://github.com/google/jax/blob/main/jax/_src/config.py

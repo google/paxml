@@ -107,11 +107,6 @@ def _extract_num_cores(model_p) -> Optional[int]:
 def _main(argv) -> None:
   del argv  # unused.
 
-  # We use xmap only with SPMD.
-  jax.config.update('experimental_xmap_spmd_lowering', True)
-  # Use the manual partitioning lowering of xmap to avoid vectorization.
-  jax.config.update('experimental_xmap_spmd_lowering_manual', True)
-
   logging.info('Retrieving experiment `%s` from the registry.', _EXP.value)
   if _EXP.value is not None:
     experiment_config = _get_experiment(_EXP.value)()
