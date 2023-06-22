@@ -399,6 +399,8 @@ class SeqIOInput(base_input.BaseInput):
       call to `next()`. This improves the latency of the initial
       'get_next_padded()' calls at the expense of requiring more memory to hold
       prefetched elements between the time of iterator construction and usage.
+    dataset: Set to the underlying tf.data.Dataset. This field is inherited from
+      `BaseInput`, used for creating iterators and input specs.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -455,7 +457,7 @@ class SeqIOInput(base_input.BaseInput):
   use_enumeration: bool = True
   annotate_padding_fields: bool = False
   overridden_vocab: Optional[seqio.Vocabulary] = None
-  _dataset: Any = dataclasses.field(init=False, repr=False)
+  dataset: tf.data.Dataset = dataclasses.field(init=False, repr=False)
   _iter: Any = dataclasses.field(init=False, repr=False)
   _cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = (
       dataclasses.field(init=False, repr=False)
@@ -498,7 +500,7 @@ class SeqIOInput(base_input.BaseInput):
     self._validate_hparams()
 
     with py_utils.timeit() as get_dataset_timer:
-      self._dataset = self._get_dataset()
+      self.dataset = self._get_dataset()
     logging.info(
         '[PAX STATUS]: SeqIO init took %d seconds (mixture=%s, split=%s)',
         get_dataset_timer.elapsed,
@@ -507,7 +509,7 @@ class SeqIOInput(base_input.BaseInput):
     )
 
     with py_utils.timeit() as np_iterator_timer:
-      self._iter = self._dataset.as_numpy_iterator()
+      self._iter = self.dataset.as_numpy_iterator()
     logging.info(
         '[PAX STATUS]: SeqIO dataset `as_numpy_iterator` call took %d seconds'
         ' (mixture=%s, split=%s)',
@@ -806,7 +808,7 @@ class SeqIOInput(base_input.BaseInput):
     return next(self._iter)
 
   def reset(self) -> None:
-    self._iter = self._dataset.as_numpy_iterator()
+    self._iter = self.dataset.as_numpy_iterator()
 
   def _get_vocab(self, key) -> seqio.Vocabulary:
     if self.overridden_vocab is not None:
@@ -1898,27 +1900,27 @@ def get_eval_hparams_for_seqio(
     metric_type: The type of metrics to return hparams for. Configure PREDICT
       type in decoder_datasets() and SCORE type in datasets().
     split_name: The split to use for evaluation, defaults to 'validation'. This
-      may optionally be a callable that takes a str task name (i.e. a member
-      of the provided mixture) and returns the name of the split to use for each
+      may optionally be a callable that takes a str task name (i.e. a member of
+      the provided mixture) and returns the name of the split to use for each
       task.
     feature_converter: The SeqIO FeatureConverter to use to transform data,
       defaults to seqio_input.LanguageModelFeatures with packing disabled
     num_infeed_hosts: Usually set to jax.process_count(). Implementation must
-        ensure that the data is sharded into these many shards. If
-        num_infeed_hosts is 0, it will be given a default value by the trainer;
-        if it is still not set during __init__, a value of 1 will be used.
+      ensure that the data is sharded into these many shards. If
+      num_infeed_hosts is 0, it will be given a default value by the trainer; if
+      it is still not set during __init__, a value of 1 will be used.
     use_enumeration: whether to use enumeration in both batch generation
       (get_next()) and metrics computation. For details, see SeqIOInput attrs.
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
     eval_metrics_retain_task_features: retain the provided feature lengths.
-    check_split_exists: If set, checks for `split_name` existing as a split
-    in the SeqIO Task.  Note that for certain TFDS backed tasks, which don't
-    have splits specified, this can cause file operations.
-    eval_loop_num_batches: Num of batches to process per eval loop. This 
-      value is ignored if reset_for_eval is set True. If None, eval will run
-      on the entire dataset.
+    check_split_exists: If set, checks for `split_name` existing as a split in
+      the SeqIO Task.  Note that for certain TFDS backed tasks, which don't have
+      splits specified, this can cause file operations.
+    eval_loop_num_batches: Num of batches to process per eval loop. This value
+      is ignored if reset_for_eval is set True. If None, eval will run on the
+      entire dataset.
     repeat: Whether to repeat the data.
     reset_for_eval: If set, eval will continue until tf.errors.OutOfRange is
       raised, and reset() will called for each eval.
