@@ -32,7 +32,6 @@ pytype_library(
         "c4.py",
         "c4_multislice.py",
         "lm_cloud.py",
-        "nvidia.py",
         "optimal_scaling.py",
     ],
     tags = ["keep_dep"],
@@ -55,11 +54,31 @@ pytype_library(
         "//praxis:pax_fiddle",
         "//praxis:schedules",
         "//praxis/layers",
-        "//praxis/layers:gpu_fast_attention",
         "//praxis/layers:transformers",
         # Implicit seqio dependency.
         # Implicit t5.data dependency.
         # Implicit t5.data.preprocessors dependency.
+    ],
+)
+
+pytype_library(
+    name = "nvidia",
+    srcs = [
+        "nvidia.py",
+    ],
+    tags = ["keep_dep"],
+    deps = [
+        ":lm_cloud",
+        ":params",
+        # Implicit jax dependency.
+        "//paxml:experiment_registry",
+        "//paxml:tasks_lib",
+        "//praxis:base_layer",
+        "//praxis:optimizers",
+        "//praxis:pax_fiddle",
+        "//praxis:schedules",
+        "//praxis/layers",
+        "//praxis/layers:gpu_fast_attention",
     ],
 )
 
@@ -102,4 +121,11 @@ pax_targets(
     experiments = [
         ":params",
     ],
+)
+
+pax_targets(
+    experiments = [
+        ":nvidia",
+    ],
+    prefix_name = "gpu",
 )
