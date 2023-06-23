@@ -190,6 +190,7 @@ pytype_strict_library(
     deps = [
         ":base_experiment",
         ":base_metrics",
+        ":checkpoint_paths",
         ":decode_programs",
         ":io_utils",
         ":partitioning",
@@ -204,6 +205,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
@@ -259,6 +261,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
