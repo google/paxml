@@ -215,12 +215,6 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     super().__init__(directory, *args, **kwargs)
     # Set to 1 if not provided or set to 0.
     self._options.save_interval_steps = self._options.save_interval_steps or 1
-    self._options.step_prefix = checkpoint_paths.checkpoint_prefix(
-        self._checkpoint_type
-    )
-    self._options.step_format_fixed_length = (
-        checkpoint_paths.checkpoint_name_fixed_length(self._checkpoint_type)
-    )
 
   @property
   def version(self) -> float:
