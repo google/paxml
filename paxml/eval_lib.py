@@ -133,11 +133,6 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
 
-  def retrieve_latest_checkpoint_step(self) -> int:
-    return checkpoints.retrieve_latest_checkpoint_step(
-        self.restore_checkpoint_dir
-    )
-
   @abc.abstractmethod
   def load_checkpoint_for_step(
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
