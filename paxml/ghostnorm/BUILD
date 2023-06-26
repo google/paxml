@@ -40,11 +40,27 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "embedding",
+    srcs = ["embedding.py"],
+    deps = [
+        ":base",
+        ":linears",
+        # Implicit jax dependency.
+        # Implicit jax.experimental.sparse dependency.
+        "//praxis:base_layer",
+        "//praxis:pytypes",
+        "//praxis/layers",
+        "//praxis/layers:base_ops",
+    ],
+)
+
 py_strict_test(
     name = "layers_test",
     srcs = ["layers_test.py"],
     deps = [
         ":base",
+        ":embedding",
         ":linears",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
@@ -53,6 +69,7 @@ py_strict_test(
         # Implicit optax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
+        "//praxis/layers:embedding_softmax",
         "//praxis/layers:linears",
         # Implicit tensorflow_no_contrib dependency.
     ],

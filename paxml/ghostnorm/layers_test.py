@@ -17,15 +17,16 @@
 
 from absl.testing import absltest
 from absl.testing import parameterized
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 from paxml.ghostnorm import base
+from paxml.ghostnorm import embedding
 from paxml.ghostnorm import linears
 from praxis import base_layer
 from praxis import pax_fiddle
+from praxis.layers import embedding_softmax as praxis_embedding
 from praxis.layers import linears as praxis_linears
 import tensorflow as tf
 
@@ -47,43 +48,109 @@ class LayersTest(parameterized.TestCase):
           'reference_layer_cls': praxis_linears.Linear,
           'ghostnorm_layer_cls': linears.LinearGhostNorm,
           'configs': dict(input_dims=10, output_dims=3),
-          'inputs_shape': (32, 10),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 10)),
       },
       {
           'testcase_name': 'LinearMultiDimInputs',
           'reference_layer_cls': praxis_linears.Linear,
           'ghostnorm_layer_cls': linears.LinearGhostNorm,
           'configs': dict(input_dims=10, output_dims=3),
-          'inputs_shape': (32, 24, 10),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 24, 10)),
       },
       {
           'testcase_name': 'Bias',
           'reference_layer_cls': praxis_linears.Bias,
           'ghostnorm_layer_cls': linears.BiasGhostNorm,
           'configs': {'dims': 3},
-          'inputs_shape': (32, 24, 3),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 24, 3)),
+      },
+      {
+          'testcase_name': 'Embedding',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {'input_dims': 3, 'num_classes': 10},
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32,)),
+      },
+      {
+          'testcase_name': 'EmbeddingOOB',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {'input_dims': 3, 'num_classes': 2},
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32,)),
+      },
+      {
+          'testcase_name': 'EmbeddingScaleSqrt',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {
+              'input_dims': 3,
+              'num_classes': 10,
+              'scale_sqrt_depth': True,
+          },
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32,)),
+      },
+      {
+          'testcase_name': 'EmbeddingMultiDimInputs',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {'input_dims': 3, 'num_classes': 10},
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 24, 20)),
+      },
+      {
+          'testcase_name': 'EmbeddingMultiDimInputsOOB',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {'input_dims': 3, 'num_classes': 2},
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 24, 3)),
+      },
+      {
+          'testcase_name': 'EmbeddingMatMul',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {
+              'input_dims': 3,
+              'num_classes': 10,
+              'lookup_style': 'matmul',
+          },
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32,)),
+      },
+      {
+          'testcase_name': 'EmbeddingOOBSetNan',
+          'reference_layer_cls': praxis_embedding.Embedding,
+          'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
+          'configs': {
+              'input_dims': 3,
+              'num_classes': 2,
+              'set_nan_for_oob_id': True,
+          },
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32,)),
       },
   )
-  def test_calculate_grad_norms(self, reference_layer_cls, ghostnorm_layer_cls,
-                                configs, inputs_shape):
+  def test_calculate_grad_norms(
+      self, reference_layer_cls, ghostnorm_layer_cls, configs, inputs_fn
+  ):
     ref_layer_tpl = pax_fiddle.Config(reference_layer_cls, **configs)
     ghostnorm_layer_tpl = pax_fiddle.Config(ghostnorm_layer_cls, **configs)
     ref_layer = instantiate(ref_layer_tpl)
     ghostnorm_layer = instantiate(ghostnorm_layer_tpl)
-    inputs = jnp.asarray(np.random.normal(0, 0.1, size=inputs_shape))
+    inputs = jnp.asarray(inputs_fn())
 
     prng_key = jax.random.PRNGKey(seed=1234)
     prng_key, init_key, random_key, noise_key = jax.random.split(prng_key, 4)
-    initial_vars = ghostnorm_layer.init({PARAMS: init_key, RANDOM: random_key},
-                                        inputs)
+    initial_vars = ghostnorm_layer.init(
+        {PARAMS: init_key, RANDOM: random_key}, inputs
+    )
 
     # make sure the layer behaves the same as the reference layer in forward
     ghostnorm_outputs = ghostnorm_layer.apply(
-        initial_vars, inputs, rngs={RANDOM: noise_key})
+        initial_vars, inputs, rngs={RANDOM: noise_key}
+    )
     ref_outputs = ref_layer.apply(
-        initial_vars, inputs, rngs={RANDOM: noise_key})
-    np.testing.assert_allclose(ghostnorm_outputs, ref_outputs,
-                               rtol=1e-5, atol=1e-5)
+        initial_vars, inputs, rngs={RANDOM: noise_key}
+    )
+    np.testing.assert_allclose(
+        ghostnorm_outputs, ref_outputs, rtol=1e-5, atol=1e-5
+    )
 
     def simple_loss(outputs):
       # simple loss for testing purpose
@@ -93,8 +160,9 @@ class LayersTest(parameterized.TestCase):
       return jnp.mean(jnp.sum(jnp.square(outputs - target), axis=1))
 
     def loss_fn(mdl_vars, inputs):
-      outputs = ghostnorm_layer.apply(mdl_vars, inputs,
-                                      rngs={RANDOM: noise_key})
+      outputs = ghostnorm_layer.apply(
+          mdl_vars, inputs, rngs={RANDOM: noise_key}
+      )
       return simple_loss(outputs)
 
     def loss_fn_ref(mdl_vars, inputs):
@@ -110,40 +178,57 @@ class LayersTest(parameterized.TestCase):
 
     # first pass to compute gradient norm
     grad_fn = jax.grad(loss_fn)
-    scales = jnp.ones(inputs_shape[0])
+    scales = jnp.ones(inputs.shape[0])
     params_with_sq_norms = jax.tree_map(
-        lambda x: base.ParamWithAux(x, scales), initial_vars[PARAMS])
+        lambda x: base.ParamWithAux(x, scales), initial_vars[PARAMS]
+    )
     grad_with_sq_norms = grad_fn(
-        {**initial_vars, PARAMS: params_with_sq_norms}, inputs)[PARAMS]
+        {**initial_vars, PARAMS: params_with_sq_norms}, inputs
+    )[PARAMS]
 
     is_leaf = lambda x: isinstance(x, base.ParamWithAux)
-    fast_per_eg_grad_norms = jnp.sqrt(sum(
-        x.aux for x in
-        jax.tree_util.tree_flatten(grad_with_sq_norms, is_leaf=is_leaf)[0]))
+    fast_per_eg_grad_norms = jnp.sqrt(
+        sum(
+            x.aux
+            for x in jax.tree_util.tree_flatten(
+                grad_with_sq_norms, is_leaf=is_leaf
+            )[0]
+        )
+    )
 
     # test if the computed per-example gradient norms match expected values
-    np.testing.assert_allclose(per_eg_grad_norms, fast_per_eg_grad_norms,
-                               rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(
+        per_eg_grad_norms, fast_per_eg_grad_norms, rtol=1e-5, atol=1e-5
+    )
 
     # test if the computed gradient matches the grad of the reference layer
     grad_fn_ref = jax.grad(loss_fn_ref)
     grad_ref = grad_fn_ref(initial_vars, inputs)[PARAMS]
-    grad_diffs = jax.tree_map(lambda x, y: np.mean(np.abs(x-y.param)),
-                              grad_ref, grad_with_sq_norms)
-    np.testing.assert_allclose(jax.tree_util.tree_flatten(grad_diffs)[0], 0,
-                               rtol=1e-5, atol=1e-5)
+    grad_diffs = jax.tree_map(
+        lambda x, y: np.mean(np.abs(x - y.param)), grad_ref, grad_with_sq_norms
+    )
+    np.testing.assert_allclose(
+        jax.tree_util.tree_flatten(grad_diffs)[0], 0, rtol=1e-5, atol=1e-5
+    )
 
     # second pass to compute norm-clipped gradients
     l2_clip = 0.2
     scales = jnp.minimum(1.0, l2_clip / fast_per_eg_grad_norms)
     params_with_sq_norms = jax.tree_map(
-        lambda x: base.ParamWithAux(x, scales), initial_vars[PARAMS])
+        lambda x: base.ParamWithAux(x, scales), initial_vars[PARAMS]
+    )
     grad_with_sq_norms = grad_fn(
-        {**initial_vars, PARAMS: params_with_sq_norms}, inputs)[PARAMS]
+        {**initial_vars, PARAMS: params_with_sq_norms}, inputs
+    )[PARAMS]
 
-    fast_per_eg_grad_norms = jnp.sqrt(sum(
-        x.aux for x in
-        jax.tree_util.tree_flatten(grad_with_sq_norms, is_leaf=is_leaf)[0]))
+    fast_per_eg_grad_norms = jnp.sqrt(
+        sum(
+            x.aux
+            for x in jax.tree_util.tree_flatten(
+                grad_with_sq_norms, is_leaf=is_leaf
+            )[0]
+        )
+    )
 
     # test if the norm clipping conditions are satisfied
     self.assertTrue(np.all(fast_per_eg_grad_norms <= l2_clip + 1e-5))
@@ -151,18 +236,22 @@ class LayersTest(parameterized.TestCase):
     # compute the expected average gradients from the clipped per-example grads
     grads_flat, grads_treedef = jax.tree_flatten(per_eg_grad[PARAMS])
     sum_clipped, _ = optax.per_example_global_norm_clip(
-        grads=grads_flat, l2_norm_clip=l2_clip)
+        grads=grads_flat, l2_norm_clip=l2_clip
+    )
     sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
-    expected_grads = jax.tree_map(lambda x: x / inputs_shape[0], sum_grads)
+    expected_grads = jax.tree_map(lambda x: x / inputs.shape[0], sum_grads)
 
     obtained_grads = jax.tree_map(
-        lambda x: x.param, grad_with_sq_norms, is_leaf=is_leaf)
+        lambda x: x.param, grad_with_sq_norms, is_leaf=is_leaf
+    )
 
     # test if the ghost norm clipping outputs expected average gradients
-    diffs = jax.tree_map(lambda x, y: np.mean(np.abs(x-y)),
-                         expected_grads, obtained_grads)
-    np.testing.assert_allclose(jax.tree_util.tree_flatten(diffs)[0], 0,
-                               rtol=1e-5, atol=1e-5)
+    diffs = jax.tree_map(
+        lambda x, y: np.mean(np.abs(x - y)), expected_grads, obtained_grads
+    )
+    np.testing.assert_allclose(
+        jax.tree_util.tree_flatten(diffs)[0], 0, rtol=1e-5, atol=1e-5
+    )
 
 
 if __name__ == '__main__':

@@ -74,22 +74,19 @@ import collections
 from typing import Optional, Union
 from praxis import pytypes
 
-NestedJTensor = pytypes.NestedJTensor
+JTensor = pytypes.JTensor
 
 
-ParamWithAux = collections.namedtuple(
-    'ParamWithAux', ['param', 'aux'])
+ParamWithAux = collections.namedtuple('ParamWithAux', ['param', 'aux'])
 
 
-def get_param(param: Union[ParamWithAux, NestedJTensor]) -> NestedJTensor:
+def get_param(param: Union[ParamWithAux, JTensor]) -> JTensor:
   if isinstance(param, ParamWithAux):
     return param.param
   return param
 
 
-def get_aux(
-    param: Union[ParamWithAux, NestedJTensor]
-) -> Optional[NestedJTensor]:
+def get_aux(param: Union[ParamWithAux, JTensor]) -> Optional[JTensor]:
   if isinstance(param, ParamWithAux):
     return param.aux
   return None
