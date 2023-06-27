@@ -143,12 +143,19 @@ class PercoreClippedGradient(BaseStochasticGradient):
     # Clip the per-core mean gradient.
     grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
     grads_flat, grads_treedef = jax.tree_flatten(grads)
-    clipped_flat, _ = optax.per_example_global_norm_clip(
+    clipped_flat, num_clipped = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=aux.loss_weight * self.l2_norm_clip
     )
     clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
 
-    return (values, aux), clipped
+    return (
+        values,
+        DPGradAuxInfo(
+            dp_aux_info={'frac_clipped': num_clipped},
+            aux_info=aux.aux_info,
+            loss_weight=aux.loss_weight,
+        ),
+    ), clipped
 
 
 class DpSgdStochasticGradient(BaseStochasticGradient):

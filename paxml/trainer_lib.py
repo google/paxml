@@ -986,7 +986,8 @@ def train_step_single_learner(
       for name, norm in var_summary_tensors.items():
         base_layer.add_global_summary(name, norm)
     if isinstance(
-        learner.stochastic_gradient, sgf.DpSgdStochasticGradient
+        learner.stochastic_gradient,
+        (sgf.DpSgdStochasticGradient, sgf.PercoreClippedGradient),
     ):
       if base_layer.is_running_under_pmap():
         frac_clipped = jax.lax.pmean(
