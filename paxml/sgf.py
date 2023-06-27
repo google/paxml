@@ -18,7 +18,8 @@
 from __future__ import annotations
 
 import abc
-from typing import Any, Callable, Optional, Tuple
+from collections.abc import Callable
+from typing import Any, Optional
 
 from flax import struct
 import jax
@@ -40,7 +41,7 @@ PARAMS = base_layer.PARAMS
 @struct.dataclass
 class GradAuxInfo:
   aux_info: Any
-  loss_weight: JTensor = 1.0  # pytype: disable=annotation-type-mismatch  # jax-ndarray
+  loss_weight: float = 1.0
 
 
 @struct.dataclass
@@ -53,7 +54,7 @@ class BaseStochasticGradient(
 ):
   """Stochastic gradient function."""
 
-  def process_aux_info(self, aux_info: Any) -> Any:
+  def process_aux_info(self, aux_info: GradAuxInfo) -> GradAuxInfo:
     """Processes auxiliary info returned by `grad_fn`.
 
     Args:
@@ -69,9 +70,9 @@ class BaseStochasticGradient(
       self,
       loss_fn: Callable[..., Any],
       mdl_vars_grad: NestedJTensor,
-      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
-  ) -> Tuple[Any, Any]:
+  ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
     """Main gradients function.
 
     Intended to accept a loss function, model parameters, input data, and
@@ -96,14 +97,15 @@ class StandardGradient(BaseStochasticGradient):
 
   def grad_fn(
       self,
-      loss_fn: Callable[..., Any],
+      loss_fn: Callable[..., tuple[JTensor, GradAuxInfo]],
       mdl_vars_grad: NestedJTensor,
-      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
-  ) -> Tuple[Any, Any]:
+  ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
-    (values, aux), grads = grad_fn(mdl_vars_grad, mdl_vars_nograd_and_inputs,
-                                   prng_key)
+    (values, aux), grads = grad_fn(
+        mdl_vars_grad, mdl_vars_nograd_and_inputs, prng_key
+    )
     aux = self.process_aux_info(aux)
     return (values, aux), grads
 
@@ -124,11 +126,11 @@ class PercoreClippedGradient(BaseStochasticGradient):
 
   def grad_fn(
       self,
-      loss_fn: Callable[..., Any],
+      loss_fn: Callable[..., tuple[JTensor, GradAuxInfo]],
       mdl_vars_grad: NestedJTensor,
-      mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
-  ) -> Tuple[Any, Any]:
+  ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
     assert (
         self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
@@ -144,7 +146,8 @@ class PercoreClippedGradient(BaseStochasticGradient):
     grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
     grads_flat, grads_treedef = jax.tree_flatten(grads)
     clipped_flat, num_clipped = optax.per_example_global_norm_clip(
-        grads=grads_flat, l2_norm_clip=aux.loss_weight * self.l2_norm_clip
+        grads=grads_flat,
+        l2_norm_clip=aux.loss_weight * self.l2_norm_clip,
     )
     clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
 
@@ -160,6 +163,7 @@ class PercoreClippedGradient(BaseStochasticGradient):
 
 class DpSgdStochasticGradient(BaseStochasticGradient):
   """DP-SGD stochastic gradient function."""
+
   # Standard DP-SGD hyperparameters.
   l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
@@ -179,10 +183,11 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
   def _clip_and_mean_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
-  ) -> Tuple[NestedMap, float, int]:
+  ) -> tuple[NestedMap, float, int]:
     grads_flat, grads_treedef = jax.tree_flatten(grads)
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
-        grads=grads_flat, l2_norm_clip=l2_norm_clip)
+        grads=grads_flat, l2_norm_clip=l2_norm_clip
+    )
     sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
 
     # Normalize gradients across all examples.
@@ -196,8 +201,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       self,
       grads: NestedMap,
       noise_stddev: float,
-      loss_weight: JTensor,
-      prng_key: PRNGKey = None) -> NestedMap:
+      loss_weight: float,
+      prng_key: PRNGKey = None,
+  ) -> NestedMap:
     prng_keys = jax.random.split(
         prng_key, len(jax.tree_util.tree_leaves(grads))
     )
@@ -223,14 +229,17 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     """Reshape inputs to prepare for vmap to find per-example gradients."""
     return jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=1), inputs)
 
-  def process_aux_info(self, aux_info):
+  def process_aux_info(self, aux_info: GradAuxInfo) -> GradAuxInfo:
     aux_info = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), aux_info)
     return aux_info
 
-  def grad_fn(self, loss_fn: Callable[..., Any],
-              mdl_vars_grad: NestedJTensor,
-              mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
-              prng_key: PRNGKey) -> Tuple[Any, Any]:
+  def grad_fn(
+      self,
+      loss_fn: Callable[..., Any],
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
+      prng_key: PRNGKey,
+  ) -> tuple[tuple[JTensor, DPGradAuxInfo], NestedJTensor]:
     assert (
         self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
@@ -325,6 +334,7 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
   the `noise_multiplier` parameter should be divided by `sqrt(num_devices)`.
   See the docstring of `DpSgdStochasticGradient` for more details.
   """
+
   microbatch_size: int = 1
 
   def _prepare_inputs(self, inputs):
@@ -343,8 +353,9 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
     """
     batch_size = tensor.shape[0]
     microbatch_size = self.microbatch_size
-    return tensor.reshape((batch_size // microbatch_size, microbatch_size,
-                           *tensor.shape[1:]))
+    return tensor.reshape(
+        (batch_size // microbatch_size, microbatch_size, *tensor.shape[1:])
+    )
 
 
 class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
@@ -369,7 +380,8 @@ class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
     shape = tensor.shape
     num_repeat = self.microbatch_size
     return jnp.repeat(tensor, num_repeat, axis=0).reshape(
-        (shape[0], num_repeat, *shape[1:]))
+        (shape[0], num_repeat, *shape[1:])
+    )
 
 
 class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
@@ -392,30 +404,42 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
   of a standard back-propagation.
   """
 
-  def grad_fn(self, loss_fn: Callable[..., Any],
-              mdl_vars_grad: NestedJTensor,
-              mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
-              prng_key: PRNGKey) -> Tuple[Any, Any]:
-    assert self.inner_batch_size is None, (
-        'inner_batch_size is not supported yet by GhostClipping.')
+  def grad_fn(
+      self,
+      loss_fn: Callable[..., Any],
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
+      prng_key: PRNGKey,
+  ) -> tuple[tuple[JTensor, DPGradAuxInfo], NestedJTensor]:
+    assert (
+        self.inner_batch_size is None
+    ), 'inner_batch_size is not supported yet by GhostClipping.'
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    batch_size = jax.tree_util.tree_flatten(
-        mdl_vars_nograd_and_inputs[1])[0][0].shape[0]
+    batch_size = jax.tree_util.tree_flatten(mdl_vars_nograd_and_inputs[1])[0][
+        0
+    ].shape[0]
 
     # Pass 1: get per-example gradient norms
     scales = jnp.ones(batch_size)
     params_with_sq_norms = jax.tree_map(
-        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS])
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
+    )
     (loss, aux), grad_with_sq_norms = grad_fn(
         {**mdl_vars_grad, PARAMS: params_with_sq_norms},
-        mdl_vars_nograd_and_inputs, prng_key)
+        mdl_vars_nograd_and_inputs,
+        prng_key,
+    )
 
     is_leaf = lambda node: isinstance(node, ghostnorm_base.ParamWithAux)
-    grad_norms = jnp.sqrt(sum(
-        x.aux for x in
-        jax.tree_util.tree_flatten(
-            grad_with_sq_norms[PARAMS], is_leaf=is_leaf)[0]))
+    grad_norms = jnp.sqrt(
+        sum(
+            x.aux
+            for x in jax.tree_util.tree_flatten(
+                grad_with_sq_norms[PARAMS], is_leaf=is_leaf
+            )[0]
+        )
+    )
 
     # PAX scales the loss by global batch size under pmap, specifically:
     # - under pmap:
@@ -425,7 +449,6 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     #   - loss = local_loss_sum / local_batch_size
     #   - loss_weight depends on specific models, sometimes it's
     #     local_batch_size, sometimes it's just 1
-    num_devices = 1
     if base_layer.is_running_under_pmap():
       # correct grad norm calculation
       num_devices = 1 / aux.loss_weight
@@ -438,18 +461,23 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # Pass 2: get average of clipped gradients
     params_with_sq_norms = jax.tree_map(
-        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS])
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
+    )
     (loss, aux), clipped_grads = grad_fn(
         {**mdl_vars_grad, PARAMS: params_with_sq_norms},
-        mdl_vars_nograd_and_inputs, prng_key)
+        mdl_vars_nograd_and_inputs,
+        prng_key,
+    )
     clipped_grads[PARAMS] = jax.tree_map(
-        lambda x: x.param, clipped_grads[PARAMS], is_leaf=is_leaf)
+        lambda x: x.param, clipped_grads[PARAMS], is_leaf=is_leaf
+    )
 
     # Note here noise stddev is divided by num_devices because in PAX the loss
     # is scaled by global batch size when pmap is used (see above)
     noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
     noised_grads = self._add_noise(
-        clipped_grads, noise_stddev, aux.loss_weight, prng_key)
+        clipped_grads, noise_stddev, aux.loss_weight, prng_key
+    )
 
     aux = DPGradAuxInfo(
         dp_aux_info={'frac_clipped': frac_clipped},
