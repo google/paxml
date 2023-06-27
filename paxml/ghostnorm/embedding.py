@@ -42,6 +42,9 @@ def make_index_lookup(
   def index_lookup_fwd(weights, idx):
     """Forward index lookup for custom vjp."""
     params = base.get_param(weights)
+    assert isinstance(params, JTensor), 'Expected JTensor. Got: {}'.format(
+        type(params)
+    )
     y, vjp_fun = jax.vjp(array_lookup, params, idx)
     return y, (vjp_fun, idx, params.shape, base.get_aux(weights))
 

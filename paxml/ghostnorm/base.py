@@ -71,22 +71,35 @@ rule. See `paxml.ghostnorm.linears.LinearGhostNorm` for a concrete example.
 """
 
 import collections
-from typing import Optional, Union
+
+import jax
 from praxis import pytypes
 
 JTensor = pytypes.JTensor
+NestedJTensor = pytypes.NestedJTensor
+Nested = pytypes.Nested
 
 
 ParamWithAux = collections.namedtuple('ParamWithAux', ['param', 'aux'])
 
 
-def get_param(param: Union[ParamWithAux, JTensor]) -> JTensor:
+def _get_param(param: ParamWithAux | JTensor) -> JTensor:
   if isinstance(param, ParamWithAux):
     return param.param
   return param
 
 
-def get_aux(param: Union[ParamWithAux, JTensor]) -> Optional[JTensor]:
+def _get_aux(param: ParamWithAux | JTensor) -> JTensor | None:
   if isinstance(param, ParamWithAux):
     return param.aux
   return None
+
+
+def get_param(params: Nested[ParamWithAux] | NestedJTensor) -> NestedJTensor:
+  is_leaf = lambda x: isinstance(x, ParamWithAux)
+  return jax.tree_util.tree_map(_get_param, params, is_leaf=is_leaf)
+
+
+def get_aux(params: Nested[ParamWithAux] | NestedJTensor) -> JTensor | None:
+  is_leaf = lambda x: isinstance(x, ParamWithAux)
+  return _get_aux(jax.tree_util.tree_leaves(params, is_leaf=is_leaf)[0])

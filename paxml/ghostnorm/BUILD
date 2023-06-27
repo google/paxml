@@ -25,7 +25,10 @@ package(default_visibility = JAX_VISIBILITY)
 pytype_strict_library(
     name = "base",
     srcs = ["base.py"],
-    deps = ["//praxis:pytypes"],
+    deps = [
+        # Implicit jax dependency.
+        "//praxis:pytypes",
+    ],
 )
 
 pytype_strict_library(
@@ -55,12 +58,25 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "generic_wrapper",
+    srcs = ["generic_wrapper.py"],
+    deps = [
+        ":base",
+        # Implicit jax dependency.
+        "//praxis:base_layer",
+        "//praxis:pax_fiddle",
+        "//praxis:pytypes",
+    ],
+)
+
 py_strict_test(
     name = "layers_test",
     srcs = ["layers_test.py"],
     deps = [
         ":base",
         ":embedding",
+        ":generic_wrapper",
         ":linears",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
