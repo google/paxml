@@ -83,14 +83,19 @@ instantiate = base_hyperparams.instantiate
 
 class RunningMode(enum.Flag):
   """Running mode."""
+
   UNKNOWN = 0
   TRAIN = enum.auto()
   EVAL = enum.auto()
   DECODE = enum.auto()
 
   @classmethod
-  def detect(cls, has_train_metrics: bool, has_eval_metrics: bool,
-             has_decode_metrics: bool) -> 'RunningMode':
+  def detect(
+      cls,
+      has_train_metrics: bool,
+      has_eval_metrics: bool,
+      has_decode_metrics: bool,
+  ) -> 'RunningMode':
     """Detects running mode from generated metrics."""
     mode = RunningMode.UNKNOWN
     if has_train_metrics:
@@ -124,6 +129,7 @@ class TrainStateMetadata:
   Specifically, this encapsulates information relevant for model initialization
   as well as train/eval/decode step creation.
   """
+
   input_shape_dtype: NestedShapeDtypeLike
   var_weight_hparams: NestedWeightHParams
   padded_global_shapes: Optional[TrainState] = None
@@ -131,17 +137,19 @@ class TrainStateMetadata:
   partition_specs: Optional[TrainState] = None
 
 
-def create_train_state_metadata(jax_task: tasks_lib.SingleTask,
-                                train_shape_dtype: NestedShapeDtypeLike,
-                                discard_opt_states: bool = False,
-                                do_eval: bool = False) -> TrainStateMetadata:
+def create_train_state_metadata(
+    jax_task: tasks_lib.SingleTask,
+    train_shape_dtype: NestedShapeDtypeLike,
+    discard_opt_states: bool = False,
+    do_eval: bool = False,
+) -> TrainStateMetadata:
   """Creates a TrainStateMetadata instance.
 
   Args:
     jax_task: The SingleTask instance.
     train_shape_dtype: Training input shape dtype to be used by
-      model.abstract_init_with_metadata(). It should have per-core shapes
-      for pmap models and global shapes for pjit ones.
+      model.abstract_init_with_metadata(). It should have per-core shapes for
+      pmap models and global shapes for pjit ones.
     discard_opt_states: Whether to discard the part corresponding to the
       optimizer states or not.
     do_eval: Whether this metadata is used for evaluation.
@@ -150,11 +158,14 @@ def create_train_state_metadata(jax_task: tasks_lib.SingleTask,
     A TrainStateMetadata instance.
   """
   var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      train_shape_dtype, do_eval=do_eval)
+      train_shape_dtype, do_eval=do_eval
+  )
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
-      var_weight_hparams, discard_opt_states=discard_opt_states)
+      var_weight_hparams, discard_opt_states=discard_opt_states
+  )
   unpadded_global_shapes = jax_task.create_train_state_unpadded_shapes(
-      var_weight_hparams, discard_opt_states=discard_opt_states)
+      var_weight_hparams, discard_opt_states=discard_opt_states
+  )
   if jax_task.model.hparams.mesh_shape is not None:
     partition_specs = jax_task.create_train_state_partition_specs(
         var_weight_hparams, discard_opt_states=discard_opt_states
@@ -268,8 +279,10 @@ def adjust_input_params_for_small_batch(
       if jax.process_count() > 1:
         # The custom device order resharding currently works only when
         # batch_size < local_device_count.
-        raise NotImplementedError('Per-host batch size must be a multiple of '
-                                  'per-host device count, or smaller than it.')
+        raise NotImplementedError(
+            'Per-host batch size must be a multiple of '
+            'per-host device count, or smaller than it.'
+        )
       else:
         # Single-host input doesn't need to do custom order resharding.
         copy.batch_padding_size = (
@@ -287,8 +300,9 @@ def adjust_input_params_for_small_batch(
   # Some hosts may produce duplicate data, but they will be discarded.
   copy.infeed_host_index = jax.process_index() % input_p.num_infeed_hosts
   if copy.infeed_host_index >= input_p.num_infeed_hosts:
-    logging.info('Process %s: infeed data will be dropped.',
-                 jax.process_index())
+    logging.info(
+        'Process %s: infeed data will be dropped.', jax.process_index()
+    )
 
   # Figure out the cores that have valid data, and construct a device order for
   # GSPMD sharding that place the valid data on the left side of the logical
@@ -303,8 +317,10 @@ def adjust_input_params_for_small_batch(
     process_idx = device.process_index
     core_offset_in_host = per_host_core_counter[device.process_index]
     per_host_core_counter[device.process_index] += 1
-    if (process_idx >= input_p.num_infeed_hosts or
-        core_offset_in_host >= batch_size):
+    if (
+        process_idx >= input_p.num_infeed_hosts
+        or core_offset_in_host >= batch_size
+    ):
       # Not an infeeding host.
       unused_cores.append(global_device_idx)
     else:
@@ -408,14 +424,16 @@ def initialize_model_state(
       # Free the previous opt_states as it will be re-computed.
       jax.tree_util.tree_map(lambda x: x.delete(), train_state.opt_states)
       # Re-compute opt_states after the model variables are updated.
-      opt_states = jax_task.create_opt_states(train_state.mdl_vars,
-                                              var_weight_hparams)
+      opt_states = jax_task.create_opt_states(
+          train_state.mdl_vars, var_weight_hparams
+      )
       train_state = train_state.replace(opt_states=opt_states)
   return train_state, train_state_provenance
 
 
 def replicate_model_state(model_states: TrainState) -> TrainState:
   """Replicates the model states."""
+
   def _replicate(state):
     # Skip the copy if it's already replicated.
     if isinstance(state, jax.Array) and len(state.devices()) != 1:
@@ -465,8 +483,9 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
     else:
       return _maybe_to_bfloat16(var)
 
-  return jax.tree_util.tree_map(_maybe_bfloat16_var_fn, mdl_vars,
-                                var_weight_hparams)
+  return jax.tree_util.tree_map(
+      _maybe_bfloat16_var_fn, mdl_vars, var_weight_hparams
+  )
 
 
 def _maybe_to_float32(x: JTensor) -> JTensor:
@@ -481,8 +500,9 @@ def _maybe_aggregate_metrics_summaries(
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: NestedMap,
-) -> Tuple[JTensor, JTensor, Optional[JTensor], WeightedScalars, SummaryDict,
-           NestedMap]:
+) -> Tuple[
+    JTensor, JTensor, Optional[JTensor], WeightedScalars, SummaryDict, NestedMap
+]:
   """If in pmap, aggregate metrics and summaries across model replicas.
 
   Args:
@@ -507,7 +527,8 @@ def _maybe_aggregate_metrics_summaries(
   """
   # compute weighted loss and mean across shards
   weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
-      weighted_scalars)
+      weighted_scalars
+  )
 
   if base_layer.is_running_under_pmap():
     # aggregate data across devices.
@@ -515,11 +536,13 @@ def _maybe_aggregate_metrics_summaries(
     for key in weighted_scalars:
       value, weight = weighted_scalars[key]
       sum_value = jax.lax.psum(
-          value * weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
+          value * weight, axis_name=PMAP_PARALLEL_AXIS_NAME
+      )
       sum_weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       aggregated_scalars[key] = (sum_value / (sum_weight + 1e-8), sum_weight)
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
-        summary_dict)
+        summary_dict
+    )
     per_example_out = jax.lax.all_gather(
         per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
     )
@@ -529,12 +552,19 @@ def _maybe_aggregate_metrics_summaries(
     # No aggregation of summaries is needed.
     aggregated_summaries = summary_dict
 
-  return (weighted_loss, mean_loss, loss_weight, aggregated_scalars,  # pytype: disable=bad-return-type  # jax-ndarray
-          aggregated_summaries, per_example_out)
+  return (  # pytype: disable=bad-return-type  # jax-ndarray
+      weighted_loss,
+      mean_loss,
+      loss_weight,
+      aggregated_scalars,
+      aggregated_summaries,
+      per_example_out,
+  )
 
 
-def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
-                                          var_weight_hparams):
+def _maybe_synchronize_non_learnable_vars(
+    old_vars, new_vars, var_weight_hparams
+):
   """A helper function to synchronize non-learnable vars for pmap training.
 
   Each non-learnable variable declares how it should be synchronized across
@@ -558,24 +588,27 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
   asserts.assert_same_structure(old_vars, new_vars)
   asserts.assert_same_structure(old_vars, var_weight_hparams)
 
-  def _synchronize_vars_using_mean(old_var: JTensor,
-                                   new_var: JTensor) -> JTensor:
+  def _synchronize_vars_using_mean(
+      old_var: JTensor, new_var: JTensor
+  ) -> JTensor:
     """Synchronize a variable across replicas by averaging."""
     delta = new_var - old_var
     delta_mean = jax.lax.pmean(delta, axis_name=PMAP_PARALLEL_AXIS_NAME)
     updated_var = old_var + delta_mean
     return updated_var
 
-  def _synchronize_vars_using_sum(old_var: JTensor,
-                                  new_var: JTensor) -> JTensor:
+  def _synchronize_vars_using_sum(
+      old_var: JTensor, new_var: JTensor
+  ) -> JTensor:
     """Synchronize a variable across replicas by summing."""
     delta = new_var - old_var
     delta_total = jax.lax.psum(delta, axis_name=PMAP_PARALLEL_AXIS_NAME)
     updated_var = old_var + delta_total
     return updated_var
 
-  def _synchronize_non_learnable_var(old_var: JTensor, new_var: JTensor,
-                                     var_param: ParamsT) -> JTensor:
+  def _synchronize_non_learnable_var(
+      old_var: JTensor, new_var: JTensor, var_param: ParamsT
+  ) -> JTensor:
     """Update a non-trainable variable, using cross-replica synchronization.
 
     Args:
@@ -607,16 +640,19 @@ def _maybe_synchronize_non_learnable_vars(old_vars, new_vars,
     elif base_layer.var_requires_sum_sync(var_param):
       return _synchronize_vars_using_sum(old_var, new_var)
     else:
-      raise ValueError('Non-trainable variables must have a cross-replica '
-                       'synchronization method specified.')
+      raise ValueError(
+          'Non-trainable variables must have a cross-replica '
+          'synchronization method specified.'
+      )
 
   if base_layer.is_running_under_pmap():
 
     def _sync_var(old_var, new_var, var_param):
       return _synchronize_non_learnable_var(old_var, new_var, var_param)
 
-    return jax.tree_util.tree_map(_sync_var, old_vars, new_vars,
-                                  var_weight_hparams)
+    return jax.tree_util.tree_map(
+        _sync_var, old_vars, new_vars, var_weight_hparams
+    )
   # no synchronization is needed.
   return new_vars
 
@@ -782,7 +818,8 @@ def train_step_single_learner(
     with base_layer.JaxContext.new_context(hparams=context_p):
       var_weight_hparams = model.abstract_init_with_metadata(inputs)
   updated_mdl_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
-      states.step, states.mdl_vars, var_weight_hparams, prng_key)
+      states.step, states.mdl_vars, var_weight_hparams, prng_key
+  )
 
   def _loss_fn(
       mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
@@ -831,11 +868,19 @@ def train_step_single_learner(
       # TODO(yonghui): Fetch aux losses and add them to summaries.
       summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
 
-      (weighted_loss, mean_loss, loss_weight, aggregated_scalars,
-       aggregated_summaries,
-       per_example_output) = _maybe_aggregate_metrics_summaries(
-           jax_task.loss_aggregator_inst, weighted_scalars, summary_tensors,
-           per_example_output)
+      (
+          weighted_loss,
+          mean_loss,
+          loss_weight,
+          aggregated_scalars,
+          aggregated_summaries,
+          per_example_output,
+      ) = _maybe_aggregate_metrics_summaries(
+          jax_task.loss_aggregator_inst,
+          weighted_scalars,
+          summary_tensors,
+          per_example_output,
+      )
       # metrics and summary_tensors no longer needed.
       del weighted_scalars
       del summary_tensors
@@ -848,8 +893,14 @@ def train_step_single_learner(
       weighted_loss = weighted_loss.astype(jnp.float32)
     return weighted_loss, sgf.GradAuxInfo(
         loss_weight=loss_weight,
-        aux_info=(mean_loss, aggregated_scalars, forward_updated_vars,
-                  aggregated_summaries, per_example_output))
+        aux_info=(
+            mean_loss,
+            aggregated_scalars,
+            forward_updated_vars,
+            aggregated_summaries,
+            per_example_output,
+        ),
+    )
 
   prng_key, subkey = jax.random.split(prng_key)
 
@@ -960,11 +1011,14 @@ def train_step_single_learner(
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
       if collection in states.mdl_vars:
         # We need to update the non-trainable vars.
-        asserts.assert_same_structure(states.mdl_vars[collection],
-                                      fwd_updated_vars[collection])
+        asserts.assert_same_structure(
+            states.mdl_vars[collection], fwd_updated_vars[collection]
+        )
         mdl_vars[collection] = _maybe_synchronize_non_learnable_vars(
-            states.mdl_vars[collection], fwd_updated_vars[collection],
-            var_weight_hparams[collection])
+            states.mdl_vars[collection],
+            fwd_updated_vars[collection],
+            var_weight_hparams[collection],
+        )
 
     # We may have updated non-trainable vars that have been explicitly excluded.
     mdl_vars = jax.tree_map(
@@ -977,12 +1031,14 @@ def train_step_single_learner(
         mdl_vars,
     )
     new_states = states.new_state(
-        mdl_vars=mdl_vars, opt_states=[new_opt_states])
+        mdl_vars=mdl_vars, opt_states=[new_opt_states]
+    )
     # Finally fetch all backward summary tensors. We do not aggregate the scalar
     # summaries with pmean because the grads are already psum-ed.
     if jax_task.hparams.train.variable_norm_summary:
       var_summary_tensors = summary_utils.l2_mean(
-          new_states.mdl_vars, prefix='vars', max_level=20)
+          new_states.mdl_vars, prefix='vars', max_level=20
+      )
       for name, norm in var_summary_tensors.items():
         base_layer.add_global_summary(name, norm)
     if isinstance(
@@ -1052,7 +1108,8 @@ def eval_step_single_learner(
   if not var_weight_hparams:
     var_weight_hparams = model.abstract_init_with_metadata(
         inputs,
-        do_eval=not jax_task.hparams.train.always_use_train_for_model_init)
+        do_eval=not jax_task.hparams.train.always_use_train_for_model_init,
+    )
 
   if fprop_dtype == jnp.float32:
     pass
@@ -1063,7 +1120,8 @@ def eval_step_single_learner(
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
   enum_keys, inputs = py_utils.filter_by_matching_keys(
-      inputs, [py_utils.PROVENANCE_PREFIX])
+      inputs, [py_utils.PROVENANCE_PREFIX]
+  )
   with base_layer.JaxContext.new_context(hparams=context_p):
     prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
@@ -1072,7 +1130,8 @@ def eval_step_single_learner(
         inputs,
         mutable=jax_task.hparams.evaluate.apply_mutable_list,
         method=model.__call__,
-        rngs=apply_rng_keys)
+        rngs=apply_rng_keys,
+    )
 
     summary_tensors = updated_vars.get(SUMMARIES, {})
     # TODO(yonghui): Add aux-loss to summaries.
@@ -1080,20 +1139,36 @@ def eval_step_single_learner(
 
     # merge back, if any, enum keys for eval matching
     per_example_out.update(enum_keys)
-    (_, mean_loss, _, aggregated_scalars, aggregated_summaries,
-     per_example_out) = _maybe_aggregate_metrics_summaries(
-         jax_task.loss_aggregator_inst, weighted_scalars, summary_tensors,
-         per_example_out)
+    (
+        _,
+        mean_loss,
+        _,
+        aggregated_scalars,
+        aggregated_summaries,
+        per_example_out,
+    ) = _maybe_aggregate_metrics_summaries(
+        jax_task.loss_aggregator_inst,
+        weighted_scalars,
+        summary_tensors,
+        per_example_out,
+    )
 
     # weighted_scalars and summary_tensors no longer needed.
     del weighted_scalars
     del summary_tensors
 
   if fprop_dtype == jnp.bfloat16:
-    (mean_loss, aggregated_scalars,
-     per_example_out, aggregated_summaries) = jax.tree_map(
-         _maybe_to_float32,
-         (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries))
+    (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries) = (
+        jax.tree_map(
+            _maybe_to_float32,
+            (
+                mean_loss,
+                aggregated_scalars,
+                per_example_out,
+                aggregated_summaries,
+            ),
+        )
+    )
 
   return None, StepFnOutput(
       loss=mean_loss,
@@ -1140,7 +1215,8 @@ def decode_step(
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
   enum_keys, inputs = py_utils.filter_by_matching_keys(
-      inputs, [py_utils.PROVENANCE_PREFIX])
+      inputs, [py_utils.PROVENANCE_PREFIX]
+  )
   with base_layer.JaxContext.new_context(hparams=context_p):
     k1, k2, k3 = jax.random.split(prng_key, 3)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
@@ -1152,7 +1228,8 @@ def decode_step(
         mutable=[
             DECODE_CACHE,
             SUMMARIES,
-        ])
+        ],
+    )
     # DECODE_CACHE are not read by caller. But they can be large. Tell XLA DCE
     # to remove it from output. Note MLP decoder don't have DECODE_CACHE.
     if DECODE_CACHE in updated_vars:
@@ -1276,8 +1353,10 @@ def initialize_partitioned_model_states(
   )
   train_state_unpadded_shapes = jax.tree_map(
       lambda x: x.shape,
-      jax_task.create_train_state_unpadded_shapes(var_weight_hparams,
-                                                  discard_opt_states))
+      jax_task.create_train_state_unpadded_shapes(
+          var_weight_hparams, discard_opt_states
+      ),
+  )
   assert train_state_partition_specs is not None
 
   def init_model_from_seed(prng_key):
@@ -1363,8 +1442,8 @@ def reshard_input_based_on_rank_fn(
   Args:
     mapping_dict: Dictionary which contains the split mapping for different
       shapes. For n-d shape, it must have an entry f'map_{n}d' which tells us
-      how to partition tensors of this dimension. If mapping_dict is None,
-      no resharding of the tensor.
+      how to partition tensors of this dimension. If mapping_dict is None, no
+      resharding of the tensor.
     mesh_names: List of mesh axis names.
     x: JTensor which to shard.
 
@@ -1376,9 +1455,11 @@ def reshard_input_based_on_rank_fn(
     return x
   key = f'map_{len(x.shape)}d'
   if key not in mapping_dict:
-    raise ValueError(f'Split mapping must be provided for {len(x.shape)}-d '
-                     f'in the form of key map_{len(x.shape)} in '
-                     f'{mapping_dict}.')
+    raise ValueError(
+        f'Split mapping must be provided for {len(x.shape)}-d '
+        f'in the form of key map_{len(x.shape)} in '
+        f'{mapping_dict}.'
+    )
   if mapping_dict[key] is not None:
     return base_layer.maybe_shard(x, mapping_dict[key], mesh_names)
   else:
@@ -1407,10 +1488,12 @@ def get_input_partition_specs(mesh_axis_names, inputs_shape_dtype):
       'get_input_partition_specs from mesh_axis_names=%s and '
       'inputs_shape_dtype=%s',
       mesh_axis_names,
-      inputs_shape_dtype)
+      inputs_shape_dtype,
+  )
   # Compute inputs PartitionSpec from inputs_shape_dtype
   inputs_partition_spec_fn = functools.partial(
-      shard_on_batch_dim_partition_spec, mesh_axis_names)
+      shard_on_batch_dim_partition_spec, mesh_axis_names
+  )
   return jax.tree_util.tree_map(inputs_partition_spec_fn, inputs_shape_dtype)
 
 
