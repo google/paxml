@@ -313,7 +313,7 @@ def _create_checkpointer(
         restore_checkpoint_dir,
         until_step=wait_until_step,
         seconds_to_sleep=300,
-        timeout=1200,
+        timeout=4800,
         step_prefix=checkpoint_paths.checkpoint_prefix(checkpoint_type),
         step_format_fixed_length=checkpoint_paths.checkpoint_name_fixed_length(
             checkpoint_type
