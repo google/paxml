@@ -645,12 +645,14 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         batch_pack.tgt.task_ids,
         np.array([[3, 17, 9, 1, 13, 7, 1, 0]], dtype=np.int32))
 
-  def test_compute_metrics(self):
+  @parameterized.parameters(True, False)
+  def test_compute_metrics(self, shuffle):
     task_name = 'compute_metrics'
-    ds = tf.data.Dataset.from_tensors({
-        'inputs': [7, 8],
-        'targets': [3, 9],
-        'targets_pretokenized': 'ex target',
+    targets = [f'ex target{i}' for i in range(5)]
+    ds = tf.data.Dataset.from_tensor_slices({
+        'inputs': [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
+        'targets': [[10, 9], [7, 6], [5, 4], [3, 2], [1, 2]],
+        'targets_pretokenized': targets,
     })
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
@@ -663,21 +665,27 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.is_training = False
     p.eval_metrics_targets_length = 3
     p.reset_for_eval = True
+    p.shuffle = shuffle
     inp = instantiate(p)
+    # shuffle is disabled when is_training=False.
+    self.assertEqual(inp.should_shuffle, False)
     vocab = inp.mixture_or_task_inst.output_features['inputs'].vocabulary
     vocab.decode = mock.Mock(return_value='blahhh')
-    enumerated_ds = seqio_input._enumerate_dataset(
-        ds, p.is_training, shard_info=None
-    )
-    enumerated_iter = enumerated_ds.as_numpy_iterator()
     decoder_outputs = []
-    for _ in range(len(ds)):
-      ex = next(enumerated_iter)
+    inp._gen_targets_artifacts()
+    for _ in range(len(inp.dataset)):
+      ex = next(inp._iter)
       enum_id = py_utils.get_enumeration_id(ex)
       decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
+      ex_targets = next(inp.targets_iter)
+      # Ensure that the inputs are the same i.e. not shuffled. Otherwise this
+      # assertion will fail with mismatching elements.
+      self.assertAllClose(ex_targets['inputs'][:1], ex['src']['ids'][0][:1])
+    # Reset targets
+    inp._gen_targets_artifacts()
     m = inp.compute_metrics(decoder_outputs)
     self.assertLen(m, 1)
-    self.assertEqual(m[0]['accuracy'], ['ex target', 'ex pred'])
+    self.assertEqual(m[0]['accuracy'], targets + ['ex pred'] * len(inp.dataset))
 
   @parameterized.named_parameters(
       ('repeat', True, 10, 1),
@@ -723,8 +731,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         for ex in py_utils.tree_unstack(batch, 0):
           enum_id = py_utils.get_enumeration_id(ex)
           decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
-    # Init input targets
-    inp._gen_targets_artifacts()
     # Compute metrics
     m = inp.compute_metrics(decoder_outputs)
     metric_output = m[0]['accuracy']

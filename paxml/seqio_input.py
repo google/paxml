@@ -595,7 +595,14 @@ class SeqIOInput(base_input.BaseInput):
     """Indicates whether this SeqIOInput shuffles the data or not."""
     if self.shuffle is None:
       return self.is_training and not self.is_deterministic
-    return self.shuffle
+    if self.shuffle and not self.is_training:
+      logging.warning(
+          (
+              'Disabling shuffle for decode/eval input; otherwise input'
+              ' and target enum fields will be mismatched.'
+          ),
+      )
+    return self.shuffle and self.is_training
 
   @property
   def should_repeat(self) -> bool:
