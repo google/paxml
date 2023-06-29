@@ -25,6 +25,15 @@ from praxis.layers import base_ops
 JTensor = pytypes.JTensor
 
 
+def _should_use_efficient_rank3_algorithm(inputs, weights):
+  if inputs.ndim == 3:
+    efficient_algo_space = 2 * (inputs.shape[1] ** 2)
+    base_algo_space = weights.shape[0] * weights.shape[1]
+    if efficient_algo_space <= base_algo_space:
+      return True
+  return False
+
+
 def make_last_dim_projector(einsum: base_ops.EinsumOp):
   """Constructs an operator that does last-dim projection given an einsum."""
 
@@ -71,12 +80,24 @@ def make_last_dim_projector(einsum: base_ops.EinsumOp):
         # There is a more memory efficient implementation for the rank-2 case
         zsum = jnp.square(scaled_g * batch_size).sum(axis=1)
         hsum = jnp.square(inputs).sum(axis=1)
-        per_example_grad_sq_norms = zsum*hsum
+        per_example_grad_sq_norms = zsum * hsum
         u_weights = jnp.matmul(inputs.T, scaled_g)
+      elif _should_use_efficient_rank3_algorithm(inputs, weights):
+
+        def rank3_algorithm(single_input, single_grad):
+          aat = jnp.matmul(single_input, single_input.T).reshape(-1)
+          ggt = jnp.matmul(single_grad, single_grad.T).reshape(-1)
+          return jnp.dot(aat, ggt)
+
+        per_example_grad_sq_norms = jax.vmap(rank3_algorithm)(
+            inputs, scaled_g * batch_size
+        )
+        _, u_weights = vjp_fun(scaled_g)
       else:  # generic case
         # shape: (batch_size, input_dim, output_dim)
         per_example_grad = einsum(
-            'k...i, k...j -> kij', inputs, scaled_g * batch_size)
+            'k...i, k...j -> kij', inputs, scaled_g * batch_size
+        )
         per_example_grad_sq_norms = (per_example_grad**2).sum(axis=(1, 2))
         u_weights = jnp.mean(per_example_grad, axis=0)
 

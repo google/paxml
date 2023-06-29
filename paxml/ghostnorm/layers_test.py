@@ -313,6 +313,13 @@ class LayersTest(parameterized.TestCase):
           'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 24, 10)),
       },
       {
+          'testcase_name': 'LinearRank3InputsFast',
+          'reference_layer_cls': praxis_linears.Linear,
+          'ghostnorm_layer_cls': linears.LinearGhostNorm,
+          'configs': dict(input_dims=10, output_dims=10),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 2, 10)),
+      },
+      {
           'testcase_name': 'Bias',
           'reference_layer_cls': praxis_linears.Bias,
           'ghostnorm_layer_cls': linears.BiasGhostNorm,
