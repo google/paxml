@@ -88,7 +88,8 @@ def make_index_lookup(
         # Use sparse tensor to sum gradients for the same rows without
         # materializing the full gradient.
         sparse_grad = js.BCOO((data, indices), shape=params_shape)
-        return js.bcoo_multiply_sparse(sparse_grad, sparse_grad).sum()
+        sparse_grad = js.bcoo_sum_duplicates(sparse_grad, nse=indices.size)
+        return (sparse_grad.data**2).sum()
 
       calculate_per_example_grad_sq_norm = jax.vmap(
           _calculate_per_example_grad_sq_norm
