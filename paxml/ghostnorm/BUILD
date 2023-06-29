@@ -15,7 +15,6 @@
 
 # Description:
 #   Library of layers that implement ghost norm protocol
-
 load("//paxml:paxml.bzl", "py_strict_test")
 load("//paxml:paxml.bzl", "pytype_strict_library")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
@@ -63,10 +62,17 @@ pytype_strict_library(
     srcs = ["generic_wrapper.py"],
     deps = [
         ":base",
+        ":embedding",
+        ":linears",
         # Implicit jax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
         "//praxis:pytypes",
+        "//praxis/layers:attentions",
+        "//praxis/layers:embedding_softmax",
+        "//praxis/layers:linears",
+        "//praxis/layers:normalizations",
+        "//praxis/layers:transformers",
     ],
 )
 
@@ -85,8 +91,10 @@ py_strict_test(
         # Implicit optax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
+        "//praxis:py_utils",
         "//praxis/layers:embedding_softmax",
         "//praxis/layers:linears",
+        "//praxis/layers:transformer_models",
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
