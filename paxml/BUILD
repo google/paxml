@@ -823,6 +823,20 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "host_callback",
+    srcs = ["host_callback.py"],
+)
+
+py_strict_test(
+    name = "host_callback_test",
+    srcs = ["host_callback_test.py"],
+    deps = [
+        ":host_callback",
+        # Implicit absl.testing.absltest.absltest dependency.
+    ],
+)
+
 py_strict_test(
     name = "automl_test",
     srcs = ["automl_test.py"],
