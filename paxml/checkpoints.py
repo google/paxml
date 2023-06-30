@@ -567,6 +567,11 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
   Should only be used in conjunction with FlaxCheckpointer.
   """
 
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    # TODO(b/273803615) Enable OCDBT.
+    self._use_ocdbt = False
+
   async def async_save(
       self,
       directory: epath.Path,
