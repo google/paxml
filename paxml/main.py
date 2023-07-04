@@ -50,7 +50,9 @@ from paxml import tuning_lib
 from praxis import pax_fiddle
 from praxis import py_utils
 
+# internal debugging module import
 # internal experiment module import
+
 
 FLAGS = flags.FLAGS
 
@@ -211,6 +213,8 @@ flags.DEFINE_integer(
 
 # Flags --jax_backend_target, --jax_xla_backend, --jax_enable_checks are
 # available through JAX.
+
+# Debugging flag
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
@@ -435,8 +439,12 @@ def run(
         running_mode=FLAGS.mode)
 
 
-@py_utils.benchmark(prefix='[PAX STATUS]: E2E time: ')
 def main(argv: Sequence[str]) -> None:
+  _main(argv)
+
+
+@py_utils.benchmark(prefix='[PAX STATUS]: E2E time: ')
+def _main(argv: Sequence[str]) -> None:
   logging.info('[PAX STATUS]: Program start.')
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
