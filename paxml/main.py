@@ -21,6 +21,7 @@ python paxml/main.py \
     --job_log_dir=/tmp/jax_log_dir/exp01
 """
 
+import contextlib
 import importlib
 import os
 import pprint
