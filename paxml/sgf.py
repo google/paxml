@@ -124,6 +124,24 @@ class PercoreClippedGradient(BaseStochasticGradient):
 
   l2_norm_clip: float = 0.0
 
+  def _clip_gradients(
+      self, grads: NestedMap, l2_norm_clip: float = 1.0
+  ) -> tuple[NestedMap, jax.Array]:
+    assert (
+        self.l2_norm_clip > 0.0
+    ), f'Clipping bound must be positive. {l2_norm_clip} is provided.'
+
+    # Clip the per-core mean gradient.
+    grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
+    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    clipped_flat, num_clipped = optax.per_example_global_norm_clip(
+        grads=grads_flat,
+        l2_norm_clip=l2_norm_clip,
+    )
+    clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
+
+    return clipped, num_clipped
+
   def grad_fn(
       self,
       loss_fn: Callable[..., tuple[JTensor, GradAuxInfo]],
@@ -131,10 +149,6 @@ class PercoreClippedGradient(BaseStochasticGradient):
       mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
-    assert (
-        self.l2_norm_clip > 0.0
-    ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
-
     # Obtain the per-core mean gradient.
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
     (values, aux), grads = grad_fn(
@@ -142,14 +156,9 @@ class PercoreClippedGradient(BaseStochasticGradient):
     )
     aux = self.process_aux_info(aux)
 
-    # Clip the per-core mean gradient.
-    grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
-    grads_flat, grads_treedef = jax.tree_flatten(grads)
-    clipped_flat, num_clipped = optax.per_example_global_norm_clip(
-        grads=grads_flat,
-        l2_norm_clip=aux.loss_weight * self.l2_norm_clip,
+    clipped, num_clipped = self._clip_gradients(
+        grads, aux.loss_weight * self.l2_norm_clip
     )
-    clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
 
     return (
         values,
@@ -159,6 +168,74 @@ class PercoreClippedGradient(BaseStochasticGradient):
             loss_weight=aux.loss_weight,
         ),
     ), clipped
+
+
+class PercoreClippedDpSgdGradient(PercoreClippedGradient):
+  """DP-SGD stochastic gradient function using per-core clipping.
+
+  Differentially private stochastic gradient using per-core clipping, whose
+  running time matches non-private baseline.
+  """
+
+  noise_multiplier: float = 0.0
+
+  def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
+      self,
+      grads: NestedMap,
+      noise_stddev: float,
+      loss_weight: float,
+      prng_key: PRNGKey = None,
+  ) -> NestedMap:
+    prng_keys = jax.random.split(
+        prng_key, len(jax.tree_util.tree_leaves(grads))
+    )
+    prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
+
+    if base_layer.is_running_under_pmap():
+      # Note: when running under pmap, loss_weight is set to 1/num_devices.
+      # In this case, the *global* batch size is batch_size / loss_weight.
+      # Moreover, each device adds independent Gaussian noises, and then the
+      # noisy gradients are added with `psum``. Because the sum of num_devices
+      # copies of independent Gaussian noises is equivalent to a single Gaussian
+      # with std scaled by `sqrt(num_devices)``, we need to further scale the
+      # noise_std on each device to correct this.
+      noise_stddev *= loss_weight * jnp.sqrt(loss_weight)
+
+    def _add_noise_to_array(x, prng):
+      return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
+
+    final_grads = jax.tree_map(_add_noise_to_array, grads, prng_tree)
+    return final_grads
+
+  def grad_fn(
+      self,
+      loss_fn: Callable[..., tuple[JTensor, GradAuxInfo]],
+      mdl_vars_grad: NestedJTensor,
+      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
+      prng_key: PRNGKey,
+  ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
+    # Obtain the per-core mean gradient.
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
+    (values, aux), grads = grad_fn(
+        mdl_vars_grad, mdl_vars_nograd_and_inputs, prng_key
+    )
+    aux = self.process_aux_info(aux)
+
+    clipped, num_clipped = self._clip_gradients(
+        grads, aux.loss_weight * self.l2_norm_clip
+    )
+
+    noise_stddev = self.noise_multiplier * self.l2_norm_clip
+    grads = self._add_noise(clipped, noise_stddev, aux.loss_weight, prng_key)
+
+    return (
+        values,
+        DPGradAuxInfo(
+            dp_aux_info={'frac_clipped': num_clipped},
+            aux_info=aux.aux_info,
+            loss_weight=aux.loss_weight,
+        ),
+    ), grads
 
 
 class DpSgdStochasticGradient(BaseStochasticGradient):
