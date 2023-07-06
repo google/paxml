@@ -87,7 +87,7 @@ def _get_targets_str(example: Mapping[str, Any], task: seqio.Task) -> str:
   target_field_name = 'targets'
   if pretokenized_target_field_name in example:
     target = example[pretokenized_target_field_name]
-  else:
+  elif target_field_name in example:
     target = example[target_field_name]
     try:
       if np.issubdtype(target[0], np.integer):
@@ -95,6 +95,9 @@ def _get_targets_str(example: Mapping[str, Any], task: seqio.Task) -> str:
     except TypeError:
       logging.warning('Could not check if the data type is integer.')
     target = task.output_features[target_field_name].vocabulary.decode(target)
+  else:
+    target = ''
+    logging.info('targets and targets_pretokenized not found in the example.')
   if isinstance(target, bytes):
     target = target.decode('utf-8')
   return target
