@@ -22,7 +22,6 @@ from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
-from paxml.tasks.lm.params.c4 import TransformerLmSpmdPipelineAdam
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -223,7 +222,7 @@ class GPT5B(Pile126M):
 
 ## 96 node
 @experiment_registry.register
-class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
+class GPT175B(Pile126M):
 
   NUM_LAYERS = 96
   NUM_HEADS = 96
@@ -234,7 +233,8 @@ class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
   DIMS_PER_HEAD = None
   # Known as NUM_EMBEDDINGS in t5x
   VOCAB_SIZE = 50257
-  USE_REPEATED_LAYER = False
+  USE_REPEATED_LAYER = True
+  MAX_STEPS = 75000
 
   # Model configs
   ACTIVATION_CLS = layers.GELU
@@ -267,13 +267,10 @@ class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
   CHECKPOINT_EVERY_N_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
-  ## GPU-specific configs
-  ICI_MESH_SHAPE = [2,1,1,4]
-  DCN_MESH_SHAPE = [8,12,1,1]
-  NUM_STAGES = 16
-  PERCORE_BATCH_SIZE = 2
-  MICROBATCH_SIZE = 12
-  MAX_STEPS = 75000
+  ## GPU-specific settings
+  ICI_MESH_SHAPE = [1,8,1]
+  DCN_MESH_SHAPE = [1,32,1]
+  PERCORE_BATCH_SIZE = 6
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
