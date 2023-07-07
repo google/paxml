@@ -126,21 +126,20 @@ class PercoreClippedGradient(BaseStochasticGradient):
 
   def _clip_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
-  ) -> tuple[NestedMap, jax.Array]:
+  ) -> tuple[NestedMap, jax.Array, Any]:
     assert (
         self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {l2_norm_clip} is provided.'
 
     # Clip the per-core mean gradient.
-    grads = jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=0), grads)
     grads_flat, grads_treedef = jax.tree_flatten(grads)
-    clipped_flat, num_clipped = optax.per_example_global_norm_clip(
-        grads=grads_flat,
-        l2_norm_clip=l2_norm_clip,
-    )
+    global_grad_norm = optax.global_norm(grads_flat)
+    divisor = jnp.maximum(global_grad_norm / l2_norm_clip, 1.0)
+    num_clipped = jnp.greater(divisor, 1.0)
+    clipped_flat = [g / divisor for g in grads_flat]
     clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
 
-    return clipped, num_clipped
+    return clipped, num_clipped, global_grad_norm
 
   def grad_fn(
       self,
@@ -156,14 +155,17 @@ class PercoreClippedGradient(BaseStochasticGradient):
     )
     aux = self.process_aux_info(aux)
 
-    clipped, num_clipped = self._clip_gradients(
+    clipped, num_clipped, grad_norm = self._clip_gradients(
         grads, aux.loss_weight * self.l2_norm_clip
     )
 
     return (
         values,
         DPGradAuxInfo(
-            dp_aux_info={'frac_clipped': num_clipped},
+            dp_aux_info={
+                'frac_clipped': num_clipped,
+                'per_core_grad_norm': grad_norm,
+            },
             aux_info=aux.aux_info,
             loss_weight=aux.loss_weight,
         ),
@@ -221,7 +223,7 @@ class PercoreClippedDpSgdGradient(PercoreClippedGradient):
     )
     aux = self.process_aux_info(aux)
 
-    clipped, num_clipped = self._clip_gradients(
+    clipped, num_clipped, grad_norm = self._clip_gradients(
         grads, aux.loss_weight * self.l2_norm_clip
     )
 
@@ -231,7 +233,10 @@ class PercoreClippedDpSgdGradient(PercoreClippedGradient):
     return (
         values,
         DPGradAuxInfo(
-            dp_aux_info={'frac_clipped': num_clipped},
+            dp_aux_info={
+                'frac_clipped': num_clipped,
+                'per_core_grad_norm': grad_norm,
+            },
             aux_info=aux.aux_info,
             loss_weight=aux.loss_weight,
         ),

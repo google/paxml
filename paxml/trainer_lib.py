@@ -1052,7 +1052,18 @@ def train_step_single_learner(
         )
       else:
         frac_clipped = aux_info.dp_aux_info['frac_clipped']
-      base_layer.add_global_summary('frac_clipped', frac_clipped)
+      base_layer.add_global_summary('dp_metrics/frac_clipped', frac_clipped)
+    if isinstance(learner.stochastic_gradient, sgf.PercoreClippedGradient):
+      if base_layer.is_running_under_pmap():
+        mean_per_core_grad_norm = jax.lax.psum(
+            aux_info.dp_aux_info['per_core_grad_norm'],
+            axis_name=PMAP_PARALLEL_AXIS_NAME,
+        )
+      else:
+        mean_per_core_grad_norm = aux_info.dp_aux_info['per_core_grad_norm']
+      base_layer.add_global_summary(
+          'dp_metrics/mean_per_core_grad_norm', mean_per_core_grad_norm
+      )
     bwd_summary_tensors = base_layer.all_global_summaries()
 
   summary_tensors = NestedMap()
