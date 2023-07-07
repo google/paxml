@@ -19,6 +19,9 @@ import os
 from setuptools import find_namespace_packages
 from setuptools import setup
 
+# Set this envvar to avoid installing packages from head that can overwrite
+# existing installs of those packages, e.g., jax
+SKIP_HEAD_INSTALLS = os.environ.get('SKIP_HEAD_INSTALLS', '')
 
 def _get_requirements():
   """Parses requirements.txt file."""
@@ -29,7 +32,11 @@ def _get_requirements():
     for line in f:
       package_name = line.strip()
       # Skip empty line or comments starting with "#".
-      if not package_name or package_name[0] == '#':
+      if (
+          not package_name
+          or package_name[0] == '#'
+          or (' @ ' in package_name and SKIP_HEAD_INSTALLS)
+      ):
         continue
       else:
         install_requires_tmp.append(package_name)
