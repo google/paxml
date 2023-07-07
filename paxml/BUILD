@@ -495,7 +495,6 @@ pytype_strict_library(
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
-        # Implicit fiddle dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
