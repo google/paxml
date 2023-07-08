@@ -110,19 +110,20 @@ class StandardGradient(BaseStochasticGradient):
     return (values, aux), grads
 
 
-class PercoreClippedGradient(BaseStochasticGradient):
-  """Per-core clipped gradient function.
+class PercoreClippedDpSgdGradient(BaseStochasticGradient):
+  """DP-SGD stochastic gradient function using per-core clipping.
 
-  Efficient implementation of per-core clipping, whose running time matches
-  non-private baseline.
+  Differentially private stochastic gradient using per-core clipping, whose
+  running time matches non-private baseline.
 
-  Experimental results:
+  Experimental results with zero noise multiplier:
     Non-private baseline: http://tb/4569190445426541226
     PercoreClippedGradient: http://tb/1885364525575923265
     MicrobatchDpSgdStochasticGradient: http://tb/2683981470965501622
   """
 
   l2_norm_clip: float = 0.0
+  noise_multiplier: float = 0.0
 
   def _clip_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
@@ -140,46 +141,6 @@ class PercoreClippedGradient(BaseStochasticGradient):
     clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
 
     return clipped, num_clipped, global_grad_norm
-
-  def grad_fn(
-      self,
-      loss_fn: Callable[..., tuple[JTensor, GradAuxInfo]],
-      mdl_vars_grad: NestedJTensor,
-      mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
-      prng_key: PRNGKey,
-  ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
-    # Obtain the per-core mean gradient.
-    grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
-    (values, aux), grads = grad_fn(
-        mdl_vars_grad, mdl_vars_nograd_and_inputs, prng_key
-    )
-    aux = self.process_aux_info(aux)
-
-    clipped, num_clipped, grad_norm = self._clip_gradients(
-        grads, aux.loss_weight * self.l2_norm_clip
-    )
-
-    return (
-        values,
-        DPGradAuxInfo(
-            dp_aux_info={
-                'frac_clipped': num_clipped,
-                'per_core_grad_norm': grad_norm,
-            },
-            aux_info=aux.aux_info,
-            loss_weight=aux.loss_weight,
-        ),
-    ), clipped
-
-
-class PercoreClippedDpSgdGradient(PercoreClippedGradient):
-  """DP-SGD stochastic gradient function using per-core clipping.
-
-  Differentially private stochastic gradient using per-core clipping, whose
-  running time matches non-private baseline.
-  """
-
-  noise_multiplier: float = 0.0
 
   def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
       self,
