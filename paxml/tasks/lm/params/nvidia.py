@@ -370,6 +370,19 @@ class NVIDIA175BProxy(NVIDIA5B):
 
 
 @experiment_registry.register
+class NVIDIA175BProxyTwoHosts(NVIDIA175BProxy):
+  """175B proxy config that works with 2x16 A100-40G."""
+
+  DCN_MESH_SHAPE = [2, 1, 1, 1]
+  ICI_MESH_SHAPE = [1, 1, 1, 16]
+
+  NUM_LAYERS = 12
+  NUM_STAGES = 2
+  MICROBATCH_SIZE = 8
+  PERCORE_BATCH_SIZE = 0.25
+
+
+@experiment_registry.register
 class TestSmallConfig(NVIDIA5B):
   """Test config that works with 16 A100-40G."""
 
