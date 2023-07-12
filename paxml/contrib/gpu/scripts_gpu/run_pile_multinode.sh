@@ -15,6 +15,7 @@
 
 #! /bin/bash
 # Assumes you are using a SLURM cluster. Edit flags under --multiprocess_gpu below to suit your setup
+set -u
 
 TFDS_DATA_DIR=$1
 VOCAB_PATH=$2
@@ -23,7 +24,7 @@ LOG_DIR=${3:-"test_logdir"}
 export VOCAB_PATH=$VOCAB_PATH
 
 mkdir -p ${LOG_DIR}
-python3 /pax/paxml/paxml/main.py \
+python3 -u -m paxml.main \
     --job_log_dir=${LOG_DIR} \
     --exp=paxml.contrib.gpu.scripts_gpu.configs.Pile126M \
     --tfds_data_dir=$TFDS_DATA_DIR \

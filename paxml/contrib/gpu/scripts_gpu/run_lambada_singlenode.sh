@@ -14,6 +14,7 @@
 # limitations under the License.
 
 #! /bin/bash
+set -u
 
 TFDS_DATA_DIR=$1
 VOCAB_PATH=$2
@@ -23,10 +24,10 @@ LOG_DIR=$3
 export VOCAB_PATH=$VOCAB_PATH
 
 mkdir -p ${PWD}/${LOG_DIR}
-python3 /pax/paxml/paxml/main.py \
-    --job_log_dir=${PWD}/${LOG_DIR} \
+python3 -u -m paxml.main \
+    --job_log_dir=${LOG_DIR} \
     --exp=paxml.contrib.gpu.scripts_gpu.configs.Lambada126M \
     --tfds_data_dir=$TFDS_DATA_DIR \
     --mode='eval' \
-    --alsologtostderr &> ${PWD}/${LOG_DIR}/output.log
+    --alsologtostderr &> ${LOG_DIR}/output.log
 

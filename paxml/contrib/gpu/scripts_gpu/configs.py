@@ -22,7 +22,6 @@ from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
-from paxml.tasks.lm.params.c4 import TransformerLmSpmdPipelineAdam
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -196,23 +195,23 @@ class Lambada126M(GPT126M, LambadaDataset):
 ## 32 node
 @experiment_registry.register
 class GPT5B(Pile126M):
-  
+
   USE_REPEATED_LAYER = True
   ICI_MESH_SHAPE = [1,4,2]
   DCN_MESH_SHAPE = [32,1,1]
   MAX_STEPS = 75000
-    
+
   PERCORE_BATCH_SIZE = 8
-    
+
   NUM_LAYERS = 24
   NUM_HEADS = 32
   MODEL_DIMS = 4096
   HIDDEN_DIMS = 16384
   DIMS_PER_HEAD = 128
-    
+
   INIT_STD = 0.01
   SOFTMAX_INIT_STD = 0.01
-    
+
   ## optimizer-related
   LEARNING_RATE = 1.6e-4
 
@@ -221,9 +220,10 @@ class GPT5B(Pile126M):
   LR_COS_DECAY_START = LR_COS_WARMUP+1
   LR_COS_DECAY_END = 62500
 
+
 ## 96 node
 @experiment_registry.register
-class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
+class GPT175B(Pile126M):
 
   NUM_LAYERS = 96
   NUM_HEADS = 96
@@ -234,7 +234,8 @@ class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
   DIMS_PER_HEAD = None
   # Known as NUM_EMBEDDINGS in t5x
   VOCAB_SIZE = 50257
-  USE_REPEATED_LAYER = False
+  USE_REPEATED_LAYER = True
+  MAX_STEPS = 75000
 
   # Model configs
   ACTIVATION_CLS = layers.GELU
@@ -267,13 +268,10 @@ class GPT175B(TransformerLmSpmdPipelineAdam, PileUnsupervisedDataset):
   CHECKPOINT_EVERY_N_STEPS = 100
   CHECKPOINT_MAX_TO_KEEP = 10
 
-  ## GPU-specific configs
-  ICI_MESH_SHAPE = [2,1,1,4]
-  DCN_MESH_SHAPE = [8,12,1,1]
-  NUM_STAGES = 16
-  PERCORE_BATCH_SIZE = 2
-  MICROBATCH_SIZE = 12
-  MAX_STEPS = 75000
+  ## GPU-specific settings
+  ICI_MESH_SHAPE = [1, 8, 1]
+  DCN_MESH_SHAPE = [1, 32, 1]
+  PERCORE_BATCH_SIZE = 6
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
