@@ -247,7 +247,15 @@ class SingleTaskDecodeProgram(programs.Program):
       for key, tensor in all_summary_tensors.items():
         summary_type = base_layer.get_summary_type_from_key(key)
         summary_utils.write_summary_tensor(
-            train_step, key, np.array(tensor), summary_type
+            train_step,
+            key,
+            np.array(tensor),
+            summary_type,
+            sample_rate=(
+                self._task.model.sample_rate
+                if hasattr(self._task.model, 'sample_rate')
+                else summary_utils.AUDIO_SUMMARY_SAMPLE_RATE
+            ),
         )
       metric_utils.write_clu_metric_summaries(metric_values, train_step)
       metric_utils.write_clu_metric_summaries(process_metric_values, train_step)
