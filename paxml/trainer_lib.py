@@ -489,7 +489,7 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
 
 
 def _maybe_to_float32(x: JTensor) -> JTensor:
-  if x.dtype == jnp.bfloat16:
+  if hasattr(x, 'dtype') and x.dtype == jnp.bfloat16:
     return x.astype(jnp.float32)
   return x
 
