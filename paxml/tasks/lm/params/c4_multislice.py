@@ -114,3 +114,44 @@ class C4Spmd22BAdam2xv4_384(C4Spmd22BAdam1xv4_384):
 
   DCN_MESH_SHAPE = [2, 1, 1]
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+
+@experiment_registry.register
+class C4Spmd22BAdam1xv4_8(C4Spmd22BAdamMaxText):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 1 * 4 * 1 * 16 = 64
+  """
+
+  NUM_LAYERS = 16
+  MODEL_DIMS = 2048
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 8
+  DIMS_PER_HEAD = 256
+  PERCORE_BATCH_SIZE = 16
+  MAX_SEQ_LEN = 1024
+  VOCAB_SIZE = 32768
+
+  ICI_MESH_SHAPE = [1, 4, 1]
+  PERCORE_BATCH_SIZE = 16
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+
+@experiment_registry.register
+class C4Spmd22BAdam2xv4_8(C4Spmd22BAdam1xv4_8):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 2 * 1 * 4 * 1 * 16 = 128
+  """
+
+  DCN_MESH_SHAPE = [2, 1, 1]
+
+
+@experiment_registry.register
+class C4Spmd22BAdam4xv4_8(C4Spmd22BAdam1xv4_8):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 4 * 1 * 4 * 1 * 16 = 256
+  """
+
+  DCN_MESH_SHAPE = [4, 1, 1]
