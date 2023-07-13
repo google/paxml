@@ -1,7 +1,13 @@
 # Version: 1.1.0
 ## Major Features and Improvements
-## Breaking changes
-## Deprecations
+* Support multislice on Cloud TPU: example configs and instructions added ([link](https://github.com/google/paxml#pax-on-multislice)).
+* Move to python 3.10 as the minimal python requirement (previously on python 3.8).
+* Checkpoint improvements:
+  * OCDBT support (off by default).
+  * Pax can take advantage of [Orbax-style transformations](https://github.com/google/orbax/blob/main/docs/checkpoint.md#transformations) to gain support for additional features.
+  * Users can provide their own Checkpointer to allow for custom logic and reading from a custom checkpoint location.
+* Eval customization support.
+* Support for [tf.data.experimental.service](https://www.tensorflow.org/api_docs/python/tf/data/experimental/service).
 ## Note
 *   Version: 1.1.0
 *   Build Date: 20230712
