@@ -1,3 +1,13 @@
+# Version: 1.1.0
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 1.1.0
+*   Build Date: 20230712
+*   Paxml commit: b8e021a18d20816d713eea7e0c9056becea1823a
+*   Praxis version: 1.1.0
+*   Praxis commit: f457672aa6193621a4ebf2f7d9c9acf62e0513f6
 # Version: 1.0.0
 ## Major Features and Improvements
 * **Fiddle** - Pax's layer library, Praxis, now has layers and BaseParameterizable configured with [Fiddle](https://github.com/google/fiddle), a Python-first configuration library. Fiddle reduces boilerplate, and adds productivity features including history tracking, graphviz visualization, support for aliasing objects, and more.

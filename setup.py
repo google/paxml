@@ -47,7 +47,7 @@ install_requires = _get_requirements()
 
 setup(
     name='paxml',
-    version='1.0.0',  # use major/minor version number, e.g. "0.1.0"
+    version='1.1.0',  # use major/minor version number, e.g. "0.1.0"
     description=(
         'Framework to configure and run machine learning experiments '
         'on top of Jax.'
