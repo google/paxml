@@ -23,6 +23,15 @@ package(default_visibility = JAX_VISIBILITY)
 licenses(["notice"])
 
 pytype_strict_library(
+    name = "codegen_tracer",
+    srcs = ["codegen_tracer.py"],
+    deps = [
+        # Implicit fiddle.daglish dependency.
+        "//paxml:base_experiment",
+    ],
+)
+
+pytype_strict_library(
     name = "remove_sharding",
     srcs = ["remove_sharding.py"],
     deps = [
@@ -43,5 +52,22 @@ pytype_strict_test(
         # Implicit fiddle.daglish dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_test(
+    name = "codegen_tracer_test",
+    srcs = ["codegen_tracer_test.py"],
+    deps = [
+        ":codegen_tracer",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+        "//paxml:base_experiment",
+        "//paxml:base_task",
+        "//paxml:tasks_lib",
+        "//praxis:base_input",
+        "//praxis:base_model",
+        "//praxis:pax_fiddle",
+        "//praxis/layers:checkpoint_policy",
     ],
 )
