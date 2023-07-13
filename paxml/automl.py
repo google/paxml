@@ -67,32 +67,36 @@ def hyperparameter_tuning(
     max_num_trials: int = 100,
     goal: str = 'maximize',
     *,
-    errors_to_skip: Optional[List[
-        Union[Type[Exception], Tuple[Type[Exception], str]]]] = None,
+    enable_dataset_tuning: bool = False,
+    errors_to_skip: Optional[
+        List[Union[Type[Exception], Tuple[Type[Exception], str]]]
+    ] = None,
     cross_step_metric_aggregator: Optional[
-        pax_fiddle.Config[CrossStepMetricAggregator]] = None,
-    early_stopping: Optional[
-        pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None,
-    reward_for_nan: Optional[float] = None) -> SearchHParams:
+        pax_fiddle.Config[CrossStepMetricAggregator]
+    ] = None,
+    early_stopping: Optional[pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None,
+    reward_for_nan: Optional[float] = None,
+) -> SearchHParams:
   """Returns a common search config for hyper-parameter tuning.
 
   Args:
     metric: The metric to optimize.
     max_num_trials: Max number of trials for tuning.
     goal: 'maximize' or 'minimize'.
-    errors_to_skip: An optional field to specify on what errors the trial
-      should be skipped. It's in the form of a list of (ExceptionType) or
+    enable_dataset_tuning: Whether to enable dataset tuning.
+    errors_to_skip: An optional field to specify on what errors the trial should
+      be skipped. It's in the form of a list of (ExceptionType) or
       (ExceptionType, regexForError). For example, if users specify:
       `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
-      RuntimeError or errors that match 'XLACompilation.*' will be treated as
-      to skip.
+      RuntimeError or errors that match 'XLACompilation.*' will be treated as to
+      skip.
     cross_step_metric_aggregator: An optional cross-step metric aggregator
       config indicating how metrics will be aggregated at the end of the search
       for computing the reward. If None, the last reported metrics will be used.
-    early_stopping: An optional population-wise early stopping policy.
-      If None, no population-wise early stopping policy will be used, though
-      users still can raise `automl.EarlyStoppingError` to early terminate a
-      a single trial during training/evaluation.
+    early_stopping: An optional population-wise early stopping policy. If None,
+      no population-wise early stopping policy will be used, though users still
+      can raise `automl.EarlyStoppingError` to early terminate a a single trial
+      during training/evaluation.
     reward_for_nan: An optional float used as the reward when metric value is
       NaN. If not specified, the reward will remain NaN so the trial will be
       skipped by the search algorithm.
@@ -114,6 +118,7 @@ def hyperparameter_tuning(
       errors_to_skip=errors_to_skip,
       cross_step_metric_aggregator=cross_step_metric_aggregator,
       treats_early_stopped_trials_as_done=True,
+      enable_dataset_tuning=enable_dataset_tuning,
   )
 
 
