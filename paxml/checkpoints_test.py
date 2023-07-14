@@ -26,7 +26,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
@@ -35,7 +35,7 @@ from paxml import train_states
 from praxis import pytypes
 
 
-orbax_utils = orbax.checkpoint.utils
+orbax_utils = ocp.utils
 ArrayMetadata = checkpoint_metadata.ArrayMetadata
 TrainState = train_states.TrainState
 

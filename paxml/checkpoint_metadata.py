@@ -23,7 +23,7 @@ from absl import logging
 from etils import epath
 import jax
 import jax.numpy as jnp
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_version
 from paxml import train_states
 from praxis import py_utils
@@ -31,11 +31,11 @@ from praxis import pytypes
 
 
 PAX_METADATA_ITEM_NAME = 'pax_metadata'
-METADATA_ITEM_NAME = orbax.checkpoint.checkpoint_manager.METADATA_ITEM_NAME
+METADATA_ITEM_NAME = ocp.checkpoint_manager.METADATA_ITEM_NAME
 
 get_version_key = checkpoint_version.get_version_key
 get_version = checkpoint_version.get_version
-Checkpointer = orbax.checkpoint.Checkpointer
+Checkpointer = ocp.Checkpointer
 
 # string consts used in metadata
 ARRAY_METADATA_TAG = '_array_metadata_tag'
@@ -91,13 +91,13 @@ def metadata_exists(directory: epath.Path) -> bool:
 
 
 def save_metadata(directory: epath.Path, metadata: Mapping[str, Any]):
-  checkpointer = Checkpointer(orbax.checkpoint.JsonCheckpointHandler())
+  checkpointer = Checkpointer(ocp.JsonCheckpointHandler())
   path = directory / METADATA_ITEM_NAME
   checkpointer.save(path, metadata)
 
 
 def restore_metadata(directory: epath.Path) -> Mapping[str, Any]:
-  checkpointer = Checkpointer(orbax.checkpoint.JsonCheckpointHandler())
+  checkpointer = Checkpointer(ocp.JsonCheckpointHandler())
   path = directory / METADATA_ITEM_NAME
   return checkpointer.restore(path)
 
@@ -196,7 +196,7 @@ class PaxMetadata:
       train_state_metadata = dataclasses.asdict(train_state_metadata)
 
     # serialize to a nested dict so that it is json-serializable
-    train_state_metadata = orbax.checkpoint.utils.serialize_tree(
+    train_state_metadata = ocp.utils.serialize_tree(
         train_state_metadata,
         keep_empty_nodes=True,
     )

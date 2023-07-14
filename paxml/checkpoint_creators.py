@@ -24,7 +24,7 @@ from etils import epath
 import jax
 from jax import monitoring
 import numpy as np
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_managers
 from paxml import partitioning
 from paxml import tasks_lib
@@ -109,7 +109,7 @@ def _parse_duration(
 
 def _restore_from_external_checkpoint(
     path: epath.Path,
-    checkpoint_handler: Optional[orbax.checkpoint.CheckpointHandler],
+    checkpoint_handler: Optional[ocp.CheckpointHandler],
     train_state_metadata: trainer_lib.TrainStateMetadata,
     partitioner: partitioning.Partitioner,
     train_input_pipeline: Optional[base_input.BaseInput] = None,
@@ -141,9 +141,7 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
       external_checkpoint_path: Optional[epath.Path] = None,
-      external_checkpoint_handler: Optional[
-          orbax.checkpoint.CheckpointHandler
-      ] = None,
+      external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
   ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
@@ -324,9 +322,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
       external_checkpoint_path: Optional[epath.Path] = None,
-      external_checkpoint_handler: Optional[
-          orbax.checkpoint.CheckpointHandler
-      ] = None,
+      external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
   ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)

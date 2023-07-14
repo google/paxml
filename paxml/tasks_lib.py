@@ -36,7 +36,7 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 import optax
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
@@ -1196,8 +1196,8 @@ class SingleTask(base_task.BaseTask):
       external_checkpoint_path: A path from which to restore an external
         checkpoint. The checkpoint is used for restoration if there are no
         checkpoints present in the main directory.
-      external_checkpoint_handler: An orbax.checkpoint.CheckpointHandler
-        defining logic for loading the checkpoint.
+      external_checkpoint_handler: An ocp.CheckpointHandler defining logic for
+        loading the checkpoint.
     """
 
     learner: pax_fiddle.Config[learners_lib.Learner] = (
@@ -1238,9 +1238,7 @@ class SingleTask(base_task.BaseTask):
     enable_input_checkpointing: Optional[bool] = False
     restore_transformations: Optional[Dict[str, Any]] = None
     external_checkpoint_path: Optional[epath.Path] = None
-    external_checkpoint_handler: Optional[
-        orbax.checkpoint.CheckpointHandler
-    ] = None
+    external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None
 
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 

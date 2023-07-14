@@ -33,7 +33,7 @@ from jax.experimental import multihost_utils
 from jax.sharding import Mesh
 import numpy as np
 import optax
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_managers
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
@@ -55,16 +55,16 @@ TrainState = train_states.TrainState
 def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
   """Use OCDBT driver within context."""
   original_registry = list(
-      orbax.checkpoint.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
+      ocp.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
   )
   if use_ocdbt:
-    orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
+    ocp.type_handlers.register_standard_handlers_with_options(
         use_ocdbt=use_ocdbt, ts_context=ts_context
     )
   try:
     yield
   finally:
-    orbax.checkpoint.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
+    ocp.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
         original_registry
     )
 
@@ -93,14 +93,14 @@ def _actual_checkpoint_filenames(directory: str) -> List[str]:
 
 
 def create_train_state(step: int = 0):
-  mdl_vars = orbax.checkpoint.test_utils.setup_pytree()
+  mdl_vars = ocp.test_utils.setup_pytree()
   global_mesh = Mesh(np.asarray(jax.devices()), ('x',))
   axes = jax.sharding.PartitionSpec(
       None,
   )
   mdl_vars = jax.tree_util.tree_map(
       functools.partial(
-          orbax.checkpoint.test_utils.create_sharded_array,
+          ocp.test_utils.create_sharded_array,
           mesh=global_mesh,
           mesh_axes=axes,
       ),
@@ -110,9 +110,7 @@ def create_train_state(step: int = 0):
   train_state = TrainState(step=step, mdl_vars=mdl_vars, opt_states=opt_states)
 
   def _create_sharded_array(x):
-    return orbax.checkpoint.test_utils.create_sharded_array(
-        x, global_mesh, axes
-    )
+    return ocp.test_utils.create_sharded_array(x, global_mesh, axes)
 
   train_state = jax.tree_util.tree_map(_create_sharded_array, train_state)
   state_specs = jax.tree_util.tree_map(
@@ -186,7 +184,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           checkpoints.FlaxCheckpointHandler()
       )
     elif checkpoint_type == CheckpointType.GDA:
-      checkpointer = orbax.checkpoint.Checkpointer(
+      checkpointer = ocp.Checkpointer(
           checkpoints.PaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
       )
     else:
@@ -226,7 +224,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
   ) -> bool:
     train_state = train_state.replace(
-        step=orbax.checkpoint.test_utils.create_sharded_array(
+        step=ocp.test_utils.create_sharded_array(
             step,
             self.global_mesh,
             jax.sharding.PartitionSpec(
@@ -329,10 +327,8 @@ class CheckpointManagerTest(parameterized.TestCase):
     if train_input_pipeline:
       # restored inputs should start from the second batch
       restored_inputs = train_input_pipeline.get_next()
-      orbax.checkpoint.test_utils.assert_tree_equal(
-          self, expected_inputs, restored_inputs
-      )
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+      ocp.test_utils.assert_tree_equal(self, expected_inputs, restored_inputs)
+    ocp.test_utils.assert_tree_equal(self, expected, restored)
 
     # incompatible unpadded shape
     wrong_unpadded_shape_dtype_struct = copy.deepcopy(
@@ -423,7 +419,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       )
 
     restored = _restore(check_unpadded_shape=True)
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+    ocp.test_utils.assert_tree_equal(self, expected, restored)
 
   @parameterized.parameters(
       (CheckpointType.GDA),
@@ -460,9 +456,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
     restored_inputs = train_input_pipeline.get_next()
-    orbax.checkpoint.test_utils.assert_tree_equal(
-        self, expected_inputs, restored_inputs
-    )
+    ocp.test_utils.assert_tree_equal(self, expected_inputs, restored_inputs)
 
   @parameterized.parameters(
       (None, CheckpointType.GDA),
@@ -715,7 +709,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
 
     with mock.patch.object(
-        orbax.checkpoint.utils, 'ensure_atomic_save', autospec=True
+        ocp.utils, 'ensure_atomic_save', autospec=True
     ) as commit_callback:
       commit_callback.side_effect = _fake_on_commit_callback
       checkpoint_manager = self.create_checkpoint_manager(options)
@@ -727,14 +721,12 @@ class CheckpointManagerTest(parameterized.TestCase):
       )
       # Step 0 not finalized.
       self.assertLen(
-          orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory),
+          ocp.utils.tmp_checkpoints(checkpoint_manager.directory),
           1,
       )
 
     checkpoint_manager = self.create_checkpoint_manager(options)
-    self.assertEmpty(
-        orbax.checkpoint.utils.tmp_checkpoints(checkpoint_manager.directory)
-    )
+    self.assertEmpty(ocp.utils.tmp_checkpoints(checkpoint_manager.directory))
     self.save(
         checkpoint_manager,
         0,
@@ -883,7 +875,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         global_mesh=self.global_mesh,
         train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
     )
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+    ocp.test_utils.assert_tree_equal(self, expected, restored)
 
     # Saving again, we expect it to be saved with the old format.
     self.save(checkpoint_manager, 1, self.train_state)
@@ -930,7 +922,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           lambda x: np.asarray(x.addressable_data(0)),
           expected,
       )
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+    ocp.test_utils.assert_tree_equal(self, expected, restored)
 
   def test_transforms(self):
     ts_context = ts.Context({
@@ -965,7 +957,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       expected = TrainState(
           self.train_state.step,
           mdl_vars,
-          orbax.checkpoint.test_utils.apply_function(
+          ocp.test_utils.apply_function(
               self.train_state.opt_states, lambda x: x * 2
           ),
       )
@@ -977,13 +969,11 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
       transforms = {
-          r'(.*)opt_states(.*)': orbax.checkpoint.Transform(
-              value_fn=lambda x: x * 2
-          ),
+          r'(.*)opt_states(.*)': ocp.Transform(value_fn=lambda x: x * 2),
           'mdl_vars': {
-              'x': orbax.checkpoint.Transform(original_key='mdl_vars/a'),
+              'x': ocp.Transform(original_key='mdl_vars/a'),
               'y': {
-                  'z': orbax.checkpoint.Transform(original_key='mdl_vars/b'),
+                  'z': ocp.Transform(original_key='mdl_vars/b'),
               },
           },
       }
@@ -1003,7 +993,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           train_state_unpadded_shape_dtype_struct=train_state_unpadded_shape_dtype_struct,
           transforms=transforms,
       )
-      orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+      ocp.test_utils.assert_tree_equal(self, expected, restored)
 
   @parameterized.parameters((True,), (False,))
   def test_restoring_gda_independent_of_prefix(self, remove_checkpoint_prefix):
@@ -1056,7 +1046,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         },
     )
 
-    orbax.checkpoint.test_utils.assert_tree_equal(self, expected, restored)
+    ocp.test_utils.assert_tree_equal(self, expected, restored)
 
 
 if __name__ == '__main__':

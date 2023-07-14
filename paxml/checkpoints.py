@@ -27,7 +27,7 @@ import flax.serialization
 import jax
 from jax.experimental import multihost_utils
 import optax
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_managers
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
@@ -41,8 +41,8 @@ from praxis import trees
 CHECKPOINT_PREFIX = checkpoint_paths.CHECKPOINT_PREFIX
 
 CheckpointType = checkpoint_types.CheckpointType
-AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
-Checkpointer = orbax.checkpoint.Checkpointer
+AsyncCheckpointer = ocp.AsyncCheckpointer
+Checkpointer = ocp.Checkpointer
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 PyTree = Any
 
@@ -70,7 +70,7 @@ def get_checkpointer(
   if async_checkpointer is not None:
     return async_checkpointer
   if checkpoint_type == CheckpointType.GDA:
-    checkpointer = orbax.checkpoint.Checkpointer(
+    checkpointer = ocp.Checkpointer(
         PaxCheckpointHandler(
             enforce_restore_shape_check=enforce_restore_shape_check,
             use_ocdbt=tensorstore_use_ocdbt,
@@ -258,9 +258,9 @@ def reregister_type_handlers(
   ts_context = None
   if tensorstore_use_ocdbt:
     ts_context, ocdbt_coordinator_server = (
-        orbax.checkpoint.type_handlers.create_coordinator_server_and_context()
+        ocp.type_handlers.create_coordinator_server_and_context()
     )
-  orbax.checkpoint.type_handlers.register_standard_handlers_with_options(
+  ocp.type_handlers.register_standard_handlers_with_options(
       metadata_key=tensorstore_metadata_key,
       use_ocdbt=tensorstore_use_ocdbt,
       ts_context=ts_context,
@@ -406,7 +406,7 @@ def _check_restored_shapes(restored: Any, expected: Any):
   jax.tree_util.tree_map(_check, restored, expected)
 
 
-class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
+class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   """PaxCheckpointHandler override for Pax GDA checkpointing.
 
   Allows setting parameter names manually, which would normally be extracted
@@ -445,7 +445,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       return await super()._write_aggregate_file(
           directory, item, param_infos, save_args
       )
-    return orbax.checkpoint.future.NoopFuture()
+    return ocp.future.NoopFuture()
 
   async def async_save(
       self,
@@ -478,9 +478,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
       raise ValueError('Expected version for restoration.')
-    is_ocdbt_checkpoint = orbax.checkpoint.type_handlers.is_ocdbt_checkpoint(
-        directory
-    )
+    is_ocdbt_checkpoint = ocp.type_handlers.is_ocdbt_checkpoint(directory)
     if is_ocdbt_checkpoint and not self._use_ocdbt:
       raise ValueError(
           'Must enable `tensorstore_use_ocdbt` in order to load OCDBT format'
@@ -499,7 +497,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       self._set_param_names(reference_nested_names)
 
     def _create_restore_args(shape_struct):
-      return orbax.checkpoint.RestoreArgs(
+      return ocp.RestoreArgs(
           dtype=shape_struct.dtype,
       )
 
@@ -509,7 +507,7 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       restore_shape = (
           None if self._enforce_restore_shape_check else shape_struct.shape
       )
-      return orbax.checkpoint.ArrayRestoreArgs(
+      return ocp.ArrayRestoreArgs(
           mesh=mesh,
           mesh_axes=pspec,
           global_shape=restore_shape,
@@ -556,12 +554,12 @@ class PaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
       return super().structure(directory)
     # Otherwise, rely on implicit structure from directories.
     return jax.tree_util.tree_map(
-        orbax.checkpoint.utils.leaf_placeholder,
+        ocp.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names),
     )
 
 
-class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
+class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   """Override to process checkpoints in Flax format.
 
   Should only be used in conjunction with FlaxCheckpointer.
@@ -597,7 +595,7 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     }
     assert save_args is None
     save_args = jax.tree_util.tree_map(
-        lambda _: orbax.checkpoint.SaveArgs(aggregate=True), checkpoint_target
+        lambda _: ocp.SaveArgs(aggregate=True), checkpoint_target
     )
     return await super().async_save(
         directory, checkpoint_target, save_args=save_args
@@ -654,7 +652,7 @@ class FlaxCheckpointHandler(orbax.checkpoint.PyTreeCheckpointHandler):
     return restored
 
 
-class FlaxCheckpointer(orbax.checkpoint.Checkpointer):
+class FlaxCheckpointer(ocp.Checkpointer):
   """Allows restoring legacy Flax checkpoints, which are not directories.
 
   Should only be used in conjunction with FlaxCheckpointHandler.
@@ -686,7 +684,7 @@ class FlaxCheckpointer(orbax.checkpoint.Checkpointer):
     return result
 
 
-class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
+class BaseInputCheckpointHandler(ocp.CheckpointHandler):
   """A CheckpointHandler implementation that handles a tf.data BaseInput (sub)class.
 
   Useful for distributed input where the data iterator on the server cannot be
@@ -717,8 +715,8 @@ class BaseInputCheckpointHandler(orbax.checkpoint.CheckpointHandler):
     Args:
       directory: restore location directory.
       item: a BaseInput to be restored, which must have restore() implemented.
-        Not Optional (declared as optional to conform to
-        orbax.checkpoint.CheckpointHandler superclass)
+        Not Optional (declared as optional to conform to ocp.CheckpointHandler
+        superclass)
     """
     if item is None:
       raise ValueError('Must provide item to restore')

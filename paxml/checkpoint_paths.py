@@ -22,7 +22,7 @@ from absl import logging
 from etils import epath
 from jax.experimental import multihost_utils
 import numpy as np
-import orbax.checkpoint
+import orbax.checkpoint as ocp
 from paxml import checkpoint_types
 from paxml import checkpoint_version
 from praxis import pytypes
@@ -48,8 +48,8 @@ retrieve_checkpoint_type = checkpoint_types.retrieve_checkpoint_type
 
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 PyTree = Any
-AsyncCheckpointer = orbax.checkpoint.AsyncCheckpointer
-Checkpointer = orbax.checkpoint.Checkpointer
+AsyncCheckpointer = ocp.AsyncCheckpointer
+Checkpointer = ocp.Checkpointer
 COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 
@@ -96,7 +96,7 @@ def is_tmp_checkpoint_asset(x: epath.Path) -> bool:
   # Very old format Flax checkpoint.
   if x.is_file():
     return False
-  return orbax.checkpoint.utils.is_tmp_checkpoint(x)
+  return ocp.utils.is_tmp_checkpoint(x)
 
 
 def checkpoint_name(

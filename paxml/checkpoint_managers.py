@@ -23,8 +23,7 @@ from typing import Any, Mapping, Optional, Sequence, Union
 from absl import logging
 from etils import epath
 import jax
-import orbax.checkpoint
-from orbax.checkpoint import utils
+import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
@@ -130,7 +129,7 @@ def _has_digit_step_subdirectory(directory) -> bool:
 
 
 @dataclasses.dataclass
-class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
+class CheckpointManagerOptions(ocp.CheckpointManagerOptions):
   """Options for constructing OrbaxCheckpointManager.
 
   See superclass.
@@ -152,8 +151,8 @@ class CheckpointManagerOptions(orbax.checkpoint.CheckpointManagerOptions):
   cleanup_tmp_directories: bool = False
 
 
-class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
-  """Provides Pax-specific logic for orbax.checkpoint.CheckpointManager.
+class _CheckpointManagerImpl(ocp.CheckpointManager):
+  """Provides Pax-specific logic for ocp.CheckpointManager.
 
   Pax only supports a single checkpointable item (TrainState) and checkpoints
   are saved under a different folder name in a flat manner (no per-item
@@ -240,7 +239,7 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     Returns:
       A step (integer) or None.
     """
-    any_step = utils.any_checkpoint_step(self.directory)
+    any_step = ocp.utils.any_checkpoint_step(self.directory)
     if any_step is not None:
       return any_step
 
@@ -327,7 +326,7 @@ class _CheckpointManagerImpl(orbax.checkpoint.CheckpointManager):
     if self._version < 1:
       # Construct the path without returning. This is because Checkpointer must
       # be allowed to create the path. Only needed for legacy compatibility.
-      return orbax.checkpoint.utils.get_tmp_directory(directory)
+      return ocp.utils.get_tmp_directory(directory)
     return super()._create_tmp_directory(directory)
 
   def _delete_directory(self, step: int):
@@ -360,8 +359,8 @@ class OrbaxCheckpointManager:
   def __init__(
       self,
       directory: epath.Path,
-      checkpointer: orbax.checkpoint.AbstractCheckpointer,
-      train_input_checkpointer: Optional[orbax.checkpoint.Checkpointer] = None,
+      checkpointer: ocp.AbstractCheckpointer,
+      train_input_checkpointer: Optional[ocp.Checkpointer] = None,
       options: Optional[CheckpointManagerOptions] = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       tensorstore_use_ocdbt: Optional[bool] = None,
@@ -369,9 +368,7 @@ class OrbaxCheckpointManager:
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     checkpointers = {
         STATE_ITEM_NAME: checkpointer,
-        METADATA_ITEM_NAME: orbax.checkpoint.Checkpointer(
-            orbax.checkpoint.JsonCheckpointHandler()
-        ),
+        METADATA_ITEM_NAME: ocp.Checkpointer(ocp.JsonCheckpointHandler()),
     }
 
     if train_input_checkpointer:
