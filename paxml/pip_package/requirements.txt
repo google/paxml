@@ -64,7 +64,7 @@ charset-normalizer==3.2.0
     # via requests
 chex==0.1.81
     # via optax
-click==8.1.4
+click==8.1.5
     # via
     #   nltk
     #   tensorflow-datasets
@@ -95,6 +95,8 @@ dm-tree==0.1.8
     #   chex
     #   tensorflow-datasets
     #   tfds-nightly
+docstring-parser==0.15
+    # via pyglove
 editdistance==0.6.2
     # via
     #   seqio-nightly
@@ -129,7 +131,7 @@ flax==0.7.0
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   clu
-fonttools==4.40.0
+fonttools==4.41.0
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
@@ -216,6 +218,8 @@ jaxlib==0.4.13
     #   optax
     #   orbax-checkpoint
     #   seqio-nightly
+jaxtyping==0.2.20
+    # via -r praxis-requirements.in
 jedi==0.18.2
     # via ipython
 jinja2==3.1.2
@@ -230,7 +234,7 @@ joblib==1.3.1
     #   scikit-learn
 jsonpointer==2.4
     # via jsonschema
-jsonschema[format-nongpl]==4.18.2
+jsonschema[format-nongpl]==4.18.3
     # via
     #   jupyter-events
     #   nbformat
@@ -373,6 +377,7 @@ numpy==1.25.1
     #   h5py
     #   jax
     #   jaxlib
+    #   jaxtyping
     #   keras-preprocessing
     #   matplotlib
     #   ml-dtypes
@@ -487,7 +492,7 @@ pyasn1-modules==0.3.0
     # via google-auth
 pycparser==2.21
     # via cffi
-pyglove==0.3.0
+pyglove==0.4.0
     # via
     #   -r paxml-requirements.in
     #   seqio-nightly
@@ -593,7 +598,7 @@ sentencepiece==0.1.99
     #   lingvo
     #   seqio-nightly
     #   t5
-seqio-nightly==0.0.15.dev20230712
+seqio-nightly==0.0.15.dev20230714
     # via
     #   -r paxml-requirements.in
     #   t5
@@ -646,7 +651,7 @@ tensorflow-datasets==4.8.3
     #   mesh-tensorflow
 tensorflow-estimator==2.9.0
     # via tensorflow
-tensorflow-hub==0.13.0
+tensorflow-hub==0.14.0
     # via
     #   lingvo
     #   tensorflow-text
@@ -686,7 +691,7 @@ tfds-nightly==4.8.3.dev202303280045
     #   -r praxis-requirements.in
     #   seqio-nightly
     #   t5
-threadpoolctl==3.1.0
+threadpoolctl==3.2.0
     # via scikit-learn
 tinycss2==1.2.1
     # via nbconvert
@@ -734,6 +739,8 @@ traitlets==5.9.0
     #   qtconsole
 transformers==4.30.2
     # via t5
+typeguard==4.0.0
+    # via jaxtyping
 typing-extensions==4.7.1
     # via
     #   chex
@@ -742,9 +749,11 @@ typing-extensions==4.7.1
     #   fiddle
     #   flax
     #   huggingface-hub
+    #   jaxtyping
     #   libcst
     #   orbax-checkpoint
     #   tensorflow
+    #   typeguard
     #   typing-inspect
 typing-inspect==0.9.0
     # via libcst
@@ -780,7 +789,7 @@ wrapt==1.15.0
     #   tensorflow
     #   tensorflow-datasets
     #   tfds-nightly
-zipp==3.16.0
+zipp==3.16.1
     # via etils
 
 # The following packages are considered to be unsafe in a requirements file:
