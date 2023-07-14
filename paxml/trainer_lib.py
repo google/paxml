@@ -908,6 +908,17 @@ def train_step_single_learner(
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
       var_weight_hparams, learner
   )
+  flat_var_prefix = jax.tree_flatten(
+      py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
+  )[0]
+  flat_mask = jax.tree_flatten(excluded_for_grad)[0]
+  for prefix, excluded in zip(flat_var_prefix, flat_mask):
+    if excluded:
+      logging.info('Bprop excluded var: %s', prefix)
+  for prefix, excluded in zip(flat_var_prefix, flat_mask):
+    if not excluded:
+      logging.info('Bprop included var: %s', prefix)
+
   # Excluded for optimizer states.
   excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
       var_weight_hparams,
