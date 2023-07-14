@@ -29,7 +29,7 @@ set -eux
 # File system and volume glue code
 #-------------------------------------------------------------------------------
 # << CHANGE ! >>
-CONTAINER="${CONTAINER:-ghcr.io/nvidia/pax:pax-release-07-10-2023}"
+CONTAINER="${CONTAINER:-ghcr.io/nvidia/pax:pax-release-2023-06-23}"
 
 # << CHANGE ! >>
 BASE_WORKSPACE_DIR=${BASE_WORKSPACE_DIR} ## location to write logs and checkpoints to
