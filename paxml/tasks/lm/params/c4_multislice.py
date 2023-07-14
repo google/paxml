@@ -25,6 +25,7 @@ from paxml.tasks.lm import model_params
 from paxml.tasks.lm.params import c4
 from paxml.tasks.lm.params import lm_cloud
 from praxis import layers
+from praxis import pax_fiddle
 
 
 @experiment_registry.register
@@ -79,6 +80,45 @@ class C4Spmd22BAdam4xv4_128(C4Spmd22BAdam1xv4_128):
   """
 
   DCN_MESH_SHAPE = [4, 1, 1]
+
+
+@experiment_registry.register
+class C4Spmd22BAdam1xv4_128LimitSteps(C4Spmd22BAdam1xv4_128):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 1 * 64 * 1 * 16 = 1024
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
+
+
+@experiment_registry.register
+class C4Spmd22BAdam2xv4_128LimitSteps(C4Spmd22BAdam2xv4_128):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 2 * 1 * 64 * 1 * 16 = 2048
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
+
+
+@experiment_registry.register
+class C4Spmd22BAdam4xv4_128LimitSteps(C4Spmd22BAdam4xv4_128):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 4 * 1 * 64 * 1 * 16 = 4096
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
 
 
 @experiment_registry.register
@@ -155,3 +195,42 @@ class C4Spmd22BAdam4xv4_8(C4Spmd22BAdam1xv4_8):
   """
 
   DCN_MESH_SHAPE = [4, 1, 1]
+
+
+@experiment_registry.register
+class C4Spmd22BAdam1xv4_8LimitSteps(C4Spmd22BAdam1xv4_8):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 2 * 1 * 4 * 1 * 16 = 128
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
+
+
+@experiment_registry.register
+class C4Spmd22BAdam2xv4_8LimitSteps(C4Spmd22BAdam2xv4_8):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 2 * 1 * 4 * 1 * 16 = 128
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
+
+
+@experiment_registry.register
+class C4Spmd22BAdam4xv4_8LimitSteps(C4Spmd22BAdam4xv4_8):
+  """GPT-3 config with 22B params.
+
+  Model Parameters: Global batch size = 4 * 1 * 4 * 1 * 16 = 256
+  """
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 300
+    return task_p
