@@ -23,7 +23,7 @@ from paxml import xla_passthrough
 class InputUtilsTest(absltest.TestCase):
 
   def test_split_out_xla_unsupported_batch_noop(self):
-    batch = {'a': np.array([[1, 2], [3, 4]]), 'b': np.array([[5, 6], [7, 8]])}
+    batch = {'a': np.array([1, 2, 3, 4]), 'b': np.array([5, 6, 7, 8])}
     partitioning_spec = {'a': 'fake_spec', 'b': 'fake_spec'}
     out_batch, out_unsupported, partitioning_spec = (
         xla_passthrough.split_out_xla_unsupported_batch(
@@ -41,9 +41,9 @@ class InputUtilsTest(absltest.TestCase):
 
   def test_split_out_xla_unsupported_batch_singly_nested(self):
     batch = {
-        'a': np.array([[1, 2], [3, 4]]),
-        'b': np.array([[5, 6], [7, 8]]),
-        'c': np.array([['a', 'b'], ['c', 'd']]),
+        'a': np.array([1, 2, 3, 4]),
+        'b': np.array([5, 6, 7, 8]),
+        'c': np.array(['a', 'b', 'c', 'd']),
     }
     partitioning_spec = {'a': 'fake_spec', 'b': 'fake_spec', 'c': 'fake_spec'}
     out_batch, out_unsupported, new_partitioning_spec = (
@@ -66,11 +66,11 @@ class InputUtilsTest(absltest.TestCase):
 
   def test_split_out_xla_unsupported_batch_multi_nested(self):
     batch = {
-        'a': np.array([[1, 2], [3, 4]]),
-        'b': np.array([[5, 6], [7, 8]]),
+        'a': np.array([1, 2, 3, 4]),
+        'b': np.array([5, 6, 7, 8]),
         'c': {
-            'd': np.array([['a', 'b'], ['c', 'd']]),
-            'e': np.array([[1, 2], [3, 4]]),
+            'd': np.array(['a', 'b', 'c', 'd']),
+            'e': np.array([1, 2, 3, 4]),
         },
     }
     partitioning_spec = {

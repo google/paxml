@@ -66,10 +66,7 @@ def split_out_xla_unsupported_batch(batch, partitioning_spec=None):
     ):
       continue
 
-    # np.hstack is needed to collapse the per-TPU core dimension. For other
-    # inputs, this would be done with JAX, but since we are passing these
-    # through separately, we need to do this explicitly here.
-    unsupported_batch[k] = np.hstack(v)
+    unsupported_batch[k] = v
 
   # If no unsupported keys were detected, return out the original batch object
   # without modifying it.
