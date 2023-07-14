@@ -623,6 +623,16 @@ pytype_strict_library(
     ],
 )
 
+py_strict_test(
+    name = "trainer_lib_test",
+    srcs = ["trainer_lib_test.py"],
+    deps = [
+        ":trainer_lib",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
+    ],
+)
+
 pytype_strict_library(
     name = "train_states",
     srcs = ["train_states.py"],
