@@ -23,6 +23,31 @@ package(default_visibility = JAX_VISIBILITY)
 licenses(["notice"])
 
 pytype_strict_library(
+    name = "codegen",
+    srcs = ["codegen.py"],
+    deps = [
+        ":codegen_external_init_checkpoint_fns",
+        ":codegen_pax_code_ir",
+        ":codegen_tracer",
+        ":remove_sharding",
+        # Implicit fiddle dependency.
+        # Implicit fiddle.daglish dependency.
+        # Implicit fiddle.diffing dependency.
+        # Implicit fiddle.selectors dependency.
+        # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
+        # Implicit fiddle._src.codegen.auto_config.ir_to_cst dependency.
+        # Implicit fiddle.codegen dependency.
+        # Implicit fiddle.codegen.codegen_diff dependency.
+        # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
+        # Implicit fiddle.experimental.visualize dependency.
+        # Implicit libcst dependency.
+        "//paxml:base_experiment",
+        "//paxml:parameterized_experiment",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_library(
     name = "codegen_tracer",
     srcs = ["codegen_tracer.py"],
     deps = [
@@ -39,6 +64,57 @@ pytype_strict_library(
         # Implicit fiddle.daglish dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_library(
+    name = "test_fixtures",
+    srcs = ["test_fixtures.py"],
+    deps = [
+        # Implicit jax dependency.
+        "//paxml:base_experiment",
+        "//paxml:base_task",
+        "//paxml:tasks_lib",
+        "//praxis:base_input",
+        "//praxis:base_model",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_library(
+    name = "codegen_pax_code_ir",
+    srcs = ["codegen_pax_code_ir.py"],
+    deps = [
+        # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
+        # Implicit libcst dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "codegen_external_init_checkpoint_fns",
+    srcs = ["codegen_external_init_checkpoint_fns.py"],
+    deps = [
+        ":codegen_pax_code_ir",
+        # Implicit fiddle dependency.
+        # Implicit fiddle.daglish dependency.
+        # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
+        # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
+        "//paxml:base_experiment",
+        "//paxml:tasks_lib",
+    ],
+)
+
+pytype_strict_test(
+    name = "codegen_external_init_checkpoint_fns_test",
+    srcs = ["codegen_external_init_checkpoint_fns_test.py"],
+    deps = [
+        ":codegen_external_init_checkpoint_fns",
+        ":codegen_pax_code_ir",
+        ":test_fixtures",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle._src.codegen.auto_config.init_task dependency.
+        # Implicit fiddle._src.codegen.auto_config.ir_printer dependency.
+        # Implicit fiddle.experimental.visualize dependency.
     ],
 )
 
@@ -69,5 +145,18 @@ pytype_strict_test(
         "//praxis:base_model",
         "//praxis:pax_fiddle",
         "//praxis/layers:checkpoint_policy",
+    ],
+)
+
+pytype_strict_test(
+    name = "codegen_test",
+    srcs = ["codegen_test.py"],
+    tags = ["fast_and_reliable_fiddle_integration_test"],
+    deps = [
+        ":codegen",
+        ":codegen_tracer",
+        ":test_fixtures",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle._src.codegen.auto_config.ir_printer dependency.
     ],
 )
