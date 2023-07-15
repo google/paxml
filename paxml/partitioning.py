@@ -1029,7 +1029,7 @@ class PjitPartitioner(Partitioner):
       extra_kwargs = {}
     pjitted_fn = pjit.pjit(
         step_fn,
-        out_axis_resources=fn_out_partition_specs,
+        out_shardings=fn_out_partition_specs,
         # For training, TrainState is the first argument and return value. We
         # setup donation/alias to minimize device memory usage.
         donate_argnums=() if is_eval else (0,),
