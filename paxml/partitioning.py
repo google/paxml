@@ -1024,7 +1024,7 @@ class PjitPartitioner(Partitioner):
     logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
     logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
 
-    extra_kwargs = dict(in_axis_resources=fn_in_partition_specs)
+    extra_kwargs = dict(in_shardings=fn_in_partition_specs)
     if not use_pspec_on_array_inputs:
       extra_kwargs = {}
     pjitted_fn = pjit.pjit(
