@@ -234,3 +234,25 @@ class C4Spmd22BAdam4xv4_8LimitSteps(C4Spmd22BAdam4xv4_8):
     task_p = super().task()
     task_p.train.num_train_steps = 300
     return task_p
+
+
+@experiment_registry.register
+class C4SpmdGpt3AdamDataParallel2x16x16(c4.C4SpmdGpt3AdamOrgHP):
+  r"""Cross-slice data-parallel GPT-3 config."""
+
+  PERCORE_BATCH_SIZE = 0.5
+  ICI_MESH_SHAPE = [1, 16, 16]
+  DCN_MESH_SHAPE = [2, 1, 1]
+  FPROP_DTYPE = jnp.bfloat16
+
+  CHECKPOINT_EVERY_N_STEPS = 2000
+
+  CHECKPOINT_SAVE_MAX_TO_KEEP = 20
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = 1000
+
+    task_p.summary_verbosity = 0
+
+    return task_p
