@@ -25,6 +25,7 @@ pytype_strict_library(
     name = "base",
     srcs = ["base.py"],
     deps = [
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//praxis:pytypes",
     ],

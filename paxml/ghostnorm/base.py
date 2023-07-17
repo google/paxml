@@ -70,8 +70,7 @@ rule. See `paxml.ghostnorm.linears.LinearGhostNorm` for a concrete example.
   should be put in the `aux` attribute.
 """
 
-import collections
-
+from flax import struct
 import jax
 from praxis import pytypes
 
@@ -80,7 +79,22 @@ NestedJTensor = pytypes.NestedJTensor
 Nested = pytypes.Nested
 
 
-ParamWithAux = collections.namedtuple('ParamWithAux', ['param', 'aux'])
+@struct.dataclass
+class ParamWithAux:
+  """Wrapper for parameters to pass auxiliary info to/from jax custom_vjp."""
+
+  param: JTensor
+  aux: JTensor | None
+
+  @property
+  def dtype(self):
+    return self.param.dtype
+
+  def astype(self, dtype):
+    aux = None
+    if self.aux is not None:
+      aux = self.aux.astype(dtype)
+    return self.replace(param=self.param.astype(dtype), aux=aux)
 
 
 def _get_param(param: ParamWithAux | JTensor) -> JTensor:

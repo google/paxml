@@ -483,8 +483,10 @@ def _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams):
     else:
       return _maybe_to_bfloat16(var)
 
+  # Match the definition of leaf to asserts.assert_same_structure.
+  is_leaf = lambda x: not isinstance(x, (tuple, dict, list))
   return jax.tree_util.tree_map(
-      _maybe_bfloat16_var_fn, mdl_vars, var_weight_hparams
+      _maybe_bfloat16_var_fn, mdl_vars, var_weight_hparams, is_leaf=is_leaf
   )
 
 
