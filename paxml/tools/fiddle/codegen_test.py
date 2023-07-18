@@ -36,6 +36,7 @@ def _wrap_matched_line(m: re.Match[str]) -> str:
 def _update_expected_text(code: str) -> str:
   indented = re.sub(r"\s+$", "", textwrap.indent(code, " " * 4))
   wrapped = re.sub(r"([^\n]+.{,70})[ ]+(.+)", _wrap_matched_line, indented)
+  wrapped = wrapped.replace("  \n", "\n")
   return (
       'PLEASE UPDATE THE EXPECTED CODE TO:\n\n    expected = """\n'
       f'{wrapped}\n    """'
@@ -86,7 +87,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -123,7 +124,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleShardedExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -161,7 +162,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleShardedExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -173,9 +174,11 @@ class CodegenTest(absltest.TestCase):
             task=task, eval_datasets=[])
 
       def model_fixture(self):
-        return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+        model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
+        shard_model_config(model_config)
+        return model_config
 
     def shard_model_config(model_config):
       original_model_config_activation_split_dims_mapping = model_config.activation_split_dims_mapping
@@ -201,7 +204,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperimentWithDatasets_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -244,7 +247,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperimentWithInputSpecsProvider_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -283,7 +286,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -336,7 +339,7 @@ class CodegenTest(absltest.TestCase):
 
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]
@@ -387,7 +390,7 @@ class CodegenTest(absltest.TestCase):
     from praxis import pax_fiddle
 
     @dataclasses.dataclass(frozen=True)
-    class Experiment:
+    class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = [4123, 8246]

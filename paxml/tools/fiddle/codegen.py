@@ -160,10 +160,52 @@ class MakeShardingFiddler(experimental_top_level_api.CodegenPass):
 
 
 @dataclasses.dataclass(frozen=True)
+class _AddShardingCall:
+  model_fixture_name: str
+  add_sharding_function: str
+
+
+@dataclasses.dataclass(frozen=True)
 class IrToCst(experimental_top_level_api.CodegenPass):
   """Modified LibCST conversion that doesn't emit imports."""
 
   class_name: str = "Experiment"
+  add_sharding_call: Optional[_AddShardingCall] = None
+
+  def _add_sharding_call(self, fn_code: cst.FunctionDef) -> cst.FunctionDef:
+    """Adds a call to the sharding function within the model fixture.
+
+    This would be a little prettier as an IR pass, but we don't currently have
+    an attribute in code_ir.FixtureFunction for mutation-based functions, and it
+    would probably be nice not to worry about it for the rest of codegen. So
+    this is just an add-on CST-modifying function for now.
+
+    Args:
+      fn_code: Function definition for the model fixture.
+
+    Returns:
+      Modified version of fn_code.
+    """
+    assert isinstance(
+        fn_code.body, cst.IndentedBlock
+    ), f"Expected an IndentedBlock body, got a {type(fn_code.body)}"
+    body = fn_code.body.body
+    if not matchers.matches(
+        body[-1], matchers.SimpleStatementLine([matchers.Return()])
+    ):
+      raise ValueError(
+          "Expected a single return line at the end of the model fixture."
+      )
+    # TODO(b/291758766): use namer to avoid unlikely collisions.
+    var_name = cst.Name("model_config")
+    shard_model_name = cst.Name(self.add_sharding_call.add_sharding_function)  # pytype: disable=attribute-error
+    last_lines = [
+        cst.Assign([cst.AssignTarget(var_name)], body[-1].body[0].value),
+        cst.Expr(cst.Call(shard_model_name, args=[cst.Arg(var_name)])),
+        cst.Return(var_name),
+    ]
+    body = body[:-1] + [cst.SimpleStatementLine([line]) for line in last_lines]
+    return fn_code.with_changes(body=fn_code.body.with_changes(body=body))
 
   def __call__(self, task: Any) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
@@ -203,7 +245,20 @@ class IrToCst(experimental_top_level_api.CodegenPass):
 
     # Add main fixtures.
     for fn in task.top_level_call.all_fixture_functions():
-      class_body.append(ir_to_cst.code_for_fn(fn, task=task))
+      fn_code = ir_to_cst.code_for_fn(fn, task=task)
+      if (
+          self.add_sharding_call
+          and fn.name.value == self.add_sharding_call.model_fixture_name
+      ):
+        fn_code = self._add_sharding_call(fn_code)
+
+      # The main codegen produces two newlines because it's emitting
+      # module-level functions, but generally we only want one for class
+      # methods.
+      fn_code = fn_code.with_changes(
+          leading_lines=[cst.EmptyLine(newline=cst.Newline())]
+      )
+      class_body.append(fn_code)
 
     # Create the class with these attributes and fixtures.
     module_body.append(
@@ -262,6 +317,7 @@ def code_generator_config(
     lowercase_highlevel_settings: bool = True,
     class_name: str = "Experiment",
     init_checkpoint_experiments_strict: bool = True,
+    add_sharding_call: Optional[_AddShardingCall] = None,
 ):
   """Returns a code generator object.
 
@@ -278,6 +334,8 @@ def code_generator_config(
     init_checkpoint_experiments_strict: Whether to enforce that
       init_checkpoint_experiments contains entries for all items in
       init_from_checkpoint_rules, if it is provided.
+    add_sharding_call: Modify the model fixture to call an add sharding method
+      before returning.
   """
   config = codegen.code_generator.as_buildable(
       top_level_fixture_name=top_level_fixture_name,
@@ -336,6 +394,7 @@ def code_generator_config(
   )
   fdl.update_callable(ir_to_cst_pass, IrToCst)
   ir_to_cst_pass.class_name = class_name
+  ir_to_cst_pass.add_sharding_call = add_sharding_call
 
   return config
 
@@ -448,11 +507,16 @@ def codegen_baseline_from_legacy(
         experiment.get_input_specs_provider_params()
     )
 
+  add_sharding_call = None
+  if model_sharding_diff is not None:
+    add_sharding_call = _AddShardingCall("model_fixture", "shard_model_config")
   codegen_config = code_generator_config(
       top_level_fixture_name="experiment_fixture",
+      class_name=f"{experiment_cls.__name__}_NewBaseline",
       max_expression_complexity=6,
       lowercase_highlevel_settings=lowercase_highlevel_settings,
       init_checkpoint_experiments_strict=init_checkpoint_experiments_strict,
+      add_sharding_call=add_sharding_call,
   )
   codegen_obj = fdl.build(codegen_config)
 
