@@ -43,6 +43,7 @@ from paxml import checkpoint_types
 from paxml import io_utils
 from paxml import learners as learners_lib
 from paxml import train_states
+from paxml.contrib.gpu.scripts_gpu.te_helper import DEFAULT_INIT_MUTABLE_LIST
 from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_input
@@ -1786,7 +1787,7 @@ class SingleTask(base_task.BaseTask):
       )
     # Initialize with a dummy seed
     var_weight_hparams = ckpt_task.model.abstract_init_with_metadata(
-        inputs_shape_dtype)
+        inputs_shape_dtype, mutable=DEFAULT_INIT_MUTABLE_LIST)
     ckpt_train_state = ckpt_task.create_train_state_padded_shapes(
         var_weight_hparams)
     train_state_pspecs = ckpt_task.create_train_state_partition_specs(

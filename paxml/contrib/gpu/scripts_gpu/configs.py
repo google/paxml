@@ -28,6 +28,7 @@ from paxml.contrib.gpu.scripts_gpu.tasks import BoolQDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.model_params import maybe_setup_moe_params
+from paxml.contrib.gpu.scripts_gpu.te_helper import TransformerEngineHelper
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
 from paxml.tasks.lm.params.lm_cloud import SyntheticDataset
 from praxis import base_layer
@@ -116,7 +117,7 @@ class GPT126MBase(TransformerLmSpmdAdam):
 
   MAX_SEQ_LEN = 2048
   VOCAB_SIZE = 50304
-  PACKED_INPUT = True
+  PACKED_INPUT = False
   PERCORE_BATCH_SIZE = 4
 
   NUM_LAYERS = 12
@@ -171,10 +172,21 @@ class GPT126MBase(TransformerLmSpmdAdam):
         fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
     ):
       stacked_p = stacked_p.block
-    transformer_layer_p = stacked_p.transformer_layer_params_tpl
-    transformer_layer_p.ln_tpl.reductions_in_fp32 = True
-    transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
+
     task_p.model.lm_tpl.final_ln_tpl.reductions_in_fp32 = True
+    if not TransformerEngineHelper.is_enabled_te():
+      transformer_layer_p = stacked_p.transformer_layer_params_tpl
+      transformer_layer_p.ln_tpl.reductions_in_fp32 = True
+      transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
+    else:
+      stacked_p = TransformerEngineHelper.get_stack_transformer(
+        stacked_p, jnp.dtype(self.FPROP_DTYPE))
+      if issubclass(fdl.get_callable(model_p.lm_tpl.stacked_transformer_tpl),
+                    transformers.StackedTransformerRepeated):
+        model_p.lm_tpl.stacked_transformer_tpl.block = stacked_p
+      else:
+        model_p.lm_tpl.stacked_transformer_tpl = stacked_p
+
 
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
     softmax_init = WeightInit.Gaussian(self.SOFTMAX_INIT_STD)
@@ -239,7 +251,7 @@ class GPT175BBase(GPT126MBase):
   # Known as MLP_DIM in t5x
   HIDDEN_DIMS = MODEL_DIMS * 4
   # Defaults to MODEL_DIMS // NUM_HEADS.
-  DIMS_PER_HEAD = None
+  DIMS_PER_HEAD = 128
   # Known as NUM_EMBEDDINGS in t5x
   VOCAB_SIZE = 50257
   USE_REPEATED_LAYER = True
