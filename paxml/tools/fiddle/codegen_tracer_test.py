@@ -55,6 +55,28 @@ class SampleExperiment(base_experiment.BaseExperiment):
     )
 
 
+class SameValueDifferentParameters(base_experiment.BaseExperiment):
+  """Tests the case where we have multiple names for the same value.
+
+  It's not infeasible to that some networks will have num_heads == num_layers.
+  So let's make sure the tracers work properly in this case.
+  """
+
+  A = 105
+  B = 105
+  C = 105
+  D = 105
+
+  def demo_config(self):
+    return [self.A, self.B, self.D, self.C]
+
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+    return []
+
+  def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
+    raise NotImplementedError()
+
+
 class CodegenTracerTest(parameterized.TestCase):
 
   def test_tracing(self):
@@ -71,6 +93,19 @@ class CodegenTracerTest(parameterized.TestCase):
         "derived_setting",
     )
     self.assertEqual(task.model.derived_setting, 8246)
+
+  def test_tracing_same_value(self):
+    # See SameValueDifferentParameters docstring.
+    experiment_cls = codegen_tracer.make_subclass_mixin(
+        SameValueDifferentParameters
+    )
+    experiment = experiment_cls()
+    config = experiment.demo_config()
+    self.assertEqual(config[0].__highlevel_name__, "A")
+    self.assertEqual(config[1].__highlevel_name__, "B")
+    self.assertEqual(config[2].__highlevel_name__, "D")
+    self.assertEqual(config[3].__highlevel_name__, "C")
+    self.assertEqual(config, [105, 105, 105, 105])
 
   @parameterized.named_parameters(
       {
