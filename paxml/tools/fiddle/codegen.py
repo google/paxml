@@ -495,6 +495,9 @@ def codegen_baseline_from_legacy(
       for dataset_config in dataset_configs
       if not dataset_config.is_training
   ]
+  decoder_datasets = experiment.decoder_datasets()
+  if not isinstance(decoder_datasets, list):
+    decoder_datasets = list(decoder_datasets)
   overall_config = pax_fiddle.Config(
       parameterized_experiment.ParameterizedExperiment,
       task=task_config,
@@ -506,6 +509,8 @@ def codegen_baseline_from_legacy(
     overall_config.input_specs_provider = (
         experiment.get_input_specs_provider_params()
     )
+  if decoder_datasets:
+    overall_config.decoder_datasets = decoder_datasets
 
   add_sharding_call = None
   if model_sharding_diff is not None:
@@ -535,6 +540,8 @@ def codegen_baseline_from_legacy(
     )
   if additional_sub_fixtures:
     sub_fixtures.update(additional_sub_fixtures(overall_config))
+  if decoder_datasets:
+    sub_fixtures["decoder_datasets_fixture"] = overall_config.decoder_datasets
   try:
     init_from_checkpoint_rules = (
         overall_config.task.train.init_from_checkpoint_rules

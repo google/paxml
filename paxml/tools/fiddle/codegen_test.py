@@ -233,6 +233,48 @@ class CodegenTest(absltest.TestCase):
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
 
+  def test_codegen_with_decoder_datasets(self):
+    code = codegen.codegen_baseline_from_legacy(
+        test_fixtures.SampleExperimentWithDecoderDatasets,
+        has_input_specs_provider=False,
+        has_train_dataset=False,
+    )
+    expected = """
+    import dataclasses
+    from paxml import parameterized_experiment
+    from paxml import tasks_lib
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import base_input
+    from praxis import pax_fiddle
+
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleExperimentWithDecoderDatasets_NewBaseline:
+      foo_setting: int = 4123
+      derived_setting: int = 8246
+      derived_list_setting: list = [4123, 8246]
+
+      def experiment_fixture(self):
+        task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
+            model=self.model_fixture())
+        return
+        pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+            task=task, eval_datasets=[],
+            decoder_datasets=self.decoder_datasets_fixture())
+
+      def model_fixture(self):
+        return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+        my_setting=self.foo_setting, derived_setting=self.derived_setting,
+            derived_list_setting=self.derived_list_setting)
+
+      def decoder_datasets_fixture(self):
+        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256,
+            is_training=False)]
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
   def test_codegen_with_input_specs_provider(self):
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleExperimentWithInputSpecsProvider,

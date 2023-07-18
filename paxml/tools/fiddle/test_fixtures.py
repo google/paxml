@@ -88,6 +88,18 @@ class SampleExperimentWithDatasets(SampleExperiment):
     ]
 
 
+class SampleExperimentWithDecoderDatasets(SampleExperiment):
+
+  def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+    return [
+        pax_fiddle.Config(
+            base_input.BaseInput,
+            is_training=False,
+            batch_size=256,
+        ),
+    ]
+
+
 class SampleInputSpecsProvider(base_input.BaseInputSpecsProvider):
 
   def get_input_specs(self) -> base_input.NestedShapeDtypeStruct:
