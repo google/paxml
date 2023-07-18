@@ -30,6 +30,7 @@ pytype_strict_library(
         ":codegen_pax_code_ir",
         ":codegen_tracer",
         ":remove_sharding",
+        ":unshare_sharding",
         # Implicit fiddle dependency.
         # Implicit fiddle.daglish dependency.
         # Implicit fiddle.diffing dependency.
@@ -76,6 +77,7 @@ pytype_strict_library(
         "//paxml:base_task",
         "//paxml:tasks_lib",
         "//praxis:base_input",
+        "//praxis:base_layer",
         "//praxis:base_model",
         "//praxis:pax_fiddle",
     ],
@@ -101,6 +103,26 @@ pytype_strict_library(
         # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
         "//paxml:base_experiment",
         "//paxml:tasks_lib",
+    ],
+)
+
+pytype_strict_library(
+    name = "unshare_sharding",
+    srcs = ["unshare_sharding.py"],
+    deps = [
+        ":remove_sharding",
+        # Implicit fiddle.daglish dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "unshare_sharding_test",
+    srcs = ["unshare_sharding_test.py"],
+    deps = [
+        ":unshare_sharding",
+        # Implicit absl.testing.absltest.absltest dependency.
+        "//praxis:base_layer",
+        "//praxis:pax_fiddle",
     ],
 )
 

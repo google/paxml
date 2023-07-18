@@ -39,6 +39,7 @@ from paxml.tools.fiddle import codegen_external_init_checkpoint_fns
 from paxml.tools.fiddle import codegen_pax_code_ir
 from paxml.tools.fiddle import codegen_tracer
 from paxml.tools.fiddle import remove_sharding
+from paxml.tools.fiddle import unshare_sharding
 from praxis import pax_fiddle
 
 
@@ -121,6 +122,7 @@ class HighlevelParameterization(experimental_top_level_api.CodegenPass):
 
 def _sharding_diff(
     experiment_cls: Type[base_experiment.BaseExperiment],
+    unshare_sharding_config: bool = True,
 ) -> Optional[diffing.Diff]:
   """Returns a diff that will re-add sharding to a model.
 
@@ -130,8 +132,12 @@ def _sharding_diff(
 
   Args:
     experiment_cls: The class of the experiment to generate a diff for.
+    unshare_sharding_config: Whether to unshare sharding configurations. Please
+      see codegen_baseline_from_legacy() for details.
   """
   sharding_diff_rhs = experiment_cls().task().model
+  if unshare_sharding_config:
+    sharding_diff_rhs = unshare_sharding.unshare_sharding(sharding_diff_rhs)
   sharding_diff_lhs = remove_sharding.remove_sharding(
       sharding_diff_rhs, replace_with_default=True
   )
@@ -401,7 +407,9 @@ def code_generator_config(
 
 def codegen_baseline_from_legacy(
     experiment_cls: Type[base_experiment.BaseExperiment],
+    *,
     factor_out_sharding_annotations: bool = True,
+    unshare_sharding_config: bool = True,
     remove_defaults: bool = True,
     lowercase_highlevel_settings: bool = True,
     has_train_dataset: bool = True,
@@ -434,6 +442,13 @@ def codegen_baseline_from_legacy(
   Args:
     experiment_cls: Class used for the experiment.
     factor_out_sharding_annotations: Whether to remove sharding annotations.
+    unshare_sharding_config: Whether to unshare values in sharding
+      configuration. Fiddle generally retains information when mutables like
+      lists or sub-config objects are shared, but for sharding annotations this
+      shouldn't matter; only the values matter. Generated code is generally
+      prettier when you unshare sharding configs. However, if you later write a
+      test asserting equality with the original config, please make sure to run
+      unshare_sharding.unshare_sharding() on the original config.
     remove_defaults: Whether to remove default values. Often with Pax configs,
       dataclass field defaulting magic means that you get large, expanded
       templates that may actually be unused or equal to their default values.
@@ -474,11 +489,12 @@ def codegen_baseline_from_legacy(
   # If factor_out_sharding_annotations is set, save some A/B configs to diff the
   # sharding annotations. This is a bit disjointed because we want to compute it
   # before removing nested/deep field defaults.
-  model_sharding_diff = (
-      _sharding_diff(experiment_cls)
-      if factor_out_sharding_annotations
-      else None
-  )
+  if factor_out_sharding_annotations:
+    model_sharding_diff = _sharding_diff(
+        experiment_cls, unshare_sharding_config=unshare_sharding_config
+    )
+  else:
+    model_sharding_diff = None
 
   # Get the task configuration, modulo any changes.
   task_config = experiment.task()
@@ -488,6 +504,8 @@ def codegen_baseline_from_legacy(
     )
   if factor_out_sharding_annotations:
     task_config = remove_sharding.remove_sharding(task_config)
+  elif unshare_sharding_config:
+    task_config = unshare_sharding.unshare_sharding(task_config)
 
   dataset_configs = experiment.datasets()
   eval_datasets = [

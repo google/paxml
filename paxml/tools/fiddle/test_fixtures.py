@@ -23,8 +23,13 @@ from paxml import base_experiment
 from paxml import base_task
 from paxml import tasks_lib
 from praxis import base_input
+from praxis import base_layer
 from praxis import base_model
 from praxis import pax_fiddle
+
+
+class TestLayer(base_layer.BaseLayer):
+  x: int = 12
 
 
 class SampleModel(base_model.BaseModel):
@@ -32,6 +37,9 @@ class SampleModel(base_model.BaseModel):
   derived_setting: int = 2
   derived_list_setting: list[int] = dataclasses.field(
       default_factory=lambda: [3, 4]
+  )
+  sublayers: list[base_layer.BaseLayer] = dataclasses.field(
+      default_factory=lambda: []
   )
 
 
@@ -68,6 +76,18 @@ class SampleShardedExperiment(SampleExperiment):
   def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
     task = super().task()
     task.model.activation_split_dims_mapping.out = ["foo_axis", "bar_axis"]
+    return task
+
+
+class SampleExperimentWithSharedShardingAnnotations(SampleShardedExperiment):
+
+  def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
+    task = super().task()
+    sharding = task.model.activation_split_dims_mapping
+    task.model.sublayers = [
+        pax_fiddle.Config(TestLayer, activation_split_dims_mapping=sharding),
+        pax_fiddle.Config(TestLayer, activation_split_dims_mapping=sharding),
+    ]
     return task
 
 

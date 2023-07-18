@@ -147,6 +147,51 @@ class CodegenTest(absltest.TestCase):
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
 
+  def test_codegen_shared_sharding_unfactored(self):
+    code = codegen.codegen_baseline_from_legacy(
+        test_fixtures.SampleExperimentWithSharedShardingAnnotations,
+        factor_out_sharding_annotations=False,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    import dataclasses
+    from paxml import parameterized_experiment
+    from paxml import tasks_lib
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import base_layer
+    from praxis import pax_fiddle
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleExperimentWithSharedShardingAnnotations_NewBaseline:
+      foo_setting: int = 4123
+      derived_setting: int = 8246
+      derived_list_setting: list = [4123, 8246]
+
+      def experiment_fixture(self):
+        task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
+            model=self.model_fixture())
+        return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+            task=task, eval_datasets=[])
+
+      def model_fixture(self):
+        sublayers = [pax_fiddle.PaxConfig(test_fixtures.TestLayer,
+            activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
+            out=['foo_axis', 'bar_axis'])),
+            pax_fiddle.PaxConfig(test_fixtures.TestLayer,
+            activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
+            out=['foo_axis', 'bar_axis']))]
+        return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+            activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
+            out=['foo_axis', 'bar_axis']), my_setting=self.foo_setting,
+            derived_setting=self.derived_setting,
+            derived_list_setting=self.derived_list_setting,
+            sublayers=sublayers)
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
   def test_codegen_sharding_factored(self):
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleShardedExperiment,
@@ -183,6 +228,56 @@ class CodegenTest(absltest.TestCase):
     def shard_model_config(model_config):
       original_model_config_activation_split_dims_mapping = model_config.activation_split_dims_mapping
       original_model_config_activation_split_dims_mapping.out = ['foo_axis',
+          'bar_axis']
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
+  def test_codegen_shared_sharding_factored(self):
+    code = codegen.codegen_baseline_from_legacy(
+        test_fixtures.SampleExperimentWithSharedShardingAnnotations,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    import dataclasses
+    from paxml import parameterized_experiment
+    from paxml import tasks_lib
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import pax_fiddle
+
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleExperimentWithSharedShardingAnnotations_NewBaseline:
+      foo_setting: int = 4123
+      derived_setting: int = 8246
+      derived_list_setting: list = [4123, 8246]
+
+      def experiment_fixture(self):
+        task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
+            model=self.model_fixture())
+        return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+            task=task, eval_datasets=[])
+
+      def model_fixture(self):
+        model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+            my_setting=self.foo_setting, derived_setting=self.derived_setting,
+            derived_list_setting=self.derived_list_setting,
+            sublayers=[pax_fiddle.PaxConfig(test_fixtures.TestLayer),
+            pax_fiddle.PaxConfig(test_fixtures.TestLayer)])
+        shard_model_config(model_config)
+        return model_config
+
+    def shard_model_config(model_config):
+      original_model_config_activation_split_dims_mapping = model_config.activation_split_dims_mapping
+      original_model_config_sublayers_0_activation_split_dims_mapping = model_config.sublayers[0].activation_split_dims_mapping
+      original_model_config_sublayers_1_activation_split_dims_mapping = model_config.sublayers[1].activation_split_dims_mapping
+      original_model_config_activation_split_dims_mapping.out = ['foo_axis',
+          'bar_axis']
+      original_model_config_sublayers_0_activation_split_dims_mapping.out = ['foo_axis',
+          'bar_axis']
+      original_model_config_sublayers_1_activation_split_dims_mapping.out = ['foo_axis',
           'bar_axis']
     """
     self.assertEqual(
