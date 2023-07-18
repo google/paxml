@@ -815,7 +815,36 @@ class SeqIOInput(base_input.BaseInput):
     self._iter._restore(state)  # pylint: disable=protected-access
 
   def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
-    return next(self._iter)
+    element = next(self._iter)
+    # For non-training single-host infeed, the xla_passthrough will deal with
+    # the unsupported types.
+    if not self.is_training and self.num_infeed_hosts == 1:
+      return element
+
+    # Remove unsupported string (byte) array from input if training.
+    # Also remove unsupported string (byte) array from input if there are
+    # multiple hosts for eval, since xla passthrough does not support multihost
+    # eval b/279795947.
+    unsupported_key_dtype_name = {}
+
+    def is_dtype_supported(key, value) -> bool:
+      is_supported = np.issubdtype(value.dtype, np.number) or np.issubdtype(
+          value.dtype, np.bool_
+      )
+      if not is_supported:
+        unsupported_key_dtype_name[key] = value.dtype.name
+      return is_supported
+
+    filtered_element = element.FilterKeyVal(is_dtype_supported)
+
+    if unsupported_key_dtype_name:
+      logging.log_first_n(
+          logging.INFO,
+          'The following keys are filtered for unsupported dtypes: %s',
+          1,
+          unsupported_key_dtype_name,
+      )
+    return filtered_element
 
   def reset(self) -> None:
     self._iter = self.dataset.as_numpy_iterator()
