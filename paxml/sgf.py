@@ -211,6 +211,12 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
   l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
 
+  # Whether to apply Gradient Normalization as implemented in eqn 3 of
+  # https://arxiv.org/abs/2204.13650 to reduce the dependence between
+  # clipping value and learning rate. Note that normalization is only applied
+  # post-clipping.
+  normalize_gradients: bool = False
+
   # Number of examples to process at one time. If set to `None`,
   # this will be set to batch size as determined by the 0th element of
   # the shape of the input.
@@ -365,7 +371,11 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     )
 
     # Add noise to normalized gradients.
-    noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+    if self.normalize_gradients:
+      grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
+      noise_stddev = self.noise_multiplier / batch_size
+    else:
+      noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
     grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
     return (values, aux), grads
 
@@ -448,6 +458,17 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     assert (
         self.inner_batch_size is None
     ), 'inner_batch_size is not supported yet by GhostClipping.'
+
+    # Gradient Normalization needs to be implemented differently here and is
+    # not a supported operation yet.
+    if self.normalize_gradients:
+      # TODO(b/291615231): Raising error is necessary till normalization
+      # implemented in GhostClipping
+      raise ValueError(
+          'Expected a "False" value for normalize_gradients but got "True" as'
+          ' gradient normalization is currently not supported for ghost'
+          ' clipping.'
+      )
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     batch_size = jax.tree_util.tree_flatten(mdl_vars_nograd_and_inputs[1])[0][
