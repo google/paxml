@@ -351,6 +351,16 @@ def codegen_baseline_from_legacy(
         Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
     ] = None,
     init_checkpoint_experiments_strict: bool = True,
+    additional_sub_fixtures: Optional[
+        Callable[
+            [
+                pax_fiddle.Config[
+                    parameterized_experiment.ParameterizedExperiment
+                ]
+            ],
+            Dict[str, Any],
+        ]
+    ] = None,
 ):
   """Generates code for a baseline configuration, from a legacy BaseExperiment.
 
@@ -388,6 +398,12 @@ def codegen_baseline_from_legacy(
     init_checkpoint_experiments_strict: Whether to check that the checkpoint
       experiments are provided for all init_from_checkpoint_rules entries. This
       only applies if `init_checkpoint_experiments` is provided.
+    additional_sub_fixtures: Optional callable for producing additional
+      sub-fixtures. It is generally recommended to choose a granularity of
+      sub-fixtures so that experiments can override parts of a baseline without
+      doing much mutation. This function will receive the root
+      ParameterizedExperiment configuration, and should produce a dict with keys
+      as additional sub-fixture names, and values as sub-config objects.
 
   Returns:
     Generated code.
@@ -453,6 +469,8 @@ def codegen_baseline_from_legacy(
     sub_fixtures["input_specs_provider_fixture"] = (
         overall_config.input_specs_provider
     )
+  if additional_sub_fixtures:
+    sub_fixtures.update(additional_sub_fixtures(overall_config))
   try:
     init_from_checkpoint_rules = (
         overall_config.task.train.init_from_checkpoint_rules

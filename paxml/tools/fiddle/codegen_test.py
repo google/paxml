@@ -366,6 +366,67 @@ class CodegenTest(absltest.TestCase):
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
 
+  def test_codegen_additional_sub_fixtures(self):
+    def _sub_fixtures(config):
+      rules = config.task.train.init_from_checkpoint_rules
+      return {"pretrain_task_fixture": rules["/path/to/my/checkpoint"].task_p}
+
+    code = codegen.codegen_baseline_from_legacy(
+        test_fixtures.SampleExperimentWithInitFromCheckpointRules,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+        additional_sub_fixtures=_sub_fixtures,
+    )
+    # FIXME(b/289289423): Update this output when multiply-nested subfixtures
+    # are better supported.
+    expected = """
+    import dataclasses
+    from paxml import parameterized_experiment
+    from paxml import tasks_lib
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import pax_fiddle
+
+    @dataclasses.dataclass(frozen=True)
+    class Experiment:
+      foo_setting: int = 4123
+      derived_setting: int = 8246
+      derived_list_setting: list = [4123, 8246]
+
+      def experiment_fixture(self):
+        model = pax_fiddle.PaxConfig(test_fixtures.SampleModel, my_setting=4123,
+        derived_setting=8246, derived_list_setting=[4123, 8246])
+        derived_list_setting = [4123, 8246] train =
+        pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
+        init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture(model=model,
+        derived_list_setting=derived_list_setting)) task =
+        pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=self.model_fixture(),
+        train=train) return
+        pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+        task=task, eval_datasets=[])
+
+      def model_fixture(self):
+        return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+        my_setting=self.foo_setting, derived_setting=self.derived_setting,
+        derived_list_setting=self.derived_list_setting)
+
+      def pretrain_task_fixture(
+        self, model, derived_list_setting):
+        return pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=model)
+
+      def init_from_checkpoint_rules_fixture(
+        self, model, derived_list_setting):
+        checkpoint_loading_rules =
+        pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules,
+        task_p=self.pretrain_task_fixture(model=model,
+        derived_list_setting=derived_list_setting), load_rules=[('(.*)', '{}')],
+        safe_load=True, ignore_rules=[], step=532000,
+        input_specs_provider_p=pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider))
+        return {'/path/to/my/checkpoint': checkpoint_loading_rules}
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
 
 if __name__ == "__main__":
   absltest.main()
