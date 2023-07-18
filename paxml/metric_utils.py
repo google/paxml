@@ -226,7 +226,7 @@ def write_seqio_metric_summaries(
         v = float(v)
       logging.info('Writing summary of %s with value %.4f.', metric_name, v)
       summary_utils.write_summary_tensor(
-          step, metric_name, v, summary_utils.SummaryType.SCALAR
+          step, metric_name, v, summary_utils.SummaryType.AGGREGATE_SCALAR
       )
 
 
