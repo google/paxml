@@ -540,6 +540,7 @@ def codegen_baseline_from_legacy(
       lowercase_highlevel_settings=lowercase_highlevel_settings,
       init_checkpoint_experiments_strict=init_checkpoint_experiments_strict,
       add_sharding_call=add_sharding_call,
+      debug_print=False,
   )
   codegen_obj = fdl.build(codegen_config)
 
