@@ -18,7 +18,7 @@
 import dataclasses
 import os
 import typing
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from absl import logging
 from etils import epath
@@ -28,6 +28,7 @@ from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
 from paxml import checkpoint_version
+from paxml import train_states
 from praxis import base_input
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
@@ -41,6 +42,7 @@ Nested = pytypes.Nested
 # or pytypes.NestedShapeDtypeStruct | None,
 # Switch to the right type hint once pytyping versions are in sync.
 OptionalNestedShapeDtypeStruct = Any
+TrainState = train_states.TrainState
 
 STATE_ITEM_NAME = checkpoint_paths.STATE_ITEM_NAME
 METADATA_ITEM_NAME = checkpoint_metadata.METADATA_ITEM_NAME
@@ -364,12 +366,15 @@ class OrbaxCheckpointManager:
       options: Optional[CheckpointManagerOptions] = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       tensorstore_use_ocdbt: Optional[bool] = None,
+      aux_checkpointers: Optional[Dict[str, ocp.AbstractCheckpointer]] = None,
   ):
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     checkpointers = {
         STATE_ITEM_NAME: checkpointer,
         METADATA_ITEM_NAME: ocp.Checkpointer(ocp.JsonCheckpointHandler()),
     }
+    if aux_checkpointers:
+      checkpointers.update(aux_checkpointers)
 
     if train_input_checkpointer:
       checkpointers[INPUT_ITEM_NAME] = train_input_checkpointer
@@ -423,6 +428,7 @@ class OrbaxCheckpointManager:
       train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       force: Optional[bool] = False,
+      aux_items: Optional[Dict[str, Any]] = None,
   ) -> bool:
     """See superclass documentation."""
     if self.version > 1.0 and train_state_unpadded_shape_dtype_struct is None:
@@ -444,6 +450,9 @@ class OrbaxCheckpointManager:
         tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
     )
 
+    if aux_items:
+      items.update(aux_items)
+
     if train_input_pipeline:
       items[INPUT_ITEM_NAME] = train_input_pipeline
 
@@ -456,7 +465,8 @@ class OrbaxCheckpointManager:
       train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       restore_kwargs: Optional[Any] = None,
-  ) -> Any:
+      aux_items: Optional[Dict[str, Any]] = None,
+  ) -> Union[TrainState, Dict[str, Any]]:
     """See superclass documentation."""
     uses_transformations = (
         restore_kwargs
@@ -472,6 +482,9 @@ class OrbaxCheckpointManager:
         self.version,
         tensorstore_use_ocdbt=self._tensorstore_use_ocdbt,
     )
+
+    if aux_items:
+      items.update(aux_items)
 
     # Train input checkpoint may not exist if input checkpointing wasn't
     # previously enabled
@@ -508,4 +521,7 @@ class OrbaxCheckpointManager:
               f'actual PaxMetadata = {metadata}.'
           )
 
-    return restored[STATE_ITEM_NAME]
+    if aux_items:
+      return restored
+    else:
+      return restored[STATE_ITEM_NAME]

@@ -79,6 +79,7 @@ pytype_strict_library(
         ":checkpoint_paths",
         ":checkpoint_types",
         ":checkpoint_version",
+        ":train_states",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
