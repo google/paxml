@@ -30,7 +30,6 @@ from fiddle._src.codegen.auto_config import ir_to_cst
 from fiddle.codegen import codegen
 from fiddle.codegen import codegen_diff
 from fiddle.codegen.auto_config import experimental_top_level_api
-from fiddle.experimental import visualize
 import libcst as cst
 from libcst import matchers
 from paxml import base_experiment
@@ -38,6 +37,8 @@ from paxml import parameterized_experiment
 from paxml.tools.fiddle import codegen_external_init_checkpoint_fns
 from paxml.tools.fiddle import codegen_pax_code_ir
 from paxml.tools.fiddle import codegen_tracer
+from paxml.tools.fiddle import config_normalization
+from paxml.tools.fiddle import make_parameterized_experiment
 from paxml.tools.fiddle import remove_sharding
 from paxml.tools.fiddle import unshare_sharding
 from praxis import pax_fiddle
@@ -482,8 +483,17 @@ def codegen_baseline_from_legacy(
   Returns:
     Generated code.
   """
-  experiment: base_experiment.BaseExperiment = (
-      codegen_tracer.make_subclass_mixin(experiment_cls)()
+  normalizer = config_normalization.ConfigNormalizer(
+      remove_sharding_annotations=factor_out_sharding_annotations,
+      unshare_sharding_config=unshare_sharding_config,
+      remove_defaults=remove_defaults,
+      convert_seqio_task_objects=True,
+  )
+  overall_config = make_parameterized_experiment.from_legacy(
+      experiment_cls=codegen_tracer.make_subclass_mixin(experiment_cls),
+      normalizer=normalizer,
+      has_train_dataset=has_train_dataset,
+      has_input_specs_provider=has_input_specs_provider,
   )
 
   # If factor_out_sharding_annotations is set, save some A/B configs to diff the
@@ -495,40 +505,6 @@ def codegen_baseline_from_legacy(
     )
   else:
     model_sharding_diff = None
-
-  # Get the task configuration, modulo any changes.
-  task_config = experiment.task()
-  if remove_defaults:
-    task_config = visualize.with_defaults_trimmed(
-        task_config, remove_deep_defaults=True
-    )
-  if factor_out_sharding_annotations:
-    task_config = remove_sharding.remove_sharding(task_config)
-  elif unshare_sharding_config:
-    task_config = unshare_sharding.unshare_sharding(task_config)
-
-  dataset_configs = experiment.datasets()
-  eval_datasets = [
-      dataset_config
-      for dataset_config in dataset_configs
-      if not dataset_config.is_training
-  ]
-  decoder_datasets = experiment.decoder_datasets()
-  if not isinstance(decoder_datasets, list):
-    decoder_datasets = list(decoder_datasets)
-  overall_config = pax_fiddle.Config(
-      parameterized_experiment.ParameterizedExperiment,
-      task=task_config,
-      eval_datasets=eval_datasets,
-  )
-  if has_train_dataset:
-    overall_config.training_dataset = experiment.training_dataset()
-  if has_input_specs_provider:
-    overall_config.input_specs_provider = (
-        experiment.get_input_specs_provider_params()
-    )
-  if decoder_datasets:
-    overall_config.decoder_datasets = decoder_datasets
 
   add_sharding_call = None
   if model_sharding_diff is not None:
@@ -559,7 +535,7 @@ def codegen_baseline_from_legacy(
     )
   if additional_sub_fixtures:
     sub_fixtures.update(additional_sub_fixtures(overall_config))
-  if decoder_datasets:
+  if overall_config.decoder_datasets:
     sub_fixtures["decoder_datasets_fixture"] = overall_config.decoder_datasets
   try:
     init_from_checkpoint_rules = (

@@ -29,6 +29,8 @@ pytype_strict_library(
         ":codegen_external_init_checkpoint_fns",
         ":codegen_pax_code_ir",
         ":codegen_tracer",
+        ":config_normalization",
+        ":make_parameterized_experiment",
         ":remove_sharding",
         ":unshare_sharding",
         # Implicit fiddle dependency.
@@ -40,7 +42,6 @@ pytype_strict_library(
         # Implicit fiddle.codegen dependency.
         # Implicit fiddle.codegen.codegen_diff dependency.
         # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
-        # Implicit fiddle.experimental.visualize dependency.
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
@@ -112,6 +113,69 @@ pytype_strict_library(
     deps = [
         ":remove_sharding",
         # Implicit fiddle.daglish dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "convert_seqio_task_objects",
+    srcs = ["convert_seqio_task_objects.py"],
+    deps = [
+        # Implicit fiddle.daglish dependency.
+        "//praxis:pax_fiddle",
+        # Implicit seqio dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "config_normalization",
+    srcs = ["config_normalization.py"],
+    deps = [
+        ":convert_seqio_task_objects",
+        ":remove_sharding",
+        ":unshare_sharding",
+        # Implicit fiddle dependency.
+        # Implicit fiddle.experimental.auto_config dependency.
+        # Implicit fiddle.experimental.visualize dependency.
+        "//paxml:base_task",
+        "//paxml:parameterized_experiment",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_library(
+    name = "make_parameterized_experiment",
+    srcs = ["make_parameterized_experiment.py"],
+    deps = [
+        ":config_normalization",
+        "//paxml:base_experiment",
+        "//paxml:parameterized_experiment",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_test(
+    name = "config_normalization_test",
+    srcs = ["config_normalization_test.py"],
+    deps = [
+        ":config_normalization",
+        ":test_fixtures",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle dependency.
+        "//paxml:parameterized_experiment",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_test(
+    name = "convert_seqio_task_objects_test",
+    srcs = ["convert_seqio_task_objects_test.py"],
+    deps = [
+        ":convert_seqio_task_objects",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle dependency.
+        "//praxis:pax_fiddle",
+        # Implicit seqio dependency.
+        # Implicit seqio.test_utils dependency.
     ],
 )
 
