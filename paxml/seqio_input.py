@@ -1977,8 +1977,11 @@ def get_eval_hparams_for_seqio(
 
   if not feature_converter:
     weights_on_targets_only = True if metric_type is MetricType.SCORE else False
-    feature_converter = LanguageModelFeatures(
-        pack=False, weights_on_targets_only=weights_on_targets_only)
+    feature_converter = pax_fiddle.Config(
+        LanguageModelFeatures,
+        pack=False,
+        weights_on_targets_only=weights_on_targets_only,
+    )
   p = pax_fiddle.Config(
       SeqIOInput,
       name=task_or_mixture_name,
@@ -1991,7 +1994,7 @@ def get_eval_hparams_for_seqio(
       num_infeed_hosts=num_infeed_hosts,
       input_random_seed=seed,
       eval_loop_num_batches=eval_loop_num_batches,
-      repeat=repeat
+      repeat=repeat,
   )
 
   # Set task_feature_lengths.targets depending on eval vs decode metrics.
@@ -2026,7 +2029,8 @@ def get_eval_hparams_for_seqio(
         mixture_or_task=task,
         name=task.name,
         use_enumeration=use_enumeration,
-        use_cached=use_cached)
+        use_cached=use_cached,
+    )
     # Allow selecting split based on `Callable` `split_name` if mixture contains
     # tasks with varying splits.
     hp.split_name = select_split(task.name, split_name)
