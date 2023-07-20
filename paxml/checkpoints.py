@@ -466,6 +466,19 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       self._set_param_names(flattened_nested_names)
     return await super().async_save(directory, item, save_args=save_args)
 
+  async def _maybe_deserialize(
+      self, structure: PyTree, param_infos: PyTree, restore_args: PyTree
+  ) -> PyTree:
+    if isinstance(restore_args, list) and isinstance(param_infos, dict):
+      # restore_args is created with an "incorrect" tree structure from Pax's
+      # perspective, due to overriding parameter names. This gets restore_args
+      # back into list format, like the other arguments.
+      restore_args = {str(i): restore_args[i] for i in range(len(restore_args))}
+      assert restore_args.keys() == param_infos.keys()
+    return await super()._maybe_deserialize(
+        structure, param_infos, restore_args
+    )
+
   def restore(
       self,
       directory: epath.Path,
@@ -552,7 +565,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     # checkpoint was written with OCDBT.
     if self._use_ocdbt and (directory / self._aggregate_filename).exists():
       return super().structure(directory)
-    # Otherwise, rely on implicit structure from directories.
+    # Otherwise, rely on hacked structure.
     return jax.tree_util.tree_map(
         ocp.utils.leaf_placeholder,
         flax.serialization.to_state_dict(self._param_names),
