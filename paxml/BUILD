@@ -628,9 +628,19 @@ py_strict_test(
     name = "trainer_lib_test",
     srcs = ["trainer_lib_test.py"],
     deps = [
+        ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
+        # Implicit jax dependency.
+        "//praxis:base_hyperparams",
+        "//praxis:base_layer",
+        "//praxis:base_model",
+        "//praxis:optimizers",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:schedules",
     ],
 )
 
