@@ -245,6 +245,59 @@ def _comment_line(comment: str) -> cst.EmptyLine:
   )
 
 
+def _classmethod_make_experiment_fn() -> cst.FunctionDef:
+  node = cst.parse_module("""
+class UnusedClass:  # For whitespace/newlines/indentation.
+
+  @classmethod
+  def make_experiment(cls, **kwargs):
+    return cls(**kwargs).experiment_fixture()
+""")
+  return _extract_function_def(node, "make_experiment")
+
+
+def _highlevel_config_fn(import_manager: ..., cls_name: str) -> cst.FunctionDef:
+  """Generates the highlevel_config function."""
+  pax_fiddle_config = import_manager.add(pax_fiddle.Config)
+  node = cst.parse_module(f"""
+import unused_module  # For whitespace/newlines
+
+
+def highlevel_config():
+  return {pax_fiddle_config}({cls_name}.make)
+""")
+  return _extract_function_def(node, "highlevel_config")
+
+
+def _lower_fn(import_manager: ...) -> cst.FunctionDef:
+  """Generates the function to lower highlevel to lowlevel configs."""
+  pax_fiddle_build = import_manager.add(pax_fiddle.build)
+  fdl_ordered_arguments = import_manager.add(fdl.ordered_arguments)
+  fdl_get_callable = import_manager.add(fdl.get_callable)
+  node = cst.parse_module(f"""
+import unused_module  # For whitespace/newlines
+
+
+def lower(highlevel_config):
+  kwargs = {pax_fiddle_build}({fdl_ordered_arguments}(highlevel_config))
+  exp_cls = {fdl_get_callable}(highlevel_config)
+  return exp_cls(**kwargs).experiment_fixture()
+""")
+  return _extract_function_def(node, "lower")
+
+
+def _lowlevel_config_fn() -> cst.FunctionDef:
+  """Generates the lowlevel_config function."""
+  node = cst.parse_module("""
+import unused_module  # For whitespace/newlines
+
+
+def lowlevel_config():
+  return lower(highlevel_config())
+""")
+  return _extract_function_def(node, "lowlevel_config")
+
+
 def _extract_function_def(node: cst.CSTNode, name: str) -> cst.FunctionDef:
   matcher = matchers.SaveMatchedNode(
       matchers.FunctionDef(matchers.Name(name)),
@@ -262,6 +315,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
 
   class_name: str = "Experiment"
   add_sharding_call: Optional[_AddShardingCall] = None
+  add_boilerplate: bool = True
 
   def _add_sharding_call(self, fn_code: cst.FunctionDef) -> cst.FunctionDef:
     """Adds a call to the sharding function within the model fixture.
@@ -301,8 +355,6 @@ class IrToCst(experimental_top_level_api.CodegenPass):
   def __call__(self, task: Any) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
 
-    module_body = list(task.import_manager.sorted_import_lines())
-
     # Add highlevel accesses as attributes.
     class_body = _class_attributes(task.highlevel_accesses)
 
@@ -323,14 +375,27 @@ class IrToCst(experimental_top_level_api.CodegenPass):
       )
       class_body.append(fn_code)
 
+    if self.add_boilerplate:
+      class_body.append(_classmethod_make_experiment_fn())
+
     # Create the class with these attributes and fixtures.
-    module_body.append(_make_class_def(self.class_name, [], class_body))
+    module_body = [_make_class_def(self.class_name, [], class_body)]
 
     # Add fiddler for sharding, if it is set.
     if task.sharding_diff_module:
       module_body.append(
           _extract_function_def(task.sharding_diff_module, "shard_model_config")
       )
+
+    if self.add_boilerplate:
+      module_body.extend([
+          _highlevel_config_fn(task.import_manager, self.class_name),
+          _lower_fn(task.import_manager),
+          _lowlevel_config_fn(),
+      ])
+
+    # Add imports after boilerplate, since the import manager is updated.
+    module_body[0:0] = task.import_manager.sorted_import_lines()
 
     return cst.Module(body=module_body, default_indent="  ")
 
@@ -361,6 +426,7 @@ def code_generator_config(
     class_name: str = "Experiment",
     init_checkpoint_experiments_strict: bool = True,
     add_sharding_call: Optional[_AddShardingCall] = None,
+    add_boilerplate: bool = False,
 ):
   """Returns a code generator object.
 
@@ -379,6 +445,8 @@ def code_generator_config(
       init_from_checkpoint_rules, if it is provided.
     add_sharding_call: Modify the model fixture to call an add sharding method
       before returning.
+    add_boilerplate: Whether to add make_experiment(), highlevel_config(),
+      lower(), and lowlevel_config() functions.
   """
   config = codegen.code_generator.as_buildable(
       top_level_fixture_name=top_level_fixture_name,
@@ -438,6 +506,7 @@ def code_generator_config(
   fdl.update_callable(ir_to_cst_pass, IrToCst)
   ir_to_cst_pass.class_name = class_name
   ir_to_cst_pass.add_sharding_call = add_sharding_call
+  ir_to_cst_pass.add_boilerplate = add_boilerplate
 
   return config
 
@@ -465,6 +534,7 @@ def codegen_baseline_from_legacy(
             Dict[str, Any],
         ]
     ] = None,
+    add_boilerplate: bool = True,
 ):
   """Generates code for a baseline configuration, from a legacy BaseExperiment.
 
@@ -515,6 +585,8 @@ def codegen_baseline_from_legacy(
       doing much mutation. This function will receive the root
       ParameterizedExperiment configuration, and should produce a dict with keys
       as additional sub-fixture names, and values as sub-config objects.
+    add_boilerplate: Whether to add make_experiment(), highlevel_config(),
+      lower(), and lowlevel_config() functions.
 
   Returns:
     Generated code.
@@ -553,6 +625,7 @@ def codegen_baseline_from_legacy(
       init_checkpoint_experiments_strict=init_checkpoint_experiments_strict,
       add_sharding_call=add_sharding_call,
       debug_print=False,
+      add_boilerplate=add_boilerplate,
   )
   codegen_obj = fdl.build(codegen_config)
 
@@ -601,6 +674,7 @@ def codegen_experiment_diff(
     lowercase_highlevel_settings: bool = None,
     has_train_dataset: bool = False,
     has_input_specs_provider: bool = False,
+    add_boilerplate: bool = True,
 ):
   """Generates an experiment subclass from a main class.
 
@@ -627,6 +701,8 @@ def codegen_experiment_diff(
     has_input_specs_provider: Whether the experiment has an input specs provider
       defined. Please set to False if you are using the (slower) one predefined
       by the dataset.
+    add_boilerplate: Whether to add make_experiment(), highlevel_config(),
+      lower(), and lowlevel_config() functions.
 
   Returns:
     Generated code.
@@ -721,11 +797,25 @@ def codegen_experiment_diff(
     )
     class_body.append(diff_fn)
 
+  if add_boilerplate:
+    class_body.append(_classmethod_make_experiment_fn())
+
   class_name = f"{experiment_cls.__name__}_NewExperiment"
   class_def = _make_class_def(
       class_name,
       [cst.Arg(cst.parse_expression(import_manager.add(baseline)))],
       class_body,
   )
-  module_body = [*import_manager.sorted_import_lines(), class_def]
+
+  module_body = [class_def]
+  if add_boilerplate:
+    module_body.extend([
+        _highlevel_config_fn(import_manager, class_name),
+        _lower_fn(import_manager),
+        _lowlevel_config_fn(),
+    ])
+
+  # Add imports after boilerplate, since the import manager is updated.
+  module_body[0:0] = import_manager.sorted_import_lines()
+
   return cst.Module(body=module_body, default_indent="  ").code

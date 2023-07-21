@@ -79,6 +79,7 @@ class CodegenTest(absltest.TestCase):
         test_fixtures.SampleExperiment,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -109,12 +110,69 @@ class CodegenTest(absltest.TestCase):
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
 
+  def test_codegen_boilerplate(self):
+    # Note: This output is copied in `test_fixtures.py` for derived fixture
+    # tests. Please make sure to update it there if it changes.
+    code = codegen.codegen_baseline_from_legacy(
+        test_fixtures.SampleExperiment,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    import dataclasses
+    import fiddle as fdl
+    from paxml import parameterized_experiment
+    from paxml import tasks_lib
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import pax_fiddle
+
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleExperiment_NewBaseline:
+      foo_setting: int = 4123
+      derived_setting: int = 8246
+      derived_list_setting: list = [4123, 8246]
+
+      def experiment_fixture(self):
+        task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
+            model=self.model_fixture())
+        return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+            task=task, eval_datasets=[])
+
+      def model_fixture(self):
+        return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
+            my_setting=self.foo_setting, derived_setting=self.derived_setting,
+            derived_list_setting=self.derived_list_setting)
+
+      @classmethod
+      def make_experiment(cls, **kwargs):
+        return cls(**kwargs).experiment_fixture()
+
+
+    def highlevel_config():
+      return pax_fiddle.PaxConfig(SampleExperiment_NewBaseline.make)
+
+
+    def lower(highlevel_config):
+      kwargs = pax_fiddle.build(fdl.ordered_arguments(highlevel_config))
+      exp_cls = fdl.get_callable(highlevel_config)
+      return exp_cls(**kwargs).experiment_fixture()
+
+
+    def lowlevel_config():
+      return lower(highlevel_config())
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
   def test_codegen_sharding_unfactored(self):
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleShardedExperiment,
         factor_out_sharding_annotations=False,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -155,6 +213,7 @@ class CodegenTest(absltest.TestCase):
         factor_out_sharding_annotations=False,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -199,6 +258,7 @@ class CodegenTest(absltest.TestCase):
         test_fixtures.SampleShardedExperiment,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -239,6 +299,7 @@ class CodegenTest(absltest.TestCase):
         test_fixtures.SampleExperimentWithSharedShardingAnnotations,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -284,6 +345,7 @@ class CodegenTest(absltest.TestCase):
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleExperimentWithDatasets,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -329,6 +391,7 @@ class CodegenTest(absltest.TestCase):
         test_fixtures.SampleExperimentWithDecoderDatasets,
         has_input_specs_provider=False,
         has_train_dataset=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -370,6 +433,7 @@ class CodegenTest(absltest.TestCase):
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleExperimentWithInputSpecsProvider,
         has_train_dataset=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -409,6 +473,7 @@ class CodegenTest(absltest.TestCase):
         test_fixtures.SampleExperimentWithInitFromCheckpointRules,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -462,6 +527,7 @@ class CodegenTest(absltest.TestCase):
                 test_fixtures.SampleExperimentWithInputSpecsProvider
             )
         },
+        add_boilerplate=False,
     )
     expected = """
     import dataclasses
@@ -512,6 +578,7 @@ class CodegenTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
         additional_sub_fixtures=_sub_fixtures,
+        add_boilerplate=False,
     )
     # FIXME(b/289289423): Update this output when multiply-nested subfixtures
     # are better supported.
@@ -559,6 +626,7 @@ class CodegenTest(absltest.TestCase):
         baseline=test_fixtures.SampleExperimentNewBaseline,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     from paxml.tools.fiddle import test_fixtures
@@ -581,6 +649,7 @@ class CodegenTest(absltest.TestCase):
         baseline=test_fixtures.SampleExperimentNewBaseline,
         has_train_dataset=False,
         has_input_specs_provider=False,
+        add_boilerplate=False,
     )
     expected = """
     from paxml.tools.fiddle import test_fixtures
@@ -591,6 +660,48 @@ class CodegenTest(absltest.TestCase):
       foo_setting: int = 4217
       derived_setting: int = 8434
       derived_list_setting: list = [4217, 8434]
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
+  def test_codegen_experiment_highlevel_only_boilerplate(self):
+    code = codegen.codegen_experiment_diff(
+        test_fixtures.SampleDerivedExperimentHighlevel,
+        baseline=test_fixtures.SampleExperimentNewBaseline,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    import fiddle as fdl
+    from paxml.tools.fiddle import test_fixtures
+    from praxis import pax_fiddle
+
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleDerivedExperimentHighlevel_NewExperiment(test_fixtures.SampleExperimentNewBaseline):
+      # Overrides to existing high-level settings.
+      foo_setting: int = 4217
+      derived_setting: int = 8434
+      derived_list_setting: list = [4217, 8434]
+
+      @classmethod
+      def make_experiment(cls, **kwargs):
+        return cls(**kwargs).experiment_fixture()
+
+
+    def highlevel_config():
+      return pax_fiddle.PaxConfig(SampleDerivedExperimentHighlevel_NewExperiment.make)
+
+
+    def lower(highlevel_config):
+      kwargs = pax_fiddle.build(fdl.ordered_arguments(highlevel_config))
+      exp_cls = fdl.get_callable(highlevel_config)
+      return exp_cls(**kwargs).experiment_fixture()
+
+
+    def lowlevel_config():
+      return lower(highlevel_config())
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
