@@ -185,6 +185,25 @@ class _AddShardingCall:
   add_sharding_function: str
 
 
+def _make_default_factory(node: cst.CSTNode) -> cst.Expr:
+  return cst.Call(
+      func=cst.parse_expression("dataclasses.field"),
+      args=[
+          cst.Arg(
+              value=cst.Lambda(
+                  params=cst.Parameters([]),
+                  body=node,
+              ),
+              keyword=cst.Name("default_factory"),
+              equal=cst.AssignEqual(
+                  whitespace_before=cst.SimpleWhitespace(value=""),
+                  whitespace_after=cst.SimpleWhitespace(value=""),
+              ),
+          )
+      ],
+  )
+
+
 def _class_attributes(highlevel_settings: Dict[str, Any]) -> List[cst.CSTNode]:
   """Returns CST nodes for dataclass fields, given highlevel settings."""
   result = []
@@ -207,12 +226,17 @@ def _class_attributes(highlevel_settings: Dict[str, Any]) -> List[cst.CSTNode]:
     # Convert the value to its primitive form.
     value = codegen_tracer.remove_tracers(value)
 
+    if daglish.is_immutable(value):
+      value = ir_to_cst.code_for_expr(value)
+    else:
+      value = _make_default_factory(ir_to_cst.code_for_expr(value))
+
     result.append(
         cst.SimpleStatementLine([
             cst.AnnAssign(
                 target=cst.Name(name),
                 annotation=cst.Annotation(cst.Name(type_name)),
-                value=ir_to_cst.code_for_expr(value),
+                value=value,
             ),
         ])
     )

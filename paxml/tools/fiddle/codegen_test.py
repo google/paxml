@@ -93,7 +93,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -131,7 +132,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -187,7 +189,8 @@ class CodegenTest(absltest.TestCase):
     class SampleShardedExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -227,7 +230,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithSharedShardingAnnotations_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -272,7 +276,8 @@ class CodegenTest(absltest.TestCase):
     class SampleShardedExperiment_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -313,7 +318,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithSharedShardingAnnotations_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -360,7 +366,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithDatasets_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -406,7 +413,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithDecoderDatasets_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -447,7 +455,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithInputSpecsProvider_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -487,7 +496,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
@@ -541,7 +551,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
@@ -593,7 +604,8 @@ class CodegenTest(absltest.TestCase):
     class SampleExperimentWithInitFromCheckpointRules_NewBaseline:
       foo_setting: int = 4123
       derived_setting: int = 8246
-      derived_list_setting: list = [4123, 8246]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4123, 8246])
 
       def experiment_fixture(self):
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
@@ -659,7 +671,8 @@ class CodegenTest(absltest.TestCase):
       # Overrides to existing high-level settings.
       foo_setting: int = 4217
       derived_setting: int = 8434
-      derived_list_setting: list = [4217, 8434]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4217, 8434])
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
@@ -683,7 +696,8 @@ class CodegenTest(absltest.TestCase):
       # Overrides to existing high-level settings.
       foo_setting: int = 4217
       derived_setting: int = 8434
-      derived_list_setting: list = [4217, 8434]
+      derived_list_setting: list = dataclasses.field(default_factory=lambda:
+          [4217, 8434])
 
       @classmethod
       def make_experiment(cls, **kwargs):
