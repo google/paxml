@@ -1342,6 +1342,7 @@ def initialize_partitioned_model_states(
     checkpoint_type: CheckpointType = CheckpointType.GDA,
     do_init_checkpoint_rules: bool = True,
     var_weight_hparams: Optional[NestedWeightHParams] = None,
+    is_eval: bool = False,
 ) -> Tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
@@ -1364,13 +1365,17 @@ def initialize_partitioned_model_states(
       the init_checkpoint_rules.
     do_init_checkpoint_rules: If apply init_checkpoint_rules.
     var_weight_hparams: A pytree of WeightHParams for the model variables.
+    is_eval: Whether to load the model in eval mode (useful for models which
+      have different inference graphs than training).
 
   Returns:
     The partitioned vars themselves.
   """
   model = jax_task.model
   if not var_weight_hparams:
-    var_weight_hparams = model.abstract_init_with_metadata(global_input_shapes)
+    var_weight_hparams = model.abstract_init_with_metadata(
+        global_input_shapes, do_eval=is_eval
+    )
 
   train_state_partition_specs = (
       state_specs.to_eval_state() if discard_opt_states else state_specs
@@ -1393,6 +1398,7 @@ def initialize_partitioned_model_states(
         # checkpoint loading has to be done after partitioning. See below.
         do_init_checkpoint_rules=False,
         var_weight_hparams=var_weight_hparams,
+        is_eval=is_eval,
     )
     return py_utils.maybe_pad_uneven_sharding(
         outs,
