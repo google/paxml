@@ -88,7 +88,9 @@ def _create_ghostnorm_fn(fn: Callable[..., JTensor]) -> Callable[..., JTensor]:
 
     # scaled gradients for parameters to achieve per-eg grad clipping
     # scaled_g: (batch_size, ..., output_dim)
-    scaled_g = jnp.einsum('i, i... -> i...', scales, g)
+    scaled_g = jax.tree_map(
+        lambda g_: jnp.einsum('i, i... -> i...', scales, g_), g
+    )
     vjp_params, *vjp_args = vjp_fun(scaled_g)
 
     def vmappable_vjp(g_, *args_):
@@ -101,7 +103,7 @@ def _create_ghostnorm_fn(fn: Callable[..., JTensor]) -> Callable[..., JTensor]:
     # Compute per-example gradient square norms.
     # The batch_size factor is needed when the loss is *averaged* over the
     # mini-batch of examples (instead of summed over).
-    batch_size = g.shape[0]
+    batch_size = args[0].shape[0]
     batch_scaled_per_example_grad = jax.tree_map(
         lambda x: x * batch_size, per_example_grad
     )
@@ -166,6 +168,7 @@ class GhostNormPaxConfig(pax_fiddle.Config):
 # Note that this list should mututally exclusive with _REPLACE_MAP.
 _WRAPPABLE_LAYERS = {
     praxis_normalizations.LayerNorm,
+    praxis_normalizations.RmsNorm,
     praxis_attentions.PerDimScale,
     praxis_attentions.CausalDepthwiseConv1D,
     praxis_attentions.AttentionProjection,  # optimize most likely.

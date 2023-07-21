@@ -503,6 +503,12 @@ class LayersTest(parameterized.TestCase):
     stacked_transformer_tpl.hidden_dims = num_heads * model_dim
     stacked_transformer_tpl.num_heads = num_heads
     stacked_transformer_tpl.num_layers = 1
+
+    tr_atten_tpl = (
+        stacked_transformer_tpl.transformer_layer_params_tpl.tr_atten_tpl
+    )
+    tr_atten_tpl.combine_qkv = True
+
     ref_layer_tpl.softmax_tpl.scale_sqrt_depth = True
 
     # Use a separate embedding as shared weights are not compatible with
