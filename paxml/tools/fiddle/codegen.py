@@ -121,10 +121,16 @@ class HighlevelParameterization(experimental_top_level_api.CodegenPass):
     return task
 
 
+@dataclasses.dataclass(frozen=True)
+class ModelShardingDiff:
+  diff: diffing.Diff
+  old: pax_fiddle.Config[Any]
+
+
 def _sharding_diff(
     experiment_cls: Type[base_experiment.BaseExperiment],
     unshare_sharding_config: bool = True,
-) -> Optional[diffing.Diff]:
+) -> Optional[ModelShardingDiff]:
   """Returns a diff that will re-add sharding to a model.
 
   The diff is calculated by removing the sharding from the model for the "diff
@@ -143,7 +149,7 @@ def _sharding_diff(
       sharding_diff_rhs, replace_with_default=True
   )
   diff = diffing.build_diff(sharding_diff_lhs, sharding_diff_rhs)
-  return diff if diff.changes else None
+  return ModelShardingDiff(diff, sharding_diff_lhs) if diff.changes else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -153,15 +159,20 @@ class MakeShardingFiddler(experimental_top_level_api.CodegenPass):
   PASS_INPUT_KWARGS = ["model_sharding_diff"]
 
   def __call__(
-      self, task: Any, model_sharding_diff: Optional[diffing.Diff]
+      self,
+      task: Any,
+      model_sharding_diff: Optional[ModelShardingDiff],
   ) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
     if model_sharding_diff:
+      assert isinstance(model_sharding_diff, ModelShardingDiff)
       task.sharding_diff_module = codegen_diff.fiddler_from_diff(
-          model_sharding_diff,
+          model_sharding_diff.diff,
+          old=model_sharding_diff.old,
           func_name="shard_model_config",
           param_name="model_config",
           import_manager=task.import_manager,
+          variable_naming="short",
       )
     return task
 

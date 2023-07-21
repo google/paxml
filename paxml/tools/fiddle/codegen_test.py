@@ -226,9 +226,7 @@ class CodegenTest(absltest.TestCase):
         return model_config
 
     def shard_model_config(model_config):
-      original_model_config_activation_split_dims_mapping = model_config.activation_split_dims_mapping
-      original_model_config_activation_split_dims_mapping.out = ['foo_axis',
-          'bar_axis']
+      model_config.activation_split_dims_mapping.out = ['foo_axis', 'bar_axis']
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
@@ -270,15 +268,11 @@ class CodegenTest(absltest.TestCase):
         return model_config
 
     def shard_model_config(model_config):
-      original_model_config_activation_split_dims_mapping = model_config.activation_split_dims_mapping
-      original_model_config_sublayers_0_activation_split_dims_mapping = model_config.sublayers[0].activation_split_dims_mapping
-      original_model_config_sublayers_1_activation_split_dims_mapping = model_config.sublayers[1].activation_split_dims_mapping
-      original_model_config_activation_split_dims_mapping.out = ['foo_axis',
-          'bar_axis']
-      original_model_config_sublayers_0_activation_split_dims_mapping.out = ['foo_axis',
-          'bar_axis']
-      original_model_config_sublayers_1_activation_split_dims_mapping.out = ['foo_axis',
-          'bar_axis']
+      model_config.activation_split_dims_mapping.out = ['foo_axis', 'bar_axis']
+      model_config.sublayers[0].activation_split_dims_mapping.out = ['foo_axis',
+        'bar_axis']
+      model_config.sublayers[1].activation_split_dims_mapping.out = ['foo_axis',
+        'bar_axis']
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
