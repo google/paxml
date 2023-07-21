@@ -73,6 +73,8 @@ class CodegenTest(absltest.TestCase):
       self.assertEqual(list(converted.keys())[2].attribute, "tracer_bar")
 
   def test_codegen(self):
+    # Note: This output is copied in `test_fixtures.py` for derived fixture
+    # tests. Please make sure to update it there if it changes.
     code = codegen.codegen_baseline_from_legacy(
         test_fixtures.SampleExperiment,
         has_train_dataset=False,
@@ -546,6 +548,49 @@ class CodegenTest(absltest.TestCase):
         checkpoint_loading_rules = pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules, task_p=self.pretrain_task_fixture(), load_rules=[('(.*)', '{}')], safe_load=True, ignore_rules=[], step=532000,
         input_specs_provider_p=pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider))
         return {'/path/to/my/checkpoint': checkpoint_loading_rules}
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
+  def test_codegen_experiment_from_diff(self):
+    code = codegen.codegen_experiment_diff(
+        test_fixtures.SampleDerivedExperiment,
+        baseline=test_fixtures.SampleExperimentNewBaseline,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    from paxml.tools.fiddle import test_fixtures
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleDerivedExperiment_NewExperiment(test_fixtures.SampleExperimentNewBaseline):
+
+      def experiment_fixture(self, config):
+        config = super().experiment_fixture()
+        config.task.model.my_setting = 4217
+        return config
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
+  def test_codegen_experiment_highlevel_only(self):
+    code = codegen.codegen_experiment_diff(
+        test_fixtures.SampleDerivedExperimentHighlevel,
+        baseline=test_fixtures.SampleExperimentNewBaseline,
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    expected = """
+    from paxml.tools.fiddle import test_fixtures
+
+    @dataclasses.dataclass(frozen=True)
+    class SampleDerivedExperimentHighlevel_NewExperiment(test_fixtures.SampleExperimentNewBaseline):
+      # Overrides to existing high-level settings.
+      foo_setting: int = 4217
+      derived_setting: int = 8434
+      derived_list_setting: list = [4217, 8434]
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)

@@ -42,6 +42,7 @@ pytype_strict_library(
         # Implicit fiddle.codegen dependency.
         # Implicit fiddle.codegen.codegen_diff dependency.
         # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
+        # Implicit fiddle.experimental.visualize dependency.
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
@@ -76,6 +77,7 @@ pytype_strict_library(
         # Implicit jax dependency.
         "//paxml:base_experiment",
         "//paxml:base_task",
+        "//paxml:parameterized_experiment",
         "//paxml:tasks_lib",
         "//praxis:base_input",
         "//praxis:base_layer",

@@ -21,6 +21,7 @@ import jax
 from jax import numpy as jnp
 from paxml import base_experiment
 from paxml import base_task
+from paxml import parameterized_experiment
 from paxml import tasks_lib
 from praxis import base_input
 from praxis import base_layer
@@ -156,3 +157,50 @@ class SampleExperimentWithInitFromCheckpointRules(SampleExperiment):
         )
     }
     return task
+
+
+@dataclasses.dataclass(frozen=True)
+class SampleExperimentNewBaseline:
+  """Generated baseline code for SampleExperiment.
+
+  This is inlined here so we can refer to it at runtime for the derived
+  experiments.  Please update if `codegen_test.py` output changes.
+  """
+
+  foo_setting: int = 4123
+  derived_setting: int = 8246
+  # Note: Manually fixed the line below to use default_factory; will fix codegen
+  # output soon.
+  derived_list_setting: list[int] = dataclasses.field(
+      default_factory=lambda: [4123, 8246]
+  )
+
+  def experiment_fixture(self):
+    task = pax_fiddle.PaxConfig(
+        tasks_lib.SingleTask, model=self.model_fixture()
+    )
+    return pax_fiddle.PaxConfig(
+        parameterized_experiment.ParameterizedExperiment,
+        task=task,
+        eval_datasets=[],
+    )
+
+  def model_fixture(self):
+    return pax_fiddle.PaxConfig(
+        SampleModel,
+        my_setting=self.foo_setting,
+        derived_setting=self.derived_setting,
+        derived_list_setting=self.derived_list_setting,
+    )
+
+
+class SampleDerivedExperiment(SampleExperiment):
+
+  def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
+    task = super().task()
+    task.model.my_setting = 4217
+    return task
+
+
+class SampleDerivedExperimentHighlevel(SampleExperiment):
+  FOO_SETTING = 4217

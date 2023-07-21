@@ -18,8 +18,9 @@
 # Note: Fiddle and Pax devs are in collaboration; please generally do not import
 # private libraries from Fiddle.
 
+import copy
 import dataclasses
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import fiddle as fdl
 from fiddle import daglish
@@ -30,6 +31,7 @@ from fiddle._src.codegen.auto_config import ir_to_cst
 from fiddle.codegen import codegen
 from fiddle.codegen import codegen_diff
 from fiddle.codegen.auto_config import experimental_top_level_api
+from fiddle.experimental import visualize
 import libcst as cst
 from libcst import matchers
 from paxml import base_experiment
@@ -183,6 +185,77 @@ class _AddShardingCall:
   add_sharding_function: str
 
 
+def _class_attributes(highlevel_settings: Dict[str, Any]) -> List[cst.CSTNode]:
+  """Returns CST nodes for dataclass fields, given highlevel settings."""
+  result = []
+  for name, value in highlevel_settings.items():
+    types = [
+        ("bool", (bool, codegen_tracer.BoolTracer)),
+        ("int", int),
+        # `int` will never take effect, but included here for completeness
+        ("float", (float, int)),
+        ("str", str),
+        ("list", list),
+        ("tuple", tuple),
+    ]
+    type_name = "Any"
+    for candidate_name, candidate_typ in types:
+      if isinstance(value, candidate_typ):
+        type_name = candidate_name
+        break
+
+    # Convert the value to its primitive form.
+    value = codegen_tracer.remove_tracers(value)
+
+    result.append(
+        cst.SimpleStatementLine([
+            cst.AnnAssign(
+                target=cst.Name(name),
+                annotation=cst.Annotation(cst.Name(type_name)),
+                value=ir_to_cst.code_for_expr(value),
+            ),
+        ])
+    )
+  return result
+
+
+def _make_class_def(
+    name: str, bases: List[cst.Arg], body: List[cst.BaseStatement]
+) -> cst.ClassDef:
+  return cst.ClassDef(
+      name=cst.Name(name),
+      bases=bases,
+      body=cst.IndentedBlock(body=body),
+      leading_lines=[
+          cst.EmptyLine(newline=cst.Newline()),
+          cst.EmptyLine(newline=cst.Newline()),
+      ],
+      decorators=[
+          cst.Decorator(
+              cst.parse_expression("dataclasses.dataclass(frozen=True)")
+          )
+      ],
+  )
+
+
+def _comment_line(comment: str) -> cst.EmptyLine:
+  return cst.EmptyLine(
+      indent=True,
+      comment=cst.Comment(value=f"# {comment}"),
+  )
+
+
+def _extract_function_def(node: cst.CSTNode, name: str) -> cst.FunctionDef:
+  matcher = matchers.SaveMatchedNode(
+      matchers.FunctionDef(matchers.Name(name)),
+      "matched_fn",
+  )
+  matches = matchers.extractall(node, matcher)
+  if len(matches) != 1:
+    raise ValueError("Found multiple functions named {name}")
+  return matches[0]["matched_fn"]
+
+
 @dataclasses.dataclass(frozen=True)
 class IrToCst(experimental_top_level_api.CodegenPass):
   """Modified LibCST conversion that doesn't emit imports."""
@@ -231,35 +304,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
     module_body = list(task.import_manager.sorted_import_lines())
 
     # Add highlevel accesses as attributes.
-    class_body = []
-    for name, value in task.highlevel_accesses.items():
-      types = [
-          ("bool", (bool, codegen_tracer.BoolTracer)),
-          ("int", int),
-          # `int` will never take effect, but included here for completeness
-          ("float", (float, int)),
-          ("str", str),
-          ("list", list),
-          ("tuple", tuple),
-      ]
-      type_name = "Any"
-      for candidate_name, candidate_typ in types:
-        if isinstance(value, candidate_typ):
-          type_name = candidate_name
-          break
-
-      # Convert the value to its primitive form.
-      value = codegen_tracer.remove_tracers(value)
-
-      class_body.append(
-          cst.SimpleStatementLine([
-              cst.AnnAssign(
-                  target=cst.Name(name),
-                  annotation=cst.Annotation(cst.Name(type_name)),
-                  value=ir_to_cst.code_for_expr(value),
-              ),
-          ])
-      )
+    class_body = _class_attributes(task.highlevel_accesses)
 
     # Add main fixtures.
     for fn in task.top_level_call.all_fixture_functions():
@@ -279,33 +324,13 @@ class IrToCst(experimental_top_level_api.CodegenPass):
       class_body.append(fn_code)
 
     # Create the class with these attributes and fixtures.
-    module_body.append(
-        cst.ClassDef(
-            name=cst.Name(self.class_name),
-            body=cst.IndentedBlock(body=class_body),
-            leading_lines=[
-                cst.EmptyLine(newline=cst.Newline()),
-                cst.EmptyLine(newline=cst.Newline()),
-            ],
-            decorators=[
-                cst.Decorator(
-                    cst.parse_expression("dataclasses.dataclass(frozen=True)")
-                )
-            ],
-        )
-    )
+    module_body.append(_make_class_def(self.class_name, [], class_body))
 
     # Add fiddler for sharding, if it is set.
     if task.sharding_diff_module:
-      matcher = matchers.SaveMatchedNode(
-          matchers.FunctionDef(matchers.Name("shard_model_config")),
-          "shard_model_fn",
+      module_body.append(
+          _extract_function_def(task.sharding_diff_module, "shard_model_config")
       )
-      matches = matchers.extractall(task.sharding_diff_module, matcher)
-      assert (
-          len(matches) == 1
-      ), "If sharding_diff_module is present, should include fn"
-      module_body.append(matches[0]["shard_model_fn"])
 
     return cst.Module(body=module_body, default_indent="  ")
 
@@ -565,3 +590,142 @@ def codegen_baseline_from_legacy(
       model_sharding_diff=model_sharding_diff,
       init_checkpoint_experiments=init_checkpoint_experiments,
   ).code
+
+
+def codegen_experiment_diff(
+    experiment_cls: Type[base_experiment.BaseExperiment],
+    *,
+    baseline: Type[Any],
+    unshare_sharding_config: bool = True,
+    remove_defaults: bool = True,
+    lowercase_highlevel_settings: bool = None,
+    has_train_dataset: bool = False,
+    has_input_specs_provider: bool = False,
+):
+  """Generates an experiment subclass from a main class.
+
+  Note, this is not the most recommended way of expressing experiments. If you
+  can factor your configuration into granular sub-fixtures, and then just
+  override one of those, it can be easier to read.
+
+  But using the output of this should be fine / still within style
+  recommendations.
+
+  Args:
+    experiment_cls: Legacy experiment class deriving from BaseExperiment.
+    baseline: Type of the new baseline generated; usually output from
+      codegen_baseline_from_legacy().
+    unshare_sharding_config: Whether to unshare values in sharding
+      configuration. Enter the same value as for the baseline configuratoin
+    remove_defaults: Whether to remove default values. Enter the same value as
+      for the baseline configuration.
+    lowercase_highlevel_settings: Lowercase the high-level variable names. If
+      not provided, this will be inferred from the baseline configuration.
+    has_train_dataset: Whether the configuration has a training dataset. If not,
+      then the resulting ParameterizedExperiment config's train_dataset field
+      will not be populated.
+    has_input_specs_provider: Whether the experiment has an input specs provider
+      defined. Please set to False if you are using the (slower) one predefined
+      by the dataset.
+
+  Returns:
+    Generated code.
+  """
+  baseline_field_names = [field.name for field in dataclasses.fields(baseline)]
+
+  # Auto-detect lowercasing from the baseline.
+  if lowercase_highlevel_settings is None:
+    lowercase_highlevel_settings = all(
+        name.lower() == name for name in baseline_field_names
+    )
+
+  experiment_instance = experiment_cls()
+  highlevel_settings = {}
+  for key in set(dir(experiment_instance)) | set(dir(experiment_cls)):
+    value = getattr(experiment_instance, key)
+    if key.startswith("_") and key not in baseline_field_names:
+      continue  # Skip attributes like __module__.
+    if isinstance(value, (bool, int, float, str, list, tuple)):
+      key = key.lower() if lowercase_highlevel_settings else key
+      highlevel_settings[key] = value
+
+  highlevel_overrides = {}
+  baseline_instance = baseline()
+  for field in dataclasses.fields(baseline):
+    base_value = getattr(baseline_instance, field.name)
+    if base_value != highlevel_settings[field.name]:
+      highlevel_overrides[field.name] = highlevel_settings[field.name]
+    else:
+      highlevel_settings.pop(field.name)
+  # Note: highlevel_settings now contains only new settings.
+
+  # Create a version of `baseline` with only highlevel settings overridden.
+  experiment_highlevel_only = baseline(**copy.deepcopy(highlevel_overrides))
+
+  diff_lhs = experiment_highlevel_only.experiment_fixture()
+  if remove_defaults:
+    diff_lhs = visualize.with_defaults_trimmed(
+        diff_lhs, remove_deep_defaults=True
+    )
+  normalizer = config_normalization.ConfigNormalizer(
+      remove_sharding_annotations=False,
+      unshare_sharding_config=unshare_sharding_config,
+      remove_defaults=remove_defaults,
+      convert_seqio_task_objects=True,
+  )
+  diff_rhs = make_parameterized_experiment.from_legacy(
+      experiment_cls=experiment_cls,
+      normalizer=normalizer,
+      has_train_dataset=has_train_dataset,
+      has_input_specs_provider=has_input_specs_provider,
+  )
+
+  diff = diffing.build_diff(diff_lhs, diff_rhs)
+  import_manager = code_ir._init_import_manager()  # pylint: disable=protected-access
+  class_body = _class_attributes(highlevel_overrides)
+  if class_body:
+    class_body[0] = class_body[0].with_changes(
+        leading_lines=[
+            _comment_line("Overrides to existing high-level settings."),
+        ]
+    )
+  new_attributes = _class_attributes(highlevel_settings)
+  if new_attributes:
+    new_attributes[0] = new_attributes[0].with_changes(
+        leading_lines=[_comment_line("New high-level settings.")]
+    )
+
+  if diff.changes:
+    diff_module = codegen_diff.fiddler_from_diff(
+        diff,
+        old=diff_lhs,
+        func_name="experiment_fixture",
+        param_name="config",
+        import_manager=import_manager,
+        variable_naming="short",
+    )
+    diff_fn = _extract_function_def(diff_module, "experiment_fixture")
+    new_params = [
+        cst.Param(cst.Name("self")),
+        *diff_fn.params.params,
+    ]
+    new_body = [
+        cst.parse_statement("config = super().experiment_fixture()"),
+        *diff_fn.body.body,
+        cst.parse_statement("return config"),
+    ]
+    diff_fn = diff_fn.with_changes(
+        body=diff_fn.body.with_changes(body=new_body),
+        params=diff_fn.params.with_changes(params=new_params),
+        leading_lines=[cst.EmptyLine(newline=cst.Newline())],
+    )
+    class_body.append(diff_fn)
+
+  class_name = f"{experiment_cls.__name__}_NewExperiment"
+  class_def = _make_class_def(
+      class_name,
+      [cst.Arg(cst.parse_expression(import_manager.add(baseline)))],
+      class_body,
+  )
+  module_body = [*import_manager.sorted_import_lines(), class_def]
+  return cst.Module(body=module_body, default_indent="  ").code
