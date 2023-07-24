@@ -391,6 +391,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis/layers:models",
         # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
         # Implicit tensorflow_datasets dependency.
