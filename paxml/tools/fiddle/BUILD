@@ -43,6 +43,8 @@ pytype_strict_library(
         # Implicit fiddle.codegen.codegen_diff dependency.
         # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
         # Implicit fiddle.experimental.visualize dependency.
+        # Implicit fiddle.extensions.jax dependency.
+        # Implicit fiddle.extensions.seqio dependency.
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
@@ -246,6 +248,8 @@ pytype_strict_test(
         ":codegen_tracer",
         ":test_fixtures",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle dependency.
         # Implicit fiddle._src.codegen.auto_config.ir_printer dependency.
+        # Implicit seqio dependency.
     ],
 )

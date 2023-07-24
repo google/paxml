@@ -19,10 +19,12 @@ import re
 import textwrap
 
 from absl.testing import absltest
+import fiddle as fdl
 from fiddle._src.codegen.auto_config import ir_printer
 from paxml.tools.fiddle import codegen
 from paxml.tools.fiddle import codegen_tracer
 from paxml.tools.fiddle import test_fixtures
+import seqio
 
 
 def _wrap_matched_line(m: re.Match[str]) -> str:
@@ -71,6 +73,57 @@ class CodegenTest(absltest.TestCase):
     with self.subTest("tracer_conversion"):
       self.assertEqual(list(converted.keys())[0].attribute, "tracer_foo")
       self.assertEqual(list(converted.keys())[2].attribute, "tracer_bar")
+
+
+def _codegen_arbitrary_object(
+    config: fdl.Config,
+    *,
+    sub_fixtures=None,
+    init_checkpoint_experiments=None,
+    model_sharding_diff=None,
+    **kwargs,
+):
+  if sub_fixtures is None:
+    sub_fixtures = {}
+  codegen_obj = fdl.build(codegen.code_generator_config())
+  return codegen_obj(
+      config,
+      sub_fixtures=sub_fixtures,
+      init_checkpoint_experiments=init_checkpoint_experiments,
+      model_sharding_diff=model_sharding_diff,
+      **kwargs,
+  ).code
+
+
+class CodegenExamplesTest(absltest.TestCase):
+  """Tests output from codegen on smaller non-experiment objects."""
+
+  def test_seqio_import(self):
+    config = fdl.Config(
+        seqio.SentencePieceVocabulary,
+        sentencepiece_model_file="/path/to/vocab.txt",
+    )
+    code = _codegen_arbitrary_object(config)
+    expected = """
+    import dataclasses
+    import fiddle as fdl
+    import seqio
+
+
+    @dataclasses.dataclass(frozen=True)
+    class Experiment:
+
+      def config_fixture(self):
+        return fdl.Config(seqio.SentencePieceVocabulary,
+            sentencepiece_model_file='/path/to/vocab.txt')
+    """
+    self.assertEqual(
+        code.split(), expected.split(), msg=_update_expected_text(code)
+    )
+
+
+class CodegenOutputsTest(absltest.TestCase):
+  """Tests entire output for codegen."""
 
   def test_codegen(self):
     # Note: This output is copied in `test_fixtures.py` for derived fixture

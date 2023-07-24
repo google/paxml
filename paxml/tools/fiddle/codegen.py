@@ -32,6 +32,8 @@ from fiddle.codegen import codegen
 from fiddle.codegen import codegen_diff
 from fiddle.codegen.auto_config import experimental_top_level_api
 from fiddle.experimental import visualize
+import fiddle.extensions.jax
+import fiddle.extensions.seqio
 import libcst as cst
 from libcst import matchers
 from paxml import base_experiment
@@ -44,6 +46,10 @@ from paxml.tools.fiddle import make_parameterized_experiment
 from paxml.tools.fiddle import remove_sharding
 from paxml.tools.fiddle import unshare_sharding
 from praxis import pax_fiddle
+
+
+fiddle.extensions.jax.enable()
+fiddle.extensions.seqio.enable()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -499,12 +505,13 @@ def code_generator_config(
   )
 
   # Replace expression complexity logic with Pax-specific one.
-  (complex_pass,) = selectors.select(
-      config, experimental_top_level_api.MoveComplexNodesToVariables
-  )
-  complex_pass.is_complex = fdl.Config(
-      PaxExpressionIsComplex, base=complex_pass.is_complex
-  )
+  if max_expression_complexity is not None:
+    (complex_pass,) = selectors.select(
+        config, experimental_top_level_api.MoveComplexNodesToVariables
+    )
+    complex_pass.is_complex = fdl.Config(
+        PaxExpressionIsComplex, base=complex_pass.is_complex
+    )
 
   # Add the core highlevel parameterization pass. This adds a `self` parameter
   # and abstracts certain expressions using tracers, linking them to high-level
