@@ -137,6 +137,7 @@ pytype_strict_library(
         ":unshare_sharding",
         # Implicit fiddle dependency.
         # Implicit fiddle.experimental.auto_config dependency.
+        # Implicit fiddle.experimental.dataclasses dependency.
         # Implicit fiddle.experimental.visualize dependency.
         "//paxml:base_task",
         "//paxml:parameterized_experiment",

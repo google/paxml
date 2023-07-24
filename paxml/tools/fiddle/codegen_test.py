@@ -378,7 +378,7 @@ class CodegenTest(absltest.TestCase):
 
       def model_fixture(self):
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
-        my_setting=self.foo_setting, derived_setting=self.derived_setting,
+            my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def training_dataset_fixture(self):
@@ -386,8 +386,7 @@ class CodegenTest(absltest.TestCase):
             is_training=True)
 
       def eval_datasets_fixture(self):
-        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=128,
-            is_training=False)]
+        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=128)]
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
@@ -419,19 +418,17 @@ class CodegenTest(absltest.TestCase):
       def experiment_fixture(self):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
-        return
-        pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
+        return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[],
             decoder_datasets=self.decoder_datasets_fixture())
 
       def model_fixture(self):
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
-        my_setting=self.foo_setting, derived_setting=self.derived_setting,
+            my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def decoder_datasets_fixture(self):
-        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256,
-            is_training=False)]
+        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256)]
     """
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)

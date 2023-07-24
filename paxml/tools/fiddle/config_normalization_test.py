@@ -18,6 +18,8 @@
 For now, we don't test every combination of flags.
 """
 
+import dataclasses
+
 from absl.testing import absltest
 import fiddle as fdl
 from paxml import parameterized_experiment
@@ -26,7 +28,31 @@ from paxml.tools.fiddle import test_fixtures
 from praxis import pax_fiddle
 
 
+@dataclasses.dataclass(frozen=True)
+class Foo:
+  a: int = 12
+
+
+def _get_a(foo: Foo):
+  return foo.a
+
+
 class ConfigNormalizationTest(absltest.TestCase):
+
+  def test_convert_dataclasses(self):
+    dataset_config = (
+        test_fixtures.SampleExperimentWithDatasets().training_dataset()
+    )
+    dataset_config.batch_size = pax_fiddle.Config(_get_a, Foo(a=100))
+    config = pax_fiddle.Config(
+        parameterized_experiment.ParameterizedExperiment,
+        training_dataset=dataset_config,
+    )
+    self.assertIsInstance(config.training_dataset.batch_size.foo, Foo)
+    normalized = config_normalization.default_normalizer()(config)
+    self.assertIsInstance(
+        normalized.training_dataset.batch_size.foo, fdl.Config
+    )
 
   def test_lowlevel_config(self):
     task_config = (

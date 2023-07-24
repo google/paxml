@@ -20,6 +20,7 @@ from typing import TypeVar
 
 import fiddle as fdl
 from fiddle.experimental import auto_config
+from fiddle.experimental import dataclasses as fdl_dataclasses
 from fiddle.experimental import visualize
 from paxml import base_task
 from paxml import parameterized_experiment
@@ -30,19 +31,33 @@ from praxis import pax_fiddle
 
 
 @dataclasses.dataclass(frozen=True)
-class TaskNormalizer:
+class ComponentNormalizer:
+  """Mid-level API for normalizing tasks, datasets, or other configs."""
+
+  # (Defaults for the below are in ConfigNormalizer.)
+  remove_defaults: bool
+  convert_dataclasses: bool
+
+  def __call__(self, config: pax_fiddle.Config[base_task.BaseTask]):
+    if self.remove_defaults:
+      config = visualize.with_defaults_trimmed(
+          config, remove_deep_defaults=True
+      )
+    if self.convert_dataclasses:
+      config = fdl_dataclasses.convert_dataclasses_to_configs(config)
+    return config
+
+
+@dataclasses.dataclass(frozen=True)
+class TaskNormalizer(ComponentNormalizer):
   """Mid-level API for normalizing tasks."""
 
   # (Defaults for the below are in ConfigNormalizer.)
   remove_sharding_annotations: bool
   unshare_sharding_config: bool
-  remove_defaults: bool
 
   def __call__(self, task_config: pax_fiddle.Config[base_task.BaseTask]):
-    if self.remove_defaults:
-      task_config = visualize.with_defaults_trimmed(
-          task_config, remove_deep_defaults=True
-      )
+    task_config = super().__call__(task_config)
     if self.remove_sharding_annotations:
       task_config = remove_sharding.remove_sharding(task_config)
     elif self.unshare_sharding_config:
@@ -54,7 +69,7 @@ _T = TypeVar("_T")
 
 
 @dataclasses.dataclass(frozen=True)
-class DatasetNormalizer:
+class DatasetNormalizer(ComponentNormalizer):
   """Mid-level API for normalizing dataset configs."""
 
   # (Defaults for the below are in ConfigNormalizer.)
@@ -62,8 +77,12 @@ class DatasetNormalizer:
 
   def __call__(self, dataset_config: _T) -> _T:
     """Normalizes a dataset or list of datasets."""
+    dataset_config = super().__call__(dataset_config)
     if self.convert_seqio_task_objects:
-      return convert_seqio_task_objects_lib.convert_seqio_tasks(dataset_config)
+      dataset_config = convert_seqio_task_objects_lib.convert_seqio_tasks(
+          dataset_config
+      )
+    return dataset_config
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,6 +126,12 @@ class ConfigNormalizer:
   normalize() for attribute documentation.
 
   Attributes:
+    remove_defaults: Whether to remove default values. Often with Pax configs,
+      dataclass field defaulting magic means that you get large, expanded
+      templates that may actually be unused or equal to their default values.
+    convert_dataclasses: Whether to convert dataclass instances to configs. This
+      will only be applied if the dataclasses do not have __post_init__
+      functions, as __post_init__ can obscure the initial call values.
     remove_sharding_annotations: Whether to remove sharding annotations.
     unshare_sharding_config: If remove_sharding_annotations=False, whether to
       unshare values in sharding configuration. Fiddle generally retains
@@ -116,9 +141,6 @@ class ConfigNormalizer:
       However, if you later write a test asserting equality with the original
       config, please make sure to run unshare_sharding.unshare_sharding() on the
       original config.
-    remove_defaults: Whether to remove default values. Often with Pax configs,
-      dataclass field defaulting magic means that you get large, expanded
-      templates that may actually be unused or equal to their default values.
     convert_seqio_task_objects: Replaces SeqIO Task objects with a config object
       that will load them by name. Normalized configurations should not contain
       custom objects, only Fiddle buildables and primitives. However, if you
@@ -126,9 +148,10 @@ class ConfigNormalizer:
       registry, please use that.
   """
 
+  remove_defaults: bool = True
+  convert_dataclasses: bool = True
   remove_sharding_annotations: bool = False
   unshare_sharding_config: bool = True
-  remove_defaults: bool = True
   convert_seqio_task_objects: bool = True
 
   @auto_config.auto_config
@@ -141,14 +164,17 @@ class ConfigNormalizer:
   @auto_config.auto_config
   def task_normalizer(self):
     return TaskNormalizer(
+        remove_defaults=self.remove_defaults,
+        convert_dataclasses=self.convert_dataclasses,
         remove_sharding_annotations=self.remove_sharding_annotations,
         unshare_sharding_config=self.unshare_sharding_config,
-        remove_defaults=self.remove_defaults,
     )
 
   @auto_config.auto_config
   def dataset_normalizer(self):
     return DatasetNormalizer(
+        remove_defaults=self.remove_defaults,
+        convert_dataclasses=self.convert_dataclasses,
         convert_seqio_task_objects=self.convert_seqio_task_objects,
     )
 
