@@ -417,10 +417,10 @@ def _train_and_evaluate_common(
     step_i = program_output.new_train_step
 
     eval_metrics: Optional[tuning_lib.EvalMetrics] = None
-    # Run eval at regular step interval.
-    if (
-        train_p.eval_interval_steps
-        and step_i % train_p.eval_interval_steps == 0
+    # Run eval at regular step interval or the final training step.
+    if train_p.eval_interval_steps and (
+        step_i % train_p.eval_interval_steps == 0
+        or step_i >= train_p.num_train_steps
     ):
       logging.log_first_n(INFO, '[PAX STATUS]:  Starting eval_step().', 5)
       eval_partitioned_train_state = programs.get_eval_train_state(
@@ -448,7 +448,10 @@ def _train_and_evaluate_common(
     if (
         decode_programs
         and train_p.decode_interval_steps
-        and step_i % train_p.decode_interval_steps == 0
+        and (
+            step_i % train_p.decode_interval_steps == 0
+            or step_i >= train_p.num_train_steps
+        )
     ):
       decode_partitioned_train_state = programs.get_eval_train_state(
           task, partitioned_train_state, task.train.decode_use_ema_states
