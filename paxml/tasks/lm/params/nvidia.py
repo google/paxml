@@ -82,6 +82,7 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   LR_COS_DECAY_END = 500000
   LR_COS_MIN_RATIO = 0.1
   LR_COS_MAX = 1.0
+  USE_ADAFACTOR = False
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
@@ -122,16 +123,26 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
 
     lp = task_p.train.learner
     lp.loss_name = 'total_loss'
-    lp.optimizer = pax_fiddle.Config(
-        optimizers.Adam,
-        beta1=self.ADAM_BETA1,
-        beta2=self.ADAM_BETA2,
-        weight_decay=self.WEIGHT_DECAY,
-        epsilon=self.ADAM_EPSILON,
-        epsilon_root=self.ADAM_EPSILON_ROOT,
-        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
-        clip_threshold=self.CLIP_THRESHOLD,
-    )
+    if self.USE_ADAFACTOR:
+      lp.optimizer = pax_fiddle.Config(
+          optimizers.ShardedAdafactor,
+          decay_method='adam',
+          beta1=self.ADAM_BETA1,
+          decay_adam=0.99,
+          weight_decay=self.WEIGHT_DECAY,
+          clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+      )
+    else:
+      lp.optimizer = pax_fiddle.Config(
+          optimizers.Adam,
+          beta1=self.ADAM_BETA1,
+          beta2=self.ADAM_BETA2,
+          weight_decay=self.WEIGHT_DECAY,
+          epsilon=self.ADAM_EPSILON,
+          epsilon_root=self.ADAM_EPSILON_ROOT,
+          clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+          clip_threshold=self.CLIP_THRESHOLD,
+      )
     lp.optimizer.learning_rate = self.LEARNING_RATE
 
     lp.optimizer.lr_schedule = pax_fiddle.Config(
@@ -196,6 +207,7 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   LR_COS_DECAY_END = 500000
   LR_COS_MIN_RATIO = 0.1
   LR_COS_MAX = 1.0
+  USE_ADAFACTOR = False
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
@@ -233,16 +245,27 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 
     lp = task_p.train.learner
     lp.loss_name = 'total_loss'
-    lp.optimizer = pax_fiddle.Config(
-        optimizers.Adam,
-        beta1=self.ADAM_BETA1,
-        beta2=self.ADAM_BETA2,
-        weight_decay=self.WEIGHT_DECAY,
-        epsilon=self.ADAM_EPSILON,
-        epsilon_root=self.ADAM_EPSILON_ROOT,
-        clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
-        clip_threshold=self.CLIP_THRESHOLD,
-    )
+
+    if self.USE_ADAFACTOR:
+      lp.optimizer = pax_fiddle.Config(
+          optimizers.ShardedAdafactor,
+          decay_method='adam',
+          beta1=self.ADAM_BETA1,
+          decay_adam=0.99,
+          weight_decay=self.WEIGHT_DECAY,
+          clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+      )
+    else:
+      lp.optimizer = pax_fiddle.Config(
+          optimizers.Adam,
+          beta1=self.ADAM_BETA1,
+          beta2=self.ADAM_BETA2,
+          weight_decay=self.WEIGHT_DECAY,
+          epsilon=self.ADAM_EPSILON,
+          epsilon_root=self.ADAM_EPSILON_ROOT,
+          clip_gradient_norm_to_value=self.CLIP_GRADIENT_NORM_TO_VALUE,
+          clip_threshold=self.CLIP_THRESHOLD,
+      )
     lp.optimizer.learning_rate = self.LEARNING_RATE
 
     lp.optimizer.lr_schedule = pax_fiddle.Config(
@@ -370,16 +393,19 @@ class NVIDIA175BProxy(NVIDIA5B):
 
 
 @experiment_registry.register
-class NVIDIA175BProxyTwoHosts(NVIDIA175BProxy):
-  """175B proxy config that works with 2x16 A100-40G."""
+class NVIDIA175B(NVIDIA175BProxy):
+  """175B config that works with 6x16 A100-40G."""
 
-  DCN_MESH_SHAPE = [2, 1, 1, 1]
+  DCN_MESH_SHAPE = [6, 1, 1, 1]
   ICI_MESH_SHAPE = [1, 1, 1, 16]
 
-  NUM_LAYERS = 12
-  NUM_STAGES = 2
-  MICROBATCH_SIZE = 8
-  PERCORE_BATCH_SIZE = 0.25
+  NUM_LAYERS = 96
+  NUM_STAGES = 6
+  MICROBATCH_SIZE = 1
+  PERCORE_BATCH_SIZE = 0.0625
+
+  ENABLE_BFLOAT16 = True
+  USE_ADAFACTOR = True
 
 
 @experiment_registry.register
@@ -398,3 +424,23 @@ class TestSmallConfig(NVIDIA5B):
   DIMS_PER_HEAD = 128
   MODEL_DIMS = 4096
   HIDDEN_DIMS = 4 * 4096
+
+
+@experiment_registry.register
+class Llama33BProxy(NVIDIA1_3B):
+  """Llama 33B config that works with 1x16 A100-40G."""
+
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  ICI_MESH_SHAPE = [1, 16, 1]
+  PERCORE_BATCH_SIZE = 1
+
+  NUM_LAYERS = 60
+  VOCAB_SIZE = 32000
+  DIMS_PER_HEAD = 128
+  NUM_HEADS = 52
+  MODEL_DIMS = 6656
+  HIDDEN_DIMS = 17920
+  ENABLE_BFLOAT16 = True
+  USE_ADAFACTOR = True
