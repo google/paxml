@@ -39,12 +39,12 @@ from libcst import matchers
 from paxml import base_experiment
 from paxml import parameterized_experiment
 from paxml.tools.fiddle import codegen_external_init_checkpoint_fns
+from paxml.tools.fiddle import codegen_highlevel_parameterization
 from paxml.tools.fiddle import codegen_pax_code_ir
+from paxml.tools.fiddle import codegen_sharding
 from paxml.tools.fiddle import codegen_tracer
 from paxml.tools.fiddle import config_normalization
 from paxml.tools.fiddle import make_parameterized_experiment
-from paxml.tools.fiddle import remove_sharding
-from paxml.tools.fiddle import unshare_sharding
 from praxis import pax_fiddle
 
 
@@ -64,131 +64,6 @@ class InitTask(experimental_top_level_api.InitTask):
     )
     modified.import_manager.add_by_name("dataclasses")
     return modified
-
-
-@dataclasses.dataclass(frozen=True)
-class HighlevelParameterization(experimental_top_level_api.CodegenPass):
-  """Parameterizes fixtures by a highlevel settings object."""
-
-  lowercasing: bool = False
-
-  def __call__(self, task: Any, **pass_kwargs: Any) -> Any:
-    assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
-    all_fns = task.top_level_call.all_fixture_functions()
-
-    def process_fn(fn: code_ir.FixtureFunction):
-      self_name = code_ir.Name("self", is_generated=False)
-      fn.parameters.insert(0, code_ir.Parameter(self_name))
-
-      def add_self_to_calls(value, state: daglish.State):
-        value = state.map_children(value)
-
-        # Convert calls to sub-fixtures like model_fixture() to
-        # self.model_fixture().
-        if isinstance(value, code_ir.SymbolOrFixtureCall):
-          if isinstance(value.symbol_expression, code_ir.FixtureReference):
-            value.symbol_expression = code_ir.AttributeExpression(
-                base=code_ir.VariableReference(self_name),
-                attribute=value.symbol_expression.name.value,
-            )
-
-        # Convert any instances of highlevel variables to relevant expressions.
-        elif hasattr(value, "__highlevel_name__"):
-          attribute_name = value.__highlevel_name__
-          if self.lowercasing:
-            attribute_name = attribute_name.lower()
-          task.highlevel_accesses[attribute_name] = value
-          return code_ir.AttributeExpression(
-              base=code_ir.VariableReference(self_name),
-              attribute=attribute_name,
-          )
-
-        # Process dict keys too (normally ignored by daglish).
-        if isinstance(value, dict):
-          converted = {}
-          for key, sub_value in value.items():
-            if hasattr(key, "__highlevel_name__"):
-              attribute_name = key.__highlevel_name__
-              if self.lowercasing:
-                attribute_name = attribute_name.lower()
-              task.highlevel_accesses[attribute_name] = key
-              key = code_ir.AttributeExpression(
-                  base=code_ir.VariableReference(self_name),
-                  attribute=attribute_name,
-              )
-            converted[key] = sub_value
-          return converted
-
-        return value
-
-      fn.replace_with(daglish.MemoizedTraversal.run(add_self_to_calls, fn))
-
-    for fn in all_fns:
-      process_fn(fn)
-
-    return task
-
-
-@dataclasses.dataclass(frozen=True)
-class ModelShardingDiff:
-  diff: diffing.Diff
-  old: pax_fiddle.Config[Any]
-
-
-def _sharding_diff(
-    experiment_cls: Type[base_experiment.BaseExperiment],
-    unshare_sharding_config: bool = True,
-) -> Optional[ModelShardingDiff]:
-  """Returns a diff that will re-add sharding to a model.
-
-  The diff is calculated by removing the sharding from the model for the "diff
-  base", and using the original model (with sharding) as the diff
-  right-hand-side.
-
-  Args:
-    experiment_cls: The class of the experiment to generate a diff for.
-    unshare_sharding_config: Whether to unshare sharding configurations. Please
-      see codegen_baseline_from_legacy() for details.
-  """
-  sharding_diff_rhs = experiment_cls().task().model
-  if unshare_sharding_config:
-    sharding_diff_rhs = unshare_sharding.unshare_sharding(sharding_diff_rhs)
-  sharding_diff_lhs = remove_sharding.remove_sharding(
-      sharding_diff_rhs, replace_with_default=True
-  )
-  diff = diffing.build_diff(sharding_diff_lhs, sharding_diff_rhs)
-  return ModelShardingDiff(diff, sharding_diff_lhs) if diff.changes else None
-
-
-@dataclasses.dataclass(frozen=True)
-class MakeShardingFiddler(experimental_top_level_api.CodegenPass):
-  """Modified LibCST conversion that doesn't emit imports."""
-
-  PASS_INPUT_KWARGS = ["model_sharding_diff"]
-
-  def __call__(
-      self,
-      task: Any,
-      model_sharding_diff: Optional[ModelShardingDiff],
-  ) -> Any:
-    assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
-    if model_sharding_diff:
-      assert isinstance(model_sharding_diff, ModelShardingDiff)
-      task.sharding_diff_module = codegen_diff.fiddler_from_diff(
-          model_sharding_diff.diff,
-          old=model_sharding_diff.old,
-          func_name="shard_model_config",
-          param_name="model_config",
-          import_manager=task.import_manager,
-          variable_naming="short",
-      )
-    return task
-
-
-@dataclasses.dataclass(frozen=True)
-class _AddShardingCall:
-  model_fixture_name: str
-  add_sharding_function: str
 
 
 def _make_default_factory(node: cst.CSTNode) -> cst.Expr:
@@ -344,43 +219,8 @@ class IrToCst(experimental_top_level_api.CodegenPass):
   """Modified LibCST conversion that doesn't emit imports."""
 
   class_name: str = "Experiment"
-  add_sharding_call: Optional[_AddShardingCall] = None
+  add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None
   add_boilerplate: bool = True
-
-  def _add_sharding_call(self, fn_code: cst.FunctionDef) -> cst.FunctionDef:
-    """Adds a call to the sharding function within the model fixture.
-
-    This would be a little prettier as an IR pass, but we don't currently have
-    an attribute in code_ir.FixtureFunction for mutation-based functions, and it
-    would probably be nice not to worry about it for the rest of codegen. So
-    this is just an add-on CST-modifying function for now.
-
-    Args:
-      fn_code: Function definition for the model fixture.
-
-    Returns:
-      Modified version of fn_code.
-    """
-    assert isinstance(
-        fn_code.body, cst.IndentedBlock
-    ), f"Expected an IndentedBlock body, got a {type(fn_code.body)}"
-    body = fn_code.body.body
-    if not matchers.matches(
-        body[-1], matchers.SimpleStatementLine([matchers.Return()])
-    ):
-      raise ValueError(
-          "Expected a single return line at the end of the model fixture."
-      )
-    # TODO(b/291758766): use namer to avoid unlikely collisions.
-    var_name = cst.Name("model_config")
-    shard_model_name = cst.Name(self.add_sharding_call.add_sharding_function)  # pytype: disable=attribute-error
-    last_lines = [
-        cst.Assign([cst.AssignTarget(var_name)], body[-1].body[0].value),
-        cst.Expr(cst.Call(shard_model_name, args=[cst.Arg(var_name)])),
-        cst.Return(var_name),
-    ]
-    body = body[:-1] + [cst.SimpleStatementLine([line]) for line in last_lines]
-    return fn_code.with_changes(body=fn_code.body.with_changes(body=body))
 
   def __call__(self, task: Any) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
@@ -395,7 +235,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
           self.add_sharding_call
           and fn.name.value == self.add_sharding_call.model_fixture_name
       ):
-        fn_code = self._add_sharding_call(fn_code)
+        fn_code = self.add_sharding_call(fn_code)
 
       # The main codegen produces two newlines because it's emitting
       # module-level functions, but generally we only want one for class
@@ -455,7 +295,7 @@ def code_generator_config(
     lowercase_highlevel_settings: bool = True,
     class_name: str = "Experiment",
     init_checkpoint_experiments_strict: bool = True,
-    add_sharding_call: Optional[_AddShardingCall] = None,
+    add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None,
     add_boilerplate: bool = False,
 ):
   """Returns a code generator object.
@@ -522,13 +362,16 @@ def code_generator_config(
   config.passes.insert(
       move_shared_idx,
       fdl.Config(
-          HighlevelParameterization, lowercasing=lowercase_highlevel_settings
+          codegen_highlevel_parameterization.HighlevelParameterization,
+          lowercasing=lowercase_highlevel_settings,
       ),
   )
 
   # Insert the sharding pass before the IrToCst pass.
   ir_to_cst_idx = _get_pass_idx(config, experimental_top_level_api.IrToCst)
-  config.passes.insert(ir_to_cst_idx, fdl.Config(MakeShardingFiddler))
+  config.passes.insert(
+      ir_to_cst_idx, fdl.Config(codegen_sharding.MakeShardingFiddler)
+  )
 
   # Replace IrToCst pass with our custom one that emits a class.
   (ir_to_cst_pass,) = selectors.select(
@@ -639,7 +482,7 @@ def codegen_baseline_from_legacy(
   # sharding annotations. This is a bit disjointed because we want to compute it
   # before removing nested/deep field defaults.
   if factor_out_sharding_annotations:
-    model_sharding_diff = _sharding_diff(
+    model_sharding_diff = codegen_sharding.sharding_diff(
         experiment_cls, unshare_sharding_config=unshare_sharding_config
     )
   else:
@@ -647,7 +490,9 @@ def codegen_baseline_from_legacy(
 
   add_sharding_call = None
   if model_sharding_diff is not None:
-    add_sharding_call = _AddShardingCall("model_fixture", "shard_model_config")
+    add_sharding_call = codegen_sharding.AddShardingCall(
+        "model_fixture", "shard_model_config"
+    )
   codegen_config = code_generator_config(
       top_level_fixture_name="experiment_fixture",
       class_name=f"{experiment_cls.__name__}_NewBaseline",

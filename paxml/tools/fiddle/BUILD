@@ -27,12 +27,12 @@ pytype_strict_library(
     srcs = ["codegen.py"],
     deps = [
         ":codegen_external_init_checkpoint_fns",
+        ":codegen_highlevel_parameterization",
         ":codegen_pax_code_ir",
+        ":codegen_sharding",
         ":codegen_tracer",
         ":config_normalization",
         ":make_parameterized_experiment",
-        ":remove_sharding",
-        ":unshare_sharding",
         # Implicit fiddle dependency.
         # Implicit fiddle.daglish dependency.
         # Implicit fiddle.diffing dependency.
@@ -154,6 +154,45 @@ pytype_strict_library(
         ":config_normalization",
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
+        "//praxis:pax_fiddle",
+    ],
+)
+
+pytype_strict_library(
+    name = "codegen_highlevel_parameterization",
+    srcs = ["codegen_highlevel_parameterization.py"],
+    deps = [
+        ":codegen_pax_code_ir",
+        # Implicit fiddle.daglish dependency.
+        # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
+        # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "codegen_highlevel_parameterization_test",
+    srcs = ["codegen_highlevel_parameterization_test.py"],
+    deps = [
+        ":codegen",
+        ":codegen_highlevel_parameterization",
+        ":codegen_tracer",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle._src.codegen.auto_config.ir_printer dependency.
+    ],
+)
+
+pytype_strict_library(
+    name = "codegen_sharding",
+    srcs = ["codegen_sharding.py"],
+    deps = [
+        ":codegen_pax_code_ir",
+        ":remove_sharding",
+        ":unshare_sharding",
+        # Implicit fiddle.diffing dependency.
+        # Implicit fiddle.codegen.codegen_diff dependency.
+        # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
+        # Implicit libcst dependency.
+        "//paxml:base_experiment",
         "//praxis:pax_fiddle",
     ],
 )

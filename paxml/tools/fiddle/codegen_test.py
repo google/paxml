@@ -20,9 +20,7 @@ import textwrap
 
 from absl.testing import absltest
 import fiddle as fdl
-from fiddle._src.codegen.auto_config import ir_printer
 from paxml.tools.fiddle import codegen
-from paxml.tools.fiddle import codegen_tracer
 from paxml.tools.fiddle import test_fixtures
 import seqio
 
@@ -43,36 +41,6 @@ def _update_expected_text(code: str) -> str:
       'PLEASE UPDATE THE EXPECTED CODE TO:\n\n    expected = """\n'
       f'{wrapped}\n    """'
   )
-
-
-class CodegenTest(absltest.TestCase):
-
-  def test_highlevel_parameterization_transform(self):
-    init_pass = codegen.InitTask()
-    codegen_pass = codegen.HighlevelParameterization(lowercasing=False)
-    tracer_obj = codegen_tracer.make_tracer("tracer_name", 1)
-    task = init_pass(tracer_obj)
-    self.assertIs(codegen_pass(task), task)
-    self.assertEqual(
-        ir_printer.format_expr(task.top_level_call.fn.output_value),
-        "self.tracer_name",
-    )
-
-  def test_highlevel_parameterization_transforms_keys(self):
-    init_pass = codegen.InitTask()
-    codegen_pass = codegen.HighlevelParameterization(lowercasing=False)
-    tracer_obj = codegen_tracer.make_tracer("tracer_foo", 1)
-    tracer_obj_2 = codegen_tracer.make_tracer("tracer_bar", 2)
-    task = init_pass({tracer_obj: [1, 2, 3], 0: 10, tracer_obj_2: [4, 5, 6]})
-    self.assertIs(codegen_pass(task), task)
-    converted = task.top_level_call.fn.output_value
-
-    with self.subTest("order_preservation"):
-      self.assertEqual(list(converted.values()), [[1, 2, 3], 10, [4, 5, 6]])
-
-    with self.subTest("tracer_conversion"):
-      self.assertEqual(list(converted.keys())[0].attribute, "tracer_foo")
-      self.assertEqual(list(converted.keys())[2].attribute, "tracer_bar")
 
 
 def _codegen_arbitrary_object(
