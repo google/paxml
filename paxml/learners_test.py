@@ -168,6 +168,95 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])
     self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
 
+  def test_adam_with_sharding(self):
+    learner_params = pax_fiddle.Config(learners.Learner)
+    learner_params.name = 'learner'
+    learner_params.loss_name = 'loss'
+    learner_params.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+
+    learner_params.optimizer.learning_rate = 0.1
+    learner_params.optimizer.lr_schedule = pax_fiddle.Config(
+        schedules.LinearRampupExponentialDecay,
+        warmup_steps=10,
+        decay_start=11,
+        decay_end=4000,
+        min_ratio=0.1,
+        max=1.0,
+    )
+    lr_scdule_inst = instantiate(learner_params.optimizer.lr_schedule)
+
+    def lr_schedule(step):
+      return (
+          lr_scdule_inst.value_at(step) * learner_params.optimizer.learning_rate
+      )
+
+    learner_params.optimizer.grad_tx = optax.adam(
+        learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1
+    )
+    # TODO(b/277132394): Add parameterized test for prefix vectorization.
+    learner_params.vectorize_on_repeat_prefix = False
+
+    learner_instance = instantiate(learner_params)
+
+    # Define device mesh.
+    mesh_shape = [1, 2, 1]
+    num_devices = np.prod(mesh_shape)
+    logging.info('num_local_devices: %s', num_devices)
+    mesh_shape = np.arange(num_devices).reshape(mesh_shape)
+
+    grads = NestedMap()
+    grads.lm = NestedMap(
+        w=jnp.asarray(np.random.normal(1.4, 2.0, [1, 2]).astype('float32'))
+    )
+    grads.ffn = jnp.asarray(
+        np.random.normal(1.6, 2.0, [1, 2]).astype('float32')
+    )
+    old_vars = grads.DeepCopy()
+    old_vars.lm.w = jnp.asarray(
+        np.random.normal(1.2, 4.0, [1, 2]).astype('float32')
+    )
+    old_vars.ffn = jnp.asarray(
+        np.random.normal(1.6, 2.0, [1, 2]).astype('float32')
+    )
+    var_weight_hparams = jax.tree_map(
+        lambda v: base_layer.WeightHParams(
+            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
+        ),
+        old_vars,
+    )
+
+    grad_tx = learner_instance.get_grad_tx(var_weight_hparams)
+    # Initialize optimizer
+    opt_states = grad_tx.init(old_vars)
+    logging.info('grad_tx: %s', grad_tx)
+    logging.info('Init state: %s', opt_states)
+    logging.info('var params %s', var_weight_hparams)
+    # Apply sharding with tree_map_params instead of calling init_partition_spec
+    opt_states_pspec = optimizers.partition_params(
+        grad_tx, var_weight_hparams, opt_states
+    )
+    logging.info('opt_states_pspec=%s', opt_states_pspec)
+    # Similar to tf.nest.assert_same_structure(opt_states_pspec, opt_states),
+    # but takes is_leaf arg to treat WeightHParams as a leaf.
+    jax.tree_map(
+        lambda x, y: True,
+        opt_states_pspec,
+        opt_states,
+        is_leaf=lambda x: isinstance(x, base_layer.WeightHParams),
+    )
+
+    with base_layer.JaxContext.new_context():
+      transformed_grads, updated_opt_states = learner_instance.update_states(
+          grads, opt_states, old_vars, var_weight_hparams
+      )
+
+    logging.info('updated_opt_states: %s', updated_opt_states)
+    adam_opt = optax.adam(learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1)
+    updated_grads, updated_state = adam_opt.update(grads, opt_states[2])
+    logging.info('updated_state: %s', updated_state)
+    self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])
+    self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
+
   @parameterized.parameters(
       (0.5, 2.0, True),
       (1.5, 3.0, False),
@@ -246,6 +335,169 @@ class LearnersTest(test_utils.TestCase):
           transformed_grads.lm.ngrammer.ngram_layer.ngram_table[0].emb_var)
       new_grad2 = (
           transformed_grads.lm.ngrammer.ngram_layer.ngram_table[1].emb_var)
+    else:
+      new_grad1 = transformed_grads.lm.ngrammer.ngram_table[0].emb_var
+      new_grad2 = transformed_grads.lm.ngrammer.ngram_table[1].emb_var
+    self.assertAllClose(new_grad1, expected_grad1)
+    self.assertAllClose(new_grad2, expected_grad2)
+    expected_grad_transformer = -lr_multiplier2 * grads.lm.transformer.w
+    new_grad_transformer = transformed_grads.lm.transformer.w
+    expected_grad_ffn = -grads.lm.ffn.k
+    new_grad_ffn = transformed_grads.lm.ffn.k
+    self.assertAllClose(new_grad_transformer, expected_grad_transformer)
+    self.assertAllClose(new_grad_ffn, expected_grad_ffn)
+
+  @parameterized.parameters(
+      (0.5, 2.0, True),
+      (1.5, 3.0, False),
+      (10.0, 0.1, True),
+      (100.0, 2.0, False),
+  )
+  def test_multioptimizer_learner_with_optax_optimizers(
+      self, lr_multiplier1, lr_multiplier2, use_vq_ngrams
+  ):
+    learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
+    learner_p.name = 'learner'
+    learner_p.loss_name = 'loss'
+    learner_p.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    learning_rate = 1.0
+    learner_p.optimizer.grad_tx = optax.sgd(
+        learning_rate=learning_rate, momentum=0.9
+    )
+    learner_p.vectorize_on_repeat_prefix = False
+    learner_p.optimizer.learning_rate = learning_rate
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    aux_p1 = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    aux_p1.grad_tx = optax.sgd(learning_rate=lr_multiplier1, momentum=0.9)
+    aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    aux_p1.learning_rate = lr_multiplier1
+    aux_p2 = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    aux_p2.grad_tx = optax.sgd(learning_rate=lr_multiplier2, momentum=0.9)
+    aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    aux_p2.learning_rate = lr_multiplier2
+
+    learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
+    learner_p.auxiliary_regex = ['.*ngram', '.*transformer']
+    learner_p.auxiliary_names = ['ngram', 'transformer']
+    learner_instance = instantiate(learner_p)
+
+    # Add a single instance optimizer.
+    learner_p = pax_fiddle.Config(learners.Learner)
+    learner_p.name = 'learner'
+    learner_p.loss_name = 'loss'
+    learner_p.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    learning_rate = 1.0
+    learner_p.optimizer.grad_tx = optax.sgd(
+        learning_rate=learning_rate, momentum=0.9
+    )
+    learner_p.optimizer.learning_rate = learning_rate
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    # TODO(b/277132394): Add parameterized test for prefix vectorization.
+    learner_p.vectorize_on_repeat_prefix = False
+    learner_instance_single = instantiate(learner_p)
+
+    # Define device mesh.
+    mesh_shape = [1, 2, 1]
+    num_devices = np.prod(mesh_shape)
+    mesh_shape = np.arange(num_devices).reshape(mesh_shape)
+
+    grads = NestedMap()
+    grads.lm = NestedMap()
+    grads.lm.ngrammer = NestedMap()
+    old_vars = grads.DeepCopy()
+    grad_v1 = jnp.asarray(np.random.normal(1.0, 0.5, [4, 8]).astype('float32'))
+    grad_v2 = jnp.asarray(np.random.normal(1.0, 0.5, [4, 8]).astype('float32'))
+    emb_var1 = jnp.asarray(np.random.normal(1.0, 0.5, [4, 8]).astype('float32'))
+    emb_var2 = jnp.asarray(np.random.normal(1.0, 0.5, [4, 8]).astype('float32'))
+    if use_vq_ngrams:
+      grads.lm.ngrammer.ngram_layer = NestedMap()
+      grads.lm.ngrammer.ngram_layer.ngram_table = [
+          NestedMap(emb_var=grad_v1),
+          NestedMap(emb_var=grad_v2),
+      ]
+      old_vars.lm.ngrammer.ngram_layer = NestedMap()
+      old_vars.lm.ngrammer.ngram_layer.ngram_table = [
+          NestedMap(emb_var=emb_var1),
+          NestedMap(emb_var=emb_var2),
+      ]
+    else:
+      grads.lm.ngrammer.ngram_table = [
+          NestedMap(emb_var=grad_v1),
+          NestedMap(emb_var=grad_v2),
+      ]
+      old_vars.lm.ngrammer.ngram_table = [
+          NestedMap(emb_var=emb_var1),
+          NestedMap(emb_var=emb_var2),
+      ]
+
+    # Create some other keys.
+    grads.lm.transformer = NestedMap(
+        w=jnp.asarray(np.random.normal(1.4, 2.0, [4, 4]).astype('float32'))
+    )
+    old_vars.lm.transformer = NestedMap(
+        w=jnp.asarray(np.random.normal(1.2, 4.0, [4, 4]).astype('float32'))
+    )
+    grads.lm.ffn = NestedMap(
+        k=jnp.asarray(np.random.normal(1.6, 2.0, [4, 4]).astype('float32'))
+    )
+    old_vars.lm.ffn = NestedMap(
+        k=jnp.asarray(np.random.normal(1.3, 2.0, [4, 4]).astype('float32'))
+    )
+
+    var_weight_hparams = jax.tree_map(
+        lambda v: base_layer.WeightHParams(
+            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
+        ),
+        old_vars,
+    )
+    var_weight_hparams.lm.ffn = NestedMap(
+        k=base_layer.WeightHParams(
+            shape=[4, 8],
+            mesh_shape=mesh_shape,
+            tensor_split_dims_mapping=[0, 1],
+        )
+    )
+
+    grad_tx = learner_instance.get_grad_tx(var_weight_hparams)
+    grad_tx_single = learner_instance_single.get_grad_tx(var_weight_hparams)
+    opt_state = grad_tx.init(old_vars)
+    logging.info('opt_state: %s', opt_state)
+    opt_state_single = grad_tx_single.init(old_vars)
+    logging.info('opt_state_single: %s', opt_state_single)
+    partition_spec = optimizers.partition_params(
+        grad_tx, var_weight_hparams=old_vars, opt_states=opt_state
+    )
+
+    partition_spec_single = optimizers.partition_params(
+        grad_tx_single, var_weight_hparams=old_vars, opt_states=opt_state_single
+    )
+    # Assert that the length of partition spec is the same as the total
+    # auxiliary optimizers plus 1 (for the primary optimizer).
+    self.assertLen(
+        partition_spec, len(learner_instance._auxiliary_optimizer_insts) + 1
+    )
+    # MaskedState has inner_state representing the single optimizer state
+    # and the masked states are chained for optimizer and auziliary optimizers.
+    for p in partition_spec:
+      jax.tree_map(
+          asserts.assert_same_structure,
+          partition_spec_single,
+          p.inner_state,
+      )
+    with base_layer.JaxContext.new_context():
+      transformed_grads, _ = learner_instance.update_states(
+          grads, opt_state, old_vars, var_weight_hparams
+      )
+
+    expected_grad1 = -lr_multiplier1 * grad_v1
+    expected_grad2 = -lr_multiplier1 * grad_v2
+    if use_vq_ngrams:
+      new_grad1 = transformed_grads.lm.ngrammer.ngram_layer.ngram_table[
+          0
+      ].emb_var
+      new_grad2 = transformed_grads.lm.ngrammer.ngram_layer.ngram_table[
+          1
+      ].emb_var
     else:
       new_grad1 = transformed_grads.lm.ngrammer.ngram_table[0].emb_var
       new_grad2 = transformed_grads.lm.ngrammer.ngram_table[1].emb_var

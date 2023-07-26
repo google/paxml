@@ -119,9 +119,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   # TODO(pax): loss_name is not used anywhere anymore other than to
   # create a LossAggregator on the task. Consider moving loss_name to the
   # task or having everyone set it through the loss_aggregator.
+  optimizer: optimizers.Optimizer
   loss_name: Optional[str] = None
   stochastic_gradient: Optional[sgf.BaseStochasticGradient] = None
-  optimizer: optimizers.BaseOptimizer = None
   skip_zero_gradients: Optional[bool] = None
   grad_norm_summary: bool = True
   grad_norm_individual_vars: bool = False
@@ -147,7 +147,6 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     )
     module_name = self.name
     NestedMap.CheckKey(module_name)
-    asserts.not_none(self.optimizer)
     self._get_grad_tx = self.optimizer.get_grad_transformation
 
     if not self.vectorize_on_repeat_prefix:
@@ -442,9 +441,7 @@ class MultiOptimizerLearner(Learner):
       all configurations under auxiliary optimizers are ignored.
   """
 
-  auxiliary_optimizers: Sequence[
-      pax_fiddle.Config[optimizers.BaseOptimizer]
-  ] = ()
+  auxiliary_optimizers: Sequence[pax_fiddle.Config[optimizers.Optimizer]] = ()
   auxiliary_regex: Sequence[str] = ()
   auxiliary_names: Sequence[str] = ()
   apply_separate_scaling: bool = False
@@ -470,6 +467,12 @@ class MultiOptimizerLearner(Learner):
     self._auxiliary_grad_tx_fn = [
         opt.get_grad_transformation for opt in self._auxiliary_optimizer_insts
     ]
+
+    # Confirm that auxiliary optimizers and main optimizer are of the same type.
+    # i.e. BaseOptimizer and OptaxOptimizer instances cannot be mixed together.
+    if isinstance(self.optimizer, optimizers.OptaxOptimizer):
+      for aux_op in self._auxiliary_optimizer_insts:
+        asserts.instance(aux_op, optimizers.OptaxOptimizer)
 
   def plot_learning_rate(self, step: int) -> None:
     learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
@@ -539,10 +542,17 @@ class MultiOptimizerLearner(Learner):
     optimizer_chain = []
     optimizer_mask, default_mask = self.get_masks(var_weight_hparams)
 
+    if isinstance(self.optimizer, optimizers.OptaxOptimizer):
+      use_optax_gradient_transforms = True
+    else:
+      use_optax_gradient_transforms = False
+
     for mask, grad_tx_fn in zip(optimizer_mask, self._auxiliary_grad_tx_fn):
       optimizer_chain.append(
           optimizers.sharded_masked(
-              grad_tx_fn(var_weight_hparams, include_ema=False), mask
+              grad_tx_fn(var_weight_hparams, include_ema=False),
+              mask,
+              use_custom_masked=use_optax_gradient_transforms,
           )
       )
 
@@ -551,6 +561,7 @@ class MultiOptimizerLearner(Learner):
         optimizers.sharded_masked(
             self._grad_tx_fn(var_weight_hparams, include_ema=False),
             default_mask,
+            use_custom_masked=use_optax_gradient_transforms,
         ),
     )
 
@@ -558,10 +569,17 @@ class MultiOptimizerLearner(Learner):
     op = self.optimizer
     if op.ema_decay > 0.0:
       optimizer_chain.insert(
-          0, optimizers.apply_ema_weights(decay=op.ema_decay)
+          0,
+          optimizers.apply_ema_weights(
+              decay=op.ema_decay,
+              use_optax_gradient_transformations=use_optax_gradient_transforms,
+          ),
       )
 
-    grad_tx = optimizers.sharded_chain(*optimizer_chain)
+    if use_optax_gradient_transforms:
+      grad_tx = optax.chain(*optimizer_chain)
+    else:
+      grad_tx = optimizers.sharded_chain(*optimizer_chain)
     # Finally, apply vectorization on prefix dims.
     if self.vectorize_on_repeat_prefix:
       grad_tx = opt_vec.get_transformations_with_vectorized_repeat_prefix(
