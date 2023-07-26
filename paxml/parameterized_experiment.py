@@ -42,7 +42,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
         return pax_fiddle.Config(
             ParameterizedExperiment,
             task=pax_fiddle.Config(tasks_lib.SingleTask, model=model_cfg),
-            train_dataset=train_dataset_cfg,
+            training_dataset=train_dataset_cfg,
             eval_datasets=[eval_dataset_cfg],
         )
 
