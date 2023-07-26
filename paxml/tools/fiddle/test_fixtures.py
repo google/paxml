@@ -23,6 +23,7 @@ from paxml import base_experiment
 from paxml import base_task
 from paxml import parameterized_experiment
 from paxml import tasks_lib
+from paxml.experimental import baseline_experiment
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
@@ -167,8 +168,8 @@ class SampleExperimentCustomObject(SampleExperiment):
     return task
 
 
-@dataclasses.dataclass(frozen=True)
-class SampleExperimentNewBaseline:
+@dataclasses.dataclass
+class SampleExperimentNewBaseline(baseline_experiment.BaselineExperiment):
   """Generated baseline code for SampleExperiment.
 
   This is inlined here so we can refer to it at runtime for the derived
@@ -177,8 +178,7 @@ class SampleExperimentNewBaseline:
 
   foo_setting: int = 4123
   derived_setting: int = 8246
-  # Note: Manually fixed the line below to use default_factory; will fix codegen
-  # output soon.
+  # Note: Manually fixed to add type argument for list[].
   derived_list_setting: list[int] = dataclasses.field(
       default_factory=lambda: [4123, 8246]
   )

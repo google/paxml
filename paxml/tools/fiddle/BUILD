@@ -49,6 +49,7 @@ pytype_strict_library(
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
+        "//paxml/experimental:baseline_experiment",
         "//praxis:pax_fiddle",
     ],
 )
@@ -82,6 +83,7 @@ pytype_strict_library(
         "//paxml:base_task",
         "//paxml:parameterized_experiment",
         "//paxml:tasks_lib",
+        "//paxml/experimental:baseline_experiment",
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
