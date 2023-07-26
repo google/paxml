@@ -307,18 +307,23 @@ class SingleTaskDecodeProgram(programs.Program):
     processed_decodes = []
     all_summary_tensors = collections.defaultdict(list)
     # profile xprof for decoding.
+    profiler = None
     if self._task.decode.profiler_num_steps > 0:
       profiler = profiling.Profiler(
           num_steps=self._task.decode.profiler_num_steps,
           min_duration_sec=self._task.decode.profiler_min_duration_sec,
           max_num_hosts=self._task.decode.profiler_max_num_hosts,
       )
-      profiler.capture_async()
 
     step_num = 0
     # self._num_steps < 0 indicates running until input out of range.
     while self._num_steps < 0 or step_num < self._num_steps:
       step_num += 1
+      if (
+          profiler is not None
+          and step_num == self._task.decode.profiler_capture_step
+      ):
+        profiler.capture_async()
       # Instrument decode step.
       with jax.profiler.StepTraceAnnotation('decode', step_num=step_num):
         try:

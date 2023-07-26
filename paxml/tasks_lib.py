@@ -1255,6 +1255,7 @@ class SingleTask(base_task.BaseTask):
       profiler_min_duration_sec: The minimum duration to be captured by the
         profiler in seconds. This is used when the estimate step duration times
         profiler_num_steps is smaller than this value.
+      profiler_capture_step: The step index at which to capture a code profile.
       profiler_max_num_hosts: If set, limit profiling only on the specified
         number of hosts.
     """
@@ -1263,6 +1264,7 @@ class SingleTask(base_task.BaseTask):
     random_seed: int = 1234
     profiler_num_steps: int = 0
     profiler_min_duration_sec: float = 1.0
+    profiler_capture_step: int = 1
     profiler_max_num_hosts: Optional[int] = None
 
   DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
