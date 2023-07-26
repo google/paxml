@@ -108,6 +108,7 @@ pytype_strict_library(
         # Implicit fiddle dependency.
         # Implicit fiddle.daglish dependency.
         # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
+        # Implicit fiddle._src.codegen.auto_config.import_manager_wrapper dependency.
         # Implicit fiddle.codegen.auto_config.experimental_top_level_api dependency.
         "//paxml:base_experiment",
         "//paxml:tasks_lib",

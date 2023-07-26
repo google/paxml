@@ -21,26 +21,16 @@ input specs), including all of that would likely be too verbose.
 """
 
 import dataclasses
-import typing
 from typing import Any, Dict, Optional, Type
 
 import fiddle as fdl
 from fiddle import daglish
 from fiddle._src.codegen.auto_config import code_ir
+from fiddle._src.codegen.auto_config import import_manager_wrapper
 from fiddle.codegen.auto_config import experimental_top_level_api
 from paxml import base_experiment
 from paxml import tasks_lib
 from paxml.tools.fiddle import codegen_pax_code_ir
-
-
-def _name_to_attribute_expression(name: str) -> code_ir.AttributeExpression:
-  if "." not in name:
-    raise ValueError(f"Could not parse symbol import {name}")
-  base, *parts = name.split(".")
-  value = code_ir.ModuleReference(code_ir.Name(base))
-  for part in parts:
-    value = code_ir.AttributeExpression(value, part)
-  return typing.cast(code_ir.AttributeExpression, value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,9 +88,11 @@ class InitCheckpointRulesFromOtherTask(experimental_top_level_api.CodegenPass):
           return value
 
       # Replace task and model with refs.
-      name = task.import_manager.add(init_checkpoint_experiments[key])
+      experiment_symbol = import_manager_wrapper.add(
+          init_checkpoint_experiments[key], task.import_manager
+      )
       experiment_expr = code_ir.SymbolOrFixtureCall(
-          symbol_expression=_name_to_attribute_expression(name),
+          symbol_expression=experiment_symbol,
           positional_arg_expressions=[],
           arg_expressions={},
       )
