@@ -9,7 +9,7 @@ jax==0.4.7
 lingvo==0.12.6
 numpy~=1.24.2
 orbax==0.1.6
-praxis==0.4.0
+praxis==1.0.0
 protobuf==3.19.6
 pyglove==0.3.0
 seqio==0.0.15
