@@ -90,6 +90,22 @@ class CodegenExamplesTest(absltest.TestCase):
     )
 
 
+class CodegenErrorsTest(absltest.TestCase):
+
+  def test_friendly_message_custom_objects(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Custom objects.*Custom"
+        r" objects:\n.*task.model.my_setting.*test_fixtures.*task",
+    ):
+      codegen.codegen_baseline_from_legacy(
+          test_fixtures.SampleExperimentCustomObject,
+          has_train_dataset=False,
+          has_input_specs_provider=False,
+          add_boilerplate=False,
+      )
+
+
 class CodegenOutputsTest(absltest.TestCase):
   """Tests entire output for codegen."""
 

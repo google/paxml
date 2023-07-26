@@ -159,6 +159,14 @@ class SampleExperimentWithInitFromCheckpointRules(SampleExperiment):
     return task
 
 
+class SampleExperimentCustomObject(SampleExperiment):
+
+  def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
+    task = super().task()
+    task.model.my_setting = object()
+    return task
+
+
 @dataclasses.dataclass(frozen=True)
 class SampleExperimentNewBaseline:
   """Generated baseline code for SampleExperiment.

@@ -45,6 +45,7 @@ pytype_strict_library(
         # Implicit fiddle.experimental.visualize dependency.
         # Implicit fiddle.extensions.jax dependency.
         # Implicit fiddle.extensions.seqio dependency.
+        # Implicit fiddle.validation dependency.
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",

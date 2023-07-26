@@ -26,6 +26,7 @@ import fiddle as fdl
 from fiddle import daglish
 from fiddle import diffing
 from fiddle import selectors
+from fiddle import validation
 from fiddle._src.codegen.auto_config import code_ir
 from fiddle._src.codegen.auto_config import ir_to_cst
 from fiddle.codegen import codegen
@@ -476,6 +477,15 @@ def codegen_baseline_from_legacy(
       normalizer=normalizer,
       has_train_dataset=has_train_dataset,
       has_input_specs_provider=has_input_specs_provider,
+  )
+  # Check for custom objects, but without tracers.
+  validation.check_no_custom_objects(
+      make_parameterized_experiment.from_legacy(
+          experiment_cls=experiment_cls,
+          normalizer=normalizer,
+          has_train_dataset=has_train_dataset,
+          has_input_specs_provider=has_input_specs_provider,
+      )
   )
 
   # If factor_out_sharding_annotations is set, save some A/B configs to diff the
