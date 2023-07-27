@@ -79,6 +79,7 @@ def pax_targets(
         smoke_test_py_test_rule = py_strict_test,
         smoke_test_args = None,
         smoke_test_kwargs = None,
+        # Internal enable fragmented build argument, toggled to True.
         main_src = "//paxml:main.py"):
     """Macro to define a collection of Pax targets with custom dependencies.
 
@@ -140,7 +141,7 @@ def pax_targets(
     export_binary(
         name = main_name,
         main = main_src,
-        # Internal enable fragmented build argument, toggled to True.
+        # Internal enable fragmented build argument.
         py_binary_rule = pytype_binary,
         deps = [
             "//paxml:main_lib",
@@ -170,7 +171,7 @@ def pax_targets(
         export_binary(
             name = main_name,
             main = main_src,
-            # Internal enable fragmented build argument, toggled to True.
+            # Internal enable fragmented build argument.
             py_binary_rule = pytype_binary,
             deps = [
                 "//paxml:main_lib",
