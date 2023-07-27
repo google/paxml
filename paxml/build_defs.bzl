@@ -17,6 +17,7 @@
 
 load("//paxml:paxml.bzl", "py_strict_test")
 load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_binary")
+# Internal fragmented binary bazel rule.
 
 def _shell_quote(s):
     """Copy of bazel-skylib's shell.quote.
@@ -139,6 +140,7 @@ def pax_targets(
     export_binary(
         name = main_name,
         main = main_src,
+        # Internal enable fragmented build argument, toggled to True.
         py_binary_rule = pytype_binary,
         deps = [
             "//paxml:main_lib",
@@ -168,6 +170,7 @@ def pax_targets(
         export_binary(
             name = main_name,
             main = main_src,
+            # Internal enable fragmented build argument, toggled to True.
             py_binary_rule = pytype_binary,
             deps = [
                 "//paxml:main_lib",
@@ -326,6 +329,7 @@ def export_binary(
         deps,
         py_binary_rule,
         exp_sources,
+        # Internal arguments for fragmented build.
         **kwargs):
     """Define an existing `py_binary()` at the current package.
 
@@ -339,6 +343,8 @@ def export_binary(
     """
     main_copied = "%s.py" % name
     _copy_src(output_name = main_copied, source_target = main, exp_sources = exp_sources)
+
+    # Internal implementation for fragmented build.
 
     # Main script.
     py_binary_rule(
