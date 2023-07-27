@@ -54,6 +54,8 @@ PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 RANDOM = base_layer.RANDOM
 PARAMS = base_layer.PARAMS
+OVERWRITE_WITH_GRADIENT = \
+    base_layer.WeightHParamsCollection.OVERWRITE_WITH_GRADIENT
 
 instantiate = base_hyperparams.instantiate
 
@@ -199,6 +201,43 @@ class TestModel03(base_model.BaseModel):
         ),
         per_example_out,
     )
+
+class TestModel04(base_model.BaseModel):
+  """Simple model for testing overwrite_with_gradient params.
+
+  Attributes:
+    input_dims: Depth of the input.
+    output_dims: Depth of the output.
+  """
+  input_dims: int = 0
+  output_dims: int = 0
+
+  def setup(self) -> None:
+    self.create_variable(
+        'var01',
+        base_layer.WeightHParams(shape=[self.input_dims, self.output_dims]),
+    )
+    self.create_variable(
+        'var02',
+        base_layer.WeightHParams(shape=[1],
+                                 collections=[OVERWRITE_WITH_GRADIENT]),
+    )
+
+  def compute_predictions(self, input_batch: NestedMap) -> JTensor:
+    # Intentionaly multiply the var02 with inputs[0,0] to make sure that the
+    # gradient of it returns inputs[0,0]*B*O, where [B,O] is the output shape.
+    # Then, we can easily check if the new var02 is overwritten by its last-step
+    # gradient.
+    ret = jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01) + \
+          input_batch.inputs[0][0] * self.theta.var02[0]
+    return ret
+
+  def compute_loss(
+      self, predictions: JTensor, input_batch: NestedMap
+  ) -> tuple[NestedMap, NestedMap]:
+    loss = jnp.sum(predictions)
+    per_example_out = NestedMap()
+    return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
 
 
 class BaseTaskTest(test_utils.TestCase):
@@ -372,6 +411,58 @@ class BaseTaskTest(test_utils.TestCase):
       replicated_mdl_states, _ = p_train_step(
           replicated_mdl_states, train_prng_key, mdl_inputs
       )
+
+  def test_model_with_overwrite_with_gradient_params(self):
+    # Set up the model.
+    input_dims = 52
+    output_dims = 32
+    decay = 0.9999
+
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel04, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+
+    lp = task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.learning_rate = 5.0
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+
+    lp.optimizer.ema_decay = decay
+
+    # Create the mdl.
+    jax_task = instantiate(task_p)
+    prng_key = jax.random.PRNGKey(12345)
+    prng_key, init_key = jax.random.split(prng_key)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
+        jax_task, init_key, sample_inputs)
+
+    def train_step(states, prng_key, inputs):
+      return trainer_lib.train_step_single_learner(jax_task, states, prng_key,
+                                                   inputs)
+
+    num_devices = jax.local_device_count()
+    batch_size = 4
+    prng_key, train_key = jax.random.split(prng_key, 2)
+    train_prng_key = jax.random.split(train_key, num=num_devices)
+
+    p_train_step = jax.pmap(
+        train_step, donate_argnums=(0,), axis_name=PMAP_PARALLEL_AXIS_NAME)
+
+    for step in range(10):
+      mdl_inputs = NestedMap(inputs=np.random.normal(
+          size=[num_devices, batch_size, input_dims]).astype(np.float32),)
+    
+      replicated_mdl_states, _ = p_train_step(
+          replicated_mdl_states, train_prng_key, mdl_inputs
+      )
+      new_overwrite_param = replicated_mdl_states.mdl_vars[PARAMS]['var02'][0]
+      expected = np.mean(mdl_inputs.inputs[:, 0, 0]) * batch_size * output_dims
+      # Check if the updated params equal to their gradients.
+      self.assertAllClose(new_overwrite_param, expected)
 
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):

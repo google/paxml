@@ -1130,8 +1130,15 @@ def train_step_single_learner(
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         var_weight_hparams, excluded_for_opt
     )
+    # Exclude the overwrite_with_gradient params, since they don't go through
+    # the optimizer and they don't have corresponding opt states.
+    overwrite_var_mask = \
+        tasks_lib.get_overwrite_with_gradient_var_mask(var_weight_hparams)
+    normal_grads = tasks_lib.filter_vars_for_grad_or_opt(
+        grads, overwrite_var_mask
+    )
     transformed_grads, new_opt_states = learner.update_states(
-        grads, states.opt_states[0], vars_with_opt, wps_with_opt
+        normal_grads, states.opt_states[0], vars_with_opt, wps_with_opt
     )
     vars_with_opt = learner.apply_gradient(
         vars_with_opt, transformed_grads, wps_with_opt
@@ -1141,6 +1148,13 @@ def train_step_single_learner(
         excluded_for_grad,
         mdl_vars,
         vars_with_opt,
+    )
+    # Update 'overwrite_with_gradient' params.
+    mdl_vars = jax.tree_map(
+        lambda e, new, old: new if e else old,
+        overwrite_var_mask,
+        grads,
+        mdl_vars,
     )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
