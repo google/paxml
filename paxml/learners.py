@@ -21,6 +21,7 @@ import dataclasses
 import re
 from typing import Any, Optional, Sequence, Tuple, Union
 
+from absl import logging
 import jax
 from jax import numpy as jnp
 import optax
@@ -114,6 +115,8 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     keep_optimizer_state_for_excluded_vars: If True, optimizer states will be
       kept for bprop-excluded vars. This is to support some legacy use cases
       with custom trainers.
+    scale_update_by_var_norm: Whether or not to scale the update by the initial
+      variable norm.
   """
 
   # TODO(pax): loss_name is not used anywhere anymore other than to
@@ -139,6 +142,8 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   )
   repeat_prefix_sep: str = '#'
   keep_optimizer_state_for_excluded_vars: bool = False
+  scale_update_by_var_norm: bool = False
+
   _get_grad_tx: Any = dataclasses.field(init=False, repr=False)
 
   def __post_init__(self):
@@ -402,9 +407,21 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     # TODO(yonghui): implement skip_zero_gradients.
     # TODO(yonghui): implement numerical checks.
 
-    def _adjust_var(old_var, transformed_grad, is_learnable):
+    def _adjust_var(old_var, transformed_grad, is_learnable, var_wh, var_key):
       if is_learnable:
-        return old_var + transformed_grad
+        if self.scale_update_by_var_norm:
+          if len(var_wh.shape) <= 1:
+            # This is scalar var, which we don't rescale the update.
+            target_magnitude = 1.0
+            logging.info('var: %s is a scalar', var_key)
+          else:
+            target_magnitude = base_layer.var_init_scale(var_wh)
+          logging.info(
+              'var: %s, target_magnitude: %f', var_key, target_magnitude
+          )
+        else:
+          target_magnitude = 1.0
+        return old_var + transformed_grad * target_magnitude
       else:
         return old_var
 
@@ -412,8 +429,15 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         lambda x: not base_layer.var_not_trainable(x), var_weight_hparams
     )
 
+    var_keys = py_utils.extract_prefixed_keys_from_nested_map(old_vars)
+
     return jax.tree_util.tree_map(
-        _adjust_var, old_vars, transformed_grads, var_is_learnable
+        _adjust_var,
+        old_vars,
+        transformed_grads,
+        var_is_learnable,
+        var_weight_hparams,
+        var_keys,
     )
     # TODO(yonghui): export gradient / variable summaries.
 

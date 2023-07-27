@@ -797,6 +797,63 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(update.b,
                         jnp.zeros_like(variables.b) + jnp.sum(variables.b))
 
+  def test_scale_update_by_var_norm(self):
+    def _opt_init(params):
+      # Reduction over each variable. Behavior will depend on vectorization.
+      return jax.tree_map(jnp.sum, params)
+
+    def _opt_update(updates, state, params):
+      del params
+      return jax.tree_map(lambda u, s: u + s, updates, state), state
+
+    def _init_partition_spec(var_hparams):
+      def _init_one(p):
+        assert not p.repeat_prefix
+        return p
+
+      return jax.tree_map(_init_one, var_hparams)
+
+    class TestOptimizer(optimizers.BaseOptimizer):
+
+      def _get_raw_grad_transformation(self, lr):
+        return optimizers.ShardedGradientTransformation(
+            init=_opt_init,
+            update=_opt_update,
+            init_partition_spec=_init_partition_spec,
+        )
+
+    learner_p = pax_fiddle.Config(
+        learners.Learner,
+        name='learner',
+        loss_name='loss',
+        grad_norm_individual_vars=True,
+        scale_update_by_var_norm=True,
+    )
+    learner_p.optimizer = pax_fiddle.Config(
+        TestOptimizer,
+        learning_rate=1.0,
+        lr_schedule=pax_fiddle.Config(schedules.Constant),
+    )
+
+    learner_instance = instantiate(learner_p)
+
+    grads = NestedMap(
+        a=jnp.array([[1, 2], [3, 4]], dtype=jnp.float32),
+        b=jnp.array([1, 2], dtype=jnp.float32),
+        c=jnp.array([[1, 2], [3, 4]], dtype=jnp.float32),
+    )
+    variables = grads.copy()
+    a_var_param = base_layer.WeightHParams((2, 2))
+    a_var_param.init = base_layer.WeightInit('gaussian', 0.003)
+    b_var_param = base_layer.WeightHParams((2,))
+    c_var_param = base_layer.WeightHParams(())
+    c_var_param.repeat_prefix = [2, 2]
+    c_var_param.repeat_prefix_split_dims_mapping = [('data', 'mdl'), None]
+    var_hparams = NestedMap(a=a_var_param, b=b_var_param, c=c_var_param)
+
+    with base_layer.JaxContext.new_context():
+      learner_instance.apply_gradient(variables, grads, var_hparams)
+
   def test_vectorized_prefix_with_global_summary(self):
 
     def _opt_init(params):

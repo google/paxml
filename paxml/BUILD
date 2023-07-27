@@ -284,6 +284,7 @@ pytype_strict_library(
     srcs = ["learners.py"],
     deps = [
         ":sgf",
+        # Implicit absl.logging dependency.
         # Implicit jax dependency.
         # Implicit optax dependency.
         "//praxis:asserts",
