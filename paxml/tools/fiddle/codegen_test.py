@@ -82,7 +82,7 @@ class CodegenExamplesTest(absltest.TestCase):
     @dataclasses.dataclass
     class Experiment(baseline_experiment.BaselineExperiment):
 
-      def config_fixture(self):
+      def config_fixture(self) -> fdl.Config[seqio.SentencePieceVocabulary]:
         return fdl.Config(seqio.SentencePieceVocabulary,
             sentencepiece_model_file='/path/to/vocab.txt')
     """
@@ -133,13 +133,15 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
@@ -172,13 +174,15 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
             out=['foo_axis', 'bar_axis']),
@@ -213,13 +217,15 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         sublayers = [pax_fiddle.PaxConfig(test_fixtures.TestLayer,
             activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
             out=['foo_axis', 'bar_axis'])),
@@ -259,13 +265,15 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
@@ -301,13 +309,15 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting,
@@ -349,23 +359,27 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, training_dataset=self.training_dataset_fixture(),
             eval_datasets=self.eval_datasets_fixture())
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def training_dataset_fixture(self):
+      def training_dataset_fixture(self) ->
+          pax_fiddle.PaxConfig[base_input.BaseInput]:
         return pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=1024,
             is_training=True)
 
-      def eval_datasets_fixture(self):
+      def eval_datasets_fixture(self) ->
+          list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
         return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=128)]
     """
     self.assertEqual(
@@ -395,19 +409,22 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[],
             decoder_datasets=self.decoder_datasets_fixture())
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def decoder_datasets_fixture(self):
+      def decoder_datasets_fixture(self) ->
+          list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
         return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256)]
     """
     self.assertEqual(
@@ -435,19 +452,22 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[],
             input_specs_provider=self.input_specs_provider_fixture())
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def input_specs_provider_fixture(self):
+      def input_specs_provider_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleInputSpecsProvider]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider)
     """
     self.assertEqual(
@@ -476,7 +496,8 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
             init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -484,12 +505,13 @@ class CodegenOutputsTest(absltest.TestCase):
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) ->
+          pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def init_from_checkpoint_rules_fixture(self):
+      def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
         task_p = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=4123, derived_setting=8246, derived_list_setting=[4123,
@@ -531,7 +553,8 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
             init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -539,12 +562,12 @@ class CodegenOutputsTest(absltest.TestCase):
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) -> pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def init_from_checkpoint_rules_fixture(self):
+      def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
         base = test_fixtures.SampleExperimentWithInputSpecsProvider()
         checkpoint_loading_rules = pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules,
             task_p=base.task(), load_rules=[('(.*)', '{}')], safe_load=True,
@@ -584,7 +607,8 @@ class CodegenOutputsTest(absltest.TestCase):
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4123, 8246])
 
-      def experiment_fixture(self):
+      def experiment_fixture(self) ->
+          pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
         init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=self.model_fixture(),
@@ -592,15 +616,15 @@ class CodegenOutputsTest(absltest.TestCase):
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment, task=task,
         eval_datasets=[])
 
-      def model_fixture(self):
+      def model_fixture(self) -> pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel, my_setting=self.foo_setting, derived_setting=self.derived_setting,
         derived_list_setting=self.derived_list_setting)
 
-      def pretrain_task_fixture(self):
+      def pretrain_task_fixture(self) -> pax_fiddle.PaxConfig[tasks_lib.SingleTask]:
         return pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=pax_fiddle.PaxConfig(test_fixtures.SampleModel, my_setting=4123, derived_setting=8246, derived_list_setting=[4123,
         8246]))
 
-      def init_from_checkpoint_rules_fixture(self):
+      def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
         checkpoint_loading_rules = pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules, task_p=self.pretrain_task_fixture(), load_rules=[('(.*)', '{}')], safe_load=True, ignore_rules=[], step=532000,
         input_specs_provider_p=pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider))
         return {'/path/to/my/checkpoint': checkpoint_loading_rules}
