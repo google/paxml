@@ -796,6 +796,7 @@ def get_excluded_var_mask_for_grad_or_opt(
     var_weight_hparams: NestedJTensor,
     learner: learners_lib.Learner,
     mask_all_non_trainable: bool,
+    exclude_fp8: bool = False,
 ) -> NestedMap:
   """Returns whether each var should be excluded for grad/optimizer."""
   if learner.keep_optimizer_state_for_excluded_vars:
@@ -811,9 +812,10 @@ def get_excluded_var_mask_for_grad_or_opt(
     excluded_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_exclusion
     )
-  if mask_all_non_trainable:
+  if mask_all_non_trainable or exclude_fp8:
     excluded_for_grad = jax.tree_util.tree_map(
-        lambda x, e: base_layer.var_not_trainable(x) or e,
+        lambda x, e: ((exclude_fp8 and base_layer.var_fp8(x)) or
+                      base_layer.var_not_trainable(x) or e),
         var_weight_hparams,
         excluded_for_grad,
     )
@@ -826,8 +828,17 @@ def get_excluded_var_mask_for_opt(
 ) -> NestedMap:
   """Returns whether each var should be excluded for optimizer."""
   return get_excluded_var_mask_for_grad_or_opt(
-      var_weight_hparams, learner, learner.optimizer.ema_decay == 0.0
+      var_weight_hparams, learner, learner.optimizer.ema_decay == 0.0,
+      exclude_fp8=True
   )
+
+
+def get_fp8_var_mask(
+    var_weight_hparams: NestedJTensor,
+) -> NestedMap:
+  """Returns whether each var is in fp8_params collection."""
+  return jax.tree_util.tree_map(lambda x: base_layer.var_fp8(x),
+                                var_weight_hparams)
 
 
 def get_excluded_var_mask_for_grad(

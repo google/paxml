@@ -200,6 +200,41 @@ class TestModel03(base_model.BaseModel):
         per_example_out,
     )
 
+class TestModel04(base_model.BaseModel):
+  """Simple model for testing fp8 params.
+
+  Attributes:
+    input_dims: Depth of the input.
+    output_dims: Depth of the output.
+  """
+  input_dims: int = 0
+  output_dims: int = 0
+
+  def setup(self) -> None:
+    self.create_variable(
+        'var01',
+        base_layer.WeightHParams(shape=[self.input_dims, self.output_dims]),
+    )
+    self.create_variable(
+        'fp8_var',
+        base_layer.WeightHParams(shape=[1], collections=['fp8_params']),
+    )
+
+  def compute_predictions(self, input_batch: NestedMap) -> JTensor:
+    # Multiply the fp8_var with 'input_batch.inputs[0][0]' to manipulate its
+    # gradient. Then, we can check if the gradient is used to update the old
+    # fp8_var by simple replacing.
+    ret = jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01) + \
+          input_batch.inputs[0][0] * self.theta.fp8_var[0]
+    return ret
+
+  def compute_loss(
+      self, predictions: JTensor, input_batch: NestedMap
+  ) -> tuple[NestedMap, NestedMap]:
+    loss = jnp.sum(predictions)
+    per_example_out = NestedMap()
+    return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
+
 
 class BaseTaskTest(test_utils.TestCase):
 
@@ -372,6 +407,58 @@ class BaseTaskTest(test_utils.TestCase):
       replicated_mdl_states, _ = p_train_step(
           replicated_mdl_states, train_prng_key, mdl_inputs
       )
+
+  def test_model_with_fp8_params(self):
+    # Set up the model.
+    input_dims = 52
+    output_dims = 32
+    decay = 0.9999
+
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel04, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+
+    lp = task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.learning_rate = 5.0
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+
+    lp.optimizer.ema_decay = decay
+
+    # Create the mdl.
+    jax_task = instantiate(task_p)
+    prng_key = jax.random.PRNGKey(12345)
+    prng_key, init_key = jax.random.split(prng_key)
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
+    replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
+        jax_task, init_key, sample_inputs)
+
+    def train_step(states, prng_key, inputs):
+      return trainer_lib.train_step_single_learner(jax_task, states, prng_key,
+                                                   inputs)
+
+    num_devices = jax.local_device_count()
+    batch_size = 4
+    prng_key, train_key = jax.random.split(prng_key, 2)
+    train_prng_key = jax.random.split(train_key, num=num_devices)
+
+    p_train_step = jax.pmap(
+        train_step, donate_argnums=(0,), axis_name=PMAP_PARALLEL_AXIS_NAME)
+
+    # Train the model for one single step.
+    for step in range(10):
+      mdl_inputs = NestedMap(inputs=np.random.normal(
+          size=[num_devices, batch_size, input_dims]).astype(np.float32),)
+    
+      replicated_mdl_states, _ = p_train_step(
+          replicated_mdl_states, train_prng_key, mdl_inputs
+      )
+      new_fp8_param = replicated_mdl_states.mdl_vars[PARAMS]['fp8_var'][0]
+      expected = np.mean(mdl_inputs.inputs[:, 0, 0]) * batch_size * output_dims
+      self.assertAllClose(new_fp8_param, expected)
 
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):
