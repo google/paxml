@@ -24,6 +24,7 @@ from absl.testing import absltest
 import fiddle as fdl
 from paxml import parameterized_experiment
 from paxml.tools.fiddle import config_normalization
+from paxml.tools.fiddle import make_parameterized_experiment
 from paxml.tools.fiddle import test_fixtures
 from praxis import pax_fiddle
 
@@ -108,6 +109,31 @@ class ConfigNormalizationTest(absltest.TestCase):
         "activation_split_dims_mapping",
         fdl.ordered_arguments(normalized.task.model.sublayers[0]),
     )
+
+  def test_removes_eval_datasets(self):
+    config = make_parameterized_experiment.from_legacy(
+        test_fixtures.SampleExperimentWithDatasets,
+        normalizer=config_normalization.noop_normalizer(),
+        has_train_dataset=False,
+    )
+    self.assertIn("eval_datasets", fdl.ordered_arguments(config))
+    normalized = config_normalization.ConfigNormalizer(
+        remove_eval_datasets=True
+    )(config)
+    self.assertNotIn("eval_datasets", fdl.ordered_arguments(normalized))
+
+  def test_removes_decoder_datasets(self):
+    config = make_parameterized_experiment.from_legacy(
+        test_fixtures.SampleExperimentWithDecoderDatasets,
+        normalizer=config_normalization.noop_normalizer(),
+        has_train_dataset=False,
+        has_input_specs_provider=False,
+    )
+    self.assertIn("decoder_datasets", fdl.ordered_arguments(config))
+    normalized = config_normalization.ConfigNormalizer(
+        remove_decoder_datasets=True
+    )(config)
+    self.assertNotIn("decoder_datasets", fdl.ordered_arguments(normalized))
 
 
 if __name__ == "__main__":

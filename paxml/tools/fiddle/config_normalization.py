@@ -91,6 +91,8 @@ class ExperimentNormalizer:
 
   task_normalizer: TaskNormalizer
   dataset_normalizer: DatasetNormalizer
+  remove_eval_datasets: bool
+  remove_decoder_datasets: bool
 
   def __call__(
       self,
@@ -106,16 +108,23 @@ class ExperimentNormalizer:
       new_kwargs["training_dataset"] = self.dataset_normalizer(
           experiment_config.training_dataset
       )
-    if "eval_datasets" in kwargs:
+    # Note: The below just skips the normalizer for `remove_eval_datasets`, we
+    # have to actually remove it below.
+    if "eval_datasets" in kwargs and not self.remove_eval_datasets:
       new_kwargs["eval_datasets"] = self.dataset_normalizer(
           experiment_config.eval_datasets
       )
-    if "decoder_datasets" in kwargs:
+    if "decoder_datasets" in kwargs and not self.remove_decoder_datasets:
       new_kwargs["decoder_datasets"] = self.dataset_normalizer(
           experiment_config.decoder_datasets
       )
 
-    return fdl.copy_with(experiment_config, **new_kwargs)
+    result = fdl.copy_with(experiment_config, **new_kwargs)
+    if "eval_datasets" in kwargs and self.remove_eval_datasets:
+      del result.eval_datasets
+    if "decoder_datasets" in kwargs and self.remove_decoder_datasets:
+      del result.decoder_datasets
+    return result
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,6 +155,10 @@ class ConfigNormalizer:
       custom objects, only Fiddle buildables and primitives. However, if you
       have a better way of configuring SeqIO objects than using the global
       registry, please use that.
+    remove_eval_datasets: Whether to remove/clear eval_datasets, even if they
+      exist.
+    remove_decoder_datasets: Whether to remove/clear decoder_datasets, even if
+      they exist.
   """
 
   remove_defaults: bool = True
@@ -153,12 +166,16 @@ class ConfigNormalizer:
   remove_sharding_annotations: bool = False
   unshare_sharding_config: bool = True
   convert_seqio_task_objects: bool = True
+  remove_eval_datasets: bool = False
+  remove_decoder_datasets: bool = False
 
   @auto_config.auto_config
   def experiment_normalizer(self):
     return ExperimentNormalizer(
         task_normalizer=self.task_normalizer(),
         dataset_normalizer=self.dataset_normalizer(),
+        remove_eval_datasets=self.remove_eval_datasets,
+        remove_decoder_datasets=self.remove_decoder_datasets,
     )
 
   @auto_config.auto_config

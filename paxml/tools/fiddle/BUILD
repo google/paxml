@@ -206,6 +206,7 @@ pytype_strict_test(
     srcs = ["config_normalization_test.py"],
     deps = [
         ":config_normalization",
+        ":make_parameterized_experiment",
         ":test_fixtures",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit fiddle dependency.

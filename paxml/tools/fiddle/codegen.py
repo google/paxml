@@ -381,16 +381,14 @@ def code_generator_config(
 def codegen_baseline_from_legacy(
     experiment_cls: Type[base_experiment.BaseExperiment],
     *,
-    factor_out_sharding_annotations: bool = True,
-    unshare_sharding_config: bool = True,
-    remove_defaults: bool = True,
-    lowercase_highlevel_settings: bool = True,
     has_train_dataset: bool = True,
     has_input_specs_provider: bool = True,
-    init_checkpoint_experiments: Optional[
-        Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
-    ] = None,
-    init_checkpoint_experiments_strict: bool = True,
+    unshare_sharding_config: bool = True,
+    remove_defaults: bool = True,
+    remove_eval_datasets: bool = False,
+    remove_decoder_datasets: bool = False,
+    factor_out_sharding_annotations: bool = True,
+    lowercase_highlevel_settings: bool = True,
     additional_sub_fixtures: Optional[
         Callable[
             [
@@ -401,7 +399,11 @@ def codegen_baseline_from_legacy(
             Dict[str, Any],
         ]
     ] = None,
-):
+    init_checkpoint_experiments: Optional[
+        Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
+    ] = None,
+    init_checkpoint_experiments_strict: bool = True,
+) -> str:
   """Generates code for a baseline configuration, from a legacy BaseExperiment.
 
   Primitive parameters and lists/tuples from the experiment, typically expressed
@@ -414,7 +416,12 @@ def codegen_baseline_from_legacy(
 
   Args:
     experiment_cls: Class used for the experiment.
-    factor_out_sharding_annotations: Whether to remove sharding annotations.
+    has_train_dataset: Whether the configuration has a training dataset. If not,
+      then the resulting ParameterizedExperiment config's train_dataset field
+      will not be populated.
+    has_input_specs_provider: Whether the experiment has an input specs provider
+      defined. Please set to False if you are using the (slower) one predefined
+      by the dataset.
     unshare_sharding_config: Whether to unshare values in sharding
       configuration. Fiddle generally retains information when mutables like
       lists or sub-config objects are shared, but for sharding annotations this
@@ -425,18 +432,23 @@ def codegen_baseline_from_legacy(
     remove_defaults: Whether to remove default values. Often with Pax configs,
       dataclass field defaulting magic means that you get large, expanded
       templates that may actually be unused or equal to their default values.
+    remove_eval_datasets: Whether to remove/clear eval_datasets, even if they
+      exist.
+    remove_decoder_datasets: Whether to remove/clear decoder_datasets, even if
+      they exist.
+    factor_out_sharding_annotations: Whether to remove sharding annotations.
     lowercase_highlevel_settings: Lowercase the high-level variable names.
       Generally this is recommended, since it is more PEP-8 compliant, as
       high-level attributes become fields on a class. However, in the case where
       there may be name conflicts (names distinguished only by capitalization),
       or when the user intentionally wants to distinguish high and low level
       settings by captialization, this can be set to False.
-    has_train_dataset: Whether the configuration has a training dataset. If not,
-      then the resulting ParameterizedExperiment config's train_dataset field
-      will not be populated.
-    has_input_specs_provider: Whether the experiment has an input specs provider
-      defined. Please set to False if you are using the (slower) one predefined
-      by the dataset.
+    additional_sub_fixtures: Optional callable for producing additional
+      sub-fixtures. It is generally recommended to choose a granularity of
+      sub-fixtures so that experiments can override parts of a baseline without
+      doing much mutation. This function will receive the root
+      ParameterizedExperiment configuration, and should produce a dict with keys
+      as additional sub-fixture names, and values as sub-config objects.
     init_checkpoint_experiments: Dictionary mapping checkpoint path to the
       experiment used to initialize it. For example, {"/path/to/my/checkpoint":
       my_pretrain_model.PretrainedModelExperiment}. This is useful for avoiding
@@ -445,12 +457,6 @@ def codegen_baseline_from_legacy(
     init_checkpoint_experiments_strict: Whether to check that the checkpoint
       experiments are provided for all init_from_checkpoint_rules entries. This
       only applies if `init_checkpoint_experiments` is provided.
-    additional_sub_fixtures: Optional callable for producing additional
-      sub-fixtures. It is generally recommended to choose a granularity of
-      sub-fixtures so that experiments can override parts of a baseline without
-      doing much mutation. This function will receive the root
-      ParameterizedExperiment configuration, and should produce a dict with keys
-      as additional sub-fixture names, and values as sub-config objects.
 
   Returns:
     Generated code.
@@ -459,6 +465,8 @@ def codegen_baseline_from_legacy(
       remove_sharding_annotations=factor_out_sharding_annotations,
       unshare_sharding_config=unshare_sharding_config,
       remove_defaults=remove_defaults,
+      remove_eval_datasets=remove_eval_datasets,
+      remove_decoder_datasets=remove_decoder_datasets,
       convert_seqio_task_objects=True,
   )
   overall_config = make_parameterized_experiment.from_legacy(
