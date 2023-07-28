@@ -118,7 +118,6 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       partitioner: partitioning.Partitioner,
       enforce_restore_shape_check: bool = False,
       tensorstore_use_ocdbt: bool = False,
-      ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[dict[str, Any]] = None,
   ):
     self._jax_task = jax_task
@@ -130,7 +129,6 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
     self.use_ema: bool = tasks_lib.has_ema(jax_task.hparams)
     self._enforce_restore_shape_check = enforce_restore_shape_check
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
-    self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
 
   @abc.abstractmethod
@@ -326,9 +324,8 @@ def _create_checkpointer(
         job_log_dir, restore_checkpoint_dir, mode
     )
 
-  ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
+  checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=jax_task.hparams.train.tensorstore_metadata_key,
-      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
 
   restore_transformations = jax_task.train.restore_transformations
@@ -347,7 +344,6 @@ def _create_checkpointer(
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
-      ocdbt_coordinator_server=ocdbt_coordinator_server,
       restore_transformations=restore_transformations,
   )
 

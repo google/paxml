@@ -249,23 +249,14 @@ def restore_checkpoint(
 
 def reregister_type_handlers(
     tensorstore_metadata_key: Optional[str] = None,
-    tensorstore_use_ocdbt: bool = False,
-) -> Any:
+) -> None:
   """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
-  if tensorstore_metadata_key is None and not tensorstore_use_ocdbt:
+  if tensorstore_metadata_key is None:
     return
 
-  ts_context = None
-  if tensorstore_use_ocdbt:
-    ts_context, ocdbt_coordinator_server = (
-        ocp.type_handlers.create_coordinator_server_and_context()
-    )
   ocp.type_handlers.register_standard_handlers_with_options(
       metadata_key=tensorstore_metadata_key,
-      use_ocdbt=tensorstore_use_ocdbt,
-      ts_context=ts_context,
   )
-  return ocdbt_coordinator_server
 
 
 def _extract_nested_prefix_names(

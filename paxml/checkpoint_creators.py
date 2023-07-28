@@ -138,7 +138,6 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
-      ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
       external_checkpoint_path: Optional[epath.Path] = None,
       external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
@@ -148,7 +147,6 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     if checkpoint_type == CheckpointType.FLAX:
       raise ValueError('FLAX checkpointing not supported for pjit models.')
     self._enable_checkpoint_saving = enable_checkpoint_saving
-    self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
 
     self._external_checkpoint_path = external_checkpoint_path
@@ -319,7 +317,6 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
-      ocdbt_coordinator_server: Optional[Any] = None,
       restore_transformations: Optional[Dict[str, Any]] = None,
       external_checkpoint_path: Optional[epath.Path] = None,
       external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
@@ -329,7 +326,6 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
     self._enable_checkpoint_saving = enable_checkpoint_saving
-    self._ocdbt_coordinator_server = ocdbt_coordinator_server
     self._restore_transformations = restore_transformations
     self._external_checkpoint_path = external_checkpoint_path
     self._external_checkpoint_handler = external_checkpoint_handler
@@ -566,9 +562,8 @@ def _create_checkpointer(
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
   restore_transformations = train_p.restore_transformations
 
-  ocdbt_coordinator_server = checkpoints.reregister_type_handlers(
+  checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=train_p.tensorstore_metadata_key,
-      tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
   options = checkpoint_managers.CheckpointManagerOptions(
       max_to_keep=max_to_keep,
@@ -641,7 +636,6 @@ def _create_checkpointer(
         checkpoint_manager,
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
-        ocdbt_coordinator_server=ocdbt_coordinator_server,
         restore_transformations=restore_transformations,
         external_checkpoint_path=task_p.train.external_checkpoint_path,
         external_checkpoint_handler=task_p.train.external_checkpoint_handler,
@@ -652,7 +646,6 @@ def _create_checkpointer(
         checkpoint_manager,
         checkpoint_type,
         enable_checkpoint_saving=enable_checkpoint_saving,
-        ocdbt_coordinator_server=ocdbt_coordinator_server,
         restore_transformations=restore_transformations,
         external_checkpoint_path=task_p.train.external_checkpoint_path,
         external_checkpoint_handler=task_p.train.external_checkpoint_handler,
