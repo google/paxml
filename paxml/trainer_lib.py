@@ -968,7 +968,7 @@ def train_step_single_learner(
   else:
     grad_fn = functools.partial(grad_fn, _loss_fn, learner)
 
-  ((weighted_loss, aux_info), grads) = grad_fn(updated_mdl_vars, inputs, subkey)
+  (weighted_loss, aux_info), grads = grad_fn(updated_mdl_vars, inputs, subkey)
 
   (
       mean_loss,

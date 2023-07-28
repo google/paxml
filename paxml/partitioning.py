@@ -1466,7 +1466,6 @@ def create_partitioner(
   if jax_task.model.ici_mesh_shape is None:
     partitioner = PmapPartitioner(init_is_eval)
   else:
-    auto_sharding_info = None
     if auto_sharding_mode:
       step_fn, step_fn_is_eval = get_step_fn(auto_sharding_mode)
       replicate_output = auto_sharding_mode == RunningMode.DECODE
