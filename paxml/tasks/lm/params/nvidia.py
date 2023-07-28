@@ -444,3 +444,22 @@ class Llama33BProxy(NVIDIA1_3B):
   HIDDEN_DIMS = 17920
   ENABLE_BFLOAT16 = True
   USE_ADAFACTOR = True
+
+
+@experiment_registry.register
+class NVIDIA175B_FSDP(NVIDIA1_3B):
+  """175B with fully-sharded data-parallel that works with 8x16 A100-40G."""
+
+  USE_FLASH_ATTENTION = False
+  USE_TRITON_LAYER_NORM = False
+
+  ICI_MESH_SHAPE = [1, 16, 1]
+  DCN_MESH_SHAPE = [1, 8, 1]
+  PERCORE_BATCH_SIZE = 1
+
+  USE_ADAFACTOR = True
+  NUM_LAYERS = 96
+  NUM_HEADS = 96
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 12288
+  HIDDEN_DIMS = 4 * 12288
