@@ -20,6 +20,7 @@ from typing import Tuple
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from etils import epath
 import jax.numpy as jnp
 from paxml import tasks_lib
 from paxml import trainer_lib
@@ -116,7 +117,7 @@ class TestModel(base_model.BaseModel):
     )
 
 
-class TrainStateMetadataTest(parameterized.TestCase):
+class TrainerLibTest(parameterized.TestCase):
 
   def _create_jax_task(self, input_dims: int, output_dims: int):
     config = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
@@ -165,6 +166,50 @@ class TrainStateMetadataTest(parameterized.TestCase):
         var_weight_hparams, discard_opt_states=discard_opt_states
     )
     self.assertEqual(metadata.partition_specs, partition_specs)
+
+  @parameterized.parameters(itertools.product((True, False), (True, False)))
+  def test_write_post_init_model_hparams_file(
+      self, discard_opt_states, do_eval
+  ):
+    input_dims = 3
+    output_dims = 5
+    layer_cfg = pax_fiddle.Config(
+        TestModel,
+        name='test_model',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    model = pax_fiddle.build(layer_cfg)
+    inputs = jnp.ones((1, input_dims), dtype=jnp.float32)
+    task = self._create_jax_task(input_dims, output_dims)
+    train_shape_dtype = NestedMap(inputs=inputs)
+    train_state_metadata = trainer_lib.create_train_state_metadata(
+        task, train_shape_dtype, discard_opt_states, do_eval
+    )
+    job_log_dir = (
+        epath.Path(absltest.get_default_test_tmpdir())
+        / f'model_hparams_{discard_opt_states}_{do_eval}'
+    )
+    trainer_lib.write_post_init_model_hparams_file(
+        model, train_state_metadata, job_log_dir, do_eval
+    )
+
+    params_fpath = job_log_dir / 'post_init_model_params.txt'
+    with params_fpath.open() as params_file:
+      hyper_params, param_weights = params_file.read().split('\n\n')
+
+    hyper_params_config = model.abstract_init_with_mdl_config(
+        train_state_metadata.input_shape_dtype, do_eval=do_eval
+    )
+    hyper_params_expected = base_hyperparams.nested_struct_to_text(
+        hyper_params_config
+    )
+    param_weights_expected = base_hyperparams.nested_struct_to_text(
+        train_state_metadata.var_weight_hparams
+    )
+
+    self.assertEqual(hyper_params.strip(), hyper_params_expected.strip())
+    self.assertEqual(param_weights.strip(), param_weights_expected.strip())
 
 
 if __name__ == '__main__':

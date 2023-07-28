@@ -634,6 +634,7 @@ py_strict_test(
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
+        # Implicit etils dependency.
         # Implicit jax dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
