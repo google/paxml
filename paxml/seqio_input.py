@@ -1907,7 +1907,12 @@ def get_eval_hparams_for_seqio(
     seed: int,
     metric_type: MetricType,
     split_name: Union[str, Callable[[str], str]] = 'validation',
-    feature_converter: Optional[seqio.FeatureConverter] = None,
+    feature_converter: Optional[
+        Union[
+            pax_fiddle.Config[seqio.FeatureConverter],
+            seqio.FeatureConverter,
+        ]
+    ] = None,
     num_infeed_hosts: int = 0,
     use_enumeration: bool = True,
     use_cached: bool = False,
@@ -1991,6 +1996,8 @@ def get_eval_hparams_for_seqio(
         pack=False,
         weights_on_targets_only=weights_on_targets_only,
     )
+  elif not isinstance(feature_converter, pax_fiddle.Config):
+    logging.warning('feature_converter should ideally be a pax_fiddle.Config')
   p = pax_fiddle.Config(
       SeqIOInput,
       name=task_or_mixture_name,
