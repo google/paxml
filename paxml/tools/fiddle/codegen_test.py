@@ -714,7 +714,7 @@ class CodegenOutputsTest(absltest.TestCase):
     class SampleDerivedExperimentNewExperiment(test_fixtures.SampleExperimentNewBaseline):
     """Experiment definition for SampleDerivedExperiment."""
 
-      def experiment_fixture(self, config):
+      def experiment_fixture(self):
         config = super().experiment_fixture()
         config.task.model.my_setting = 4217
         return config

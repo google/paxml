@@ -745,7 +745,7 @@ def codegen_experiment_diff(
     diff_fn = _extract_function_def(diff_module, "experiment_fixture")
     new_params = [
         cst.Param(cst.Name("self")),
-        *diff_fn.params.params,
+        *diff_fn.params.params[1:],
     ]
     new_body = [
         cst.parse_statement("config = super().experiment_fixture()"),
