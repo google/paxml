@@ -24,6 +24,8 @@ from paxml.tools.fiddle import codegen
 from paxml.tools.fiddle import test_fixtures
 import seqio
 
+# pylint: disable=g-inconsistent-quotes
+
 
 def _wrap_matched_line(m: re.Match[str]) -> str:
   return (
@@ -63,6 +65,14 @@ def _codegen_arbitrary_object(
   ).code
 
 
+def module_docstring(name: str) -> str:
+  return (
+      '"""'
+      + codegen._DEFAULT_MODULE_DOCSTRING.format(base_experiment_name=name)
+      + '\n"""\n'
+  )
+
+
 class CodegenExamplesTest(absltest.TestCase):
   """Tests output from codegen on smaller non-experiment objects."""
 
@@ -72,7 +82,7 @@ class CodegenExamplesTest(absltest.TestCase):
         sentencepiece_model_file="/path/to/vocab.txt",
     )
     code = _codegen_arbitrary_object(config)
-    expected = """
+    expected = module_docstring("Experiment") + '''
     import dataclasses
     import fiddle as fdl
     from paxml.experimental import baseline_experiment
@@ -81,11 +91,12 @@ class CodegenExamplesTest(absltest.TestCase):
 
     @dataclasses.dataclass
     class Experiment(baseline_experiment.BaselineExperiment):
+      """Experiment definition for Experiment."""
 
       def config_fixture(self) -> fdl.Config[seqio.SentencePieceVocabulary]:
         return fdl.Config(seqio.SentencePieceVocabulary,
             sentencepiece_model_file='/path/to/vocab.txt')
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -117,7 +128,7 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleExperiment") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -127,7 +138,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperiment_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperiment."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -135,6 +147,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -142,10 +155,11 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -157,7 +171,7 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleShardedExperiment") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -168,7 +182,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleShardedExperiment_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleShardedExperimentNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleShardedExperiment."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -176,6 +191,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -183,13 +199,14 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
             out=['foo_axis', 'bar_axis']),
             my_setting=self.foo_setting,
             derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -201,7 +218,8 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = (
+        module_docstring("SampleExperimentWithSharedShardingAnnotations") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -211,7 +229,8 @@ class CodegenOutputsTest(absltest.TestCase):
     from praxis import pax_fiddle
 
     @dataclasses.dataclass
-    class SampleExperimentWithSharedShardingAnnotations_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithSharedShardingAnnotationsNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithSharedShardingAnnotations."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -219,6 +238,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -226,6 +246,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         sublayers = [pax_fiddle.PaxConfig(test_fixtures.TestLayer,
             activation_split_dims_mapping=pax_fiddle.PaxConfig(base_layer.BaseLayer.ActivationSharding,
             out=['foo_axis', 'bar_axis'])),
@@ -238,7 +259,8 @@ class CodegenOutputsTest(absltest.TestCase):
             derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting,
             sublayers=sublayers)
-    """
+    '''
+    )
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -249,7 +271,7 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleShardedExperiment") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -259,7 +281,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleShardedExperiment_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleShardedExperimentNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleShardedExperiment."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -267,6 +290,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -274,6 +298,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
@@ -282,7 +307,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
     def shard_model_config(model_config):
       model_config.activation_split_dims_mapping.out = ['foo_axis', 'bar_axis']
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -293,7 +318,8 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = (
+        module_docstring("SampleExperimentWithSharedShardingAnnotations") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -303,7 +329,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithSharedShardingAnnotations_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithSharedShardingAnnotationsNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithSharedShardingAnnotations."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -311,6 +338,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -318,6 +346,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         model_config = pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting,
@@ -332,7 +361,8 @@ class CodegenOutputsTest(absltest.TestCase):
         'bar_axis']
       model_config.sublayers[1].activation_split_dims_mapping.out = ['foo_axis',
         'bar_axis']
-    """
+    '''
+    )
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -342,7 +372,7 @@ class CodegenOutputsTest(absltest.TestCase):
         test_fixtures.SampleExperimentWithDatasets,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleExperimentWithDatasets") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -353,7 +383,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithDatasets_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithDatasetsNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithDatasets."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -361,6 +392,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -369,19 +401,22 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def training_dataset_fixture(self) ->
           pax_fiddle.PaxConfig[base_input.BaseInput]:
+        """Returns configuration for the training dataset."""
         return pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=1024,
             is_training=True)
 
       def eval_datasets_fixture(self) ->
           list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
+        """Returns configuration for eval datasets."""
         return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=128)]
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -392,7 +427,7 @@ class CodegenOutputsTest(absltest.TestCase):
         has_input_specs_provider=False,
         has_train_dataset=False,
     )
-    expected = """
+    expected = module_docstring("SampleExperimentWithDecoderDatasets") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -403,7 +438,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithDecoderDatasets_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithDecoderDatasetsNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithDecoderDatasets."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -411,6 +447,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -419,14 +456,16 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def decoder_datasets_fixture(self) ->
           list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
+        """Returns configuration for decoder datasets."""
         return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256)]
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -436,7 +475,7 @@ class CodegenOutputsTest(absltest.TestCase):
         test_fixtures.SampleExperimentWithInputSpecsProvider,
         has_train_dataset=False,
     )
-    expected = """
+    expected = module_docstring("SampleExperimentWithInputSpecsProvider") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -446,7 +485,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithInputSpecsProvider_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithInputSpecsProviderNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithInputSpecsProvider."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -454,6 +494,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
@@ -462,14 +503,16 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def input_specs_provider_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleInputSpecsProvider]:
+        """Returns configuration for the input specs provider."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider)
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -480,7 +523,8 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = (
+        module_docstring("SampleExperimentWithInitFromCheckpointRules") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -490,7 +534,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithInitFromCheckpointRules_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithInitFromCheckpointRulesNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithInitFromCheckpointRules."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -498,6 +543,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
             init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -507,11 +553,13 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
+        """Returns configuration for checkpoint initialization rules."""
         task_p = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=4123, derived_setting=8246, derived_list_setting=[4123,
@@ -521,7 +569,8 @@ class CodegenOutputsTest(absltest.TestCase):
             ignore_rules=[], step=532000,
             input_specs_provider_p=pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider))
         return {'/path/to/my/checkpoint': checkpoint_loading_rules}
-    """
+    '''
+    )
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -537,7 +586,8 @@ class CodegenOutputsTest(absltest.TestCase):
             )
         },
     )
-    expected = """
+    expected = (
+        module_docstring("SampleExperimentWithInitFromCheckpointRules") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -547,7 +597,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithInitFromCheckpointRules_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithInitFromCheckpointRulesNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithInitFromCheckpointRules."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -555,6 +606,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
             init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
@@ -563,18 +615,21 @@ class CodegenOutputsTest(absltest.TestCase):
             task=task, eval_datasets=[])
 
       def model_fixture(self) -> pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel,
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
       def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
+        """Returns configuration for checkpoint initialization rules."""
         base = test_fixtures.SampleExperimentWithInputSpecsProvider()
         checkpoint_loading_rules = pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules,
             task_p=base.task(), load_rules=[('(.*)', '{}')], safe_load=True,
             ignore_rules=[], step=532000,
             input_specs_provider_p=base.get_input_specs_provider_params())
         return {'/path/to/my/checkpoint': checkpoint_loading_rules}
-    """
+    '''
+    )
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -589,10 +644,16 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
         additional_sub_fixtures=_sub_fixtures,
+        fixture_docstrings={
+            "pretrain_task_fixture": (
+                "Returns configuration for the pretraining task."
+            )
+        },
     )
     # FIXME(b/289289423): Update this output when multiply-nested subfixtures
     # are better supported.
-    expected = """
+    expected = (
+        module_docstring("SampleExperimentWithInitFromCheckpointRules") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -601,7 +662,8 @@ class CodegenOutputsTest(absltest.TestCase):
     from praxis import pax_fiddle
 
     @dataclasses.dataclass
-    class SampleExperimentWithInitFromCheckpointRules_NewBaseline(baseline_experiment.BaselineExperiment):
+    class SampleExperimentWithInitFromCheckpointRulesNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithInitFromCheckpointRules."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -609,6 +671,7 @@ class CodegenOutputsTest(absltest.TestCase):
 
       def experiment_fixture(self) ->
           pax_fiddle.PaxConfig[parameterized_experiment.ParameterizedExperiment]:
+        """Returns configuration for the entire experiment."""
         train = pax_fiddle.PaxConfig(tasks_lib.SingleTask.Train,
         init_from_checkpoint_rules=self.init_from_checkpoint_rules_fixture())
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=self.model_fixture(),
@@ -617,18 +680,22 @@ class CodegenOutputsTest(absltest.TestCase):
         eval_datasets=[])
 
       def model_fixture(self) -> pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
+        """Returns configuration for the model."""
         return pax_fiddle.PaxConfig(test_fixtures.SampleModel, my_setting=self.foo_setting, derived_setting=self.derived_setting,
         derived_list_setting=self.derived_list_setting)
 
       def pretrain_task_fixture(self) -> pax_fiddle.PaxConfig[tasks_lib.SingleTask]:
+        """Returns configuration for the pretraining task."""
         return pax_fiddle.PaxConfig(tasks_lib.SingleTask, model=pax_fiddle.PaxConfig(test_fixtures.SampleModel, my_setting=4123, derived_setting=8246, derived_list_setting=[4123,
         8246]))
 
       def init_from_checkpoint_rules_fixture(self) -> dict[str, Any]:
+        """Returns configuration for checkpoint initialization rules."""
         checkpoint_loading_rules = pax_fiddle.PaxConfig(tasks_lib.CheckpointLoadingRules, task_p=self.pretrain_task_fixture(), load_rules=[('(.*)', '{}')], safe_load=True, ignore_rules=[], step=532000,
         input_specs_provider_p=pax_fiddle.PaxConfig(test_fixtures.SampleInputSpecsProvider))
         return {'/path/to/my/checkpoint': checkpoint_loading_rules}
-    """
+    '''
+    )
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -640,17 +707,18 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleDerivedExperiment") + '''
     from paxml.tools.fiddle import test_fixtures
 
     @dataclasses.dataclass
-    class SampleDerivedExperiment_NewExperiment(test_fixtures.SampleExperimentNewBaseline):
+    class SampleDerivedExperimentNewExperiment(test_fixtures.SampleExperimentNewBaseline):
+    """Experiment definition for SampleDerivedExperiment."""
 
       def experiment_fixture(self, config):
         config = super().experiment_fixture()
         config.task.model.my_setting = 4217
         return config
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
@@ -662,17 +730,18 @@ class CodegenOutputsTest(absltest.TestCase):
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    expected = """
+    expected = module_docstring("SampleDerivedExperimentHighlevel") + '''
     from paxml.tools.fiddle import test_fixtures
 
     @dataclasses.dataclass
-    class SampleDerivedExperimentHighlevel_NewExperiment(test_fixtures.SampleExperimentNewBaseline):
+    class SampleDerivedExperimentHighlevelNewExperiment(test_fixtures.SampleExperimentNewBaseline):
+      """Experiment definition for SampleDerivedExperimentHighlevel."""
       # Overrides to existing high-level settings.
       foo_setting: int = 4217
       derived_setting: int = 8434
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
           [4217, 8434])
-    """
+    '''
     self.assertEqual(
         code.split(), expected.split(), msg=_update_expected_text(code)
     )

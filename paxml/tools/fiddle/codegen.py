@@ -20,6 +20,7 @@
 
 import copy
 import dataclasses
+import inspect
 from typing import Any, Callable, Dict, List, Optional, Type
 
 import fiddle as fdl
@@ -126,9 +127,27 @@ def _class_attributes(highlevel_settings: Dict[str, Any]) -> List[cst.CSTNode]:
   return result
 
 
+def _make_docstring(docstring: str, *, indent: int) -> cst.SimpleStatementLine:
+  docstring = inspect.cleandoc(docstring)
+  if not ('"""' in docstring or "'''" in docstring):
+    docstring = docstring.strip()
+    if "\n" in docstring:
+      docstring = docstring + "\n" + (" " * indent)
+    docstring = '"""' + docstring + '"""'
+  return cst.SimpleStatementLine(
+      body=[cst.Expr(cst.SimpleString(value=docstring))]
+  )
+
+
 def _make_class_def(
-    name: str, bases: List[cst.Arg], body: List[cst.BaseStatement]
+    name: str,
+    bases: List[cst.Arg],
+    body: List[cst.BaseStatement],
+    docstring: Optional[str] = None,
 ) -> cst.ClassDef:
+  """Makes a LibCST class definition."""
+  if docstring:
+    body = [_make_docstring(docstring, indent=2), *body]
   return cst.ClassDef(
       name=cst.Name(name),
       bases=bases,
@@ -212,6 +231,19 @@ def _extract_function_def(node: cst.CSTNode, name: str) -> cst.FunctionDef:
   return matches[0]["matched_fn"]
 
 
+_DEFAULT_MODULE_DOCSTRING = """Baseline experiment for the {base_experiment_name} model.
+
+This file was generated using the following code:
+
+from paxml.tools.fiddle import codegen
+...
+
+And the following manual cleanups:
+
+ * ...
+"""
+
+
 @dataclasses.dataclass(frozen=True)
 class IrToCst(experimental_top_level_api.CodegenPass):
   """Modified LibCST conversion that doesn't emit imports."""
@@ -219,8 +251,10 @@ class IrToCst(experimental_top_level_api.CodegenPass):
   class_name: str = "Experiment"
   add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None
   add_boilerplate: bool = True
+  fixture_docstrings: Optional[Dict[str, str]] = None
 
   def __call__(self, task: Any) -> Any:
+    fixture_docstrings = self.fixture_docstrings or {}
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
 
     # Add highlevel accesses as attributes.
@@ -241,17 +275,29 @@ class IrToCst(experimental_top_level_api.CodegenPass):
       fn_code = fn_code.with_changes(
           leading_lines=[cst.EmptyLine(newline=cst.Newline())]
       )
+
+      # Add the docstring if provided.
+      docstring = fixture_docstrings.get(fn.name.value, None)
+      if docstring and isinstance(fn_code.body, cst.IndentedBlock):
+        fn_code = fn_code.with_changes(
+            body=fn_code.body.with_changes(
+                body=[_make_docstring(docstring, indent=4), *fn_code.body.body]
+            )
+        )
+
       class_body.append(fn_code)
 
     # Create the class with these attributes and fixtures.
     class_base_expression = task.import_manager.add(
         baseline_experiment.BaselineExperiment
     )
+    name = self.class_name.replace("NewBaseline", "")
     module_body = [
         _make_class_def(
             self.class_name,
             [cst.Arg(cst.parse_expression(class_base_expression))],
             class_body,
+            docstring=f"Experiment definition for {name}.",
         )
     ]
 
@@ -263,6 +309,15 @@ class IrToCst(experimental_top_level_api.CodegenPass):
 
     # Add imports last, since the import manager is updated.
     module_body[0:0] = task.import_manager.sorted_import_lines()
+
+    # Add the module docstring.
+    module_body.insert(
+        0,
+        _make_docstring(
+            _DEFAULT_MODULE_DOCSTRING.format(base_experiment_name=name),
+            indent=0,
+        ),
+    )
 
     return cst.Module(body=module_body, default_indent="  ")
 
@@ -293,6 +348,7 @@ def code_generator_config(
     class_name: str = "Experiment",
     init_checkpoint_experiments_strict: bool = True,
     add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None,
+    fixture_docstrings: Optional[Dict[str, str]] = None,
 ):
   """Returns a code generator object.
 
@@ -311,6 +367,7 @@ def code_generator_config(
       init_from_checkpoint_rules, if it is provided.
     add_sharding_call: Modify the model fixture to call an add sharding method
       before returning.
+    fixture_docstrings: Docstrings for fixtures.
   """
   config = codegen.code_generator.as_buildable(
       top_level_fixture_name=top_level_fixture_name,
@@ -374,8 +431,26 @@ def code_generator_config(
   fdl.update_callable(ir_to_cst_pass, IrToCst)
   ir_to_cst_pass.class_name = class_name
   ir_to_cst_pass.add_sharding_call = add_sharding_call
+  ir_to_cst_pass.fixture_docstrings = fixture_docstrings
 
   return config
+
+
+_DEFAULT_FIXTURE_DOCSTRINGS = {
+    "experiment_fixture": "Returns configuration for the entire experiment.",
+    "model_fixture": "Returns configuration for the model.",
+    "input_specs_provider_fixture": (
+        "Returns configuration for the input specs provider."
+    ),
+    "eval_datasets_fixture": "Returns configuration for eval datasets.",
+    "decoder_datasets_fixture": "Returns configuration for decoder datasets.",
+    "training_dataset_fixture": (
+        "Returns configuration for the training dataset."
+    ),
+    "init_from_checkpoint_rules_fixture": (
+        "Returns configuration for checkpoint initialization rules."
+    ),
+}
 
 
 def codegen_baseline_from_legacy(
@@ -399,6 +474,7 @@ def codegen_baseline_from_legacy(
             Dict[str, Any],
         ]
     ] = None,
+    fixture_docstrings: Optional[Dict[str, str]] = None,
     init_checkpoint_experiments: Optional[
         Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
     ] = None,
@@ -449,6 +525,10 @@ def codegen_baseline_from_legacy(
       doing much mutation. This function will receive the root
       ParameterizedExperiment configuration, and should produce a dict with keys
       as additional sub-fixture names, and values as sub-config objects.
+    fixture_docstrings: Docstrings to be generated for fixtures. Defaults will
+      be provided, so usually you only need this if you provide
+      `additional_sub_fixtures`. But you can override them, or set them to an
+      empty string to remove them.
     init_checkpoint_experiments: Dictionary mapping checkpoint path to the
       experiment used to initialize it. For example, {"/path/to/my/checkpoint":
       my_pretrain_model.PretrainedModelExperiment}. This is useful for avoiding
@@ -461,6 +541,8 @@ def codegen_baseline_from_legacy(
   Returns:
     Generated code.
   """
+  fixture_docstrings = fixture_docstrings or {}
+  fixture_docstrings = {**_DEFAULT_FIXTURE_DOCSTRINGS, **fixture_docstrings}
   normalizer = config_normalization.ConfigNormalizer(
       remove_sharding_annotations=factor_out_sharding_annotations,
       unshare_sharding_config=unshare_sharding_config,
@@ -502,12 +584,13 @@ def codegen_baseline_from_legacy(
     )
   codegen_config = code_generator_config(
       top_level_fixture_name="experiment_fixture",
-      class_name=f"{experiment_cls.__name__}_NewBaseline",
+      class_name=f"{experiment_cls.__name__}NewBaseline",
       max_expression_complexity=6,
       lowercase_highlevel_settings=lowercase_highlevel_settings,
       init_checkpoint_experiments_strict=init_checkpoint_experiments_strict,
       add_sharding_call=add_sharding_call,
       debug_print=False,
+      fixture_docstrings=fixture_docstrings,
   )
   codegen_obj = fdl.build(codegen_config)
 
@@ -676,16 +759,28 @@ def codegen_experiment_diff(
     )
     class_body.append(diff_fn)
 
-  class_name = f"{experiment_cls.__name__}_NewExperiment"
+  class_name = f"{experiment_cls.__name__}NewExperiment"
   class_def = _make_class_def(
       class_name,
       [cst.Arg(cst.parse_expression(import_manager.add(baseline)))],
       class_body,
+      docstring=f"Experiment definition for {experiment_cls.__name__}.",
   )
 
   module_body = [class_def]
 
   # Add imports last, since the import manager was updated with the baseline.
   module_body[0:0] = import_manager.sorted_import_lines()
+
+  # Add the module docstring.
+  module_body.insert(
+      0,
+      _make_docstring(
+          _DEFAULT_MODULE_DOCSTRING.format(
+              base_experiment_name=experiment_cls.__name__
+          ),
+          indent=0,
+      ),
+  )
 
   return cst.Module(body=module_body, default_indent="  ").code
