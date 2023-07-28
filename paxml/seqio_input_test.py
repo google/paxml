@@ -313,6 +313,41 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     for _ in range(5):
       inp.get_next()
 
+  def test_passthrough_features(self):
+    name = 'passthrough_features'
+    passthrough_features = {
+        'passthrough': seqio.feature_converters.FeatureConverter.FeatureSpec(
+            dtype=tf.int32
+        ),
+    }
+    x = [{
+        'inputs': [1, 2],
+        'targets': [3, 4],
+        'passthrough': [5, 6],
+    }]
+    ds = seqio.test_utils.create_default_dataset(
+        x, feature_names=['inputs', 'targets', 'passthrough']
+    )
+    _register_task(
+        name, ds, output_feature_names=['inputs', 'targets', 'passthrough']
+    )
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
+    p.mixture_name = name
+    p.split_name = 'train'
+    p.task_feature_lengths = {'inputs': 3, 'targets': 3, 'passthrough': 3}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=False, passthrough_features=passthrough_features
+    )
+    p.batch_size = 1
+    p.is_training = True
+    p.input_random_seed = 137
+    inp = instantiate(p)
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.passthrough,
+        np.array([[5, 6, 1]], dtype=np.int32),
+    )
+
   # TODO(b/272314337): enable after the next TF OSS release.
   def test_file_based_checkpointing(self):
     it = tf.data.Dataset.range(1).as_numpy_iterator()

@@ -1588,7 +1588,10 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
       bos_id: int = 0,
       reverse_bos_padding: bool = False,
       eos_id: int = 1,
-      target_has_suffix: bool = False
+      target_has_suffix: bool = False,
+      passthrough_features: Optional[
+          Mapping[str, seqio.FeatureConverter.FeatureSpec]
+      ] = None,
   ) -> None:
     """Args to construct a language model feature converter.
 
@@ -1607,11 +1610,13 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
         less than the lengths given by `sequence_length` in the get_dataset
         function.
       bos_id: bos id for decoder inputs.
-      reverse_bos_padding: Whether to reverse the bos_id padding, and pad
-        to the end of labels with eos_id instead.
+      reverse_bos_padding: Whether to reverse the bos_id padding, and pad to the
+        end of labels with eos_id instead.
       eos_id: eos id for decoder inputs, only in effect if reverse_bos_padding
         true.
       target_has_suffix: targets followed by a suffix.
+      passthrough_features: a mapping of features that will pass through without
+        any processing.
     """
     self._pack = pack
     self._use_custom_packing_ops = use_custom_packing_ops
@@ -1626,7 +1631,9 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
         pack=pack,
         use_custom_packing_ops=use_custom_packing_ops,
         apply_length_check=apply_length_check,
-        bos_id=bos_id)
+        bos_id=bos_id,
+        passthrough_features=passthrough_features,
+    )
 
   def __str__(self) -> str:
     return (
@@ -1687,6 +1694,8 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
       ret.segment_ids = tf.cast(1.0 - ret.paddings, tf.int32)
       pos = tf.range(ret.segment_ids.shape[0])
       ret.segment_pos = ret.segment_ids * pos
+    for key in self._passthrough_features.keys():
+      ret[key] = b[key]
 
     if self.weights_on_targets_only is None or self.weights_on_targets_only:
       # Process negative ids, which some datasets use to denote input positions
