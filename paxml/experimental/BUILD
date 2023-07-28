@@ -32,6 +32,21 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "nested_map_config_helper",
+    srcs = ["nested_map_config_helper.py"],
+    deps = ["//praxis:pytypes"],
+)
+
+pytype_strict_test(
+    name = "nested_map_config_helper_test",
+    srcs = ["nested_map_config_helper_test.py"],
+    deps = [
+        ":nested_map_config_helper",
+        # Implicit absl.testing.absltest.absltest dependency.
+    ],
+)
+
 pytype_strict_test(
     name = "baseline_experiment_test",
     srcs = ["baseline_experiment_test.py"],

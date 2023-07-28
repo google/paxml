@@ -27,6 +27,7 @@ from paxml import parameterized_experiment
 from paxml.tools.fiddle import convert_seqio_task_objects as convert_seqio_task_objects_lib
 from paxml.tools.fiddle import remove_sharding
 from paxml.tools.fiddle import unshare_sharding
+from paxml.tools.fiddle import wrap_nested_maps as wrap_nested_maps_lib
 from praxis import pax_fiddle
 
 
@@ -37,6 +38,7 @@ class ComponentNormalizer:
   # (Defaults for the below are in ConfigNormalizer.)
   remove_defaults: bool
   convert_dataclasses: bool
+  wrap_nested_maps: bool
 
   def __call__(self, config: pax_fiddle.Config[base_task.BaseTask]):
     if self.remove_defaults:
@@ -45,6 +47,8 @@ class ComponentNormalizer:
       )
     if self.convert_dataclasses:
       config = fdl_dataclasses.convert_dataclasses_to_configs(config)
+    if self.wrap_nested_maps:
+      config = wrap_nested_maps_lib.wrap_nested_maps(config)
     return config
 
 
@@ -141,6 +145,8 @@ class ConfigNormalizer:
     convert_dataclasses: Whether to convert dataclass instances to configs. This
       will only be applied if the dataclasses do not have __post_init__
       functions, as __post_init__ can obscure the initial call values.
+    wrap_nested_maps: Whether to wrap NestedMap instances in a helper function,
+      to remove these custom objects from the config.
     remove_sharding_annotations: Whether to remove sharding annotations.
     unshare_sharding_config: If remove_sharding_annotations=False, whether to
       unshare values in sharding configuration. Fiddle generally retains
@@ -163,6 +169,7 @@ class ConfigNormalizer:
 
   remove_defaults: bool = True
   convert_dataclasses: bool = True
+  wrap_nested_maps: bool = True
   remove_sharding_annotations: bool = False
   unshare_sharding_config: bool = True
   convert_seqio_task_objects: bool = True
@@ -183,6 +190,7 @@ class ConfigNormalizer:
     return TaskNormalizer(
         remove_defaults=self.remove_defaults,
         convert_dataclasses=self.convert_dataclasses,
+        wrap_nested_maps=self.wrap_nested_maps,
         remove_sharding_annotations=self.remove_sharding_annotations,
         unshare_sharding_config=self.unshare_sharding_config,
     )
@@ -192,6 +200,7 @@ class ConfigNormalizer:
     return DatasetNormalizer(
         remove_defaults=self.remove_defaults,
         convert_dataclasses=self.convert_dataclasses,
+        wrap_nested_maps=self.wrap_nested_maps,
         convert_seqio_task_objects=self.convert_seqio_task_objects,
     )
 
@@ -212,6 +221,7 @@ def noop_normalizer() -> ConfigNormalizer:
       remove_sharding_annotations=False,
       unshare_sharding_config=False,
       remove_defaults=False,
+      wrap_nested_maps=False,
       convert_seqio_task_objects=False,
   )
 
@@ -224,5 +234,6 @@ def aggressive_normalizer() -> ConfigNormalizer:
   return ConfigNormalizer(
       remove_sharding_annotations=True,
       remove_defaults=True,
+      wrap_nested_maps=True,
       convert_seqio_task_objects=True,
   )

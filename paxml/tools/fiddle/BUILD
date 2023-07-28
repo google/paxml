@@ -141,6 +141,7 @@ pytype_strict_library(
         ":convert_seqio_task_objects",
         ":remove_sharding",
         ":unshare_sharding",
+        ":wrap_nested_maps",
         # Implicit fiddle dependency.
         # Implicit fiddle.experimental.auto_config dependency.
         # Implicit fiddle.experimental.dataclasses dependency.
@@ -201,6 +202,30 @@ pytype_strict_library(
     ],
 )
 
+pytype_strict_library(
+    name = "wrap_nested_maps",
+    srcs = ["wrap_nested_maps.py"],
+    deps = [
+        # Implicit fiddle.daglish dependency.
+        "//paxml/experimental:nested_map_config_helper",
+        "//praxis:pax_fiddle",
+        "//praxis:pytypes",
+    ],
+)
+
+pytype_strict_test(
+    name = "wrap_nested_maps_test",
+    srcs = ["wrap_nested_maps_test.py"],
+    deps = [
+        ":wrap_nested_maps",
+        # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit fiddle.testing dependency.
+        "//paxml/experimental:nested_map_config_helper",
+        "//praxis:pax_fiddle",
+        "//praxis:pytypes",
+    ],
+)
+
 pytype_strict_test(
     name = "config_normalization_test",
     srcs = ["config_normalization_test.py"],
@@ -212,6 +237,7 @@ pytype_strict_test(
         # Implicit fiddle dependency.
         "//paxml:parameterized_experiment",
         "//praxis:pax_fiddle",
+        "//praxis:pytypes",
     ],
 )
 

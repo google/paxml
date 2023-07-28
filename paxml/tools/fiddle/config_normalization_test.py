@@ -27,6 +27,7 @@ from paxml.tools.fiddle import config_normalization
 from paxml.tools.fiddle import make_parameterized_experiment
 from paxml.tools.fiddle import test_fixtures
 from praxis import pax_fiddle
+from praxis import pytypes
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,6 +55,22 @@ class ConfigNormalizationTest(absltest.TestCase):
     self.assertIsInstance(
         normalized.training_dataset.batch_size.foo, fdl.Config
     )
+
+  def test_converts_nested_maps(self):
+    dataset_config = (
+        test_fixtures.SampleExperimentWithDatasets().training_dataset()
+    )
+    dataset_config.batch_size = pytypes.NestedMap(foo=1234)
+    config = pax_fiddle.Config(
+        parameterized_experiment.ParameterizedExperiment,
+        training_dataset=dataset_config,
+    )
+    self.assertIsInstance(config.training_dataset.batch_size, pytypes.NestedMap)
+    normalized = config_normalization.default_normalizer()(config)
+    self.assertNotIsInstance(
+        normalized.training_dataset.batch_size, pytypes.NestedMap
+    )
+    self.assertIs(type(normalized.training_dataset.batch_size.base), dict)
 
   def test_lowlevel_config(self):
     task_config = (
