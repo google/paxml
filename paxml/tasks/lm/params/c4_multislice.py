@@ -251,7 +251,7 @@ class C4SpmdGpt3AdamDataParallel2x16x16(c4.C4SpmdGpt3AdamOrgHP):
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
-    task_p.train.num_train_steps = 1000
+    task_p.train.num_train_steps = 100
 
     task_p.summary_verbosity = 0
 
