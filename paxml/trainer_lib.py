@@ -122,7 +122,7 @@ class RunningMode(enum.Flag):
     return bool(self & RunningMode.DECODE)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class TrainStateMetadata:
   """Metadata around the TrainState.
 
@@ -802,6 +802,7 @@ def train_step_single_learner(
   Returns:
     A tuple (updated_states, StepFnOutput).
   """
+  del static_args
   model = jax_task.model
   assert len(jax_task.learners) == 1
   learner = jax_task.learners[0]
@@ -1112,12 +1113,15 @@ def eval_step_single_learner(
     inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
     var_weight_hparams: A pytree of WeightHParams for the model variables.
+    static_args: Unused.
 
   Returns:
     A tuple (None, StepFnOutput) to be compatible with the general step function
     output format (updated_train_state, StepFnOutput), where updated_train_state
     is None since it doesn't update the train state.
   """
+  del static_args
+
   model = jax_task.model
   context_p = base_layer.JaxContext.HParams(
       do_eval=True,
@@ -1497,12 +1501,22 @@ def reshard_input_based_on_rank_fn(
 
 
 def get_inputs_shape_dtype(
-    input_p: pax_fiddle.Config[base_input.BaseInput],
-) -> Tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
-  """Returns the per-host and global shape/dtype information of the input."""
-  sample_inputs = instantiate(input_p).get_next_padded()
-  # TODO(pax-dev): Retrieve shapes from input specs and compare against real
-  # input shapes from training input pipeline.
+    input_config: pax_fiddle.Config[base_input.BaseInput],
+) -> tuple[NestedShapeDtypeLike, NestedShapeDtypeLike]:
+  """Returns the per-host and global shape/dtype information of the input.
+
+  WARNING: this does instantiate the dataset and fetches a batch, so is costly.
+    This method of obtaining shapes can be avoided by specifying an input spec
+    provider in your experiment.
+
+  Args:
+    input_config: a Fiddle config parameterizing a BaseInput.
+
+  Returns:
+    A tuple consisting of the per-host input shapes and the global input shapes.
+  """
+  sample_inputs = instantiate(input_config).get_next_padded()
+
   perhost_inputs_shape_dtype = jax.tree_map(
       lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
       sample_inputs,
