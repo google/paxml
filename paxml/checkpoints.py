@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import abc
+import dataclasses
 import os
 from typing import Any, Optional, Sequence, Tuple, cast
 
@@ -386,7 +387,7 @@ def _tensorstore_reconstruct(
   return jax.tree_util.tree_unflatten(treedef, restored_flattened_train_state)
 
 
-def _check_restored_shapes(restored: Any, expected: Any):
+def _check_restored_shapes(restored: PyTree, expected: PyTree):
   def _check(a, b):
     if a.shape != b.shape:
       raise ValueError(
@@ -415,6 +416,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   ):
     self._enforce_restore_shape_check = enforce_restore_shape_check
     super().__init__(*args, **kwargs)
+    self._write_tree_metadata = self._use_ocdbt
 
   def _set_param_names(self, param_names: PyTree):
     self._param_names = param_names
@@ -460,12 +462,19 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   async def _maybe_deserialize(
       self, structure: PyTree, param_infos: PyTree, restore_args: PyTree
   ) -> PyTree:
-    if isinstance(restore_args, list) and isinstance(param_infos, dict):
-      # restore_args is created with an "incorrect" tree structure from Pax's
-      # perspective, due to overriding parameter names. This gets restore_args
-      # back into list format, like the other arguments.
-      restore_args = {str(i): restore_args[i] for i in range(len(restore_args))}
-      assert restore_args.keys() == param_infos.keys()
+
+    def _replace_param_info_name(info, name):
+      # Note: not replacing the name is intentional.
+      return dataclasses.replace(info, path=info.path.parent / name)
+
+    directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
+    # Hack to replace parameter names.
+    if not ocp.type_handlers.is_ocdbt_checkpoint(directory):
+      param_infos = jax.tree_util.tree_map(
+          _replace_param_info_name,
+          param_infos,
+          self._param_names,
+      )
     return await super()._maybe_deserialize(
         structure, param_infos, restore_args
     )
@@ -493,6 +502,15 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     else:
       reference_train_state, reference_nested_names, reference_state_specs = (
           _tensorstore_prepare(item, specs)
+      )
+      reference_train_state = flax.serialization.to_state_dict(
+          reference_train_state
+      )
+      reference_nested_names = flax.serialization.to_state_dict(
+          reference_nested_names
+      )
+      reference_state_specs = flax.serialization.to_state_dict(
+          reference_state_specs
       )
       # At that point, the flattened entries do not contain any reference to
       # MaskedNode's.
@@ -543,23 +561,26 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       _check_restored_shapes(restored_train_state, reference_train_state)
 
     if not is_ocdbt_checkpoint:
+      flat_restored_train_state = [0] * len(restored_train_state)
+      for i in range(len(restored_train_state)):
+        flat_restored_train_state[i] = restored_train_state[str(i)]
       # We add back the MaskedNode entries into the pytree.
       restored_train_state = _tensorstore_reconstruct(
-          item, restored_train_state
+          item, flat_restored_train_state
       )
 
     return restored_train_state
 
-  def structure(self, directory: epath.Path) -> PyTree:
+  def _read_aggregate_file(self, directory: epath.Path) -> PyTree:
     # Use msgpack file if it exists.
     # Check for _use_ocdbt, since the msgpack file should only exist if the
     # checkpoint was written with OCDBT.
     if self._use_ocdbt and (directory / self._aggregate_filename).exists():
-      return super().structure(directory)
+      return super()._read_aggregate_file(directory)
     # Otherwise, rely on hacked structure.
     return jax.tree_util.tree_map(
         ocp.utils.leaf_placeholder,
-        flax.serialization.to_state_dict(self._param_names),
+        self._param_names,
     )
 
 
@@ -571,8 +592,8 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
-    # TODO(b/273803615) Enable OCDBT.
     self._use_ocdbt = False
+    self._write_tree_metadata = False
 
   async def async_save(
       self,
@@ -730,10 +751,6 @@ class BaseInputCheckpointHandler(ocp.CheckpointHandler):
         directory / f'process_{jax.process_index()}-of-{jax.process_count()}'
     )
     item.restore(checkpoint_path)
-
-  def structure(self, directory: epath.Path) -> Any:
-    """Unimplemented. See parent class."""
-    return NotImplementedError
 
 
 class TrainingCheckpointer(metaclass=abc.ABCMeta):

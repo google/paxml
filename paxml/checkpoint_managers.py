@@ -349,11 +349,6 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
     else:
       super()._delete_directory(step)
 
-  def structure(self) -> Union[Any, Mapping[str, Any]]:
-    if self._checkpoint_type == CheckpointType.FLAX:
-      raise ValueError('`structure` not supported for Flax format checkpoints.')
-    return super().structure()
-
 
 class OrbaxCheckpointManager:
   """Wrapper class for overridden _CheckpointManagerImpl."""
