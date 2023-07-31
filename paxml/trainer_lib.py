@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import functools
 import pprint
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
 from etils import epath
@@ -501,9 +501,14 @@ def _maybe_aggregate_metrics_summaries(
     loss_aggregator: base_metrics.LossAggregator,
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
-    per_example_out: NestedMap,
+    per_example_out: dict[str, Any],
 ) -> Tuple[
-    JTensor, JTensor, Optional[JTensor], WeightedScalars, SummaryDict, NestedMap
+    JTensor,
+    JTensor,
+    Optional[JTensor],
+    WeightedScalars,
+    SummaryDict,
+    dict[str, Any],
 ]:
   """If in pmap, aggregate metrics and summaries across model replicas.
 
@@ -728,48 +733,226 @@ class StepFnOutput:
   clu_metrics: Optional[Dict[str, Any]] = None
 
 
+class ApplyFnProtocol(Protocol):
+  """Protocol for a function that can perform model inference."""
+
+  def __call__(
+      self,
+      model: base_model.BaseModel,
+      variables: NestedJTensor,
+      inputs: NestedMap,
+      mutable: bool,
+      rngs: dict[str, PRNGKey],
+  ) -> tuple[tuple[base_model.WeightedScalars, dict[str, Any]], NestedJTensor]:
+    pass
+
+
+def _default_apply_fn(
+    model: base_model.BaseModel,
+    variables: NestedJTensor,
+    inputs: NestedMap,
+    mutable: bool,
+    rngs: dict[str, PRNGKey],
+) -> tuple[tuple[base_model.WeightedScalars, dict[str, Any]], NestedJTensor]:
+  """Just calls model.__call__ with the given vars, inputs, and other params."""
+  return model.apply(
+      variables,
+      inputs,
+      method=model.__call__,
+      mutable=mutable,
+      rngs=rngs,
+  )
+
+
+class LossFnProtocol(Protocol):
+
+  def __call__(
+      self, mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
+  ) -> tuple[JTensor, sgf.GradAuxInfo]:
+    """Produces losses and grad info by passing the inputs through a model."""
+
+
+def _get_default_loss_fn(
+    jax_task: tasks_lib.SingleTask,
+    context_p: base_layer.JaxContext.HParams,
+    fprop_dtype: jnp.dtype,
+    var_weight_hparams: NestedWeightHParams,
+    apply_fn: ApplyFnProtocol | None = None,
+) -> LossFnProtocol:
+  """Get the default loss function."""
+  if apply_fn is None:
+    apply_fn = _default_apply_fn
+
+  def _loss_fn(
+      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
+  ) -> tuple[JTensor, sgf.GradAuxInfo]:
+    """Computes loss as well as other auxiliary outputs."""
+    if fprop_dtype == jnp.float32:
+      pass
+    elif fprop_dtype == jnp.bfloat16:
+      mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
+      inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
+    else:
+      assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
+
+    with base_layer.JaxContext.new_context(hparams=context_p):
+      k1, k2, k3 = jax.random.split(prng_key, 3)
+      (weighted_scalars, per_example_output), updated_vars = apply_fn(
+          model=jax_task.model,
+          variables=mdl_vars,
+          inputs=inputs,
+          mutable=jax_task.hparams.train.apply_mutable_list,
+          rngs={PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3},
+      )
+
+      # Fetch all the summary tensors.
+      assert isinstance(updated_vars, dict)
+      summary_tensors = updated_vars.get(SUMMARIES, {})
+      # TODO(yonghui): Fetch aux losses and add them to summaries.
+      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
+
+      (
+          weighted_loss,
+          mean_loss,
+          loss_weight,
+          aggregated_scalars,
+          aggregated_summaries,
+          per_example_output,
+      ) = _maybe_aggregate_metrics_summaries(
+          loss_aggregator=jax_task.loss_aggregator_inst,
+          weighted_scalars=weighted_scalars,
+          summary_dict=summary_tensors,
+          per_example_out=per_example_output,
+      )
+      # metrics and summary_tensors no longer needed.
+      del weighted_scalars
+      del summary_tensors
+
+      forward_updated_vars = {
+          collection: updated_vars[collection]
+          for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION
+          if collection in updated_vars
+      }
+
+    if fprop_dtype == jnp.bfloat16 and weighted_loss.dtype == fprop_dtype:
+      weighted_loss = weighted_loss.astype(jnp.float32)
+
+    return weighted_loss, sgf.GradAuxInfo(
+        loss_weight=loss_weight,
+        aux_info=(
+            mean_loss,
+            aggregated_scalars,
+            forward_updated_vars,
+            aggregated_summaries,
+            per_example_output,
+        ),
+    )
+
+  return _loss_fn
+
+
+class GradFnProtocol(Protocol):
+  """Protocol for a gradient function, used in train_step_single_learner."""
+
+  def __call__(
+      self,
+      loss_fn: LossFnProtocol,
+      learner: learners_lib.Learner,
+      mdl_vars: pytypes.PyTree,
+      inputs: NestedMap,
+      prng_key: PRNGKey,
+  ) -> tuple[Any, Any]:
+    """Computes gradients given an input batch.
+
+    Args:
+      loss_fn: A callable conforming to the LossFn protocol.
+      learner: A pax learner.
+      mdl_vars: A PyTree of tensors
+      inputs: A NestedMap of model inputs.
+      prng_key: a root PRNG key.
+
+    Returns:
+      A tuple of (values, grads).
+    """
+
+
+def _get_default_grad_fn(
+    excluded_for_grad: NestedMap, excluded_for_opt: NestedMap
+) -> GradFnProtocol:
+  """Returns the default grad function, used for training."""
+
+  def grad_fn(
+      loss_fn: LossFnProtocol,
+      learner: learners_lib.Learner,
+      mdl_vars: NestedJTensor,
+      inputs: NestedMap,
+      prng_key: PRNGKey,
+  ):
+    with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_grad
+    )
+    no_grad = jax.tree_map(
+        lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
+    )
+
+    def _loss(
+        mdl_vars_grad: NestedJTensor,
+        mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+        prng_key: PRNGKey,
+    ):
+      mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
+      merged_vars = jax.tree_map(
+          lambda e, x, y: y if e else x,
+          excluded_for_grad,
+          mdl_vars_grad,
+          mdl_vars_nograd,
+      )
+      return loss_fn(merged_vars, inputs, prng_key)
+
+    if learner.stochastic_gradient is None:
+      g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
+    else:
+      g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
+    values, grads = g(with_grad, (no_grad, inputs), prng_key)
+    grads = jax.tree_map(
+        lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
+        excluded_for_opt,
+        excluded_for_grad,
+        mdl_vars,
+        grads,
+    )
+    return values, grads
+
+  return grad_fn
+
+
+def _log_bprop_include_exclude_list(
+    var_weight_hparams: NestedWeightHParams, excluded_for_grad: NestedMap
+) -> None:
+  flat_var_prefix = jax.tree_flatten(
+      py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
+  )[0]
+  flat_mask = jax.tree_flatten(excluded_for_grad)[0]
+  for prefix, excluded in zip(flat_var_prefix, flat_mask):
+    if excluded:
+      logging.info('Bprop excluded var: %s', prefix)
+  for prefix, excluded in zip(flat_var_prefix, flat_mask):
+    if not excluded:
+      logging.info('Bprop included var: %s', prefix)
+
+
 # TODO(yonghui): refactor to pass in learner separately.
-# TODO(wangpeng): Consider breaking this function into smaller pieces, and/or
-#   moving it to `TrainProgram` or `BaseExecutor`, and/or making `grad_fn` and
-#   `apply_fn` class methods instead of arguments.
 def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
     states: TrainState,
     prng_key: PRNGKey,
-    inputs: Union[JTensor, NestedMap],
+    inputs: JTensor | NestedMap,
     fprop_dtype: jnp.dtype = jnp.float32,
-    var_weight_hparams: Optional[NestedWeightHParams] = None,
-    static_args: Optional[BaseStepFnStaticArgs] = None,
+    var_weight_hparams: NestedWeightHParams | None = None,
+    static_args: BaseStepFnStaticArgs | None = None,
     *,
-    grad_fn: Optional[
-        Callable[
-            [
-                Callable[
-                    [NestedJTensor, NestedMap, PRNGKey],
-                    Tuple[JTensor, sgf.GradAuxInfo],
-                ],
-                learners_lib.Learner,
-                NestedJTensor,
-                NestedMap,
-                PRNGKey,
-            ],
-            Tuple[Any, Any],
-        ]
-    ] = None,
-    apply_fn: Optional[
-        Callable[
-            [
-                base_model.BaseModel,
-                NestedJTensor,
-                NestedMap,
-                bool,
-                Dict[str, PRNGKey],
-            ],
-            Tuple[
-                Tuple[base_model.WeightedScalars, Dict[str, Any]], NestedJTensor
-            ],
-        ]
-    ] = None,
+    grad_fn: GradFnProtocol | None = None,
+    apply_fn: ApplyFnProtocol | None = None,
     expose_updated_nontrainables_to_learner=True,
 ) -> Tuple[TrainState, StepFnOutput]:
   """Trains a model for a single step.
@@ -787,6 +970,7 @@ def train_step_single_learner(
     inputs: Inputs to the model() function.
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
     var_weight_hparams: A pytree of WeightHParams for the model variables.
+    static_args: Unused.
     grad_fn: A custom gradient function to be used instead of a default one.
     apply_fn: A custom apply function to be used instead of a default one. Note
       that when `grad_fn` is not `None`, this argument has no effect and you
@@ -803,6 +987,7 @@ def train_step_single_learner(
     A tuple (updated_states, StepFnOutput).
   """
   del static_args
+
   model = jax_task.model
   assert len(jax_task.learners) == 1
   learner = jax_task.learners[0]
@@ -820,107 +1005,20 @@ def train_step_single_learner(
   if not var_weight_hparams:
     with base_layer.JaxContext.new_context(hparams=context_p):
       var_weight_hparams = model.abstract_init_with_metadata(inputs)
-  updated_mdl_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
-      states.step, states.mdl_vars, var_weight_hparams, prng_key
+  updated_model_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
+      step=states.step,
+      mdl_vars=states.mdl_vars,
+      var_weight_hparams=var_weight_hparams,
+      prng_key=prng_key,
   )
 
-  def _loss_fn(
-      mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey
-  ) -> Tuple[JTensor, sgf.GradAuxInfo]:
-    """Computes loss as well as other auxiliary outputs."""
-    if fprop_dtype == jnp.float32:
-      pass
-    elif fprop_dtype == jnp.bfloat16:
-      mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
-      inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
-    else:
-      assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
-
-    with base_layer.JaxContext.new_context(hparams=context_p):
-      prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
-      apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-      if apply_fn is None:
-
-        def apply(
-            variables: NestedJTensor,
-            inputs: NestedMap,
-            mutable: bool,
-            rngs: Dict[str, PRNGKey],
-        ) -> Tuple[
-            Tuple[base_model.WeightedScalars, Dict[str, Any]], NestedJTensor
-        ]:
-          return model.apply(
-              variables,
-              inputs,
-              method=model.__call__,
-              mutable=mutable,
-              rngs=rngs,
-          )
-
-      else:
-        apply = functools.partial(apply_fn, model)
-      (weighted_scalars, per_example_output), updated_vars = apply(
-          mdl_vars,
-          inputs,
-          jax_task.hparams.train.apply_mutable_list,
-          apply_rng_keys,
-      )
-
-      # Fetch all the summary tensors.
-      summary_tensors = updated_vars.get(SUMMARIES, {})
-      # TODO(yonghui): Fetch aux losses and add them to summaries.
-      summary_tensors = summary_utils.flatten_flax_summaries(summary_tensors)
-
-      (
-          weighted_loss,
-          mean_loss,
-          loss_weight,
-          aggregated_scalars,
-          aggregated_summaries,
-          per_example_output,
-      ) = _maybe_aggregate_metrics_summaries(
-          jax_task.loss_aggregator_inst,
-          weighted_scalars,
-          summary_tensors,
-          per_example_output,
-      )
-      # metrics and summary_tensors no longer needed.
-      del weighted_scalars
-      del summary_tensors
-
-      forward_updated_vars = {}
-      for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
-        if collection in updated_vars:
-          forward_updated_vars[collection] = updated_vars[collection]
-    if fprop_dtype == jnp.bfloat16 and weighted_loss.dtype == fprop_dtype:
-      weighted_loss = weighted_loss.astype(jnp.float32)
-    return weighted_loss, sgf.GradAuxInfo(
-        loss_weight=loss_weight,
-        aux_info=(
-            mean_loss,
-            aggregated_scalars,
-            forward_updated_vars,
-            aggregated_summaries,
-            per_example_output,
-        ),
-    )
-
-  prng_key, subkey = jax.random.split(prng_key)
+  _, subkey = jax.random.split(prng_key)
 
   # Skip variables for gradients.
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
       var_weight_hparams, learner
   )
-  flat_var_prefix = jax.tree_flatten(
-      py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
-  )[0]
-  flat_mask = jax.tree_flatten(excluded_for_grad)[0]
-  for prefix, excluded in zip(flat_var_prefix, flat_mask):
-    if excluded:
-      logging.info('Bprop excluded var: %s', prefix)
-  for prefix, excluded in zip(flat_var_prefix, flat_mask):
-    if not excluded:
-      logging.info('Bprop included var: %s', prefix)
+  _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
 
   # Excluded for optimizer states.
   excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
@@ -928,49 +1026,22 @@ def train_step_single_learner(
       learner,
   )
 
-  if grad_fn is None:
-
-    def grad_fn(mdl_vars: NestedJTensor, inputs: NestedMap, prng_key: PRNGKey):
-      with_grad = tasks_lib.filter_vars_for_grad_or_opt(
-          mdl_vars, excluded_for_grad
-      )
-      no_grad = jax.tree_map(
-          lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
-      )
-
-      def _loss(
-          mdl_vars_grad: NestedJTensor,
-          mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
-          prng_key: PRNGKey,
-      ):
-        mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
-        merged_vars = jax.tree_map(
-            lambda e, x, y: y if e else x,
-            excluded_for_grad,
-            mdl_vars_grad,
-            mdl_vars_nograd,
-        )
-        return _loss_fn(merged_vars, inputs, prng_key)
-
-      if learner.stochastic_gradient is None:
-        g = jax.value_and_grad(_loss, has_aux=True, allow_int=True)
-      else:
-        g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
-      values, grads = g(with_grad, (no_grad, inputs), prng_key)
-      grads = jax.tree_map(
-          lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
-          excluded_for_opt,
-          excluded_for_grad,
-          mdl_vars,
-          grads,
-      )
-      return values, grads
-
-  else:
-    grad_fn = functools.partial(grad_fn, _loss_fn, learner)
-
-  (weighted_loss, aux_info), grads = grad_fn(updated_mdl_vars, inputs, subkey)
-
+  # Construct and call the grad function.
+  if not grad_fn:
+    grad_fn = _get_default_grad_fn(excluded_for_grad, excluded_for_opt)
+  (weighted_loss, aux_info), grads = grad_fn(
+      loss_fn=_get_default_loss_fn(
+          jax_task=jax_task,
+          context_p=context_p,
+          fprop_dtype=fprop_dtype,
+          var_weight_hparams=var_weight_hparams,
+          apply_fn=apply_fn,
+      ),
+      learner=learner,
+      mdl_vars=updated_model_vars,
+      inputs=inputs,
+      prng_key=subkey,
+  )
   (
       mean_loss,
       weighted_scalars,
