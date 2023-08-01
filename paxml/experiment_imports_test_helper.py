@@ -59,7 +59,6 @@ class ExperimentImportsTestHelper(absltest.TestCase):
           s,
           (
               pax_fiddle.Config,
-              base_input.DistributedInputHParams,
           ),
       )
 

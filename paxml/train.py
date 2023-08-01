@@ -33,7 +33,6 @@ from paxml import partitioning
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
-from praxis import base_input
 from praxis import pax_fiddle
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
@@ -150,23 +149,12 @@ def train_and_evaluate(
   logging.info('[PAX STATUS]: Getting dataset configurations.')
   input_p = experiment_config.datasets()
   for inp in input_p:
-    if not isinstance(
-        inp,
-        (
-            pax_fiddle.Config,
-            base_input.DistributedInputHParams,
-        ),
-    ):
+    if not isinstance(inp, pax_fiddle.Config):
       raise ValueError(
           'Expecting pax_fiddle.Config[BaseInput] from datasets(), got:'
           f' {inp.ToText()}'
       )
-  train_input_p = [v for v in input_p if v.is_training]
-  if len(train_input_p) != 1:
-    raise ValueError(
-        f'Expecting exactly one training split. Got `{len(train_input_p)}`.'
-    )
-  train_input_p = train_input_p[0]
+  train_input_p = experiment_config.training_dataset()
   logging.info('[PAX STATUS]: Done getting dataset configurations.')
 
   logging.info('train_input_p:')
