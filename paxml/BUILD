@@ -322,7 +322,6 @@ pytype_strict_library(
         ":train",
         ":trainer_lib",
         ":tuning_lib",
-        # Implicit internal tf.data service dependency.  # BC internal suffix.
         # Implicit internal Jax runtime dependency.  # BC internal suffix.
         # Implicit Jax software support dependency.  # BC internal suffix.
         # Implicit absl.app dependency.
@@ -335,7 +334,12 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit seqio dependency.
-    ],
+    ] + select({
+        # Internal empty GCE platform
+        "//conditions:default": [
+            # Implicit internal tf.data service dependency.  # BC internal suffix.
+        ],
+    }),
 )
 
 pytype_strict_library(
