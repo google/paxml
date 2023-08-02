@@ -576,7 +576,6 @@ class MultiOptimizerLearner(Learner):
           optimizers.sharded_masked(
               grad_tx_fn(var_weight_hparams, include_ema=False),
               mask,
-              use_custom_masked=use_optax_gradient_transforms,
           )
       )
 
@@ -585,7 +584,6 @@ class MultiOptimizerLearner(Learner):
         optimizers.sharded_masked(
             self._grad_tx_fn(var_weight_hparams, include_ema=False),
             default_mask,
-            use_custom_masked=use_optax_gradient_transforms,
         ),
     )
 
