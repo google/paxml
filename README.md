@@ -53,7 +53,7 @@ If you encounter issues with transitive dependencies and you are using the nativ
 
 ```bash
 git clone -b rX.Y.Z https://github.com/google/paxml
-pip install --no-deps paxml/paxml/pip_package/requirements.txt
+pip install --no-deps -r paxml/paxml/pip_package/requirements.txt
 ```
 
 For installing the dev version from github, and for the ease of editing code:
