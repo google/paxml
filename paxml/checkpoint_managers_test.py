@@ -677,7 +677,6 @@ class CheckpointManagerTest(parameterized.TestCase):
     checkpoint_manager = self.create_checkpoint_manager(options)
 
     save_step = 3
-    jax.config.update('jax_coordination_service', True)
     multihost_utils.reached_preemption_sync_point = (
         lambda step_id: step_id == save_step
     )

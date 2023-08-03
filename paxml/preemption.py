@@ -14,11 +14,9 @@
 # limitations under the License.
 
 """Utils for preemption."""
-import jax
 from jax.experimental import multihost_utils
 
 
 def reached_preemption_sync_point(step: int) -> bool:
   """Determine whether all hosts have reached a preemption sync point."""
-  return (jax.config.jax_coordination_service and
-          multihost_utils.reached_preemption_sync_point(step))
+  return multihost_utils.reached_preemption_sync_point(step)
