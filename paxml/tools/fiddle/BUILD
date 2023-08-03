@@ -37,6 +37,7 @@ pytype_strict_library(
         # Implicit fiddle.daglish dependency.
         # Implicit fiddle.diffing dependency.
         # Implicit fiddle.selectors dependency.
+        # Implicit fiddle.validation dependency.
         # Implicit fiddle._src.codegen.auto_config.code_ir dependency.
         # Implicit fiddle._src.codegen.auto_config.ir_to_cst dependency.
         # Implicit fiddle.codegen dependency.
@@ -45,7 +46,6 @@ pytype_strict_library(
         # Implicit fiddle.experimental.visualize dependency.
         # Implicit fiddle.extensions.jax dependency.
         # Implicit fiddle.extensions.seqio dependency.
-        # Implicit fiddle.validation dependency.
         # Implicit libcst dependency.
         "//paxml:base_experiment",
         "//paxml:parameterized_experiment",
