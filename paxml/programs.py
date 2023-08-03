@@ -793,6 +793,7 @@ class BaseEvalProgram(Program):
 
     # TODO(laigd): consider adding a method for this for subclass to overwrite.
     if seqio_input.should_process_outputs(self.eval_input):
+      verbose_entries = 0 if flags.FLAGS.pax_only_aggregate_summaries else 1
       eval_scoring_metrics = seqio_input.process_outputs(
           self.eval_input,
           flat_scoring_outputs,
@@ -800,6 +801,7 @@ class BaseEvalProgram(Program):
           seqio_input.MetricType.SCORE,
           step,
           output_dir,
+          verbose_entries=verbose_entries,
       )
       logging.info(
           'Finished processing %d outputs using seqio.',
