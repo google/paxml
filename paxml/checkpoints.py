@@ -637,6 +637,10 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   ) -> PyTree:
     if version is None:
       raise ValueError('Expected version for restoration.')
+    if transforms is not None and not self._use_ocdbt:
+      raise ValueError(
+          'Transforms with `use_ocdbt=False` are not currently supported.'
+      )
     # Input the same data structure as in save_checkpoint().
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
         item, is_leaf=py_utils.is_bprop_masked_node

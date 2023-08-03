@@ -197,16 +197,14 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       train_input_pipeline,
   ):
     restore_args = {}
-    if self._checkpoint_type == CheckpointType.GDA:
+    if (
+        self._checkpoint_type == CheckpointType.GDA
+        or self._checkpoint_type == CheckpointType.PERSISTENCE
+    ):
       restore_args = {
           'specs': train_state_pspecs,
           'mesh': global_mesh,
           'transforms': self._restore_transformations,
-      }
-    elif self._checkpoint_type == CheckpointType.PERSISTENCE:
-      restore_args = {
-          'state_specs': train_state_pspecs,
-          'global_mesh': global_mesh,
       }
     return self.checkpoint_manager.restore(
         step_i,
