@@ -37,7 +37,7 @@ class SyntheticDataset(base_experiment.BaseExperiment):
       self, is_training
   ) -> pax_fiddle.Config[base_input.BaseInput]:
     num_local_devices = jax.local_device_count()
-    batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
+    batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices * jax.process_count())
     input_p = input_generator.SyntheticLmData.HParams()
     if is_training:
       input_p.batch_size = batch_size
