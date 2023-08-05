@@ -757,10 +757,10 @@ def get_excluded_var_mask_for_grad_or_opt(
   # Skip variables for gradients.
   if learner.bprop_variable_inclusion:
     assert not learner.bprop_variable_exclusion
-    excluded_for_grad = py_utils.match_variable_names(
+    included_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_inclusion
     )
-    excluded_for_grad = jax.tree_map(lambda x: not x, excluded_for_grad)
+    excluded_for_grad = jax.tree_map(lambda x: not x, included_for_grad)
   else:
     excluded_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_exclusion
@@ -788,7 +788,7 @@ def get_excluded_var_mask_for_grad(
     var_weight_hparams: NestedJTensor,
     learner: learners_lib.Learner,
 ) -> NestedMap:
-  """Returns whether each var should be excluded for optimizer."""
+  """Returns whether each var should be excluded for grad."""
   return get_excluded_var_mask_for_grad_or_opt(
       var_weight_hparams, learner, True
   )

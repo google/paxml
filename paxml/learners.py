@@ -553,7 +553,7 @@ class MultiOptimizerLearner(Learner):
   def get_grad_tx(
       self, var_weight_hparams: NestedWeightHParams
   ) -> optimizers.GeneralGradientTransformation:
-    """The gradient transformation the MultiOptimizer lerner.
+    """The gradient transformation of the MultiOptimizer learner.
 
     Args:
       var_weight_hparams: The model vars' params which will be used to filter
