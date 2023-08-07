@@ -17,6 +17,7 @@ import functools
 import os
 from typing import List, Optional
 import jax
+import math
 from paxml import base_experiment
 from paxml import seqio_input
 from paxml.contrib.gpu.scripts_gpu import tfds_lambada

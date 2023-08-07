@@ -15,17 +15,34 @@
 
 #! /bin/bash
 set -u
+set -o pipefail
 
 TFDS_DATA_DIR=$1
 VOCAB_PATH=$2
-LOG_DIR=${3:-"test_logdir"}
+PREC=${3:-"bfloat16"}        # Precision (float32, bfloat16)
+NUM_GPUS=${4:-8}      # Number of GPUs (1, 2, 4, 8)
+PERCORE_BATCH_SIZE=${5:-4}
+LOG_DIR=${6:-"test_logdir"}
 
 export VOCAB_PATH=$VOCAB_PATH
 
 mkdir -p ${LOG_DIR}
 python3 -u -m paxml.main \
     --job_log_dir=${LOG_DIR} \
-    --exp=paxml.contrib.gpu.scripts_gpu.configs.SmallPileTest \
+    --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.Pile126M \
+    --fdl.FPROP_DTYPE=\"${PREC}\" \
+    --fdl.ICI_MESH_SHAPE="[${NUM_GPUS}, 1, 1]" \
+    --fdl.PERCORE_BATCH_SIZE=$PERCORE_BATCH_SIZE \
     --tfds_data_dir=$TFDS_DATA_DIR \
-    --alsologtostderr &> ${LOG_DIR}/output.log
+    --alsologtostderr \
+    2>&1 | tee ${LOG_DIR}/pile_output.log
 
+EXP_STATUS=$?
+
+if [ $EXP_STATUS != 0 ]; then
+  echo "Run failed"
+else
+  echo "Run succeeded!"
+fi
+
+echo Output written to ${LOG_DIR}/pile_output.log
