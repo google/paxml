@@ -16,6 +16,7 @@
 """Unit tests for tasks_lib."""
 
 from __future__ import annotations
+
 import re
 from typing import Tuple
 
@@ -25,6 +26,7 @@ import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 from paxml import checkpoints
 from paxml import learners
 from paxml import partitioning
@@ -374,10 +376,17 @@ class BaseTaskTest(test_utils.TestCase):
 
 class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
-  @parameterized.named_parameters(('partial_load_opt_states', True, False),
-                                  ('load_no_opt_states', False, False),
-                                  ('load_all_opt_states', False, True))
-  def test_load(self, partial_load_opt_states, load_opt_states):
+  @parameterized.named_parameters(
+      ('partial_load_opt_states', True, False, False),
+      ('load_no_opt_states', False, False, False),
+      ('load_all_opt_states', False, True, False),
+      ('partial_load_opt_states_opt_native', True, False, True),
+      ('load_no_opt_states_opt_native', False, False, True),
+      ('load_all_opt_states_opt_native', False, True, True),
+  )
+  def test_load(
+      self, partial_load_opt_states, load_opt_states, use_native_optax_opt
+  ):
     input_dims = 3
     output_dims = 5
 
@@ -391,6 +400,164 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     lp = ext_task_p.train.learner
     lp.loss_name = 'loss'
+
+    if use_native_optax_opt:
+      lp.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+      lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+      lr_scdule_inst = instantiate(lp.optimizer.lr_schedule)
+
+      def lr_schedule(step):
+        return lr_scdule_inst.value_at(step) * lp.optimizer.learning_rate
+
+      lp.optimizer.grad_tx = optax.adam(
+          learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1
+      )
+      # TODO(b/277132394): Add parameterized test for prefix vectorization.
+      lp.vectorize_on_repeat_prefix = False
+    else:
+      lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+      lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+
+    # Enable ema
+    lp.optimizer.ema_decay = 0.9999
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
+    )
+    ext_task = instantiate(ext_task_p)
+    ext_train_state = trainer_lib.initialize_replicate_model_state(
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
+    )
+    if use_native_optax_opt:
+      opt_state_shape = (
+          ext_train_state.opt_states[0][2][0].mu['params']['var01'].shape
+      )
+      ext_train_state.opt_states[0][2][0].mu['params']['var01'] = jnp.array(
+          np.random.normal(size=opt_state_shape)
+      )
+      ext_train_state.opt_states[0][2][0].nu['params']['var01'] = jnp.array(
+          np.random.normal(size=opt_state_shape)
+      )
+    else:
+      opt_state_shape = ext_train_state.opt_states[0][2]['m']['params'][
+          'var01'
+      ].shape
+      ext_train_state.opt_states[0][2]['m']['params']['var01'] = jnp.array(
+          np.random.normal(size=opt_state_shape)
+      )
+      ext_train_state.opt_states[0][2]['v']['params']['var01'] = jnp.array(
+          np.random.normal(size=opt_state_shape)
+      )
+
+    # Modify var01 to be random
+    var_shape = ext_train_state.mdl_vars['params']['var01'].shape
+    random_var = jnp.array(np.random.normal(size=var_shape))
+    ext_train_state.mdl_vars['params']['var01'] = random_var
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+    )
+
+    # Create task with warm-start
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+    task_p.train.learner = lp.clone()
+    load_rules = [(r'params/(.*)', 'params/{}')]
+    if partial_load_opt_states:
+      if use_native_optax_opt:
+        load_rules.extend([
+            (r'(.*)mu/params/(.*)', '{}mu/params/{}'),
+            (r'(.*)nu/params/(.*)', '{}nu/params/{}'),
+        ])
+      else:
+        load_rules.extend([
+            (r'(.*)m/params/(.*)', '{}m/params/{}'),
+            (r'(.*)v/params/(.*)', '{}v/params/{}'),
+        ])
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=load_rules,
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
+            ),
+            load_opt_states=load_opt_states,
+            partial_load_opt_states=partial_load_opt_states,
+        ),
+    }
+    task = instantiate(task_p)
+
+    # Now initialize also includes warm start (loading from ckpt)
+    train_state = trainer_lib.initialize_replicate_model_state(
+        task, jax.random.PRNGKey(1), sample_inputs
+    )
+
+    self.assertAllClose(
+        ext_train_state.mdl_vars['params']['var01'],
+        train_state.mdl_vars['params']['var01'][0],
+    )
+
+    if partial_load_opt_states:
+      if use_native_optax_opt:
+        self.assertAllClose(
+            ext_train_state.opt_states[0][2][0].mu['params']['var01'],
+            train_state.opt_states[0][2][0].mu['params']['var01'][0],
+        )
+        self.assertAllClose(
+            ext_train_state.opt_states[0][2][0].nu['params']['var01'],
+            train_state.opt_states[0][2][0].nu['params']['var01'][0],
+        )
+      else:
+        self.assertAllClose(
+            ext_train_state.opt_states[0][2]['m']['params']['var01'],
+            train_state.opt_states[0][2]['m']['params']['var01'][0],
+        )
+        self.assertAllClose(
+            ext_train_state.opt_states[0][2]['v']['params']['var01'],
+            train_state.opt_states[0][2]['v']['params']['var01'][0],
+        )
+
+    # When loading opt states from a checkpoint, ema is not auto-initialized to
+    # mdl_vars by default.
+    if not partial_load_opt_states and not load_opt_states:
+      for v in train_state.opt_states[0]:
+        if 'ema' in v:
+          self.assertAllClose(
+              ext_train_state.mdl_vars['params']['var01'],
+              v.ema['params']['var01'][0],
+          )
+
+  @parameterized.named_parameters(
+      ('partial_load_opt_states', True, False),
+      ('load_all_opt_states', False, True),
+  )
+  def test_load_checkpoint_from_base_optmizer_to_optax_optimizer(
+      self, partial_load_opt_states, load_opt_states
+  ):
+    input_dims = 3
+    output_dims = 5
+
+    # Initialize external task and save checkpoint
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    lp = ext_task_p.train.learner
+    lp.loss_name = 'loss'
+
     lp.optimizer = pax_fiddle.Config(optimizers.Adam)
     lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
@@ -433,11 +600,31 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     task_p.model = pax_fiddle.Config(
         TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
     )
-    task_p.train.learner = lp.clone()
+    # Create learner with new optax optimizer
+    lp = task_p.train.learner
+    lp.loss_name = 'loss'
+
+    lp.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    lr_scdule_inst = instantiate(lp.optimizer.lr_schedule)
+
+    def lr_schedule(step):
+      return lr_scdule_inst.value_at(step) * lp.optimizer.learning_rate
+
+    lp.optimizer.grad_tx = optax.adam(
+        learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1
+    )
+    # TODO(b/277132394): Add parameterized test for prefix vectorization.
+    lp.vectorize_on_repeat_prefix = False
+
+    # Enable ema
+    lp.optimizer.ema_decay = 0.9999
     load_rules = [(r'params/(.*)', 'params/{}')]
-    if partial_load_opt_states:
-      load_rules.extend([(r'(.*)m/params/(.*)', '{}m/params/{}'),
-                         (r'(.*)v/params/(.*)', '{}v/params/{}')])
+
+    load_rules.extend([
+        (r'(.*)/0/mu/params/(.*)', '{}/m/params/{}'),
+        (r'(.*)/0/nu/params/(.*)', '{}/v/params/{}'),
+    ])
     task_p.train.init_from_checkpoint_rules = {
         tempdir.full_path: tasks_lib.CheckpointLoadingRules(
             task_p=ext_task_p,
@@ -458,21 +645,14 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
                         train_state.mdl_vars['params']['var01'][0])
 
-    if partial_load_opt_states:
-      self.assertAllClose(
-          ext_train_state.opt_states[0][2]['m']['params']['var01'],
-          train_state.opt_states[0][2]['m']['params']['var01'][0])
-      self.assertAllClose(
-          ext_train_state.opt_states[0][2]['v']['params']['var01'],
-          train_state.opt_states[0][2]['v']['params']['var01'][0])
-
-    # When loading opt states from a checkpoint, ema is not auto-initialized to
-    # mdl_vars by default.
-    if not partial_load_opt_states and not load_opt_states:
-      for v in train_state.opt_states[0]:
-        if 'ema' in v:
-          self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
-                              v.ema['params']['var01'][0])
+    self.assertAllClose(
+        ext_train_state.opt_states[0][2]['m']['params']['var01'],
+        train_state.opt_states[0][2][0].mu['params']['var01'][0],
+    )
+    self.assertAllClose(
+        ext_train_state.opt_states[0][2]['v']['params']['var01'],
+        train_state.opt_states[0][2][0].nu['params']['var01'][0],
+    )
 
   @parameterized.named_parameters(
       ('partial_load_opt_states', True, False, False),

@@ -1063,6 +1063,7 @@ py_strict_test(
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
+        # Implicit optax dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",

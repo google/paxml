@@ -217,6 +217,37 @@ def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
       current = current[k]
 
 
+# These rules are needed in order to load optimizer states from checkpoint with
+# Praxis optimizer to new Optax based optimizer.
+# For example, the internal state for Adam optimizer in praxis used variables
+# 'm' and 'v', whereas optax based optimizer stores the internal state in
+# varaibles 'mu' and 'nu' within ScaleByAdamState state. Thus, we replace these
+# state variables when loading from checkpoint using variable mapping. To
+# avoid each user from specifying these common patterns, we keep all the
+# required mappings for optimizer states in one place. Mapping for each
+# optimizer will be introduced one by one after testing.
+def get_optax_opt_load_rules() -> Sequence[Tuple[re.Pattern[str], str]]:
+  rules = [
+      # Rules for Adam optimizer.
+      # Note extra '/0/' is to account for ScaleByAdamState tuple.
+      (r'(.*)/0/mu/params/(.*)', '{}/m/params/{}'),
+      (r'(.*)/0/nu/params/(.*)', '{}/v/params/{}'),
+      # Note this will be populated one by one for each optimizer.
+  ]
+  loading_rules = [(re.compile(pattern), ref) for pattern, ref in rules]
+  return loading_rules
+
+
+def get_praxis_opt_state_regex() -> Sequence[re.Pattern[str]]:
+  opt_state_patterns = [
+      # Regex for matching opt state for Praxis Adam optimizer.
+      r'(.*)/m/params/(.*)',
+      r'(.*)/v/params/(.*)',
+  ]
+  opt_state_patterns = [re.compile(pattern) for pattern in opt_state_patterns]
+  return opt_state_patterns
+
+
 def _get_var_mapping(
     varnames: List[str],
     loading_rules: Sequence[Tuple[re.Pattern[str], str]],
@@ -811,6 +842,7 @@ def create_state_partition_specs(
     mesh_axis_names: Sequence[str],
     discard_opt_states: bool,
     learners: Optional[Sequence[learners_lib.Learner]],
+    opt_states: Optional[optax.OptState] = None,
 ):
   """Creates partition specs for all variables used in training.
 
@@ -836,6 +868,7 @@ def create_state_partition_specs(
     opt_var_partition_specs = []
   else:
     opt_var_weight_hparams = []
+    index = 0
     for learner in learners:
       excluded = get_excluded_var_mask_for_opt(
           var_weight_hparams,
@@ -846,9 +879,22 @@ def create_state_partition_specs(
       )
       grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
       assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
-      opt_var_weight_hparams.append(
-          grad_tx.init_partition_spec(var_weight_hparams_for_opt)
-      )
+      if isinstance(grad_tx, optimizers.ShardedGradientTransformation):
+        opt_var_weight_hparams.append(
+            grad_tx.init_partition_spec(var_weight_hparams_for_opt)
+        )
+      elif isinstance(grad_tx, optax.GradientTransformationExtraArgs):
+        opt_var_weight_hparams.append(
+            optax.tree_map_params(
+                grad_tx,
+                lambda v, s: s,
+                opt_states[index],
+                var_weight_hparams_for_opt,
+                transform_non_params=lambda v: None,
+            )
+        )
+      index += 1
+
     opt_var_partition_specs = base_layer.var_partition_specs(
         opt_var_weight_hparams,
         mesh_shape=mesh_shape,
@@ -1021,6 +1067,7 @@ def create_state_padded_shapes(
       mesh_axis_names,
       discard_opt_states,
       learners,
+      unpadded_shapes.opt_states,
   )
   asserts.assert_same_structure(model_state_partition_specs, unpadded_shapes)
 
@@ -1511,12 +1558,17 @@ class SingleTask(base_task.BaseTask):
     if mesh_shape is None:
       return None
     mesh_axis_names = self.model.mesh_axis_names
+    unpadded_shapes = self.create_train_state_unpadded_shapes(
+        var_weight_hparams, discard_opt_states
+    )
+
     return create_state_partition_specs(
         var_weight_hparams,
         mesh_shape,
         mesh_axis_names,
         discard_opt_states,
         self.learners,
+        unpadded_shapes.opt_states,
     )
 
   def maybe_adjust_train_state(self, step: int, mdl_vars: Dict[
@@ -1595,6 +1647,7 @@ class SingleTask(base_task.BaseTask):
       loading_rules,
       ignore_rules,
       ckpt_path,
+      loading_to_optax_opt_states,
   ):
     # pylint: disable=g-doc-args
     """Delete some opt vars before they get are loaded from the checkpoint.
@@ -1612,12 +1665,11 @@ class SingleTask(base_task.BaseTask):
       opt_states_flat = _flatten_dict(opt_states_serialized)
       flattened_opt_vars = dict(opt_states_flat)
       opt_state_names = [x[0] for x in opt_states_flat]
+      # Make a copy as we don't want to modify `is_opt_states_initialized`
+      # which is going to be used later.
+      is_opt_states_initialized_copy = copy.deepcopy(is_opt_states_initialized)
       if rules.partial_load_opt_states:
         # Delete matching vars from the checkpoint
-        # Make a copy as we don't want to modify `is_opt_states_initialized`
-        # which is going to be used later.
-        is_opt_states_initialized_copy = copy.deepcopy(
-            is_opt_states_initialized)
         opt_state_mapping, _ = _get_var_mapping(
             opt_state_names,
             loading_rules,
@@ -1626,10 +1678,25 @@ class SingleTask(base_task.BaseTask):
             ckpt_path,
             kind='Opt State',
             safe_load=False,
-            target_partition_specs=None)
+            target_partition_specs=None,
+        )
       else:
-        # Delete all opt vars
-        opt_state_mapping = opt_state_names
+        if loading_to_optax_opt_states:
+          # For loading opt states from old checkpoints to new optax based
+          # optimizers, we need to retain the other parameters.
+          opt_state_mapping, _ = _get_var_mapping(
+              opt_state_names,
+              loading_rules,
+              ignore_rules,
+              is_opt_states_initialized_copy,
+              ckpt_path,
+              kind='Opt State',
+              safe_load=False,
+              target_partition_specs=None,
+          )
+        else:
+          # Delete all opt vars
+          opt_state_mapping = opt_state_names
 
       jax.block_until_ready(flattened_opt_vars)
       for k in opt_state_mapping:
@@ -1706,9 +1773,39 @@ class SingleTask(base_task.BaseTask):
     jax.block_until_ready(flattened_model_vars)
     for k in model_vars_mapping:
       flattened_model_vars[k].delete()
+
+    # When loading from old opt checkpoint with current praxis optimizer to
+    # new optax basd optimizers, we need to apply loading rules to match the
+    # optimizer states.
+    # Below we check whether we are loading the checkpoint to optax based
+    # optimizer using regex match. If yes, we want to prevent prematurely
+    # deleting unneeded opt states.
+    # We perform this check only for load_opt_states since for
+    # partial_load_opt_states, only the loading rules from user are honored.
+    loading_to_optax_opt = False
+    if rules.load_opt_states and not rules.partial_load_opt_states:
+      opt_states_serialized = flax.serialization.to_state_dict(
+          train_state.opt_states
+      )
+      opt_states_flat = _flatten_dict(opt_states_serialized)
+      for opt_state_name in opt_states_flat:
+        var_name = opt_state_name[0].replace(
+            '.', '/'
+        )  # dot is reserved for regex
+        for rule, _ in get_optax_opt_load_rules():
+          if rule.match(var_name) is not None:
+            loading_to_optax_opt = True
+            break
+
     self._maybe_delete_unneeded_opt_vars(
-        rules, train_state.opt_states, is_opt_states_initialized, loading_rules,
-        ignore_rules, ckpt_path)
+        rules,
+        train_state.opt_states,
+        is_opt_states_initialized,
+        loading_rules,
+        ignore_rules,
+        ckpt_path,
+        loading_to_optax_opt,
+    )
 
     if uses_gda:
       ckpt_train_state, train_state_pspecs = _make_train_state(
@@ -1823,20 +1920,64 @@ class SingleTask(base_task.BaseTask):
             is_opt_states_initialized,
         )
       else:
-        train_state = train_state.replace(
-            opt_states=loaded_train_state.opt_states
+        # Confirm that we are loading from loading from old opt checkpoint to
+        # new optax based checkpoints. If yes, apply loading rules to match the
+        # optimizer states.
+        # We do not perform this automatic application of rules for
+        # partial_load_opt_states, since the rules might conflict with user
+        # provided rules. In case of partial_load_opt_states, expectation is for
+        # the user to send the rules correctly for loading from old checkpoint
+        # that uses praxis optimizers.
+        loading_from_praxis_opt_state = False
+        loaded_opt_states_flat = _flatten_dict(
+            flax.serialization.to_state_dict(loaded_train_state.opt_states)
         )
-        train_state_provenance = train_state_provenance.replace(
-            opt_states=loaded_state_provenance.opt_states
-        )
-        load_status[2] = {'all': ckpt_path}
-        logging.info(
-            (
-                'Initialization by external checkpoint: train_state.opt_states'
-                ' is overwritten by value from %s'
-            ),
-            ckpt_path,
-        )
+
+        for opt_state_name in loaded_opt_states_flat:
+          var_name = opt_state_name[0].replace(
+              '.', '/'
+          )  # dot is reserved for regex
+          for rule in get_praxis_opt_state_regex():
+            if rule.match(var_name) is not None:
+              loading_from_praxis_opt_state = True
+              break
+
+        if loading_from_praxis_opt_state and loading_to_optax_opt:
+          train_state, train_state_provenance = _load_partial_opt_states(
+              train_state,
+              train_state_provenance,
+              loaded_train_state,
+              loaded_state_provenance,
+              get_optax_opt_load_rules(),
+              ignore_rules,
+              is_opt_states_initialized,
+              ckpt_path,
+          )
+
+          logging.info(
+              (
+                  'Initialization by external checkpoint: '
+                  'with train_state.opt_states replaced from praxis optimizer '
+                  'to optax optimizer opt_state variables using checkpoint '
+                  '%s'
+              ),
+              ckpt_path,
+          )
+        else:
+          train_state = train_state.replace(
+              opt_states=loaded_train_state.opt_states
+          )
+          train_state_provenance = train_state_provenance.replace(
+              opt_states=loaded_state_provenance.opt_states
+          )
+          load_status[2] = {'all': ckpt_path}
+          logging.info(
+              (
+                  'Initialization by external checkpoint:'
+                  ' train_state.opt_states is overwritten by value from %s'
+              ),
+              ckpt_path,
+          )
 
     return train_state, train_state_provenance
 
