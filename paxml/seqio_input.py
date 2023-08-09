@@ -978,7 +978,7 @@ class SeqIOInput(base_input.BaseInput):
     # Find the max number of batches required across all Jax processes.
     num_batches_all = multihost_utils.process_allgather(
         jnp.array([local_num_batches]), tiled=False)
-    num_batches = int(jnp.max(num_batches_all))
+    num_batches = np.max(num_batches_all)
     pad_num = num_batches * self.batch_size - local_num
     assert pad_num >= 0
     logging.info(
