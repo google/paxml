@@ -203,6 +203,26 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "graphviz_utils",
+    srcs = ["graphviz_utils.py"],
+    deps = [
+        ":config_normalization",
+        # Implicit fiddle.graphviz dependency.
+        # Implicit graphviz dependency.
+    ],
+)
+
+pytype_strict_test(
+    name = "graphviz_utils_test",
+    srcs = ["graphviz_utils_test.py"],
+    deps = [
+        ":graphviz_utils",
+        ":test_fixtures",
+        # Implicit absl.testing.absltest.absltest dependency.
+    ],
+)
+
+pytype_strict_library(
     name = "wrap_nested_maps",
     srcs = ["wrap_nested_maps.py"],
     deps = [

@@ -161,7 +161,9 @@ googleapis-common-protos==1.60.0
 graph-compression-google-research==0.0.4
     # via lingvo
 graphviz==0.20.1
-    # via fiddle
+    # via
+    #   -r paxml-requirements.in
+    #   fiddle
 grpcio==1.56.2
     # via
     #   tensorboard

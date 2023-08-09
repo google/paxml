@@ -5,6 +5,7 @@ absl-py
 clu
 etils
 flax
+graphviz
 jax @ git+https://github.com/google/jax
 lingvo
 numpy
