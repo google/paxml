@@ -415,7 +415,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
             target_magnitude = 1.0
             logging.info('var: %s is a scalar', var_key)
           else:
-            target_magnitude = base_layer.var_init_scale(var_wh)
+            target_magnitude = base_layer.var_init_scale(var_wh, var_key)
           logging.info(
               'var: %s, target_magnitude: %f', var_key, target_magnitude
           )
