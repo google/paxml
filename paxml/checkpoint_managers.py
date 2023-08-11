@@ -461,6 +461,7 @@ class OrbaxCheckpointManager:
       train_input_pipeline: Optional[base_input.BaseInput] = None,
       restore_kwargs: Optional[Any] = None,
       aux_items: Optional[Dict[str, Any]] = None,
+      aux_restore_kwargs: Optional[Dict[str, Any]] = None,
   ) -> Union[TrainState, Dict[str, Any]]:
     """See superclass documentation."""
     uses_transformations = (
@@ -480,6 +481,9 @@ class OrbaxCheckpointManager:
 
     if aux_items:
       items.update(aux_items)
+
+    if aux_restore_kwargs:  # Add aux restore kwargs for aux_items
+      restore_kwargs.update(aux_restore_kwargs)
 
     # Train input checkpoint may not exist if input checkpointing wasn't
     # previously enabled
