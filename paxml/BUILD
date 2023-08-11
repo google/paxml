@@ -504,7 +504,6 @@ pytype_strict_library(
         # Implicit jax dependency.
         "//paxml:checkpoints",
         "//praxis:base_hyperparams",
-        "//praxis:base_input",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.

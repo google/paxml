@@ -190,22 +190,19 @@ class DefaultExecutor(base_executor.BaseExecutor):
     # Sets up the partitioner. Note it only needs shape/dtype information of the
     # prng key.
     # TODO(laigd): let it take ShapeDtypeStruct of prng key instead.
-    train_input_specs = None
-    if self._task.train.enforce_input_specs:
-      train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
-          self._task, input_specs_provider
+    train_input_specs = trainer_lib.get_train_input_specs_for_model_init(
+        self._task, input_specs_provider
+    )
+    if not train_input_specs:
+      raise ValueError(
+          'No training input specs available from [%s].'
+          % type(input_specs_provider)
       )
-      if not train_input_specs:
-        raise ValueError(
-            'No training input specs available, while enabling '
-            '`self._task.train.enforce_input_specs` requires it.'
-        )
     logging.info('[PAX STATUS]: Setting up partitioner')
     partitioner.setup(
         jax_task,
         root_prng_key,
         train_inputs_shape_dtype=train_input_specs,
-        train_input_pipeline=train_input_for_partitioner,
         job_log_dir=job_log_dir,
     )
     logging.info('[PAX STATUS]: Getting train state metadata.')
