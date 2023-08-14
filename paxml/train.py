@@ -33,6 +33,7 @@ from paxml import partitioning
 from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
+from praxis import base_input
 from praxis import pax_fiddle
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
@@ -217,6 +218,11 @@ def train_and_evaluate(
         reshard_inputs=reshard_inputs,
         auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
     )
+  specs_provider_p = experiment_config.get_input_specs_provider_params()
+  if issubclass(specs_provider_p.cls, base_input.DatasetInputSpecsProvider):
+    specs_provider_p.input_p = partitioner.preprocess_input_config(
+        specs_provider_p.input_p
+    )
 
   # Creates the train/eval/decode programs.
   logging.info('[PAX STATUS]: Initializing train program.')
@@ -258,7 +264,7 @@ def train_and_evaluate(
         job_log_dir,
         checkpointer,
         partitioner,
-        instantiate(experiment_config.get_input_specs_provider_params()),
+        instantiate(specs_provider_p),
         train_input_p,
         train_program,
         eval_programs,
