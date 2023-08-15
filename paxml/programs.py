@@ -14,13 +14,14 @@
 # limitations under the License.
 
 """The basic program concept that encapsulates a per-step runnable."""
+
 import abc
 import collections
 import contextlib
 import dataclasses
 import queue
 import time
-from typing import Any, Optional, Sequence, Tuple, Union, Mapping
+from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import flags
 from absl import logging
@@ -30,10 +31,7 @@ from jax import monitoring
 from jax.experimental import multihost_utils
 import numpy as np
 from paxml import io_utils
-from paxml import metric_utils
 from paxml import partitioning
-from paxml import seqio_input
-from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
@@ -41,13 +39,26 @@ from paxml import xla_passthrough
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
+from praxis import lazy_loader
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import trees
-import tensorflow.compat.v2 as tf
 
-from paxml import profiling  # mapped to internal
+# Those modules are slow to import, so we do it lazily.
+metric_utils = lazy_loader.LazyLoader(
+    'metric_utils', globals(), 'paxml.metric_utils'
+)
+seqio_input = lazy_loader.LazyLoader(
+    'seqio_input', globals(), 'paxml.seqio_input'
+)
+summary_utils = lazy_loader.LazyLoader(
+    'summary_utils', globals(), 'paxml.summary_utils'
+)
+tf = lazy_loader.LazyLoader('tf', globals(), 'tensorflow.compat.v2')
+profiling = lazy_loader.LazyLoader(
+    'profiling', globals(), 'paxml.profiling'  # mapped to internal
+)
 
 JTensor = pytypes.JTensor
 NestedJTensor = pytypes.NestedJTensor
@@ -57,7 +68,7 @@ PRNGKey = pytypes.PRNGKey
 SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 EvaluationMode = io_utils.EvaluationMode
-SummaryWriter = tf.summary.SummaryWriter
+SummaryWriter = 'tf.summary.SummaryWriter'  # pylint:disable=invalid-name
 StepFnOutput = trainer_lib.StepFnOutput
 BaseStepFnStaticArgs = trainer_lib.BaseStepFnStaticArgs
 

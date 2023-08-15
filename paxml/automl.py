@@ -18,7 +18,6 @@
 import abc
 import collections
 import dataclasses
-import inspect
 import math
 import typing
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
@@ -698,30 +697,6 @@ class EarlyStoppingError(BaseException):
     self.checkpoint = checkpoint_path
 
 
-def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
-  """Enable class-level hypers for a BaseExperiment subclass."""
-
-  def create_hyper_property(name: str, hyper: pg.hyper.HyperPrimitive):
-    attr_name = f'_PROPERTY_{name}'
-    hyper_kwargs = dict(hyper.sym_init_args)
-    if 'name' not in hyper_kwargs or hyper_kwargs['name'] is None:
-      hyper_kwargs['name'] = name
-
-    def getter(x):
-      if hasattr(x, attr_name):
-        return getattr(x, attr_name)
-      return hyper.__class__(**hyper_kwargs)  # pytype: disable=not-instantiable
-
-    def setter(x, v):
-      setattr(x, attr_name, v)
-
-    return property(getter, setter)
-
-  for name, hyper in inspect.getmembers(
-      cls, lambda x: isinstance(x, pg.hyper.HyperPrimitive)):
-    setattr(cls, name, create_hyper_property(name, hyper))
-
-
 #
 # Decorators for parameter sweeping.
 #
@@ -824,7 +799,7 @@ def parameter_sweep(
 
       setattr(new_cls, COMBINED_DECISION_ATTR, pg.oneof(combinations[1:]))
       setattr(new_cls, COMBINED_DECISION_POINT_NAMES, attr_names)
-      enable_class_level_hyper_primitives(new_cls)
+      automl_interfaces.enable_class_level_hyper_primitives(new_cls)
 
     setattr(new_cls, '__name__', cls.__name__)
     setattr(new_cls, '__module__', cls.__module__)

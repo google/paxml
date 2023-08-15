@@ -25,9 +25,12 @@ from paxml import train_states
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import base_model
+from praxis import lazy_loader
 from praxis import py_utils
 from praxis import pytypes
-import tensorflow_datasets as tfds
+
+# TFDS is slow to import, so we do it lazily.
+tfds = lazy_loader.LazyLoader('tfds', globals(), 'tensorflow_datasets')
 
 NestedMap = py_utils.NestedMap
 NestedWeightHParams = base_layer.NestedWeightHParams

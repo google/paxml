@@ -26,10 +26,15 @@ from typing import Any, Optional, Sequence, Tuple, Union
 import jax
 import jax.numpy as jnp
 import numpy as np
-from paxml import summary_utils
 from praxis import base_hyperparams
 from praxis import base_layer
+from praxis import lazy_loader
 from praxis import pax_fiddle
+
+# summary_utils is slow to import, so we do it lazily.
+summary_utils = lazy_loader.LazyLoader(
+    'summary_utils', globals(), 'paxml.summary_utils'
+)
 
 instantiate = base_hyperparams.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME

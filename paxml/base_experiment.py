@@ -21,7 +21,7 @@ to a specific ML experiment.
 
 import abc
 from typing import Dict, List, Optional, Type, TypeVar
-from paxml import automl
+from paxml import automl_interfaces
 from paxml import base_executor
 from paxml import base_task
 from paxml import partitioning
@@ -99,7 +99,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Validates the experiment config but raises if misconfigured."""
     return
 
-  def search(self) -> automl.SearchHParams:
+  def search(self) -> automl_interfaces.SearchHParams:
     """Returns the parameters for AutoML search."""
     raise NotImplementedError(
         'Please implement `search` method for your experiment for tuning.')
@@ -157,4 +157,4 @@ class BaseExperiment(metaclass=abc.ABCMeta):
 
   def __init_subclass__(cls):
     """Modifications to the subclasses."""
-    automl.enable_class_level_hyper_primitives(cls)
+    automl_interfaces.enable_class_level_hyper_primitives(cls)

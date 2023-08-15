@@ -36,10 +36,10 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 import optax
-import orbax.checkpoint as ocp
 from paxml import base_inference_runner
 from paxml import base_metrics
 from paxml import base_task
+from paxml import checkpoint_types
 from paxml import io_utils
 from paxml import learners as learners_lib
 from paxml import train_states
@@ -48,16 +48,21 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
+from praxis import lazy_loader
 from praxis import optimizer_prefix_vectorization
 from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
-from paxml import checkpoints  # mapped to internal
+# Those modules are slow to import, so we do it lazily.
+ocp = lazy_loader.LazyLoader('ocp', globals(), 'orbax.checkpoint')
+checkpoints = lazy_loader.LazyLoader(
+    'checkpoints', globals(), 'paxml.checkpoints'  # mapped to internal
+)
 
 BaseInferenceRunner = base_inference_runner.BaseInferenceRunner
-CheckpointType = checkpoints.CheckpointType
+CheckpointType = checkpoint_types.CheckpointType
 Nested = pytypes.Nested
 NestedMap = py_utils.NestedMap
 NestedJTensor = base_layer.NestedJTensor

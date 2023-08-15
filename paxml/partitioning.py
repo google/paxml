@@ -31,23 +31,27 @@ from jax import core
 from jax import numpy as jnp
 from jax.experimental import pjit
 import numpy as np
+from paxml import checkpoint_types
 from paxml import tasks_lib
-from paxml import tf_data_service_lib
 from paxml import train_states
 from paxml import trainer_lib
 from praxis import asserts
 from praxis import base_input
 from praxis import base_layer
+from praxis import lazy_loader
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 from praxis import trees
 
-from paxml import checkpoints  # mapped to internal
+# tf_data_service_lib is slow to import, so we do it lazily.
+tf_data_service_lib = lazy_loader.LazyLoader(
+    'tf_data_service_lib', globals(), 'paxml.tf_data_service_lib'
+)
 
 PartitionSpec = jax.sharding.PartitionSpec
 
-CheckpointType = checkpoints.CheckpointType
+CheckpointType = checkpoint_types.CheckpointType
 PRNGKey = pytypes.PRNGKey
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec

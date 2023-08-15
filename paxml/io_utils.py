@@ -32,10 +32,14 @@ from absl import logging
 from etils import epath
 import jax
 import numpy as np
+from praxis import lazy_loader
 from praxis import py_utils
-import tensorflow.compat.v2 as tf
 
-from paxml import checkpoints  # mapped to internal
+# Those modules are slow to import, so we do it lazily.
+tf = lazy_loader.LazyLoader('tf', globals(), 'tensorflow.compat.v2')
+checkpoints = lazy_loader.LazyLoader(
+    'checkpoints', globals(), 'paxml.checkpoints'  # mapped to internal
+)
 
 FLAGS = flags.FLAGS
 

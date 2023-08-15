@@ -95,7 +95,7 @@ pytype_strict_library(
     name = "base_experiment",
     srcs = ["base_experiment.py"],
     deps = [
-        ":automl",
+        ":automl_interfaces",
         ":base_executor",
         ":base_task",
         ":partitioning",
@@ -113,6 +113,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:lazy_loader",
         "//praxis:py_utils",
         "//praxis:pytypes",
         # Implicit tensorflow_datasets dependency.
@@ -128,6 +129,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
+        "//praxis:lazy_loader",
         "//praxis:pax_fiddle",
     ],
 )
@@ -264,6 +266,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
+        "//praxis:lazy_loader",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
     ],
@@ -454,6 +457,7 @@ pytype_strict_library(
         ":base_inference_runner",
         ":base_metrics",
         ":base_task",
+        ":checkpoint_types",
         ":io_utils",
         ":learners",
         ":train_states",
@@ -470,6 +474,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:lazy_loader",
         "//praxis:optimizer_prefix_vectorization",
         "//praxis:optimizers",
         "//praxis:pax_fiddle",
@@ -533,6 +538,7 @@ pytype_strict_library(
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:lazy_loader",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -594,6 +600,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:lazy_loader",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -607,6 +614,7 @@ pytype_strict_library(
     srcs = ["trainer_lib.py"],
     deps = [
         ":base_metrics",
+        ":checkpoint_types",
         ":learners",
         ":sgf",
         ":summary_utils",
@@ -623,6 +631,7 @@ pytype_strict_library(
         "//praxis:base_input",
         "//praxis:base_layer",
         "//praxis:base_model",
+        "//praxis:lazy_loader",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -688,6 +697,7 @@ pytype_strict_library(
     name = "partitioning",
     srcs = ["partitioning.py"],
     deps = [
+        ":checkpoint_types",
         ":tasks_lib",
         ":tf_data_service_lib",
         ":train_states",
@@ -702,6 +712,7 @@ pytype_strict_library(
         "//praxis:asserts",
         "//praxis:base_input",
         "//praxis:base_layer",
+        "//praxis:lazy_loader",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",

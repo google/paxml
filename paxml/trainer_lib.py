@@ -29,9 +29,9 @@ import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
 from paxml import base_metrics
+from paxml import checkpoint_types
 from paxml import learners as learners_lib
 from paxml import sgf
-from paxml import summary_utils
 from paxml import tasks_lib
 from paxml import train_states
 from praxis import asserts
@@ -39,11 +39,15 @@ from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
 from praxis import base_model
+from praxis import lazy_loader
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
-from paxml import checkpoints  # mapped to internal
+# summary_utils is slow to import, so we do it lazily.
+summary_utils = lazy_loader.LazyLoader(
+    'summary_utils', globals(), 'paxml.summary_utils'
+)
 
 PartitionSpec = jax.sharding.PartitionSpec
 
@@ -66,7 +70,7 @@ SummaryDict = pytypes.SummaryDict
 WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 
-CheckpointType = checkpoints.CheckpointType
+CheckpointType = checkpoint_types.CheckpointType
 
 PARAMS = base_layer.PARAMS
 AUX_LOSS = base_layer.AUX_LOSS

@@ -15,11 +15,15 @@
 
 """Interfaces for AutoML for PAX."""
 
+from __future__ import annotations
+
 import abc
 import dataclasses
 import enum
+import inspect
 import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
+
 from praxis import base_hyperparams
 from praxis import pax_fiddle
 import pyglove as pg
@@ -438,3 +442,28 @@ class Metric:
                   dataset_name,
                   sub_experiment_id=sub_experiment_id,
                   aggregator=aggregator)
+
+
+def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
+  """Enable class-level hypers for a BaseExperiment subclass."""
+
+  def create_hyper_property(name: str, hyper: pg.hyper.HyperPrimitive):
+    attr_name = f'_PROPERTY_{name}'
+    hyper_kwargs = dict(hyper.sym_init_args)
+    if 'name' not in hyper_kwargs or hyper_kwargs['name'] is None:
+      hyper_kwargs['name'] = name
+
+    def getter(x):
+      if hasattr(x, attr_name):
+        return getattr(x, attr_name)
+      return hyper.__class__(**hyper_kwargs)  # pytype: disable=not-instantiable
+
+    def setter(x, v):
+      setattr(x, attr_name, v)
+
+    return property(getter, setter)
+
+  for name, hyper in inspect.getmembers(
+      cls, lambda x: isinstance(x, pg.hyper.HyperPrimitive)
+  ):
+    setattr(cls, name, create_hyper_property(name, hyper))
