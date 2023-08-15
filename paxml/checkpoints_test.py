@@ -80,7 +80,7 @@ class CheckpointsTest(parameterized.TestCase):
     model_vars = m.init(jax.random.PRNGKey(0), jnp.zeros([4, 256]))
     optimizer = optax.sgd(0.1)
     opt_params = optimizer.init(model_vars['params'])
-    train_state = train_states.TrainState(
+    train_state = train_states.TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         jnp.asarray([0], jnp.int64), model_vars, opt_params
     )
     # Save the "checkpoint".
@@ -210,7 +210,7 @@ class PaxMetadataTest(parameterized.TestCase):
     self.assertTrue(checkpoint_metadata._trees_are_equal(d, d_restored))
 
   def test_from_padded_and_unpadded(self):
-    padded = TrainState(
+    padded = TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         step=0,
         opt_states=[],
         mdl_vars={
@@ -221,7 +221,7 @@ class PaxMetadataTest(parameterized.TestCase):
             },
         },
     )
-    unpadded = TrainState(
+    unpadded = TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         step=0,
         opt_states=[],
         mdl_vars={
