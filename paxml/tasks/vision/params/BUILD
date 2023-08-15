@@ -49,6 +49,40 @@ pytype_library(
     ],
 )
 
+pytype_library(
+    name = "mnist",
+    srcs = ["mnist.py"],
+    deps = [
+        # Implicit jax dependency.
+        "//paxml:base_experiment",
+        "//paxml:base_task",
+        "//paxml:experiment_registry",
+        "//paxml:learners",
+        "//paxml:tasks_lib",
+        "//praxis:base_input",
+        "//praxis:base_layer",
+        "//praxis:base_model",
+        "//praxis:optimizers",
+        "//praxis:pax_fiddle",
+        "//praxis:py_utils",
+        "//praxis:pytypes",
+        "//praxis:schedules",
+        "//praxis/layers:activations",
+        "//praxis/layers:convolutions",
+        "//praxis/layers:linears",
+        "//praxis/layers:poolings",
+        # Implicit tensorflow_no_contrib dependency.
+        # Implicit tensorflow_datasets dependency.
+    ],
+)
+
+pax_targets(
+    experiments = [
+        ":mnist",
+    ],
+    prefix_name = "mnist",
+)
+
 pax_targets(
     experiments = [
         ":params",
