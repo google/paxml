@@ -98,6 +98,7 @@ pytype_strict_library(
         ":automl_interfaces",
         ":base_executor",
         ":base_task",
+        ":decode_programs",
         ":partitioning",
         ":programs",
         "//praxis:base_input",

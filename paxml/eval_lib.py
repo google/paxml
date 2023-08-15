@@ -479,7 +479,7 @@ def evaluate(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_programs=eval_programs,
-      decode_input_ps=[],
+      decode_programs=[],
       job_log_dir=job_log_dir,
       prng_key=prng_key,
   )
@@ -507,7 +507,7 @@ class _EvalRunner:
       jax_task: tasks_lib.SingleTask,
       partitioner: partitioning.Partitioner,
       eval_programs: Sequence[programs.BaseEvalProgram],
-      decode_input_ps: Sequence[pax_fiddle.Config[base_input.BaseInput]],
+      decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
       job_log_dir: epath.Path,
       prng_key: PRNGKey,
   ):
@@ -515,16 +515,11 @@ class _EvalRunner:
     self._partitioner = partitioner
     self._job_log_dir = job_log_dir
     self._eval_programs = eval_programs
+    self._decode_programs = decode_programs
 
     decode_key, eval_key = jax.random.split(prng_key)
     logging.info('eval prng_key: %s', eval_key)
     self._eval_key = self._partitioner.preprocess_prng_key(eval_key)
-
-    # TODO(wangpeng): Make decode programs configurable.
-    self._decode_programs = [
-        decode_programs_lib.SingleTaskDecodeProgram(input_p)
-        for input_p in decode_input_ps
-    ]
 
     if self._decode_programs:
       # If prng_key_fold_with_batch_index is True, we need to fold in the step
@@ -686,14 +681,16 @@ def decode(
   )
 
   eval_programs = experiment_config.eval_programs() if run_eval else []
+  decode_programs = experiment_config.decode_programs()
   partitioned_train_state, train_state_metadata, prng_key = (
       checkpointer.get_model_states(prng_key)
   )
+
   eval_runner = _EvalRunner(
       jax_task=jax_task,
       partitioner=partitioner,
       eval_programs=eval_programs,
-      decode_input_ps=decoder_inputs,
+      decode_programs=decode_programs,
       job_log_dir=job_log_dir,
       prng_key=prng_key,
   )

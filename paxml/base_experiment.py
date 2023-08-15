@@ -24,10 +24,12 @@ from typing import Dict, List, Optional, Type, TypeVar
 from paxml import automl_interfaces
 from paxml import base_executor
 from paxml import base_task
+from paxml import decode_programs
 from paxml import partitioning
 from paxml import programs
 from praxis import base_input
 from praxis import pax_fiddle
+
 
 _BaseExperimentT = TypeVar('_BaseExperimentT', bound='BaseExperiment')
 BaseExperimentT = Type[_BaseExperimentT]
@@ -143,6 +145,14 @@ class BaseExperiment(metaclass=abc.ABCMeta):
         if not input_p.is_training
     ]
     return eval_programs
+
+  def decode_programs(self) -> List[decode_programs.SingleTaskDecodeProgram]:
+    """Returns the list of decode_programs to use for model decode."""
+    decode_program_list = [
+        decode_programs.SingleTaskDecodeProgram(input_p)
+        for input_p in self.decoder_datasets()
+    ]
+    return decode_program_list
 
   def executor(self) -> Optional[base_executor.BaseExecutor]:
     """Returns the executor to use to run the programs.
