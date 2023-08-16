@@ -45,8 +45,8 @@ class TrainState(flax_struct.PyTreeNode):
   """Simple train state."""
 
   step: JTensorOrPartitionSpec
-  mdl_vars: NestedJTensorOrPartitionSpec
-  opt_states: List[NestedJTensorOrPartitionSpec]
+  mdl_vars: pytypes.NestedJTensorOrPartitionSpec
+  opt_states: List[pytypes.NestedJTensorOrPartitionSpec]
 
   def new_state(
       self, mdl_vars: NestedJTensor, opt_states: List[optax.OptState]
