@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import functools
+import math
 import os
 from typing import List, Optional
 import jax
@@ -30,57 +31,55 @@ from t5.data import preprocessors as t5_preprocessors
 
 ### for now, make sure to set 'VOCAB_PATH' as an environment variable in your bash script
 vocab_path = os.getenv('VOCAB_PATH', None)
-assert vocab_path is not None and vocab_path != '', "Make sure to set VOCAB_PATH as an environment variable"
+assert (
+    vocab_path is not None and vocab_path != ''
+), 'Make sure to set VOCAB_PATH as an environment variable'
 vocab = t5.data.SentencePieceVocabulary(vocab_path)
 
 GPT_OUTPUT_FEATURES_LM = {
-  'targets': t5.data.Feature(vocabulary=vocab, add_eos=True)
+    'targets': t5.data.Feature(vocabulary=vocab, add_eos=True)
 }
 
 TaskRegistry.add_versioned_tfds_task(
-  'the_pile_lm',
-  versions=['1.0.0'],
-  pinned_version='1.0.0',
-  tfds_name='ThePile',
-  tfds_data_dir=None,
-  preprocessors=[
-      functools.partial(
-          t5_preprocessors.rekey, key_map={
-              "inputs": None,
-              "targets": "text"
-          }),
-      seqio.preprocessors.tokenize,
-      t5_preprocessors.reduce_concat_tokens,
-      t5_preprocessors.split_tokens_to_targets_length,
-      seqio.preprocessors.append_eos_after_trim,
-
-  ],
-  output_features=GPT_OUTPUT_FEATURES_LM,
-  metric_fns=[],
+    'the_pile_lm',
+    versions=['1.0.0'],
+    pinned_version='1.0.0',
+    tfds_name='ThePile',
+    tfds_data_dir=None,
+    preprocessors=[
+        functools.partial(
+            t5_preprocessors.rekey, key_map={'inputs': None, 'targets': 'text'}
+        ),
+        seqio.preprocessors.tokenize,
+        t5_preprocessors.reduce_concat_tokens,
+        t5_preprocessors.split_tokens_to_targets_length,
+        seqio.preprocessors.append_eos_after_trim,
+    ],
+    output_features=GPT_OUTPUT_FEATURES_LM,
+    metric_fns=[],
 )
 
-LAMBADA_OUTPUT_FEATURES = { 
-  'inputs': seqio.Feature(
-      vocabulary=vocab, add_eos=True, required=False),
-  'targets': seqio.Feature(
-      vocabulary=vocab, add_eos=True)
+LAMBADA_OUTPUT_FEATURES = {
+    'inputs': seqio.Feature(vocabulary=vocab, add_eos=True, required=False),
+    'targets': seqio.Feature(vocabulary=vocab, add_eos=True),
 }
 
 TaskRegistry.add_versioned_tfds_task(
-  'lambada_eval',
-  versions=['1.0.0'],
-  pinned_version='1.0.0',
-  tfds_name='MyLambada',
-  tfds_data_dir=None,
-  preprocessors=[
-      seqio.preprocessors.tokenize,
-  ],
-  output_features=LAMBADA_OUTPUT_FEATURES,
-  metric_fns=[],
-  shuffle_buffer_size=None,
+    'lambada_eval',
+    versions=['1.0.0'],
+    pinned_version='1.0.0',
+    tfds_name='MyLambada',
+    tfds_data_dir=None,
+    preprocessors=[
+        seqio.preprocessors.tokenize,
+    ],
+    output_features=LAMBADA_OUTPUT_FEATURES,
+    metric_fns=[],
+    shuffle_buffer_size=None,
 )
 
-class PileUnsupervisedDataset(base_experiment.BaseExperiment):  
+
+class PileUnsupervisedDataset(base_experiment.BaseExperiment):
   """Used for training Baseline ULM."""
 
   PERCORE_BATCH_SIZE = 1
@@ -95,9 +94,12 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
       num_infeed_hosts = jax.process_count()
     else:
-      global_batch_size = int(self.PERCORE_BATCH_SIZE * num_local_devices *
-                              jax.process_count())
-      batch_size_per_process = math.ceil(self.PERCORE_BATCH_SIZE * num_local_devices)
+      global_batch_size = int(
+          self.PERCORE_BATCH_SIZE * num_local_devices * jax.process_count()
+      )
+      batch_size_per_process = math.ceil(
+          self.PERCORE_BATCH_SIZE * num_local_devices
+      )
       num_infeed_hosts = global_batch_size // batch_size_per_process
 
     p = pax_fiddle.Config(
@@ -126,7 +128,7 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
-        self._dataset_common(is_training=False)
+        self._dataset_common(is_training=False),
     ]
 
 
@@ -144,8 +146,9 @@ class LambadaDataset(base_experiment.BaseExperiment):
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
       num_infeed_hosts = jax.process_count()
     else:
-      global_batch_size = int(self.PERCORE_BATCH_SIZE * num_local_devices *
-                              jax.process_count())
+      global_batch_size = int(
+          self.PERCORE_BATCH_SIZE * num_local_devices * jax.process_count()
+      )
       # batch_size_per_process = num_local_devices
       batch_size_per_process = int(self.PERCORE_BATCH_SIZE * num_local_devices)
       num_infeed_hosts = global_batch_size // batch_size_per_process
@@ -174,6 +177,4 @@ class LambadaDataset(base_experiment.BaseExperiment):
 
   def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
-    return [
-        self._dataset_common(is_training=False)
-    ]
+    return [self._dataset_common(is_training=False)]

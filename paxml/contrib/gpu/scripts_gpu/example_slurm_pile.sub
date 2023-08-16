@@ -51,8 +51,12 @@ mkdir -p $BASE_WORKSPACE_DIR
 EXPORTS="--export=ALL"
 #-------------------------------------------------------------------------------
 
-LOG_DIR_LOCAL=${LOG_DIR}
 OUTPUT_DIR=${OUTPUT_DIR:-"output"}
+PREC=${PREC}
+GPUS_PER_NODE=${GPUS_PER_NODE}
+PERCORE_BATCH_SIZE=${PERCORE_BATCH_SIZE}
+LOG_DIR_LOCAL=${LOG_DIR_LOCAL}
+
 export BASE_SCRIPT=${BASE_SCRIPT:-"${PAXML_DIR}/paxml/contrib/gpu/scripts_gpu/run_pile_multinode.sh"}
 
 # << INSERT SENTENCEPIECE MODEL NAME ! >>
@@ -60,7 +64,7 @@ cmd="$(cat <<EOF
 echo "*******STARTING********"
 cd ${PAXML_DIR}
 nvidia-smi
-bash $BASE_SCRIPT $TFDS_DATA_DIR ${GPT_VOCAB_PATH} ${WORKSPACE_DIR}/${LOG_DIR_LOCAL}
+bash $BASE_SCRIPT $TFDS_DATA_DIR $GPT_VOCAB_PATH $PREC $GPUS_PER_NODE $PERCORE_BATCH_SIZE ${WORKSPACE_DIR}/${LOG_DIR_LOCAL}
 EOF
 )"
 

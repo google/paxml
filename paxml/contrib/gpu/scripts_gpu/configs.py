@@ -277,9 +277,3 @@ class GPT175B(Pile126M):
     task_p = super().task()
     return task_p
 
-
-## single node training
-@experiment_registry.register
-class SmallPileTest(Pile126M):
-  """Base config for an SPMD model."""
-  ICI_MESH_SHAPE = [8, 1, 1]
