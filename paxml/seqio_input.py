@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import dataclasses
 import enum
 import io
@@ -2038,10 +2039,13 @@ def get_eval_hparams_for_seqio(
     p.task_feature_lengths.update(remaining_feature_lengths)
 
   # Split hparams per tasks and filter by metric type.
+  # First, the mixture_or_task itself may not be deepcopiable, so clear it
+  # before calling clone below.
+  cloneable_p = copy.copy(p).set(mixture_or_task=None)
   tasks: Sequence[seqio.Task] = seqio.get_subtasks(task_or_mixture)
   hparams = []
   for task in tasks:
-    hp = p.clone().set(
+    hp = cloneable_p.clone().set(
         mixture_or_task=task,
         name=task.name,
         use_enumeration=use_enumeration,
