@@ -268,29 +268,39 @@ def _extract_nested_prefix_names(
   key_separator = '.'
   left_separator = '_'
   right_separator = ''
+  if state.step is None:
+    raise ValueError('Expected step to be non-None.')
+  step = py_utils.extract_prefixed_keys_from_nested_map(
+      state.step,
+      'step',
+      key_separator=key_separator,
+      left_separator=left_separator,
+      right_separator=right_separator,
+  )
+  if state.mdl_vars is None:
+    raise ValueError('Expected mdl_vars to be non-None.')
+  mdl_vars = py_utils.extract_prefixed_keys_from_nested_map(
+      state.mdl_vars,
+      'mdl_vars',
+      key_separator=key_separator,
+      left_separator=left_separator,
+      right_separator=right_separator,
+  )
+  if state.opt_states is None:
+    opt_states = None
+  else:
+    opt_states = py_utils.extract_prefixed_keys_from_nested_map(
+        state.opt_states,
+        'opt_states',
+        key_separator=key_separator,
+        left_separator=left_separator,
+        right_separator=right_separator,
+        is_leaf=py_utils.is_optax_masked_node,
+    )
   return train_states.TrainState(
-      step=py_utils.extract_prefixed_keys_from_nested_map(
-          state.step,
-          'step',
-          key_separator=key_separator,
-          left_separator=left_separator,
-          right_separator=right_separator,
-      ),
-      mdl_vars=py_utils.extract_prefixed_keys_from_nested_map(
-          state.mdl_vars,
-          'mdl_vars',
-          key_separator=key_separator,
-          left_separator=left_separator,
-          right_separator=right_separator,
-      ),
-      opt_states=py_utils.extract_prefixed_keys_from_nested_map(
-          state.opt_states,
-          'opt_states',
-          key_separator=key_separator,
-          left_separator=left_separator,
-          right_separator=right_separator,
-          is_leaf=py_utils.is_optax_masked_node,
-      ),
+      step=step,
+      mdl_vars=mdl_vars,
+      opt_states=opt_states,
   )
 
 
