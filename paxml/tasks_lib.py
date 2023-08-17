@@ -1228,10 +1228,9 @@ class SingleTask(base_task.BaseTask):
       always_use_train_for_model_init: Boolean indicating whether to use the new
         flow for model initialization. With this new flow, dedicated evaluation
         and decoding-only jobs rely on training inputs for model initialization.
-      enforce_input_specs (DEPRECATED): This param is not being used and will be
-        removed. The user-defined input specs providers are used for model
-        initialization. If there is no user-defined specs provider, the system
-        default specs provider is used.
+      enforce_input_specs: Boolean indicating if the input specs check is
+        performed at the first data batch, which raises exception if the input
+        and data specs don't match.
       random_seed: Random seed to use at the beginning of the training.
       apply_mutable_list: A list of allowed collections to be mutated during
         train apply.

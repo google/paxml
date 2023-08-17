@@ -170,9 +170,9 @@ def _write_input_specs(
   )
 
 
-def _spec_mismatch_warning(actual_shape_dtype, expected_shape_dtype):
+def _spec_mismatch_error(actual_shape_dtype, expected_shape_dtype):
   """Raises a ValueError because the given specs did not match."""
-  logging.warning(
+  raise ValueError(
       'Spec of actual training input does not match train input specs. '
       f'Observed spec:\n{pprint.pformat(actual_shape_dtype)},\n'
       f'Expected spec:\n{pprint.pformat(expected_shape_dtype)}'
@@ -610,7 +610,7 @@ class PmapPartitioner(Partitioner):
     spec = jax.tree_map(fn, self.train_inputs_shape_dtype)
 
     if not trees.is_subset(spec, nested_shape_dtype):
-      _spec_mismatch_warning(nested_shape_dtype, spec)
+      _spec_mismatch_error(nested_shape_dtype, spec)
 
   def initialize_prng_key_and_train_state(
       self,
@@ -811,7 +811,7 @@ class PjitPartitioner(Partitioner):
     input_batch_spec = jax.tree_map(fn, batch)
 
     if not trees.is_subset(spec, input_batch_spec):
-      _spec_mismatch_warning(input_batch_spec, spec)
+      _spec_mismatch_error(input_batch_spec, spec)
 
   def initialize_prng_key_and_train_state(
       self,
