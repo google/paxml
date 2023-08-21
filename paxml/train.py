@@ -68,7 +68,6 @@ def write_hparams_file(
         hparams_file.write(base_hyperparams.nested_struct_to_text(dataset))
         hparams_file.write('\n\n')
       for decoder_dataset in model_config.decoder_datasets():
-        hparams_file.write('decoder dataset hparams\n')
         hparams_file.write(
             base_hyperparams.nested_struct_to_text(decoder_dataset)
         )
