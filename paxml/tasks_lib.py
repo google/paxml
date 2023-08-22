@@ -54,6 +54,7 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 
 # Those modules are slow to import, so we do it lazily.
 ocp = lazy_loader.LazyLoader('ocp', globals(), 'orbax.checkpoint')
@@ -992,8 +993,8 @@ def create_state(
   """
   # Make a private copy of mdl_vars and var_weight_hparams structures that are
   # not shared with the caller.
-  mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
-  var_weight_hparams = jax.tree_util.tree_map(lambda x: x, var_weight_hparams)
+  mdl_vars = trees.copy(mdl_vars)
+  var_weight_hparams = trees.copy(var_weight_hparams)
   if discard_opt_states:
     opt_states = []
   else:

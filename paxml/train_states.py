@@ -27,6 +27,7 @@ import optax
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
+from praxis import trees
 
 JTensor = py_utils.JTensor
 JTensorProvenance = tuple[str, int | None]
@@ -39,7 +40,7 @@ NestedMap = py_utils.NestedMap
 
 _ArrayOrPSpec = TypeVar('_ArrayOrPSpec', jax.Array, jax.sharding.PartitionSpec)
 """Either a pspec (when tracing) or a Jax tensor."""
-ExtraStateType = Optional[NestedJTensorOrPartitionSpec]
+ExtraStateType = NestedJTensorOrPartitionSpec | None
 
 # A helper class for managing various train states. This struct may contain the
 # actual Jax tensors, or simply PartitionSpecs for the corresponding tensor.
@@ -60,14 +61,11 @@ class TrainState(flax_struct.PyTreeNode, Generic[_ArrayOrPSpec]):
       extra_state: ExtraStateType = (),
   ) -> TrainState:
     """Returns a new TrainState with updated mdl_vars and opt_states."""
-    mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
-    opt_states = jax.tree_util.tree_map(lambda x: x, opt_states)
-    extra_state = jax.tree_util.tree_map(lambda x: x, extra_state)
     return TrainState(
         step=self.step + 1,
-        mdl_vars=mdl_vars,
-        opt_states=opt_states,
-        extra_state=extra_state,
+        mdl_vars=trees.copy(mdl_vars),
+        opt_states=trees.copy(opt_states),
+        extra_state=trees.copy(extra_state),
     )
 
   def to_eval_state(self) -> TrainState:

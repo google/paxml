@@ -481,6 +481,7 @@ pytype_strict_library(
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
     ],
 )
 
@@ -671,6 +672,7 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        "//praxis:trees",
     ],
 )
 

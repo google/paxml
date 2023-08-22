@@ -20,7 +20,7 @@ import dataclasses
 import functools
 import json
 import pprint
-from typing import Any, Callable, Dict, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Protocol, Sequence, Tuple, Union
 
 from absl import logging
 from clu import platform
@@ -35,7 +35,6 @@ from paxml import checkpoint_types
 from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
-from praxis import asserts
 from praxis import base_input
 from praxis import base_layer
 from praxis import lazy_loader
@@ -1236,7 +1235,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     if input_spec:
       return input_spec
     assert self.train_inputs_shape_dtype
-    return jax.tree_util.tree_map(lambda x: x, self.train_inputs_shape_dtype)
+    return trees.copy(self.train_inputs_shape_dtype)
 
   def _partition_auto_shard(
       self,
