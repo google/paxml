@@ -297,10 +297,23 @@ def _extract_nested_prefix_names(
         right_separator=right_separator,
         is_leaf=py_utils.is_optax_masked_node,
     )
+  if state.extra_state is None:
+    extra_state = None
+  else:
+    extra_state = (
+        py_utils.extract_prefixed_keys_from_nested_map(
+            state.extra_state,
+            'extra_state',
+            key_separator=key_separator,
+            left_separator=left_separator,
+            right_separator=right_separator,
+        ),
+    )
   return train_states.TrainState(
       step=step,
       mdl_vars=mdl_vars,
       opt_states=opt_states,
+      extra_state=extra_state,
   )
 
 

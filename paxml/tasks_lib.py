@@ -189,7 +189,12 @@ def extract_ema(
         model_states.mdl_vars,
         is_leaf=py_utils.is_bprop_masked_node,
     )
-  return TrainState(step=model_states.step, mdl_vars=extracted, opt_states=[])
+  return TrainState(
+      step=model_states.step,
+      mdl_vars=extracted,
+      opt_states=[],
+      extra_state=(),
+  )
 
 
 def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
@@ -226,7 +231,7 @@ def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
 # Praxis optimizer to new Optax based optimizer.
 # For example, the internal state for Adam optimizer in praxis used variables
 # 'm' and 'v', whereas optax based optimizer stores the internal state in
-# varaibles 'mu' and 'nu' within ScaleByAdamState state. Thus, we replace these
+# variables 'mu' and 'nu' within ScaleByAdamState state. Thus, we replace these
 # state variables when loading from checkpoint using variable mapping. To
 # avoid each user from specifying these common patterns, we keep all the
 # required mappings for optimizer states in one place. Mapping for each
@@ -924,7 +929,9 @@ def create_state_partition_specs(
   return TrainState(
       step=step_partition_spec,
       mdl_vars=var_partition_specs,
-      opt_states=opt_var_partition_specs)
+      opt_states=opt_var_partition_specs,
+      extra_state=(),
+  )
 
 
 def _create_opt_states(
@@ -997,6 +1004,7 @@ def create_state(
       step=jnp.array(0, dtype=jnp.uint32),
       mdl_vars=mdl_vars,
       opt_states=opt_states,
+      extra_state=(),
   )
 
 

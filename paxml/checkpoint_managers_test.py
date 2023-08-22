@@ -107,7 +107,13 @@ def create_train_state(step: int = 0):
       mdl_vars,
   )
   opt_states = [mdl_vars]
-  train_state = TrainState(step=step, mdl_vars=mdl_vars, opt_states=opt_states)
+  extra_state = [mdl_vars]
+  train_state = TrainState(
+      step=step,
+      mdl_vars=mdl_vars,
+      opt_states=opt_states,
+      extra_state=extra_state,
+  )
 
   def _create_sharded_array(x):
     return ocp.test_utils.create_sharded_array(x, global_mesh, axes)
@@ -959,6 +965,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           ocp.test_utils.apply_function(
               self.train_state.opt_states, lambda x: x * 2
           ),
+          self.train_state.extra_state,
       )
       axes = jax.sharding.PartitionSpec(
           None,

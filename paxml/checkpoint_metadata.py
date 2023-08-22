@@ -243,6 +243,7 @@ class PaxMetadata:
           step=train_state.step,
           mdl_vars=train_state.mdl_vars,
           opt_states=train_state.opt_states,
+          extra_state=train_state.extra_state,
       )
 
     def _maybe_remove_keys(d):
@@ -255,6 +256,8 @@ class PaxMetadata:
           del d['step']
         if 'opt_states' in d:
           del d['opt_states']
+        if 'extra_state' in d:
+          del d['extra_state']
       return d
 
     padded = _to_dict(padded)

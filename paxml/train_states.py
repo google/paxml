@@ -39,7 +39,7 @@ NestedMap = py_utils.NestedMap
 
 _ArrayOrPSpec = TypeVar('_ArrayOrPSpec', jax.Array, jax.sharding.PartitionSpec)
 """Either a pspec (when tracing) or a Jax tensor."""
-
+ExtraStateType = Optional[NestedJTensorOrPartitionSpec]
 
 # A helper class for managing various train states. This struct may contain the
 # actual Jax tensors, or simply PartitionSpecs for the corresponding tensor.
@@ -51,20 +51,30 @@ class TrainState(flax_struct.PyTreeNode, Generic[_ArrayOrPSpec]):
   step: _ArrayOrPSpec
   mdl_vars: jt.PyTree[_ArrayOrPSpec]
   opt_states: list[jt.PyTree[_ArrayOrPSpec]]
+  extra_state: ExtraStateType = ()
 
   def new_state(
-      self, mdl_vars: NestedJTensor, opt_states: list[optax.OptState]
+      self,
+      mdl_vars: NestedJTensor,
+      opt_states: list[optax.OptState],
+      extra_state: ExtraStateType = (),
   ) -> TrainState:
     """Returns a new TrainState with updated mdl_vars and opt_states."""
     mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
     opt_states = jax.tree_util.tree_map(lambda x: x, opt_states)
+    extra_state = jax.tree_util.tree_map(lambda x: x, extra_state)
     return TrainState(
-        step=self.step + 1, mdl_vars=mdl_vars, opt_states=opt_states
+        step=self.step + 1,
+        mdl_vars=mdl_vars,
+        opt_states=opt_states,
+        extra_state=extra_state,
     )
 
   def to_eval_state(self) -> TrainState:
     """Returns a new TrainState with opt_states removed, for eval purpose."""
-    return TrainState(step=self.step, mdl_vars=self.mdl_vars, opt_states=[])
+    return TrainState(
+        step=self.step, mdl_vars=self.mdl_vars, opt_states=[], extra_state=()
+    )
 
 
 @dataclasses.dataclass
@@ -90,6 +100,7 @@ class TrainStateProvenance:
   step: TensorProvenance
   mdl_vars: Nested[TensorProvenance]
   opt_states: Nested[TensorProvenance]
+  extra_state: Nested[TensorProvenance]
 
   def replace(self, **changes: Any) -> TrainStateProvenance:
     return dataclasses.replace(self, **changes)
@@ -113,4 +124,5 @@ def build_train_state_provenance(
       step=provenance,
       mdl_vars=jax.tree_map(lambda x: provenance, train_state.mdl_vars),
       opt_states=jax.tree_map(lambda x: provenance, train_state.opt_states),
+      extra_state=jax.tree_map(lambda x: provenance, train_state.extra_state),
   )

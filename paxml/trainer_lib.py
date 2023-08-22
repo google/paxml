@@ -1120,7 +1120,7 @@ def train_step_single_learner(
         mdl_vars,
     )
     new_states = states.new_state(
-        mdl_vars=mdl_vars, opt_states=[new_opt_states]
+        mdl_vars=mdl_vars, opt_states=[new_opt_states], extra_state=()
     )
     # Finally fetch all backward summary tensors. We do not aggregate the scalar
     # summaries with pmean because the grads are already psum-ed.

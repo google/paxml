@@ -80,8 +80,9 @@ class CheckpointsTest(parameterized.TestCase):
     model_vars = m.init(jax.random.PRNGKey(0), jnp.zeros([4, 256]))
     optimizer = optax.sgd(0.1)
     opt_params = optimizer.init(model_vars['params'])
+    extra_state = ()
     train_state = train_states.TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
-        jnp.asarray([0], jnp.int64), model_vars, opt_params
+        jnp.asarray([0], jnp.int64), model_vars, opt_params, extra_state
     )
     # Save the "checkpoint".
     tmp_dir = self.create_tempdir('test_train_state_type_check_checkpoint')
@@ -213,6 +214,7 @@ class PaxMetadataTest(parameterized.TestCase):
     padded = TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         step=0,
         opt_states=[],
+        extra_state=(),
         mdl_vars={
             'a': jnp.ones((2, 3), dtype=jnp.float32),
             'b': {
@@ -224,6 +226,7 @@ class PaxMetadataTest(parameterized.TestCase):
     unpadded = TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
         step=0,
         opt_states=[],
+        extra_state=(),
         mdl_vars={
             'a': jax.ShapeDtypeStruct(shape=(1, 2), dtype=np.float32),
             'b': {
