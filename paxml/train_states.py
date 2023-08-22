@@ -18,38 +18,42 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, List, Optional, Tuple
+from typing import Any, Generic, Optional, TypeVar
 
 from flax import struct as flax_struct
 import jax
-from jax.sharding import PartitionSpec
+import jaxtyping as jt
 import optax
 from praxis import base_layer
 from praxis import py_utils
 from praxis import pytypes
 
 JTensor = py_utils.JTensor
-JTensorProvenance = Tuple[str, Optional[int]]
-JTensorOrPartitionSpec = base_layer.JTensorOrPartitionSpec
+JTensorProvenance = tuple[str, int | None]
+JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 Nested = pytypes.Nested
 NestedJTensor = base_layer.NestedJTensor
 NestedJTensorOrPartitionSpec = base_layer.NestedJTensorOrPartitionSpec
 NestedMap = py_utils.NestedMap
 
 
+_ArrayOrPSpec = TypeVar('_ArrayOrPSpec', jax.Array, jax.sharding.PartitionSpec)
+"""Either a pspec (when tracing) or a Jax tensor."""
+
+
 # A helper class for managing various train states. This struct may contain the
 # actual Jax tensors, or simply PartitionSpecs for the corresponding tensor.
 # If the latter, this struct is used for specifying the PartitionSpecs for
 # input/output to/from a pjit-ed function.
-class TrainState(flax_struct.PyTreeNode):
+class TrainState(flax_struct.PyTreeNode, Generic[_ArrayOrPSpec]):
   """Simple train state."""
 
-  step: JTensorOrPartitionSpec
-  mdl_vars: pytypes.NestedJTensorOrPartitionSpec
-  opt_states: List[pytypes.NestedJTensorOrPartitionSpec]
+  step: _ArrayOrPSpec
+  mdl_vars: jt.PyTree[_ArrayOrPSpec]
+  opt_states: list[jt.PyTree[_ArrayOrPSpec]]
 
   def new_state(
-      self, mdl_vars: NestedJTensor, opt_states: List[optax.OptState]
+      self, mdl_vars: NestedJTensor, opt_states: list[optax.OptState]
   ) -> TrainState:
     """Returns a new TrainState with updated mdl_vars and opt_states."""
     mdl_vars = jax.tree_util.tree_map(lambda x: x, mdl_vars)
@@ -66,14 +70,15 @@ class TrainState(flax_struct.PyTreeNode):
 @dataclasses.dataclass
 class TensorProvenance:
   checkpoint_path: str = 'random_init'
-  checkpoint_step: Optional[int] = None
+  checkpoint_step: int | None = None
 
   def __repr__(self) -> str:
     if self.checkpoint_path == 'random_init':
       return f'"({self.checkpoint_path})"'
 
     checkpoint_step_repr = (
-        self.checkpoint_step if self.checkpoint_step else 'latest')
+        self.checkpoint_step if self.checkpoint_step else 'latest'
+    )
 
     return f'"({self.checkpoint_path}:{checkpoint_step_repr})"'
 
@@ -81,6 +86,7 @@ class TensorProvenance:
 @dataclasses.dataclass
 class TrainStateProvenance:
   """Provenance for the TrainState pytree struct (not jax-transformable)."""
+
   step: TensorProvenance
   mdl_vars: Nested[TensorProvenance]
   opt_states: Nested[TensorProvenance]
@@ -92,15 +98,19 @@ class TrainStateProvenance:
 def build_train_state_provenance(
     train_state: TrainState,
     checkpoint_path: Optional[str] = None,
-    step: Optional[int] = None) -> TrainStateProvenance:
-  assert not isinstance(train_state.step, PartitionSpec), (
-      'Tensor provenance is only for tensors')
+    step: Optional[int] = None,
+) -> TrainStateProvenance:
+  assert not isinstance(
+      train_state.step, jax.sharding.PartitionSpec
+  ), 'Tensor provenance is only for tensors'
 
   provenance = TensorProvenance()
   if checkpoint_path:
-    provenance = TensorProvenance(checkpoint_path=checkpoint_path,
-                                  checkpoint_step=step)
+    provenance = TensorProvenance(
+        checkpoint_path=checkpoint_path, checkpoint_step=step
+    )
   return TrainStateProvenance(
       step=provenance,
       mdl_vars=jax.tree_map(lambda x: provenance, train_state.mdl_vars),
-      opt_states=jax.tree_map(lambda x: provenance, train_state.opt_states))
+      opt_states=jax.tree_map(lambda x: provenance, train_state.opt_states),
+  )

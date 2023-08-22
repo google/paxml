@@ -666,6 +666,7 @@ pytype_strict_library(
     deps = [
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit jaxtyping dependency.
         # Implicit optax dependency.
         "//praxis:base_layer",
         "//praxis:py_utils",
