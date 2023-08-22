@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, Sequence
 
 from absl import logging
 import jax
@@ -33,11 +33,12 @@ from praxis import optimizer_prefix_vectorization as opt_vec
 from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import py_utils
+from praxis import pytypes
 
 JTensor = jnp.ndarray
 NestedMap = py_utils.NestedMap
-NestedJTensor = base_layer.NestedJTensor
-NestedBool = base_layer.NestedBool
+NestedJTensor = pytypes.NestedJTensor
+NestedBool = pytypes.NestedBool
 NestedWeightHParams = base_layer.NestedWeightHParams
 SummaryType = base_layer.SummaryType
 instantiate = base_hyperparams.instantiate
@@ -123,9 +124,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   # create a LossAggregator on the task. Consider moving loss_name to the
   # task or having everyone set it through the loss_aggregator.
   optimizer: optimizers.Optimizer
-  loss_name: Optional[str] = None
-  stochastic_gradient: Optional[sgf.BaseStochasticGradient] = None
-  skip_zero_gradients: Optional[bool] = None
+  loss_name: str | None = None
+  stochastic_gradient: sgf.BaseStochasticGradient | None = None
+  skip_zero_gradients: bool | None = None
   grad_norm_summary: bool = True
   grad_norm_individual_vars: bool = False
   var_norm_summary: bool = True
@@ -134,11 +135,11 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   force_repeat_prefix_structure: bool = False
   skip_step_gradient_norm_value: float = 0.0
   enable_skip_step_on_gradient_anomalies: bool = True
-  bprop_variable_exclusion: Union[str, Sequence[str]] = (
-      pax_fiddle.instance_field(default_factory=list)
+  bprop_variable_exclusion: str | Sequence[str] = pax_fiddle.instance_field(
+      default_factory=list
   )
-  bprop_variable_inclusion: Union[str, Sequence[str]] = (
-      pax_fiddle.instance_field(default_factory=list)
+  bprop_variable_inclusion: str | Sequence[str] = pax_fiddle.instance_field(
+      default_factory=list
   )
   repeat_prefix_sep: str = '#'
   keep_optimizer_state_for_excluded_vars: bool = False
@@ -186,10 +187,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   def scale_gradients(
       self,
       raw_grads: NestedMap,
-      optimizer_name: Optional[str] = None,
-      clip_gradient_norm_to_value: Optional[float] = None,
-      clip_gradient_single_norm_to_value: Optional[float] = None,
-  ) -> Tuple[NestedMap, JTensor]:
+      optimizer_name: str | None = None,
+      clip_gradient_norm_to_value: float | None = None,
+      clip_gradient_single_norm_to_value: float | None = None,
+  ) -> tuple[NestedMap, JTensor]:
     """Scales the gradient.
 
     Args:
@@ -320,7 +321,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       states: optax.OptState,
       old_vars: NestedJTensor,
       var_weight_hparams: NestedWeightHParams,
-  ) -> Tuple[NestedMap, optax.OptState]:
+  ) -> tuple[NestedMap, optax.OptState]:
     """Applies gradient transformation, updates optimizer states.
 
     Args:
@@ -514,7 +515,7 @@ class MultiOptimizerLearner(Learner):
 
   def get_masks(
       self, var_weight_hparams: NestedWeightHParams
-  ) -> Tuple[Sequence[NestedMap], NestedMap]:
+  ) -> tuple[Sequence[NestedMap], NestedMap]:
     optimizer_mask = []
 
     # Aggregate all the auxiliary optimizer masks.
@@ -611,7 +612,7 @@ class MultiOptimizerLearner(Learner):
 
   def scale_gradients_by_optimizer(
       self, raw_grads: NestedMap, var_weight_hparams: NestedWeightHParams
-  ) -> Tuple[NestedMap, JTensor]:
+  ) -> tuple[NestedMap, JTensor]:
     optimizer_mask, default_mask = self.get_masks(var_weight_hparams)
 
     all_grads, all_valid_step = self.scale_gradients(
@@ -642,7 +643,7 @@ class MultiOptimizerLearner(Learner):
       states: optax.OptState,
       old_vars: NestedJTensor,
       var_weight_hparams: NestedWeightHParams,
-  ) -> Tuple[NestedMap, optax.OptState]:
+  ) -> tuple[NestedMap, optax.OptState]:
     """Applies gradient transformation, updates optimizer states.
 
     Args:

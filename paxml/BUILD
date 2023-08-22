@@ -298,6 +298,7 @@ pytype_strict_library(
         "//praxis:optimizers",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
+        "//praxis:pytypes",
     ],
 )
 
