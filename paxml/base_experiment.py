@@ -62,6 +62,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
           f'config (`{self.datasets()}`).')
     return training_splits[0]
 
+  def eval_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+    """Returns the list of dataset parameters for evaluation."""
+    return [dataset for dataset in self.datasets() if not dataset.is_training]
+
   # Optional. Returns a list of datasets to be decoded.
   # When specified, all decoder datasets must have unique names.
   def decoder_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
@@ -139,12 +143,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
 
   def eval_programs(self) -> List[programs.BaseEvalProgram]:
     """Returns the list of eval programs to use for model evaluation."""
-    eval_programs = [
+    return [
         programs.SingleTaskEvalProgram(input_p)
-        for input_p in self.datasets()
-        if not input_p.is_training
+        for input_p in self.eval_datasets()
     ]
-    return eval_programs
 
   def decode_programs(self) -> List[decode_programs.SingleTaskDecodeProgram]:
     """Returns the list of decode_programs to use for model decode."""
