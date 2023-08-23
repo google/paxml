@@ -34,7 +34,7 @@ JTensorProvenance = tuple[str, int | None]
 JTensorOrPartitionSpec = pytypes.JTensorOrPartitionSpec
 Nested = pytypes.Nested
 NestedJTensor = base_layer.NestedJTensor
-NestedJTensorOrPartitionSpec = base_layer.NestedJTensorOrPartitionSpec
+NestedJTensorOrPartitionSpec = pytypes.NestedJTensorOrPartitionSpec
 NestedMap = py_utils.NestedMap
 
 
