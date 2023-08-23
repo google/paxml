@@ -15,7 +15,7 @@ protobuf==3.19.6
 pyglove
 seqio-nightly
 t5
-tensorflow~=2.9.2
+tensorflow-cpu~=2.9.2
 tensorflow-text~=2.9.0
 tensorstore
 tensorflow-datasets==4.8.3
