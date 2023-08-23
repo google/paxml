@@ -168,7 +168,11 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])
     self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
 
-  def test_adam_with_sharding(self):
+  @parameterized.parameters(
+      (True),
+      (False),
+  )
+  def test_adam_with_sharding(self, use_prefix_vectorization):
     learner_params = pax_fiddle.Config(learners.Learner)
     learner_params.name = 'learner'
     learner_params.loss_name = 'loss'
@@ -193,8 +197,8 @@ class LearnersTest(test_utils.TestCase):
     learner_params.optimizer.grad_tx = optax.adam(
         learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1
     )
-    # TODO(b/277132394): Add parameterized test for prefix vectorization.
-    learner_params.vectorize_on_repeat_prefix = False
+
+    learner_params.vectorize_on_repeat_prefix = use_prefix_vectorization
 
     learner_instance = instantiate(learner_params)
 
@@ -232,7 +236,7 @@ class LearnersTest(test_utils.TestCase):
     logging.info('Init state: %s', opt_states)
     logging.info('var params %s', var_weight_hparams)
     # Apply sharding with tree_map_params instead of calling init_partition_spec
-    opt_states_pspec = optimizers.partition_params(
+    opt_states_pspec = opt_vec.partition_params(
         grad_tx, var_weight_hparams, opt_states
     )
     logging.info('opt_states_pspec=%s', opt_states_pspec)
@@ -348,13 +352,21 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(new_grad_ffn, expected_grad_ffn)
 
   @parameterized.parameters(
-      (0.5, 2.0, True),
-      (1.5, 3.0, False),
-      (10.0, 0.1, True),
-      (100.0, 2.0, False),
+      (0.5, 2.0, True, True),
+      (1.5, 3.0, False, True),
+      (10.0, 0.1, True, True),
+      (100.0, 2.0, False, True),
+      (0.5, 2.0, True, False),
+      (1.5, 3.0, False, False),
+      (10.0, 0.1, True, False),
+      (100.0, 2.0, False, False),
   )
   def test_multioptimizer_learner_with_optax_optimizers(
-      self, lr_multiplier1, lr_multiplier2, use_vq_ngrams
+      self,
+      lr_multiplier1,
+      lr_multiplier2,
+      use_vq_ngrams,
+      vectorize_on_repeat_prefix,
   ):
     learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
@@ -364,7 +376,7 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer.grad_tx = optax.sgd(
         learning_rate=learning_rate, momentum=0.9
     )
-    learner_p.vectorize_on_repeat_prefix = False
+    learner_p.vectorize_on_repeat_prefix = vectorize_on_repeat_prefix
     learner_p.optimizer.learning_rate = learning_rate
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1 = pax_fiddle.Config(optimizers.OptaxOptimizer)
@@ -392,8 +404,8 @@ class LearnersTest(test_utils.TestCase):
     )
     learner_p.optimizer.learning_rate = learning_rate
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
-    # TODO(b/277132394): Add parameterized test for prefix vectorization.
-    learner_p.vectorize_on_repeat_prefix = False
+
+    learner_p.vectorize_on_repeat_prefix = vectorize_on_repeat_prefix
     learner_instance_single = instantiate(learner_p)
 
     # Define device mesh.
@@ -464,11 +476,11 @@ class LearnersTest(test_utils.TestCase):
     logging.info('opt_state: %s', opt_state)
     opt_state_single = grad_tx_single.init(old_vars)
     logging.info('opt_state_single: %s', opt_state_single)
-    partition_spec = optimizers.partition_params(
+    partition_spec = opt_vec.partition_params(
         grad_tx, var_weight_hparams=old_vars, opt_states=opt_state
     )
 
-    partition_spec_single = optimizers.partition_params(
+    partition_spec_single = opt_vec.partition_params(
         grad_tx_single, var_weight_hparams=old_vars, opt_states=opt_state_single
     )
     # Assert that the length of partition spec is the same as the total
@@ -712,6 +724,7 @@ class LearnersTest(test_utils.TestCase):
 
     def _opt_init(params):
       # Reduction over each variable. Behavior will depend on vectorization.
+      logging.info(f'Init called with params {params}')
       return jax.tree_map(jnp.sum, params)
 
     def _opt_update(updates, state, params):
@@ -783,8 +796,10 @@ class LearnersTest(test_utils.TestCase):
     self.assertEqual(pspec_3[opt_idx].c.repeat_prefix, [2, 2])
     self.assertEqual(pspec_3[opt_idx].c.repeat_prefix_split_dims_mapping,
                      [('data', 'mdl'), None])
-
+    logging.info(f'Prefix vectorization partition spec .. {partition_spec} ')
     state = grad_tx.init(variables)
+    logging.info('Prefix vectorization state after init .. ')
+    logging.info(state)
     # Computed update is 0 + state, and state is sum of each variable.
     update, state = grad_tx.update(
         jax.tree_map(jnp.zeros_like, variables), state, variables)
@@ -794,8 +809,75 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(update.c, variables.c)
     # b is not vectorized, so the update equals the sum reduction of the initial
     # variable value.
+    logging.info(f'Prefix vectorization a after update .. {update.a}')
+    logging.info(f'Prefix vectorization b after update .. {update.b}')
+    logging.info(f'Prefix vectorization c after update .. {update.c}')
     self.assertAllClose(update.b,
                         jnp.zeros_like(variables.b) + jnp.sum(variables.b))
+
+  def test_vectorized_prefix_with_tree_map_params(self):
+    def _opt_init(params):
+      # Reduction over each variable. Behavior will depend on vectorization.
+      logging.info(f'Init called with params {params}')
+      return jax.tree_map(jnp.sum, params)
+
+    def _opt_update(updates, state, params):
+      del params
+      return jax.tree_map(lambda u, s: u + s, updates, state), state
+
+    learner_p = pax_fiddle.Config(
+        learners.Learner,
+        name='learner',
+        loss_name='loss',
+        grad_norm_individual_vars=True,
+    )
+    learner_p.optimizer = pax_fiddle.Config(optimizers.OptaxOptimizer)
+    learner_p.optimizer.learning_rate = 1.0
+    learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.grad_tx = optax.GradientTransformationExtraArgs(
+        init=_opt_init, update=_opt_update
+    )
+
+    learner_instance = instantiate(learner_p)
+
+    grads = NestedMap(
+        a=jnp.array([1, 2], dtype=jnp.float32),
+        b=jnp.array([1, 2], dtype=jnp.float32),
+        c=jnp.array([[1, 2], [3, 4]], dtype=jnp.float32),
+    )
+    variables = grads.copy()
+    a_var_param = base_layer.WeightHParams(())
+    a_var_param.repeat_prefix = [2]
+    a_var_param.repeat_prefix_split_dims_mapping = [-1]
+    b_var_param = base_layer.WeightHParams((2,))
+    c_var_param = base_layer.WeightHParams(())
+    c_var_param.repeat_prefix = [2, 2]
+    c_var_param.repeat_prefix_split_dims_mapping = [('data', 'mdl'), None]
+    var_hparams = NestedMap(a=a_var_param, b=b_var_param, c=c_var_param)
+
+    grad_tx = learner_instance.get_grad_tx(var_weight_hparams=var_hparams)
+
+    state = grad_tx.init(variables)
+    logging.info(state)
+    opt_states_pspec = opt_vec.partition_params(grad_tx, var_hparams, state)
+    logging.info('opt_states_pspec=%s', opt_states_pspec)
+    logging.info('Prefix vectorization state after init .. ')
+    # Computed update is 0 + state, and state is sum of each variable.
+    update, state = grad_tx.update(
+        jax.tree_map(jnp.zeros_like, variables), state, variables
+    )
+    # Variables a and c are scalars excluding the prefix, so the update must be
+    # equal to the initial variable values.
+    self.assertAllClose(update.a, variables.a)
+    self.assertAllClose(update.c, variables.c)
+    # b is not vectorized, so the update equals the sum reduction of the initial
+    # variable value.
+    logging.info(f'Prefix vectorization a after update .. {update.a}')
+    logging.info(f'Prefix vectorization b after update .. {update.b}')
+    logging.info(f'Prefix vectorization c after update .. {update.c}')
+    self.assertAllClose(
+        update.b, jnp.zeros_like(variables.b) + jnp.sum(variables.b)
+    )
 
   def test_scale_update_by_var_norm(self):
     def _opt_init(params):
