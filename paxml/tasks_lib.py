@@ -896,12 +896,8 @@ def create_state_partition_specs(
         )
       elif isinstance(grad_tx, optax.GradientTransformationExtraArgs):
         opt_var_weight_hparams.append(
-            optax.tree_map_params(
-                grad_tx,
-                lambda v, s: s,
-                opt_states[index],
-                var_weight_hparams_for_opt,
-                transform_non_params=lambda v: None,
+            optimizer_prefix_vectorization.partition_params(
+                grad_tx, var_weight_hparams_for_opt, opt_states[index]
             )
         )
       index += 1
