@@ -409,22 +409,20 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     # TODO(yonghui): implement numerical checks.
 
     def _adjust_var(old_var, transformed_grad, is_learnable, var_wh, var_key):
-      if is_learnable:
-        if self.scale_update_by_var_norm:
-          if len(var_wh.shape) <= 1:
-            # This is scalar var, which we don't rescale the update.
-            target_magnitude = 1.0
-            logging.info('var: %s is a scalar', var_key)
-          else:
-            target_magnitude = base_layer.var_init_scale(var_wh, var_key)
-          logging.info(
-              'var: %s, target_magnitude: %f', var_key, target_magnitude
-          )
-        else:
-          target_magnitude = 1.0
-        return old_var + transformed_grad * target_magnitude
-      else:
+      if not is_learnable:
         return old_var
+
+      if not self.scale_update_by_var_norm:
+        return old_var + transformed_grad
+
+      if len(var_wh.shape) <= 1:
+        # This is a scalar var, which we don't rescale.
+        target_magnitude = 1.0
+        logging.info('var: %s is a scalar', var_key)
+      else:
+        target_magnitude = base_layer.var_init_scale(var_wh, var_key)
+      logging.info('var: %s, target_magnitude: %f', var_key, target_magnitude)
+      return old_var + transformed_grad * target_magnitude
 
     var_is_learnable = jax.tree_util.tree_map(
         lambda x: not base_layer.var_not_trainable(x), var_weight_hparams
