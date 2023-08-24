@@ -405,6 +405,11 @@ class SeqIOInput(base_input.BaseInput):
       prefetched elements between the time of iterator construction and usage.
     dataset: Set to the underlying tf.data.Dataset. This field is inherited from
       `BaseInput`, used for creating iterators and input specs.
+    eval_metrics_filter_targets_fields: When calculating seqio metrics, this
+      class will rebuild the input dataset and load all examples into RAM to
+      form the targets (see self._build_predict_metric_inputs_with_enum()). This
+      can cause OOM if the dataset is large. To avoid this, use this field to
+      specify that only a subset of fields in each example should be saved.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -458,6 +463,7 @@ class SeqIOInput(base_input.BaseInput):
       SeqIOInput.DeterministicInput
   ] = pax_fiddle.template_field(DeterministicInput)
   eval_metrics_targets_length: Optional[int] = None
+  eval_metrics_filter_targets_fields: Optional[List[str]] = None
   use_enumeration: bool = True
   annotate_padding_fields: bool = False
   overridden_vocab: Optional[seqio.Vocabulary] = None
@@ -1161,10 +1167,18 @@ class SeqIOInput(base_input.BaseInput):
         self._gen_targets_iter()
         break
 
+      example = NestedMap(example)
+
       # remove enum related fields from example as seqio metric_fns API
       # expects the output from the task dataset directly.
       key = py_utils.get_enumeration_id(example, pop=True)
       assert key is not None
+      # if only some fields are specified, filter out only these fields to be
+      # loaded into ram.
+      if self.eval_metrics_filter_targets_fields is not None:
+        example = example.FilterKeyVal(
+            lambda k, _: k in self.eval_metrics_filter_targets_fields
+        )
       targets[key] = example
 
       # we keep the ragged tensors and add them into the targets.
