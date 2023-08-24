@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from flax import struct
 import jax
@@ -228,7 +228,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
   # the total clipped gradient as it goes. Note that the setting of
   # `inner_batch_size` has no effect on the value of the final gradients--
   # it affects only the feasibility and speed of the computation.
-  inner_batch_size: Optional[int] = None
+  inner_batch_size: int | None = None
 
   def _clip_and_mean_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0

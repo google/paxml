@@ -18,7 +18,7 @@
 import contextlib
 import functools
 import gc
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Sequence
 
 from absl import logging
 from etils import epath
@@ -54,7 +54,7 @@ INFO = logging.INFO
 
 def _maybe_update_latest_model_step(
     train_input_p: pax_fiddle.Config[base_input.BaseInput],
-    initial_global_step: Optional[int],
+    initial_global_step: int | None,
     task: tasks_lib.SingleTask,
 ) -> None:
   """Updates `train_input_p` in place its latest model step."""
@@ -112,12 +112,12 @@ class DefaultExecutor(base_executor.BaseExecutor):
   def _maybe_create_train_input(
       self,
       task: tasks_lib.SingleTask,
-      step: Optional[int],
+      step: int | None,
       train_input_p: pax_fiddle.Config[base_input.BaseInput],
-  ) -> Tuple[
-      Optional[base_input.BaseInput],
-      Optional[base_input.BaseInput],
-      Optional[base_input.BaseInput],
+  ) -> tuple[
+      base_input.BaseInput | None,
+      base_input.BaseInput | None,
+      base_input.BaseInput | None,
   ]:
     """Optionally creates the train input for partitioner and checkpointing.
 
@@ -165,7 +165,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
       train_program: programs.BaseTrainProgram,
       eval_programs: Sequence[programs.BaseEvalProgram],
       decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
-      early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+      early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
       exit_after_ondemand_checkpoint: bool = False,
   ):
     self._task = jax_task
@@ -413,7 +413,7 @@ def _train_and_evaluate_common(
     # counter is incremented in between.
     step_i = program_output.new_train_step
 
-    eval_metrics: Optional[tuning_lib.EvalMetrics] = None
+    eval_metrics: tuning_lib.EvalMetrics | None = None
     # Run eval at regular step interval or the final training step.
     if train_p.eval_interval_steps and (
         step_i % train_p.eval_interval_steps == 0
@@ -441,7 +441,7 @@ def _train_and_evaluate_common(
             elapsed_secs,
         )
 
-    decode_metrics: Optional[tuning_lib.DecodeMetrics] = None
+    decode_metrics: tuning_lib.DecodeMetrics | None = None
     if (
         decode_programs
         and train_p.decode_interval_steps

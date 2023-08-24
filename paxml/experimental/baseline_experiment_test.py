@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import dataclasses
-from typing import Any, Optional
+from typing import Any
 
 from absl.testing import absltest
 from paxml import parameterized_experiment
@@ -30,7 +30,7 @@ def foo(z):
 
 class SampleModel(base_model.BaseModel):
   my_setting: int = 1
-  bar_tpl: Optional[pax_fiddle.Config[Any]] = None
+  bar_tpl: pax_fiddle.Config[Any] | None = None
 
 
 @dataclasses.dataclass
@@ -58,7 +58,7 @@ class ExperimentWithConfigSetting(MyExperiment):
   """This is NOT a recommended pattern, but we want to make sure it works."""
 
   foo_setting: int = 4123
-  bar_tpl: Optional[pax_fiddle.Config[Any]] = None
+  bar_tpl: pax_fiddle.Config[Any] | None = None
 
   def model_fixture(self):
     return pax_fiddle.PaxConfig(

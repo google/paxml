@@ -20,7 +20,7 @@ to a specific ML experiment.
 """
 
 import abc
-from typing import Dict, List, Optional, Type, TypeVar
+from typing import Type, TypeVar
 from paxml import automl_interfaces
 from paxml import base_executor
 from paxml import base_task
@@ -42,7 +42,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
   # the dataset is used for training or eval.
   # All training and eval datasets must have unique names.
   @abc.abstractmethod
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters."""
 
   def training_dataset(self) -> pax_fiddle.Config[base_input.BaseInput]:
@@ -62,13 +62,13 @@ class BaseExperiment(metaclass=abc.ABCMeta):
           f'config (`{self.datasets()}`).')
     return training_splits[0]
 
-  def eval_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def eval_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for evaluation."""
     return [dataset for dataset in self.datasets() if not dataset.is_training]
 
   # Optional. Returns a list of datasets to be decoded.
   # When specified, all decoder datasets must have unique names.
-  def decoder_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for decoder."""
     return []
 
@@ -110,7 +110,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     raise NotImplementedError(
         'Please implement `search` method for your experiment for tuning.')
 
-  def sub_experiments(self) -> Dict[str, Type['BaseExperiment']]:
+  def sub_experiments(self) -> dict[str, Type['BaseExperiment']]:
     """Creates sub-experiments for joint tuning.
 
     A PAX experiment can have multiple sub-experiments during tuning, which
@@ -128,7 +128,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """
     return {'': self.__class__}
 
-  def partitioner(self) -> Optional[partitioning.Partitioner]:
+  def partitioner(self) -> partitioning.Partitioner | None:
     """Returns the partitioner to use for partitioning model functions.
 
     Returns:
@@ -141,14 +141,14 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the train program to use for training the model."""
     return programs.SingleTaskTrainProgram()
 
-  def eval_programs(self) -> List[programs.BaseEvalProgram]:
+  def eval_programs(self) -> list[programs.BaseEvalProgram]:
     """Returns the list of eval programs to use for model evaluation."""
     return [
         programs.SingleTaskEvalProgram(input_p)
         for input_p in self.eval_datasets()
     ]
 
-  def decode_programs(self) -> List[decode_programs.SingleTaskDecodeProgram]:
+  def decode_programs(self) -> list[decode_programs.SingleTaskDecodeProgram]:
     """Returns the list of decode_programs to use for model decode."""
     decode_program_list = [
         decode_programs.SingleTaskDecodeProgram(input_p)
@@ -156,7 +156,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     ]
     return decode_program_list
 
-  def executor(self) -> Optional[base_executor.BaseExecutor]:
+  def executor(self) -> base_executor.BaseExecutor | None:
     """Returns the executor to use to run the programs.
 
     Returns:

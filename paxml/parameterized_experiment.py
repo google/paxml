@@ -15,7 +15,7 @@
 
 """Defines a parameterizable BaseExperiment subclass."""
 
-from typing import List, Optional, Sequence
+from typing import Sequence
 
 from paxml import base_experiment
 from paxml import base_task
@@ -76,14 +76,11 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
       self,
       *,
       task: pax_fiddle.Config[base_task.BaseTask],
-      training_dataset: Optional[
-          pax_fiddle.Config[base_input.BaseInput]
-      ] = None,
+      training_dataset: pax_fiddle.Config[base_input.BaseInput] | None = None,
       eval_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
       decoder_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
-      input_specs_provider: Optional[
-          pax_fiddle.Config[base_input.BaseInputSpecsProvider]
-      ] = None,
+      input_specs_provider: pax_fiddle.Config[base_input.BaseInputSpecsProvider]
+      | None = None,
   ):
     """Initializes a `ParameterizedExpermiment` instance.
 
@@ -129,7 +126,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
     """Returns the task config."""
     return self._task
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the union of training and eval dataset configs."""
     return (
         [self._training_dataset] if self._training_dataset else []
@@ -141,11 +138,11 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
       raise ValueError("No training dataset was provided.")
     return self._training_dataset
 
-  def eval_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def eval_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of evaluation dataset configs."""
     return self._eval_datasets
 
-  def decoder_datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of decoder dataset configs."""
     return self._decoder_datasets
 

@@ -16,7 +16,7 @@
 """Tests for automl."""
 
 import math
-from typing import Optional
+
 from absl.testing import absltest
 import fiddle as fdl
 from paxml import automl
@@ -765,9 +765,9 @@ class EarlyStoppingErrorTest(absltest.TestCase):
 
 class MyTask(base_task.BaseTask):
   """Task for testing purpose."""
-  learning_rate: Optional[float] = None
-  batch_size: Optional[int] = None
-  program_str: Optional[str] = None
+  learning_rate: float | None = None
+  batch_size: int | None = None
+  program_str: str | None = None
 
 
 class RegularExperiment(base_experiment.BaseExperiment):

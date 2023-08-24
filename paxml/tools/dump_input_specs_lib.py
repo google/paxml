@@ -16,7 +16,6 @@
 """Input specification retrieval from either provider or input pipeline."""
 
 import pprint
-from typing import Optional, Tuple
 
 from absl import logging
 import jax
@@ -31,8 +30,8 @@ instantiate = base_hyperparams.instantiate
 
 
 def extract_input_specs(
-    experiment_config: base_experiment.BaseExperiment
-) -> Tuple[Optional[NestedShapeDtypeStruct], Optional[NestedShapeDtypeStruct]]:
+    experiment_config: base_experiment.BaseExperiment,
+) -> tuple[NestedShapeDtypeStruct | None, NestedShapeDtypeStruct | None]:
   """Extracts the input specs for a given experiment config."""
   logging.info('Starting extraction of input specs info.')
 
@@ -79,8 +78,8 @@ def extract_input_specs(
 
 
 def specs_to_string(
-    experiment_name: str, specs: Tuple[Optional[NestedShapeDtypeStruct],
-                                       Optional[NestedShapeDtypeStruct]]
+    experiment_name: str,
+    specs: tuple[NestedShapeDtypeStruct | None, NestedShapeDtypeStruct | None],
 ) -> str:
   """Converts input specs into a readable string."""
   pp = pprint.PrettyPrinter(indent=2)

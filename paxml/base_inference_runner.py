@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
-from typing import Any, List
+from typing import Any
 
 from paxml import train_states
 from praxis import base_hyperparams
@@ -82,7 +82,7 @@ class BaseInferenceRunner(base_hyperparams.FiddleBaseParameterizable, abc.ABC):
     ```
     """
 
-  def serialize_outputs(self, outputs: NestedMap) -> List[bytes]:
+  def serialize_outputs(self, outputs: NestedMap) -> list[bytes]:
     input_batch_dim = 0
     features_dict = tfds.features.FeaturesDict(self.output_schema)
     examples = py_utils.tree_unstack(outputs, input_batch_dim)

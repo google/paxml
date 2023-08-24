@@ -15,7 +15,6 @@
 
 """Module defining possible checkpoint types and utility methods."""
 
-from typing import Union
 import enum
 from etils import epath
 from paxml import base_task
@@ -35,7 +34,7 @@ class CheckpointType(str, enum.Enum):
 
 def retrieve_checkpoint_type(
     maybe_use_persistence_checkpointing,
-    task: Union[base_task.BaseTask, pax_fiddle.Config[base_task.BaseTask]],
+    task: base_task.BaseTask | pax_fiddle.Config[base_task.BaseTask],
 ) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
   using_pjit = task.model.mesh_shape is not None  # pytype: disable=attribute-error

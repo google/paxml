@@ -15,8 +15,9 @@
 
 """Tests for seqio_input."""
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Mapping, Sequence
 from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
@@ -78,8 +79,8 @@ def _dummy_score_metric(targets: Sequence[Any],
 
 
 def _register_dummy_task(
-    task_name: str, dataset_fn: Callable[[str, bool, Optional[int]],
-                                         tf.data.Dataset]
+    task_name: str,
+    dataset_fn: Callable[[str, bool, int | None], tf.data.Dataset],
 ) -> seqio.Task:
   """Register a dummy task for testing eval metrics."""
   output_feature_names = ('inputs', 'targets')
@@ -782,7 +783,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       p: pax_fiddle.Config[seqio_input.SeqIOInput],
       ds: tf.data.Dataset,
       scores: Sequence[float],
-  ) -> Sequence[Tuple[Optional[str], NestedMap]]:
+  ) -> Sequence[tuple[str | None, NestedMap]]:
     enumerated_ds = seqio_input._enumerate_dataset(
         ds, p.is_training, shard_info=None
     )

@@ -24,12 +24,12 @@ Therefore, we have a very simple helper function to convert primitive dicts
 config).
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from praxis import pytypes
 
 
-def make_nested_map(base: Dict[str, Any]) -> pytypes.NestedMap:
+def make_nested_map(base: dict[str, Any]) -> pytypes.NestedMap:
   """Converts a dict to a NestedMap.
 
   Args:

@@ -18,7 +18,7 @@
 import dataclasses
 import os
 import typing
-from typing import Any, Dict, Mapping, Optional, Sequence, Union
+from typing import Any, Sequence
 
 from absl import logging
 from etils import epath
@@ -86,7 +86,7 @@ def _create_items_dict_with_metadata(
     train_state,
     train_state_unpadded_shape_dtype_struct,
     version,
-    tensorstore_use_ocdbt: Optional[bool] = None
+    tensorstore_use_ocdbt: bool | None = None,
 ):
   """Returns items dict with metadata."""
   # (padded) train_state
@@ -149,7 +149,7 @@ class CheckpointManagerOptions(ocp.CheckpointManagerOptions):
       itself with much directory management.
   """
 
-  todelete_subdir: Optional[str] = None
+  todelete_subdir: str | None = None
   cleanup_tmp_directories: bool = False
 
 
@@ -172,7 +172,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       directory: epath.PathLike,
       *args,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-      tensorstore_use_ocdbt: Optional[bool] = None,
+      tensorstore_use_ocdbt: bool | None = None,
       **kwargs,
   ):
     if checkpoint_type == CheckpointType.UNSPECIFIED:
@@ -235,7 +235,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           steps.append(checkpoint_paths.get_step_from_checkpoint_asset(path))
     return steps
 
-  def any_step(self) -> Optional[int]:
+  def any_step(self) -> int | None:
     """Returns any step tracked by the checkpoint manager.
 
     Returns:
@@ -307,8 +307,8 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       self,
       step: int,
       directory: epath.Path,
-      key_name: Optional[str] = None,
-      tmp_directory: Optional[epath.Path] = None,
+      key_name: str | None = None,
+      tmp_directory: epath.Path | None = None,
   ) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
     if tmp_directory is None:
@@ -357,11 +357,11 @@ class OrbaxCheckpointManager:
       self,
       directory: epath.Path,
       checkpointer: ocp.AbstractCheckpointer,
-      train_input_checkpointer: Optional[ocp.Checkpointer] = None,
-      options: Optional[CheckpointManagerOptions] = None,
+      train_input_checkpointer: ocp.Checkpointer | None = None,
+      options: CheckpointManagerOptions | None = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-      tensorstore_use_ocdbt: Optional[bool] = None,
-      aux_checkpointers: Optional[Dict[str, ocp.AbstractCheckpointer]] = None,
+      tensorstore_use_ocdbt: bool | None = None,
+      aux_checkpointers: dict[str, ocp.AbstractCheckpointer] | None = None,
   ):
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     checkpointers = {
@@ -395,7 +395,7 @@ class OrbaxCheckpointManager:
   def all_steps(self) -> Sequence[int]:
     return self._manager.all_steps()
 
-  def latest_step(self) -> Optional[int]:
+  def latest_step(self) -> int | None:
     return self._manager.latest_step()
 
   def check_for_errors(self):
@@ -421,9 +421,9 @@ class OrbaxCheckpointManager:
       step: int,
       train_state: Any,
       train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      force: Optional[bool] = False,
-      aux_items: Optional[Dict[str, Any]] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      force: bool | None = False,
+      aux_items: dict[str, Any] | None = None,
   ) -> bool:
     """See superclass documentation."""
     if self.version > 1.0 and train_state_unpadded_shape_dtype_struct is None:
@@ -458,11 +458,11 @@ class OrbaxCheckpointManager:
       step: int,
       train_state: Any,
       train_state_unpadded_shape_dtype_struct: OptionalNestedShapeDtypeStruct = None,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      restore_kwargs: Optional[Any] = None,
-      aux_items: Optional[Dict[str, Any]] = None,
-      aux_restore_kwargs: Optional[Dict[str, Any]] = None,
-  ) -> Union[TrainState, Dict[str, Any]]:
+      train_input_pipeline: base_input.BaseInput | None = None,
+      restore_kwargs: Any | None = None,
+      aux_items: dict[str, Any] | None = None,
+      aux_restore_kwargs: dict[str, Any] | None = None,
+  ) -> TrainState | dict[str, Any]:
     """See superclass documentation."""
     uses_transformations = (
         restore_kwargs

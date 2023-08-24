@@ -22,7 +22,7 @@ import dataclasses
 import enum
 import inspect
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Callable, Sequence, Type
 
 from praxis import base_hyperparams
 from praxis import pax_fiddle
@@ -58,7 +58,7 @@ class BaseReward(
   """Base class for reward functions."""
 
   @abc.abstractmethod
-  def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
+  def __call__(self, metrics_dict: dict[str, float], global_step: int) -> float:
     """Returns a float value as reward from a dict of metrics."""
 
   @property
@@ -89,9 +89,8 @@ class CrossStepMetricAggregator(
 
   @abc.abstractmethod
   def __call__(
-      self,
-      metrics_across_steps: Sequence[Tuple[int, Dict[str, float]]]
-      ) -> Dict[str, float]:
+      self, metrics_across_steps: Sequence[tuple[int, dict[str, float]]]
+  ) -> dict[str, float]:
     """Aggregates metrics across multiple steps.
 
     Args:
@@ -147,16 +146,17 @@ class SearchHParams:
     enable_dataset_tuning: If False, skip instantiating the dataset to look for
       tunable variables.
   """
-  search_algorithm: Optional[pax_fiddle.Config[BaseAlgorithm]] = None
-  search_reward: Optional[pax_fiddle.Config[BaseReward]] = None
-  early_stopping: Optional[pax_fiddle.Config[BaseEarlyStoppingPolicy]] = None
-  cross_step_metric_aggregator: Optional[
-      pax_fiddle.Config[CrossStepMetricAggregator]
-  ] = None
+  search_algorithm: pax_fiddle.Config[BaseAlgorithm] | None = None
+  search_reward: pax_fiddle.Config[BaseReward] | None = None
+  early_stopping: pax_fiddle.Config[BaseEarlyStoppingPolicy] | None = None
+  cross_step_metric_aggregator: pax_fiddle.Config[
+      CrossStepMetricAggregator
+  ] | None = None
   max_num_trials: int = 1000000
-  errors_to_skip: Optional[List[
-      Union[Type[Exception], Tuple[Type[Exception], str]]]] = None
-  prior_study_ids: Optional[List[int]] = None
+  errors_to_skip: list[Type[Exception] | tuple[Type[Exception], str]] | None = (
+      None
+  )
+  prior_study_ids: list[int] | None = None
   add_prior_trials: bool = False
   add_experiment_config_to_metadata: bool = True
   treats_early_stopped_trials_as_done: bool = False
@@ -232,11 +232,11 @@ class Metric:
   """
   metric_name: str
   metric_type: MetricType = MetricType.CUSTOM
-  dataset_name: Optional[str] = None
-  sub_experiment_id: Optional[str] = None
-  aggregator: Optional[Union[
-      MetricAggregator,
-      Callable[[Sequence[float]], float]]] = None
+  dataset_name: str | None = None
+  sub_experiment_id: str | None = None
+  aggregator: MetricAggregator | Callable[[Sequence[float]], float] | None = (
+      None
+  )
 
   def __post_init__(self):
     self._metric_key_regex = re.compile(self.pattern, re.IGNORECASE)
@@ -307,18 +307,19 @@ class Metric:
     return (MetricType.applies_to_multiple_datasets(self.metric_type) and
             self.dataset_name is None)
 
-  def match_items(self, metric_dict: Dict[str,
-                                          float]) -> List[Tuple[str, float]]:
+  def match_items(
+      self, metric_dict: dict[str, float]
+  ) -> list[tuple[str, float]]:
     """Gets matched items of current metric from a metric dict."""
     return [(k, v)
             for k, v in metric_dict.items()
             if self._metric_key_regex.match(k)]
 
-  def get_values(self, metric_dict: Dict[str, float]) -> List[float]:
+  def get_values(self, metric_dict: dict[str, float]) -> list[float]:
     """Gets the value of current metric from a metric dict."""
     return [v for k, v in self.match_items(metric_dict)]
 
-  def get_value(self, metric_dict: Dict[str, float]) -> float:
+  def get_value(self, metric_dict: dict[str, float]) -> float:
     """Gets the only value for current metric from a metric dict."""
     items = list(self.match_items(metric_dict))
     if not items:
@@ -337,9 +338,9 @@ class Metric:
   @classmethod
   def train_steps_per_second(
       cls,
-      sub_experiment_id: Optional[str] = None,
-      aggregator: Optional[
-          Union[str, Callable[[Sequence[float]], float]]] = None) -> 'Metric':
+      sub_experiment_id: str | None = None,
+      aggregator: str | Callable[[Sequence[float]], float] | None = None,
+  ) -> 'Metric':
     """Returns metric for training steps per second."""
     return Metric('train_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
@@ -348,9 +349,9 @@ class Metric:
   @classmethod
   def eval_steps_per_second(
       cls,
-      sub_experiment_id: Optional[str] = None,
-      aggregator: Optional[
-          Union[str, Callable[[Sequence[float]], float]]] = None) -> 'Metric':
+      sub_experiment_id: str | None = None,
+      aggregator: str | Callable[[Sequence[float]], float] | None = None,
+  ) -> 'Metric':
     """Returns metric for evaluation steps per second."""
     return Metric('eval_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
@@ -359,8 +360,9 @@ class Metric:
   @classmethod
   def decode_steps_per_second(
       cls,
-      sub_experiment_id: Optional[str] = None,
-      aggregator: Optional[Union[str, MetricAggregationFn]] = None) -> 'Metric':
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns metric for `decode_steps_per_second`."""
     return Metric('decode_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
@@ -369,8 +371,9 @@ class Metric:
   @classmethod
   def num_params(
       cls,
-      sub_experiment_id: Optional[str] = None,
-      aggregator: Optional[Union[str, MetricAggregationFn]] = None) -> 'Metric':
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns metric for `num_params`."""
     return Metric('num_params',
                   sub_experiment_id=sub_experiment_id,
@@ -378,11 +381,12 @@ class Metric:
 
   # Class methods for creating eval metric types.
   @classmethod
-  def train(cls,
-            metric_name: str,
-            sub_experiment_id: Optional[str] = None,
-            aggregator: Optional[Union[str, MetricAggregationFn]] = None
-            ) -> 'Metric':
+  def train(
+      cls,
+      metric_name: str,
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns a metric from evaluation on the training dataset."""
     return Metric(metric_name,
                   MetricType.TRAIN_METRICS,
@@ -390,11 +394,12 @@ class Metric:
                   aggregator=aggregator)
 
   @classmethod
-  def eval_train(cls,
-                 metric_name: str,
-                 sub_experiment_id: Optional[str] = None,
-                 aggregator: Optional[Union[str, MetricAggregationFn]] = None
-                 ) -> 'Metric':
+  def eval_train(
+      cls,
+      metric_name: str,
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns a metric from evaluation on the training dataset."""
     return Metric(metric_name,
                   MetricType.EVAL_TRAIN_METRICS,
@@ -402,12 +407,13 @@ class Metric:
                   aggregator=aggregator)
 
   @classmethod
-  def eval(cls,
-           metric_name: str,
-           dataset_name: Optional[str] = None,
-           sub_experiment_id: Optional[str] = None,
-           aggregator: Optional[Union[str, MetricAggregationFn]] = None
-           ) -> 'Metric':
+  def eval(
+      cls,
+      metric_name: str,
+      dataset_name: str | None = None,
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns a metric from evaluation on the test dataset."""
     return Metric(metric_name,
                   MetricType.EVAL_METRICS,
@@ -416,12 +422,13 @@ class Metric:
                   aggregator=aggregator)
 
   @classmethod
-  def eval_scoring(cls,
-                   metric_name: str,
-                   dataset_name: Optional[str] = None,
-                   sub_experiment_id: Optional[str] = None,
-                   aggregator: Optional[Union[str, MetricAggregationFn]] = None
-                   ) -> 'Metric':
+  def eval_scoring(
+      cls,
+      metric_name: str,
+      dataset_name: str | None = None,
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns a metric from evaluation on the test dataset."""
     return Metric(metric_name,
                   MetricType.EVAL_SCORING_METRICS,
@@ -430,12 +437,13 @@ class Metric:
                   aggregator=aggregator)
 
   @classmethod
-  def decode(cls,
-             metric_name: str,
-             dataset_name: Optional[str] = None,
-             sub_experiment_id: Optional[str] = None,
-             aggregator: Optional[Union[str, MetricAggregationFn]] = None
-             ) -> 'Metric':
+  def decode(
+      cls,
+      metric_name: str,
+      dataset_name: str | None = None,
+      sub_experiment_id: str | None = None,
+      aggregator: str | MetricAggregationFn | None = None,
+  ) -> 'Metric':
     """Returns a metric or processed metric from a decode dataset."""
     return Metric(metric_name,
                   MetricType.DECODE_METRICS,

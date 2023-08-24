@@ -17,7 +17,7 @@
 
 import dataclasses
 import math
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Type
 
 from absl.testing import absltest
 from clu import platform
@@ -32,11 +32,11 @@ import pyglove as pg
 
 
 class StopWithLowerMetric(automl.BaseReward):
-  metric: Optional[automl.Metric] = None
-  threshold: Union[float, List[Tuple[int, float]]] = 0.0
+  metric: automl.Metric | None = None
+  threshold: float | list[tuple[int, float]] = 0.0
   skip: bool = False
-  reward_replacement: Optional[float] = None
-  metrics_replacement: Optional[Dict[str, float]] = None
+  reward_replacement: float | None = None
+  metrics_replacement: dict[str, float] | None = None
 
   def get_threshold(self, global_step: int) -> float:
     if isinstance(self.threshold, float):
@@ -48,7 +48,7 @@ class StopWithLowerMetric(automl.BaseReward):
         return value
     return 0.0
 
-  def __call__(self, metrics_dict: Dict[str, float], global_step: int) -> float:
+  def __call__(self, metrics_dict: dict[str, float], global_step: int) -> float:
     reward = self.metric.get_value(metrics_dict)
     if reward < self.get_threshold(global_step):
       if self.skip:
@@ -78,8 +78,8 @@ class MockTask(pg.Dict):
 
 
 class MockDataset(base_hyperparams.FiddleBaseParameterizable):
-  dataset_param1: Optional[str] = None
-  dataset_param2: Optional[Callable[[], int]] = None
+  dataset_param1: str | None = None
+  dataset_param2: Callable[[], int] | None = None
   is_training: bool = False
   param1: Any = dataclasses.field(init=False, repr=False)
   param2: Any = dataclasses.field(init=False, repr=False)
@@ -309,7 +309,7 @@ class TuningWithPopulationWiseEarlyStopping(TuningExperiment):
 class TuningWithSubExperiments(TuningExperiment):
   """A faked tuning experiment with multiple sub-experiments."""
 
-  def sub_experiments(self) -> Dict[str, Type[base_experiment.BaseExperiment]]:
+  def sub_experiments(self) -> dict[str, Type[base_experiment.BaseExperiment]]:
     def _scale_experiment(multiplier):
       class ScaledExperiment(self.__class__):
 
@@ -788,11 +788,13 @@ class TuneTest(absltest.TestCase):
             train_to_end=True))
 
 
-def get_trial_dirname(search_space_fun,
-                      trial_id: int,
-                      dna: pg.DNA,
-                      combined_parameter_names: Optional[List[str]] = None,
-                      root_dir: str = 'root') -> epath.Path:
+def get_trial_dirname(
+    search_space_fun,
+    trial_id: int,
+    dna: pg.DNA,
+    combined_parameter_names: list[str] | None = None,
+    root_dir: str = 'root',
+) -> epath.Path:
   search_space = pg.hyper.trace(search_space_fun, require_hyper_name=True)
   dirname_generator = tuning_lib.TrialDirectoryNameGenerator(
       epath.Path(root_dir), search_space, combined_parameter_names)

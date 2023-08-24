@@ -21,7 +21,7 @@ import contextlib
 import dataclasses
 import queue
 import time
-from typing import Any, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Mapping, Sequence
 
 from absl import flags
 from absl import logging
@@ -129,17 +129,17 @@ class ProgramOutput:
 
 @dataclasses.dataclass(frozen=True)
 class TrainProgramOutput(ProgramOutput):
-  loss: Optional[JTensor]
-  weighted_scalars: Optional[WeightedScalars]
+  loss: JTensor | None
+  weighted_scalars: WeightedScalars | None
   new_train_step: int
   steps_per_sec: float
-  eval_train_metrics: Optional[Mapping[str, float]]
+  eval_train_metrics: Mapping[str, float] | None
 
 
 @dataclasses.dataclass(frozen=True)
 class EvalProgramOutput(ProgramOutput):
-  eval_metrics: Optional[Mapping[str, float]] = None
-  eval_scoring_metrics: Optional[Mapping[str, float]] = None
+  eval_metrics: Mapping[str, float] | None = None
+  eval_scoring_metrics: Mapping[str, float] | None = None
   num_eval_steps: int = 0
 
 
@@ -386,7 +386,7 @@ class BaseTrainProgram(Program):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       static_args: BaseStepFnStaticArgs,
-  ) -> Tuple[int, TrainState, StepFnOutput]:
+  ) -> tuple[int, TrainState, StepFnOutput]:
     """The train step function.
 
     Args:
@@ -431,12 +431,12 @@ class BaseTrainProgram(Program):
   @abc.abstractmethod
   def train_input_partition_spec(
       self, inputs: NestedJTensor
-  ) -> Optional[NestedPartitionSpec]:
+  ) -> NestedPartitionSpec | None:
     """Returns the partition spec for the model training inputs."""
 
   def _maybe_write_summaries(
       self, step: int, new_step: int, train_outputs: StepFnOutput
-  ) -> Optional[float]:
+  ) -> float | None:
     # Compute steps/sec every this many steps, revisit when necessary.
     compute_steps_per_sec_interval_steps = 10
 
@@ -497,7 +497,7 @@ class BaseTrainProgram(Program):
 
   def _maybe_run_eval_train(
       self, new_state: TrainState, new_step: int
-  ) -> Optional[Mapping[str, float]]:
+  ) -> Mapping[str, float] | None:
     train_p = self._task.train
     eval_train_metrics = None
 
@@ -572,7 +572,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
 
   def _get_train_step(
       self, inputs: NestedJTensor
-  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+  ) -> tuple[Any, NestedPartitionSpec | None]:
     """Creates the train step info (if not done before) and returns them."""
     # Note: it doesn't matter what batch size `inputs` have, or whether it's the
     # original or preprocessed input, since:
@@ -614,7 +614,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       prng_key: PRNGKey,
       inputs: NestedJTensor,
       static_args: BaseStepFnStaticArgs,
-  ) -> Tuple[int, TrainState, StepFnOutput]:
+  ) -> tuple[int, TrainState, StepFnOutput]:
     """The train step function."""
     train_step, _ = self._get_train_step(inputs)
     return step + 1, *train_step(state, prng_key, inputs, static_args)
@@ -635,7 +635,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
 
   def train_input_partition_spec(
       self, inputs: NestedJTensor
-  ) -> Optional[NestedPartitionSpec]:
+  ) -> NestedPartitionSpec | None:
     """The partition spec for the model training inputs."""
     _, input_partition_spec = self._get_train_step(inputs)
     return input_partition_spec
@@ -657,7 +657,7 @@ def can_load_written_outputs(
 
 
 def get_filename(
-    step: Union[base_layer.JTensorOrPartitionSpec, int], prefix: str
+    step: base_layer.JTensorOrPartitionSpec | int, prefix: str
 ) -> str:
   """Returns a filename for the given step."""
   step_num = py_utils.maybe_unreplicate_for_fully_replicated(step)
@@ -666,7 +666,7 @@ def get_filename(
 
 def safe_write_key_value_pairs(
     filename: epath.PathLike,
-    key_value_pairs: Sequence[Tuple[Optional[str], Any]],
+    key_value_pairs: Sequence[tuple[str | None, Any]],
     cast_to_ndarray: bool = True,
     write_pickle: bool = True,
 ) -> None:
@@ -682,7 +682,7 @@ def maybe_write_eval_outputs(
     mode: EvaluationMode,
     output_dir: epath.Path,
     step: int,
-    eval_outputs: Sequence[Tuple[str, Any]],
+    eval_outputs: Sequence[tuple[str, Any]],
     write_pickle: bool = True,
 ) -> None:
   """Writes model evaluation outputs to disk from leader process."""
@@ -939,7 +939,7 @@ class BaseEvalProgram(Program):
   @abc.abstractmethod
   def eval_input_partition_spec(
       self, inputs: NestedJTensor
-  ) -> Optional[NestedPartitionSpec]:
+  ) -> NestedPartitionSpec | None:
     """Return the partition spec for the eval inputs."""
 
   def shutdown(self) -> None:
@@ -962,7 +962,7 @@ class SingleTaskEvalProgram(BaseEvalProgram):
 
   def _get_eval_step(
       self, inputs: NestedJTensor
-  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+  ) -> tuple[Any, NestedPartitionSpec | None]:
     """Creates the eval step info if not done before."""
     if not self._eval_step_created:
       self._eval_step_fn, self._eval_step_input_spec = (
@@ -991,7 +991,7 @@ class SingleTaskEvalProgram(BaseEvalProgram):
 
   def eval_input_partition_spec(
       self, inputs: NestedJTensor
-  ) -> Optional[NestedPartitionSpec]:
+  ) -> NestedPartitionSpec | None:
     """The partition spec for the eval inputs."""
     _, input_partition_spec = self._get_eval_step(inputs)
     return input_partition_spec

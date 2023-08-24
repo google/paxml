@@ -20,7 +20,7 @@ import dataclasses
 import functools
 import json
 import pprint
-from typing import Any, Dict, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Protocol, Sequence
 
 from absl import logging
 from clu import platform
@@ -127,7 +127,7 @@ def _remove_input_padding(
     inputs: NestedJTensor,
     unpadded_global_batch_size: int,
     input_partition_spec: NestedPartitionSpec,
-    mesh_names: Optional[Sequence[str]] = None,
+    mesh_names: Sequence[str] | None = None,
 ):
   """Removes input padding on the batch dimension."""
   padded_global_batch_size = jax.tree_util.tree_leaves(inputs)[0].shape[0]
@@ -142,13 +142,13 @@ def _remove_input_padding(
 
 
 def _write_input_specs(
-    input_specs: NestedShapeDtypeLike, job_log_dir: Optional[epath.Path]
+    input_specs: NestedShapeDtypeLike, job_log_dir: epath.Path | None
 ) -> None:
   """Writes input specs as JSON to a file."""
   if job_log_dir is None or jax.process_index() != 0:
     return
 
-  def _to_dict(array_like: Any) -> Dict[str, Any]:
+  def _to_dict(array_like: Any) -> dict[str, Any]:
     return {
         '_array': {
             'shape': list(array_like.shape),
@@ -189,8 +189,8 @@ class StepFn(Protocol):
       inputs: NestedJTensor,
       fprop_dtype: jnp.dtype,
       var_weight_hparams: NestedWeightHParams,
-      static_args: Optional[BaseStepFnStaticArgs] = None,
-  ) -> Tuple[Optional[TrainState], StepFnOutput]:
+      static_args: BaseStepFnStaticArgs | None = None,
+  ) -> tuple[TrainState | None, StepFnOutput]:
     """Step function signature.
 
     Args:
@@ -221,8 +221,8 @@ class PartitionedStepFn(Protocol):
       train_state: TrainState,
       prng_key: PRNGKey,
       inputs: NestedJTensor,
-      static_args: Optional[BaseStepFnStaticArgs] = None,
-  ) -> Tuple[Optional[TrainState], StepFnOutput]:
+      static_args: BaseStepFnStaticArgs | None = None,
+  ) -> tuple[TrainState | None, StepFnOutput]:
     """Partitioned step function signature.
 
     Args:
@@ -318,11 +318,11 @@ class Partitioner(metaclass=abc.ABCMeta):
       self,
       jax_task: tasks_lib.SingleTask,
       init_key: PRNGKey,
-      train_inputs_shape_dtype: Optional[NestedShapeDtypeStruct],
+      train_inputs_shape_dtype: NestedShapeDtypeStruct | None,
       # TODO(pax-dev): remove this arg and always use train_inputs_shape_dtype
       # once all experiments provide input specs.
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      job_log_dir: Optional[epath.Path] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      job_log_dir: epath.Path | None = None,
   ) -> None:
     """Sets training shape/dtype using sample inputs from the input pipeline.
 
@@ -389,13 +389,13 @@ class Partitioner(metaclass=abc.ABCMeta):
     """
 
   @property
-  def train_inputs_shape_dtype(self) -> Optional[NestedShapeDtypeLike]:
+  def train_inputs_shape_dtype(self) -> NestedShapeDtypeLike | None:
     """Shape/dtype attributes of the training inputs to model.init."""
     assert self._train_inputs_shape_dtype
     return self._train_inputs_shape_dtype
 
   @property
-  def global_mesh(self) -> Optional[jax.sharding.Mesh]:
+  def global_mesh(self) -> jax.sharding.Mesh | None:
     """The global mesh."""
     return None
 
@@ -433,10 +433,10 @@ class Partitioner(metaclass=abc.ABCMeta):
   def initialize_prng_key_and_train_state(
       self,
       root_prng_key: PRNGKey,
-      train_state: Optional[TrainState],
-      checkpoint_type: Optional[CheckpointType],
-      discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
+      train_state: TrainState | None,
+      checkpoint_type: CheckpointType | None,
+      discard_opt_states: bool | None = False,
+  ) -> tuple[PRNGKey, TrainState, TrainStateProvenance | None]:
     """Initialize the root prng key and train state.
 
     Depending on the partitioner, this may involve actions like splitting the
@@ -472,7 +472,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       self,
       input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
-      partition_specs: Optional[NestedPartitionSpec],
+      partition_specs: NestedPartitionSpec | None,
   ) -> NestedJTensor:
     """Preprocess the input batch before using it in the partitioned function.
 
@@ -551,7 +551,7 @@ class Partitioner(metaclass=abc.ABCMeta):
       step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> tuple[PartitionedStepFn, NestedPartitionSpec | None]:
     """Partitions the step function.
 
     Args:
@@ -614,10 +614,10 @@ class PmapPartitioner(Partitioner):
   def initialize_prng_key_and_train_state(
       self,
       root_prng_key: PRNGKey,
-      train_state: Optional[TrainState],
-      checkpoint_type: Optional[CheckpointType],
-      discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
+      train_state: TrainState | None,
+      checkpoint_type: CheckpointType | None,
+      discard_opt_states: bool | None = False,
+  ) -> tuple[PRNGKey, TrainState, TrainStateProvenance | None]:
     """Initialize the root prng key and train state."""
     root_prng_key, init_key = jax.random.split(root_prng_key)
     train_state_provenance = None
@@ -661,7 +661,7 @@ class PmapPartitioner(Partitioner):
       self,
       input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
-      partition_specs: Optional[NestedPartitionSpec],
+      partition_specs: NestedPartitionSpec | None,
   ) -> NestedJTensor:
     """Preprocess the input batch before using it."""
     assert partition_specs is None
@@ -685,7 +685,7 @@ class PmapPartitioner(Partitioner):
       step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> tuple[PartitionedStepFn, NestedPartitionSpec | None]:
     """Partitions the step function."""
     del inputs_shape_dtype
 
@@ -696,8 +696,8 @@ class PmapPartitioner(Partitioner):
         state: TrainState,
         prng_key: PRNGKey,
         inputs: NestedJTensor,
-        static_args: Optional[BaseStepFnStaticArgs] = None,
-    ) -> Tuple[Optional[TrainState], StepFnOutput]:
+        static_args: BaseStepFnStaticArgs | None = None,
+    ) -> tuple[TrainState | None, StepFnOutput]:
       return step_fn(
           self._jax_task,
           state,
@@ -723,7 +723,7 @@ class PmapPartitioner(Partitioner):
         state,
         prng_key,
         inputs,
-        static_args: Optional[BaseStepFnStaticArgs] = None,
+        static_args: BaseStepFnStaticArgs | None = None,
     ):
       if static_args:
         static_args = static_args.replace(unpadded_global_batch_size=None)
@@ -739,10 +739,8 @@ class PjitPartitioner(Partitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task: Union[
-          pax_fiddle.Config[tasks_lib.SingleTask], tasks_lib.SingleTask
-      ],
-      device_mesh: Optional[np.ndarray] = None,
+      task: pax_fiddle.Config[tasks_lib.SingleTask] | tasks_lib.SingleTask,
+      device_mesh: np.ndarray | None = None,
   ):
     """Constructor.
 
@@ -815,10 +813,10 @@ class PjitPartitioner(Partitioner):
   def initialize_prng_key_and_train_state(
       self,
       root_prng_key: PRNGKey,
-      train_state: Optional[TrainState],
-      checkpoint_type: Optional[CheckpointType],
-      discard_opt_states: Optional[bool] = False,
-  ) -> Tuple[PRNGKey, TrainState, Optional[TrainStateProvenance]]:
+      train_state: TrainState | None,
+      checkpoint_type: CheckpointType | None,
+      discard_opt_states: bool | None = False,
+  ) -> tuple[PRNGKey, TrainState, TrainStateProvenance | None]:
     """Initialize the root prng key and train state."""
     root_prng_key, init_key = jax.random.split(root_prng_key)
     # train_state should already be partitioned.
@@ -878,7 +876,7 @@ class PjitPartitioner(Partitioner):
       self,
       input_pipeline: base_input.BaseInput,
       padded_inputs: NestedJTensor,
-      partition_specs: Optional[NestedPartitionSpec],
+      partition_specs: NestedPartitionSpec | None,
   ) -> NestedJTensor:
     """Preprocess the input batch before using it."""
     if self._reshard_inputs:
@@ -909,7 +907,7 @@ class PjitPartitioner(Partitioner):
       step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> tuple[PartitionedStepFn, NestedPartitionSpec | None]:
     """Gets a sharded (pjit-ed) step function of the SPMD Model.
 
     Args:
@@ -962,8 +960,8 @@ class PjitPartitioner(Partitioner):
         state: TrainState,
         prng_key: PRNGKey,
         inputs: NestedJTensor,
-        static_args: Optional[BaseStepFnStaticArgs] = None,
-    ) -> Tuple[Optional[TrainState], StepFnOutput]:
+        static_args: BaseStepFnStaticArgs | None = None,
+    ) -> tuple[TrainState | None, StepFnOutput]:
       if use_padding:
         # When there are input padding on multi-host, we use a different device
         # order in the program's input sharding. We now make sure they are
@@ -1188,11 +1186,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       self,
       init_is_eval: bool,
       reshard_inputs: bool,
-      task: Union[
-          pax_fiddle.Config[tasks_lib.SingleTask], tasks_lib.SingleTask
-      ],
+      task: pax_fiddle.Config[tasks_lib.SingleTask] | tasks_lib.SingleTask,
       auto_sharding_info: AutoShardingInfo,
-      device_mesh: Optional[np.ndarray] = None,
+      device_mesh: np.ndarray | None = None,
   ):
     """Constructor.
 
@@ -1244,7 +1240,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       inputs_shape_dtype: NestedShapeDtypeLike,
       input_partition_spec: NestedPartitionSpec,
       metadata: TrainStateMetadata,
-  ) -> Tuple[PartitionedStepFn, NestedPartitionSpec, TrainState]:
+  ) -> tuple[PartitionedStepFn, NestedPartitionSpec, TrainState]:
     """Generates and returns the train state partition spec automatically."""
     # Workflow: create abstract train state and ahead of time compile the
     # `step_fn`. Then we can extract the input shardings returned by XLA's
@@ -1350,7 +1346,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         state,
         prng_key,
         inputs,
-        static_args: Optional[BaseStepFnStaticArgs] = None,
+        static_args: BaseStepFnStaticArgs | None = None,
     ):
       if static_args:
         logging.warning('static_args is not supported for auto-sharding')
@@ -1379,7 +1375,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       step_fn: StepFn,
       inputs_shape_dtype: NestedShapeDtypeLike,
       is_eval: bool,
-  ) -> Tuple[PartitionedStepFn, Optional[NestedPartitionSpec]]:
+  ) -> tuple[PartitionedStepFn, NestedPartitionSpec | None]:
     """Returns the auto-sharding partitioned step functions and input specs."""
     # Auto-sharding result is generated by self.get_train_state_metadata, so we
     # call it first if no result is cached.
@@ -1412,7 +1408,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     return super().partition(step_fn, inputs_shape_dtype, is_eval)
 
 
-def get_step_fn(mode: RunningMode) -> Tuple[StepFn, bool]:
+def get_step_fn(mode: RunningMode) -> tuple[StepFn, bool]:
   """Returns the step function to partition.
 
   Args:
@@ -1443,10 +1439,9 @@ def create_partitioner(
     jax_task: tasks_lib.SingleTask,
     init_is_eval: bool = False,
     reshard_inputs: bool = False,
-    auto_sharding_mode: Optional[RunningMode] = None,
-    auto_sharding_input_params: Optional[
-        pax_fiddle.Config[base_input.BaseInput]
-    ] = None,
+    auto_sharding_mode: RunningMode | None = None,
+    auto_sharding_input_params: pax_fiddle.Config[base_input.BaseInput]
+    | None = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 

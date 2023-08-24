@@ -17,7 +17,7 @@
 
 import datetime
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from absl import logging
 from etils import epath
@@ -67,8 +67,8 @@ def _make_checkpoint_dir(job_log_dir: epath.Path) -> epath.Path:
 
 
 def _parse_duration(
-    duration_str: Optional[str],
-) -> Optional[datetime.timedelta]:
+    duration_str: str | None,
+) -> datetime.timedelta | None:
   """Parses a duration string and returns the datetime.timedelta instance.
 
   Args:
@@ -109,11 +109,11 @@ def _parse_duration(
 
 def _restore_from_external_checkpoint(
     path: epath.Path,
-    checkpoint_handler: Optional[ocp.CheckpointHandler],
+    checkpoint_handler: ocp.CheckpointHandler | None,
     train_state_metadata: trainer_lib.TrainStateMetadata,
     partitioner: partitioning.Partitioner,
-    train_input_pipeline: Optional[base_input.BaseInput] = None,
-    transformations: Optional[Dict[str, Any]] = None,
+    train_input_pipeline: base_input.BaseInput | None = None,
+    transformations: dict[str, Any] | None = None,
 ):
   """Restores a checkpoint from an external, possibly non-Pax, location."""
   if checkpoint_handler is None:
@@ -138,9 +138,9 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
-      restore_transformations: Optional[Dict[str, Any]] = None,
-      external_checkpoint_path: Optional[epath.Path] = None,
-      external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
+      restore_transformations: dict[str, Any] | None = None,
+      external_checkpoint_path: epath.Path | None = None,
+      external_checkpoint_handler: ocp.CheckpointHandler | None = None,
   ):
     self.checkpoint_manager = checkpoint_manager
     self._checkpoint_type = checkpoint_type
@@ -155,7 +155,7 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     self._step_to_restore = self.checkpoint_manager.latest_step()
 
   @property
-  def step_to_restore(self) -> Optional[int]:
+  def step_to_restore(self) -> int | None:
     return self._step_to_restore
 
   def wait_until_finished(self):
@@ -170,8 +170,8 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       *,
       partitioned_train_state: Any,
       train_state_unpadded_shape_dtype_struct: Any = None,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      force: Optional[bool] = False,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      force: bool | None = False,
   ):
     if not self._enable_checkpoint_saving:
       return
@@ -221,7 +221,7 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       partitioned_train_state,
       train_state_unpadded_shape_dtype_struct=None,
       train_state_pspecs=None,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
   ):
     del train_state_pspecs
     latest_step = self.checkpoint_manager.latest_step()
@@ -260,8 +260,8 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       partitioner: partitioning.Partitioner,
       metadata: trainer_lib.TrainStateMetadata,
       root_prng_key: PRNGKey,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
+      train_input_pipeline: base_input.BaseInput | None = None,
+  ) -> tuple[TrainState, TrainStateProvenance | None, int, PRNGKey]:
     with py_utils.timeit() as restore_period:
       if self._step_to_restore is None:
         if self._external_checkpoint_path is None:
@@ -315,9 +315,9 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       checkpoint_type: CheckpointType,
       enable_checkpoint_saving: bool = True,
-      restore_transformations: Optional[Dict[str, Any]] = None,
-      external_checkpoint_path: Optional[epath.Path] = None,
-      external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None,
+      restore_transformations: dict[str, Any] | None = None,
+      external_checkpoint_path: epath.Path | None = None,
+      external_checkpoint_handler: ocp.CheckpointHandler | None = None,
   ):
     self.job_log_dir = job_log_dir
     self.checkpoint_dir = _checkpoint_dir(job_log_dir)
@@ -330,7 +330,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     self._step_to_restore = self.checkpoint_manager.latest_step()
 
   @property
-  def step_to_restore(self) -> Optional[int]:
+  def step_to_restore(self) -> int | None:
     return self._step_to_restore
 
   def wait_until_finished(self):
@@ -342,9 +342,9 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
   def _restore_with_args(
       self,
       step_i: int,
-      train_state_global_shapes: Optional[TrainState],
-      train_state_unpadded_shape_dtype_struct: Optional[TrainState],
-      train_input_pipeline: Optional[base_input.BaseInput],
+      train_state_global_shapes: TrainState | None,
+      train_state_unpadded_shape_dtype_struct: TrainState | None,
+      train_input_pipeline: base_input.BaseInput | None,
   ):
     """Restore using CheckpointManager, setting up additional args."""
     restore_args = None
@@ -389,8 +389,8 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       partitioner: partitioning.Partitioner,
       metadata: trainer_lib.TrainStateMetadata,
       root_prng_key: PRNGKey,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-  ) -> Tuple[TrainState, Optional[TrainStateProvenance], int, PRNGKey]:
+      train_input_pipeline: base_input.BaseInput | None = None,
+  ) -> tuple[TrainState, TrainStateProvenance | None, int, PRNGKey]:
     train_state_global_shapes = metadata.unpadded_global_shapes
     with py_utils.timeit() as restore_period:
       if self._step_to_restore is None:
@@ -439,8 +439,8 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       *,
       train_state: Any,
       train_state_unpadded_shape_dtype_struct: Any,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      force: Optional[bool] = False,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      force: bool | None = False,
   ):
     self.checkpoint_manager.save(
         step_i,
@@ -521,7 +521,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       partitioned_train_state,
       train_state_unpadded_shape_dtype_struct,
       train_state_pspecs,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
   ):
     latest_step = self.checkpoint_manager.latest_step()
     if latest_step is None or latest_step < step_i:
@@ -543,8 +543,8 @@ def _create_checkpointer(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     job_log_dir: epath.Path,
     checkpoint_type: CheckpointType,
-    todelete_subdir: Optional[str],
-    train_input_p: Optional[pax_fiddle.Config[base_input.BaseInput]] = None,
+    todelete_subdir: str | None,
+    train_input_p: pax_fiddle.Config[base_input.BaseInput] | None = None,
     enable_async_checkpointing: bool = True,
     enable_checkpoint_saving: bool = True,
     enforce_restore_shape_check: bool = False,

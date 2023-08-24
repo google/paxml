@@ -30,7 +30,7 @@ import random
 import re
 import time
 import typing
-from typing import Optional, Sequence
+from typing import Sequence
 
 from absl import app
 from absl import flags
@@ -257,7 +257,7 @@ def run_experiment(
     experiment_config: base_experiment.BaseExperiment,
     work_unit: platform.WorkUnit,
     job_log_dir: epath.Path,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None = None,
     enable_checkpoint_saving: bool = True,
 ) -> None:
   """Run an experiment.

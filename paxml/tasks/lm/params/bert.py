@@ -15,7 +15,6 @@
 
 """BERT masked language model configurations."""
 
-from typing import List
 import jax
 from paxml import base_experiment
 from paxml import experiment_registry
@@ -61,7 +60,7 @@ class BertDataset(base_experiment.BaseExperiment):
     p.is_training = False
     return p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [self._datasetTrain(), self._datasetTest()]
 

@@ -16,7 +16,6 @@
 """Helper for testing the import and construction of experiment configs."""
 
 import re
-from typing import List
 
 from absl.testing import absltest
 import jax
@@ -48,7 +47,7 @@ class ExperimentImportsTestHelper(absltest.TestCase):
     task = instantiate(task_p)
     self.assertIsInstance(task, base_task.BaseTask)
 
-    tags: List[str] = registry.get_registry_tags(name)
+    tags: list[str] = registry.get_registry_tags(name)
 
     dataset_splits = (experiment_params.datasets()
                       + experiment_params.decoder_datasets())

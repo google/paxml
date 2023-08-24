@@ -20,7 +20,6 @@ See dump_hparams.py for usage.
 
 import contextlib
 import os
-from typing import Optional
 
 from absl import app
 from absl import flags
@@ -86,8 +85,11 @@ def _write_post_init_model_hparams_file(model_param, filepath,
     fout.write(params_inits_text)
 
 
-def _extract_num_cores(model_p) -> Optional[int]:
+def _extract_num_cores(model_p) -> int | None:
   """Extracts the number of cores used by the experiment.
+
+  Args:
+    model_p: The model config.
 
   Returns:
     The number of cores across all TPU slices for pjit experiments or None for

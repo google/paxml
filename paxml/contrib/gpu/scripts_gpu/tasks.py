@@ -16,7 +16,7 @@
 import functools
 import math
 import os
-from typing import List, Optional
+
 import jax
 from paxml import base_experiment
 from paxml import seqio_input
@@ -124,7 +124,7 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
@@ -175,6 +175,6 @@ class LambadaDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [self._dataset_common(is_training=False)]

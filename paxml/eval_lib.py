@@ -23,7 +23,7 @@ import gc
 import itertools
 import time
 import typing
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Sequence
 
 from absl import logging
 from clu import metrics as clu_metrics
@@ -118,7 +118,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
       partitioner: partitioning.Partitioner,
       enforce_restore_shape_check: bool = False,
       tensorstore_use_ocdbt: bool = False,
-      restore_transformations: Optional[dict[str, Any]] = None,
+      restore_transformations: dict[str, Any] | None = None,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
@@ -141,7 +141,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
-  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
+  ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Restore the train state from checkpoint or initialize it.
 
     Args:
@@ -185,7 +185,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
-  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
+  ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Gets a partitioned model states and the step function."""
     train_state_metadata = self._partitioner.get_train_state_metadata(
         discard_opt_states=not self.use_ema
@@ -259,7 +259,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
-  ) -> Tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
+  ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
     train_state_metadata = self._partitioner.get_train_state_metadata(
@@ -286,13 +286,13 @@ def _create_checkpointer(
     jax_task: tasks_lib.SingleTask,
     job_log_dir: epath.Path,
     checkpoint_type: checkpoints.CheckpointType,
-    mode: Optional[EvaluationMode],
-    restore_checkpoint_dir: Optional[epath.PathLike],
-    restore_checkpoint_step: Optional[int],
+    mode: EvaluationMode | None,
+    restore_checkpoint_dir: epath.PathLike | None,
+    restore_checkpoint_step: int | None,
     partitioner: partitioning.Partitioner,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
-    wait_until_step: Optional[int] = None,
+    wait_until_step: int | None = None,
 ) -> _EvalCheckpointer:
   if not restore_checkpoint_dir:
     # bool(Path(''))==True, so guarding against this odd Optional explicitly ^
@@ -353,7 +353,7 @@ def run_eval_programs(
     eval_programs: Sequence[programs.BaseEvalProgram],
     train_state: TrainState,
     step: int,
-) -> Tuple[tuning_lib.EvalMetrics, float]:
+) -> tuple[tuning_lib.EvalMetrics, float]:
   """Run evaluation in a loop over a list of test sets.
 
   Args:
@@ -391,9 +391,9 @@ def evaluate(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.Path,
     maybe_use_persistence_checkpointing: bool,
-    restore_checkpoint_dir: Optional[epath.Path] = None,
-    restore_checkpoint_step: Optional[int] = None,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    restore_checkpoint_dir: epath.Path | None = None,
+    restore_checkpoint_step: int | None = None,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None = None,
     enable_auto_sharding: bool = False,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
@@ -566,11 +566,11 @@ def decode(
     experiment_config: base_experiment.BaseExperiment,
     job_log_dir: epath.PathLike,
     maybe_use_persistence_checkpointing: bool,
-    restore_checkpoint_dir: Optional[epath.PathLike],
-    restore_checkpoint_step: Optional[int],
+    restore_checkpoint_dir: epath.PathLike | None,
+    restore_checkpoint_step: int | None,
     continuous_decode: bool,
-    run_eval: Optional[bool] = False,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn] = None,
+    run_eval: bool | None = False,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None = None,
     enable_auto_sharding: bool = False,
     output_pickle: bool = True,
     enforce_restore_shape_check: bool = False,
@@ -722,7 +722,7 @@ def run_decode_programs(
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     train_state: TrainState,
     step: int,
-) -> Tuple[tuning_lib.DecodeMetrics, float]:
+) -> tuple[tuning_lib.DecodeMetrics, float]:
   """Returns a function that runs decode over all decoder datasets.
 
   Args:
@@ -768,9 +768,7 @@ def _eval_or_decode(
     mode: io_utils.EvaluationMode,
     job_log_dir: epath.Path,
     eval_runner: _EvalRunner,
-) -> Tuple[
-    Optional[tuning_lib.EvalMetrics], Optional[tuning_lib.DecodeMetrics]
-]:
+) -> tuple[tuning_lib.EvalMetrics | None, tuning_lib.DecodeMetrics | None]:
   with io_utils.checkpoint_progress(job_log_dir, step, mode):
     decode_metrics = None
     if eval_runner.decode_programs:
@@ -806,7 +804,7 @@ def _common_eval_or_decode_loop(
     job_log_dir: epath.Path,
     partitioned_train_state: TrainState,
     train_state_metadata: trainer_lib.TrainStateMetadata,
-    early_stopping_fn: Optional[trainer_lib.EarlyStoppingFn],
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
     continuous_decode: bool,
     eval_runner: _EvalRunner,
     partitioner: partitioning.Partitioner,

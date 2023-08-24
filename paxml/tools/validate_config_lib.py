@@ -20,7 +20,6 @@ See validate_config.py for usage.
 
 import contextlib
 import os
-from typing import Optional
 
 from absl import app
 from absl import flags
@@ -79,7 +78,7 @@ def _hparams_post_init(model_param, input_specs) -> None:
   _ = model.abstract_init_with_metadata(input_specs)
 
 
-def _extract_num_cores(model_p) -> Optional[int]:
+def _extract_num_cores(model_p) -> int | None:
   """Extracts the number of cores used by the experiment.
 
   Args:

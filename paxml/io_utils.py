@@ -25,7 +25,7 @@ import os
 import pickle
 import re
 import threading
-from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, Iterator, Sequence
 
 from absl import flags
 from absl import logging
@@ -196,10 +196,12 @@ class JnpEncoder(json.JSONEncoder):
       return super().default(o)
 
 
-def write_key_value_pairs(filename: epath.PathLike,
-                          key_value_pairs: Sequence[Tuple[Optional[str], Any]],
-                          cast_to_ndarray: bool = True,
-                          write_pickle: bool = True) -> None:
+def write_key_value_pairs(
+    filename: epath.PathLike,
+    key_value_pairs: Sequence[tuple[str | None, Any]],
+    cast_to_ndarray: bool = True,
+    write_pickle: bool = True,
+) -> None:
   """Writes `key_value_pairs` to pkl and jsonl files."""
   filename = epath.Path(filename)
 
@@ -215,8 +217,9 @@ def write_key_value_pairs(filename: epath.PathLike,
       jsonl_f.write(json.dumps(v, cls=JnpEncoder) + '\n')
 
 
-def _validate_filenames(filenames: Iterable[epath.PathLike],
-                        step: Optional[int] = None) -> Tuple[int, int]:
+def _validate_filenames(
+    filenames: Iterable[epath.PathLike], step: int | None = None
+) -> tuple[int, int]:
   """Validates the list of file names."""
   if not filenames:
     raise ValueError('Expecting at least one file. Found none.')
@@ -254,10 +257,9 @@ def _validate_filenames(filenames: Iterable[epath.PathLike],
   return step, num_shards
 
 
-def load_outputs(basedir: epath.Path,
-                 pname: str,
-                 fname_prefix: str,
-                 step: Optional[int] = None) -> List[Any]:
+def load_outputs(
+    basedir: epath.Path, pname: str, fname_prefix: str, step: int | None = None
+) -> list[Any]:
   """Loads and returns the eval/decode outputs.
 
   Args:

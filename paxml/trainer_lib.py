@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import functools
 import pprint
-from typing import Any, Dict, Optional, Protocol, Sequence, Tuple, Union
+from typing import Any, Protocol, Sequence
 
 from absl import logging
 from etils import epath
@@ -136,9 +136,9 @@ class TrainStateMetadata:
 
   input_shape_dtype: NestedShapeDtypeLike
   var_weight_hparams: NestedWeightHParams
-  padded_global_shapes: Optional[TrainState] = None
-  unpadded_global_shapes: Optional[TrainState] = None
-  partition_specs: Optional[TrainState] = None
+  padded_global_shapes: TrainState | None = None
+  unpadded_global_shapes: TrainState | None = None
+  partition_specs: TrainState | None = None
 
 
 def create_train_state_metadata(
@@ -341,8 +341,8 @@ def initialize_model_state(
     do_init_checkpoint_rules: bool = True,
     is_eval: bool = False,
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-    var_weight_hparams: Optional[NestedWeightHParams] = None,
-) -> Tuple[TrainState, TrainStateProvenance]:
+    var_weight_hparams: NestedWeightHParams | None = None,
+) -> tuple[TrainState, TrainStateProvenance]:
   """Initializes the model states.
 
   Weights are random initialized first.
@@ -506,10 +506,10 @@ def _maybe_aggregate_metrics_summaries(
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: dict[str, Any],
-) -> Tuple[
+) -> tuple[
     JTensor,
     JTensor,
-    Optional[JTensor],
+    JTensor | None,
     WeightedScalars,
     SummaryDict,
     dict[str, Any],
@@ -687,7 +687,7 @@ class BaseStepFnStaticArgs:
     ...     fprop_dtype: jnp.dtype,
     ...     var_weight_hparams: NestedWeightHParams,
     ...     static_args: MyStaticArgs,
-    ... ) -> Tuple[Optional[TrainState], StepFnOutput]:
+    ... ) -> tuple[TrainState | None, StepFnOutput]:
     ...   loss = ...
     ...   if static_args.adjust_loss:
     ...     loss *= 2.0
@@ -713,7 +713,7 @@ class BaseStepFnStaticArgs:
 
   # The unpadded size of global batch, and the padding is on the right side of
   # each input. Needed only when padding is used.
-  unpadded_global_batch_size: Optional[int]
+  unpadded_global_batch_size: int | None
 
 
 @flax_struct.dataclass
@@ -721,7 +721,7 @@ class StepFnOutput:
   """Dataclass encapsulating the output of a step function."""
 
   # Mean loss computed by the model.
-  loss: Optional[JTensor]
+  loss: JTensor | None
 
   # A dict of (value, weight) pairs representing simple weighted average metrics
   # or losses.
@@ -734,7 +734,7 @@ class StepFnOutput:
   summary_tensors: SummaryDict
 
   # A dict of clu.metrics. Used by decode step function currently.
-  clu_metrics: Optional[Dict[str, Any]] = None
+  clu_metrics: dict[str, Any] | None = None
 
 
 class ApplyFnProtocol(Protocol):
@@ -901,7 +901,7 @@ def _get_default_grad_fn(
 
     def _loss(
         mdl_vars_grad: NestedJTensor,
-        mdl_vars_nograd_and_inputs: Tuple[NestedJTensor, NestedMap],
+        mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
         prng_key: PRNGKey,
     ):
       mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
@@ -958,7 +958,7 @@ def train_step_single_learner(
     grad_fn: GradFnProtocol | None = None,
     apply_fn: ApplyFnProtocol | None = None,
     expose_updated_nontrainables_to_learner=True,
-) -> Tuple[TrainState, StepFnOutput]:
+) -> tuple[TrainState, StepFnOutput]:
   """Trains a model for a single step.
 
   This function works for both pmap-ed model and pjit-ed model.
@@ -1172,11 +1172,11 @@ def eval_step_single_learner(
     jax_task: tasks_lib.SingleTask,
     states: TrainState,
     prng_key: JTensor,
-    inputs: Union[JTensor, NestedMap],
+    inputs: JTensor | NestedMap,
     fprop_dtype: jnp.dtype = jnp.float32,
-    var_weight_hparams: Optional[NestedWeightHParams] = None,
-    static_args: Optional[BaseStepFnStaticArgs] = None,
-) -> Tuple[None, StepFnOutput]:
+    var_weight_hparams: NestedWeightHParams | None = None,
+    static_args: BaseStepFnStaticArgs | None = None,
+) -> tuple[None, StepFnOutput]:
   """Evaluates a model for a single step.
 
   This utility is specialized for the single learner case.
@@ -1286,9 +1286,9 @@ def decode_step(
     states: TrainState,
     prng_key: JTensor,
     var_weight_hparams: NestedWeightHParams,
-    inputs: Union[JTensor, NestedMap],
+    inputs: JTensor | NestedMap,
     fprop_dtype: jnp.dtype = jnp.float32,
-) -> Tuple[Tuple[Any, Any, Any], NestedMap]:
+) -> tuple[tuple[Any, Any, Any], NestedMap]:
   """Decodes a model for a single step.
 
   Args:
@@ -1365,9 +1365,10 @@ def _decode_step_for_partitioner(
     inputs,
     fprop_dtype,
     var_weight_hparams,
-    static_args: Optional[BaseStepFnStaticArgs] = None,
-) -> Tuple[None, StepFnOutput]:
+    static_args: BaseStepFnStaticArgs | None = None,
+) -> tuple[None, StepFnOutput]:
   """Decode step function used by the partitioner."""
+  del static_args  # Unused.
   (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
       decode_step(
           task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
@@ -1417,12 +1418,12 @@ def initialize_partitioned_model_states(
     global_input_shapes: NestedShapeDtypeLike,
     state_specs: TrainState,
     discard_opt_states: bool = False,
-    global_mesh: Optional[jax.sharding.Mesh] = None,
+    global_mesh: jax.sharding.Mesh | None = None,
     checkpoint_type: CheckpointType = CheckpointType.GDA,
     do_init_checkpoint_rules: bool = True,
-    var_weight_hparams: Optional[NestedWeightHParams] = None,
+    var_weight_hparams: NestedWeightHParams | None = None,
     is_eval: bool = False,
-) -> Tuple[TrainState, TrainStateProvenance]:
+) -> tuple[TrainState, TrainStateProvenance]:
   """Initializes model vars that are partitioned over TPU devices.
 
   Weights are random initialized first. Then we restore weights based on the
@@ -1542,7 +1543,7 @@ def shard_on_batch_dim_partition_spec(
 
 
 def reshard_input_based_on_rank_fn(
-    mapping_dict: Optional[Dict[str, base_layer.SplitDimsMapping]],
+    mapping_dict: dict[str, base_layer.SplitDimsMapping] | None,
     mesh_names: Sequence[str],
     x: JTensor,
 ) -> JTensor:

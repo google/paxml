@@ -14,7 +14,6 @@
 # limitations under the License.
 
 """ResNets classifiers on the Imagenet dataset."""
-from typing import List
 
 from absl import flags
 import jax
@@ -151,7 +150,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         base_input.LingvoInputAdaptor, input=input_p, is_training=False
     )
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset configs."""
     return [self._dataset_train(), self._dataset_test()]
 

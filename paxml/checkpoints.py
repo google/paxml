@@ -20,7 +20,7 @@ from __future__ import annotations
 import abc
 import dataclasses
 import os
-from typing import Any, Optional, Sequence, Tuple, cast
+from typing import Any, Sequence, cast
 
 from absl import logging
 from etils import epath
@@ -63,7 +63,7 @@ is_checkpoint_asset = checkpoint_paths.is_checkpoint_asset
 
 def get_checkpointer(
     checkpoint_type: CheckpointType,
-    async_checkpointer: Optional[AsyncCheckpointer] = None,
+    async_checkpointer: AsyncCheckpointer | None = None,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
 ) -> Checkpointer:
@@ -89,11 +89,10 @@ def save_checkpoint(
     checkpoint_dir: epath.PathLike,
     overwrite: bool = False,
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
-    state_specs: Optional[train_states.TrainState] = None,
-    async_checkpointer: Optional[AsyncCheckpointer] = None,
-    train_state_unpadded_shape_dtype_struct: Optional[
-        train_states.TrainState
-    ] = None,
+    state_specs: train_states.TrainState | None = None,
+    async_checkpointer: AsyncCheckpointer | None = None,
+    train_state_unpadded_shape_dtype_struct: train_states.TrainState
+    | None = None,
     tensorstore_use_ocdbt: bool = False,
 ) -> checkpoint_managers.OrbaxCheckpointManager:
   """Saves a checkpoint into the provided base directory.
@@ -162,14 +161,14 @@ def save_checkpoint(
 def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
-    global_mesh: Optional[jax.sharding.Mesh] = None,
+    global_mesh: jax.sharding.Mesh | None = None,
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
-    state_specs: Optional[train_states.TrainState] = None,
-    step: Optional[int] = None,
+    state_specs: train_states.TrainState | None = None,
+    step: int | None = None,
     enforce_restore_shape_check: bool = False,
-    state_unpadded_shape_dtype_struct: Optional[train_states.TrainState] = None,
+    state_unpadded_shape_dtype_struct: train_states.TrainState | None = None,
     tensorstore_use_ocdbt: bool = False,
-    restore_transformations: Optional[dict[str, Any]] = None,
+    restore_transformations: dict[str, Any] | None = None,
 ) -> train_states.TrainState:
   """Restores a checkpoint from the provided base directory.
 
@@ -240,16 +239,19 @@ def restore_checkpoint(
         'mesh': global_mesh,
         'transforms': restore_transformations,
     }
-  return checkpoint_manager.restore(
+  output = checkpoint_manager.restore(
       step,
       state_global_shapes,
       state_unpadded_shape_dtype_struct,
       restore_kwargs=restore_args,
   )
+  # Note: `aux_items` argument wasn't passed to checkpoint_manager.restore()
+  # so this returns a TrainState instance.
+  return cast(train_states.TrainState, output)
 
 
 def reregister_type_handlers(
-    tensorstore_metadata_key: Optional[str] = None,
+    tensorstore_metadata_key: str | None = None,
 ) -> None:
   """Registers overrides to Orbax TypeHandlers to set Pax-specific properties."""
   if tensorstore_metadata_key is None:
@@ -326,11 +328,11 @@ def _masked_node_to_none(mask: Any, value: Any) -> Any:
 
 def _tensorstore_prepare(
     train_state: train_states.TrainState,
-    state_specs: Optional[train_states.TrainState] = None,
-) -> Tuple[
+    state_specs: train_states.TrainState | None = None,
+) -> tuple[
     Sequence[JTensorOrPartitionSpec],
     Sequence[str],
-    Optional[Sequence[JTensorOrPartitionSpec]],
+    Sequence[JTensorOrPartitionSpec] | None,
 ]:
   """Prepares data prior to saving/restoring it from/to TensorStore.
 
@@ -467,8 +469,8 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       self,
       directory: epath.Path,
       item: PyTree,
-      save_args: Optional[PyTree] = None,
-      version: Optional[float] = None,
+      save_args: PyTree | None = None,
+      version: float | None = None,
   ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
     if version is None:
@@ -505,11 +507,11 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTree] = None,
-      specs: Optional[PyTree] = None,
-      mesh: Optional[jax.sharding.Mesh] = None,
-      version: Optional[float] = None,
-      transforms: Optional[PyTree] = None,
+      item: PyTree | None = None,
+      specs: PyTree | None = None,
+      mesh: jax.sharding.Mesh | None = None,
+      version: float | None = None,
+      transforms: PyTree | None = None,
   ) -> PyTree:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
     if version is None:
@@ -622,8 +624,8 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       self,
       directory: epath.Path,
       item: PyTree,
-      save_args: Optional[PyTree] = None,
-      version: Optional[float] = None,
+      save_args: PyTree | None = None,
+      version: float | None = None,
   ) -> Any:
     if version is None:
       raise ValueError('Expected version for saving.')
@@ -652,11 +654,11 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   def restore(
       self,
       directory: epath.Path,
-      item: Optional[PyTree] = None,
-      restore_args: Optional[PyTree] = None,
-      transforms: Optional[PyTree] = None,
+      item: PyTree | None = None,
+      restore_args: PyTree | None = None,
+      transforms: PyTree | None = None,
       transforms_default_to_original: bool = True,
-      version: Optional[float] = None,
+      version: float | None = None,
   ) -> PyTree:
     if version is None:
       raise ValueError('Expected version for restoration.')
@@ -714,7 +716,7 @@ class FlaxCheckpointer(ocp.Checkpointer):
       self,
       directory: epath.PathLike,
       *args,
-      item: Optional[Any] = None,
+      item: Any | None = None,
       **kwargs,
   ) -> Any:
     if not isinstance(self._handler, FlaxCheckpointHandler):
@@ -760,7 +762,7 @@ class BaseInputCheckpointHandler(ocp.CheckpointHandler):
     multihost_utils.sync_global_devices('BaseInputCheckpointHandler:save')
 
   def restore(
-      self, directory: epath.Path, item: Optional[base_input.BaseInput] = None
+      self, directory: epath.Path, item: base_input.BaseInput | None = None
   ) -> None:
     """Restores the given item.
 
@@ -808,7 +810,7 @@ class TrainingCheckpointer(metaclass=abc.ABCMeta):
 
   @property
   @abc.abstractmethod
-  def step_to_restore(self) -> Optional[int]:
+  def step_to_restore(self) -> int | None:
     """Returns the step number of the checkpoint to restore from.
 
     Returns:

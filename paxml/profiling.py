@@ -15,8 +15,6 @@
 
 """Expose functionalities for profiling code."""
 
-from typing import Optional
-
 from absl import logging
 
 
@@ -26,12 +24,14 @@ class Profiler:
   Note: The current implementation is a no-op.
   """
 
-  def __init__(self,
-               num_steps: float = 2.,
-               min_duration_sec: float = 1.,
-               default_duration_sec: float = 5.,
-               tag: Optional[str] = None,
-               max_num_hosts: Optional[int] = None) -> None:
+  def __init__(
+      self,
+      num_steps: float = 2.0,
+      min_duration_sec: float = 1.0,
+      default_duration_sec: float = 5.0,
+      tag: str | None = None,
+      max_num_hosts: int | None = None,
+  ) -> None:
     """Constructor.
 
     Args:

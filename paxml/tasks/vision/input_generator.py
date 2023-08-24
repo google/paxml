@@ -15,7 +15,7 @@
 
 """Input generator for image data."""
 
-from typing import Any, Dict
+from typing import Any
 
 from absl import logging
 from lingvo.core import base_input_generator
@@ -55,13 +55,13 @@ class BaseImageNetInput(base_input_generator.BaseInputGeneratorFromFiles):
     p.file_random_seed = 0
     return p
 
-  def _DataSourceFromFilePattern(self,
-                                 file_pattern: Any,
-                                 input_source_weights: Any = None,
-                                 input_source_id_offset: Any = None,
-                                 **extra_input_kwargs: Dict[str, Dict[Any,
-                                                                      Any]]):
-
+  def _DataSourceFromFilePattern(
+      self,
+      file_pattern: Any,
+      input_source_weights: Any = None,
+      input_source_id_offset: Any = None,
+      **extra_input_kwargs: dict[str, dict[Any, Any]],
+  ):
     def proc(record):
       """Process a tf record into tensors."""
       keys_to_features = {

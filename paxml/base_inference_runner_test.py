@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 
 from absl.testing import absltest
 import jax
@@ -72,7 +72,7 @@ class BaseInferenceRunnerTest(test_utils.TestCase):
         # Pass dummy values to all 4 arguments of infer().
         infer_runner.infer(*([None] * 4)))
 
-    expected_outputs: List[NestedMap] = py_utils.tree_unstack(dummy_output, 0)
+    expected_outputs: list[NestedMap] = py_utils.tree_unstack(dummy_output, 0)
     self.assertEqual(len(serialized_outputs), len(expected_outputs))
 
     features_dict = tfds.features.FeaturesDict(dummy_schema)

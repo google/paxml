@@ -19,7 +19,7 @@ TODO(b/292000357): Add unit tests. This is currently decently well integration
 tested through codegen_test.py
 """
 
-from typing import Optional, Type
+from typing import Type
 
 from paxml import base_experiment
 from paxml import parameterized_experiment
@@ -30,9 +30,8 @@ from praxis import pax_fiddle
 def from_legacy(
     experiment_cls: Type[base_experiment.BaseExperiment],
     *,
-    normalizer: Optional[
-        config_normalization.ConfigNormalizer
-    ] = config_normalization.default_normalizer(),
+    normalizer: config_normalization.ConfigNormalizer
+    | None = config_normalization.default_normalizer(),
     has_train_dataset: bool = True,
     has_input_specs_provider: bool = True,
 ) -> pax_fiddle.Config[parameterized_experiment.ParameterizedExperiment]:

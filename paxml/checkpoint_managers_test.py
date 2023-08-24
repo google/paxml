@@ -21,7 +21,7 @@ import datetime
 import functools
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest import mock
 
 from absl import flags
@@ -70,7 +70,7 @@ def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
 
 
 def _expected_checkpoint_filenames(
-    steps: List[int], checkpoint_type: CheckpointType = CheckpointType.GDA
+    steps: list[int], checkpoint_type: CheckpointType = CheckpointType.GDA
 ):
   """Returns checkpoint basenames corresponding to all the `steps`."""
   results = []
@@ -83,7 +83,7 @@ def _expected_checkpoint_filenames(
   return results
 
 
-def _actual_checkpoint_filenames(directory: str) -> List[str]:
+def _actual_checkpoint_filenames(directory: str) -> list[str]:
   return [
       os.path.basename(v)
       for v in tf.io.gfile.glob(
@@ -201,7 +201,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       self,
       options: checkpoint_managers.CheckpointManagerOptions,
       checkpoint_type: CheckpointType = CheckpointType.GDA,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
       tensorstore_use_ocdbt: bool = False,
   ) -> checkpoint_managers.OrbaxCheckpointManager:
     checkpointer = self.create_checkpointer(
@@ -226,8 +226,8 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpoint_manager: checkpoint_managers.OrbaxCheckpointManager,
       step: int,
       train_state: Any,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      train_state_unpadded_shape_dtype_struct: Any | None = None,
   ) -> bool:
     train_state = train_state.replace(
         step=ocp.test_utils.create_sharded_array(
@@ -253,10 +253,10 @@ class CheckpointManagerTest(parameterized.TestCase):
       train_state: Any,
       state_specs: Any,
       checkpoint_type: CheckpointType,
-      global_mesh: Optional[Mesh] = None,
-      train_input_pipeline: Optional[base_input.BaseInput] = None,
-      train_state_unpadded_shape_dtype_struct: Optional[Any] = None,
-      transforms: Optional[Dict[str, Any]] = None,
+      global_mesh: Mesh | None = None,
+      train_input_pipeline: base_input.BaseInput | None = None,
+      train_state_unpadded_shape_dtype_struct: Any | None = None,
+      transforms: dict[str, Any] | None = None,
   ) -> Any:
     if global_mesh is None:
       global_mesh = self.global_mesh

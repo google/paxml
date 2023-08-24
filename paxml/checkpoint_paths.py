@@ -16,7 +16,7 @@
 """Shared checkpointing utility functions."""
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from absl import logging
 from etils import epath
@@ -55,7 +55,7 @@ COMMIT_SUCCESS_FILE = 'commit_success.txt'
 
 def checkpoint_prefix(
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-) -> Optional[str]:
+) -> str | None:
   """Checkpoint prefix, or None if no prefix is applied.
 
   The return type is optional to future-proof against instances where the
@@ -73,7 +73,7 @@ def checkpoint_prefix(
 
 def checkpoint_name_fixed_length(
     checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
-) -> Optional[int]:
+) -> int | None:
   """Length of the fixed width step format, or None if not used."""
   return (
       None
@@ -138,7 +138,7 @@ def get_step_from_checkpoint_asset(checkpoint_dir: epath.PathLike) -> int:
 
 def latest_checkpoint_if_exists(
     checkpoint_dir: epath.PathLike,
-) -> Optional[epath.Path]:
+) -> epath.Path | None:
   """Gets the path to the latest checkpoint if any.
 
   Use this method instead of latest_checkpoint() if you want to handle the case
@@ -194,7 +194,7 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> epath.Path:
 
 def retrieve_latest_checkpoint_step_if_exists(
     checkpoint_dir: epath.Path,
-) -> Optional[int]:
+) -> int | None:
   """Retrieves the latest checkpoint step within the given directory if any.
 
   Use this method instead of retrieve_latest_checkpoint_step() if you want to

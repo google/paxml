@@ -16,7 +16,6 @@
 r"""Utilities to set up JAX global configs."""
 
 import dataclasses
-from typing import Optional
 
 from absl import logging
 import jax
@@ -34,12 +33,12 @@ class JaxDistributedOptions:
 @py_utils.benchmark('[PAX STATUS]: ')
 def setup_jax(
     globally_use_hardware_rng: bool,
-    jax_backend_target: Optional[str],
-    jax_xla_backend: Optional[str],
+    jax_backend_target: str | None,
+    jax_xla_backend: str | None,
     jax_enable_checks: bool,
     jax_traceback_filtering_option: str = 'auto',
     should_initialize_jax_distributed: bool = False,
-    jax_distributed_options: Optional[JaxDistributedOptions] = None,
+    jax_distributed_options: JaxDistributedOptions | None = None,
 ) -> None:
   """Setups JAX and logs information about this job."""
 

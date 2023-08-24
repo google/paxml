@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from flax import struct as flax_struct
 import jax
@@ -106,8 +106,8 @@ class TrainStateProvenance:
 
 def build_train_state_provenance(
     train_state: TrainState,
-    checkpoint_path: Optional[str] = None,
-    step: Optional[int] = None,
+    checkpoint_path: str | None = None,
+    step: int | None = None,
 ) -> TrainStateProvenance:
   assert not isinstance(
       train_state.step, jax.sharding.PartitionSpec

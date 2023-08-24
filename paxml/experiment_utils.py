@@ -14,7 +14,8 @@
 # limitations under the License.
 
 """Experiment utils."""
-from typing import Any, Dict, List, Type
+
+from typing import Any, Type
 
 from paxml import base_experiment
 
@@ -33,7 +34,7 @@ def _short_cls_name(cls: Type[BaseExperiment]):
   return cls.__qualname__
 
 
-def _get_mro(cls: Type[BaseExperiment]) -> List[Type[BaseExperiment]]:
+def _get_mro(cls: Type[BaseExperiment]) -> list[Type[BaseExperiment]]:
   """Gets class mro."""
   try:
     # Gets all relevant classes in method-resolution order
@@ -52,7 +53,7 @@ def _get_mro(cls: Type[BaseExperiment]) -> List[Type[BaseExperiment]]:
   return mro[:-1]
 
 
-def _get_cls_vars(cls: Type[BaseExperiment]) -> Dict[str, Any]:
+def _get_cls_vars(cls: Type[BaseExperiment]) -> dict[str, Any]:
   """Returns cls vars."""
   res = {}
 
@@ -74,7 +75,7 @@ def _get_cls_vars(cls: Type[BaseExperiment]) -> Dict[str, Any]:
   return {k: v for k, v in res.items() if k not in base_vars}
 
 
-def _summarize_cls_vars(cls: Type[BaseExperiment]) -> Dict[str, Dict[str, Any]]:
+def _summarize_cls_vars(cls: Type[BaseExperiment]) -> dict[str, dict[str, Any]]:
   """Summarizes cls vars and their owners.
 
   Args:

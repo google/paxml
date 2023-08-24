@@ -17,7 +17,7 @@
 
 import dataclasses
 import functools
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Mapping
 
 from absl import logging
 from etils import epath
@@ -52,12 +52,11 @@ def _get_shape_dtype_struct(nested: Any) -> Any:
 
 
 def make_metadata(
-    version: Optional[float] = None,
-    train_state: Optional[train_states.TrainState] = None,
-    train_state_unpadded_shape_dtype_struct: Optional[
-        train_states.TrainState
-    ] = None,
-    tensorstore_use_ocdbt: Optional[bool] = None,
+    version: float | None = None,
+    train_state: train_states.TrainState | None = None,
+    train_state_unpadded_shape_dtype_struct: train_states.TrainState
+    | None = None,
+    tensorstore_use_ocdbt: bool | None = None,
 ) -> Mapping[str, Any]:
   """Returns metadata dict."""
   if version is None:
@@ -105,7 +104,7 @@ def restore_metadata(directory: epath.Path) -> Mapping[str, Any]:
 def _trees_are_equal(
     a_tree: pytypes.Nested[Any],
     b_tree: pytypes.Nested[Any],
-    equal_fn: Optional[Callable[[Any, Any], bool]] = None,
+    equal_fn: Callable[[Any, Any], bool] | None = None,
     treedef: bool = False,
 ) -> bool:
   """Checks if the two trees are equal w.r.t. equal_fn."""
@@ -128,10 +127,10 @@ def _trees_are_equal(
 class ArrayMetadata:
   """Metadata of an array, to be saved in PaxMetadata."""
 
-  unpadded_shape_dtype_struct: Optional[jax.ShapeDtypeStruct]
+  unpadded_shape_dtype_struct: jax.ShapeDtypeStruct | None
   is_optax_masked_node: bool
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Returns a dict to be serialized."""
     d = {
         IS_OPTAX_MASKED_NODE: self.is_optax_masked_node,
@@ -186,7 +185,7 @@ class PaxMetadata:
   version: float  # version of the checkpoint
   train_state_metadata: pytypes.Nested[ArrayMetadata]
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Returns a dict to be serialized."""
     train_state_metadata = jax.tree_util.tree_map(
         lambda x: x.to_dict(),
@@ -232,7 +231,7 @@ class PaxMetadata:
   def from_padded_and_unpadded(
       cls,
       padded: train_states.TrainState,  # of ShapeDtypeStruct or jax.Array
-      unpadded: Optional[train_states.TrainState],  # of ShapeDtypeStruct
+      unpadded: train_states.TrainState | None,  # of ShapeDtypeStruct
       version: float,
       mdl_vars_only: bool = True,
   ) -> 'PaxMetadata':

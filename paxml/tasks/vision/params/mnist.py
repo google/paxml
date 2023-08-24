@@ -15,7 +15,7 @@
 
 """A self-contained example of a CNN classifier on the MNIST dataset."""
 
-from typing import List, cast
+from typing import cast
 
 import jax
 import jax.numpy as jnp
@@ -265,7 +265,7 @@ class MnistExperiment(base_experiment.BaseExperiment):
     )
     return task_p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     return [
         pax_fiddle.Config(
             MnistDatasetInput, batch_size=self.BATCH_SIZE, is_training=True

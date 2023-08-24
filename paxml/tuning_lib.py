@@ -18,7 +18,7 @@
 import inspect
 import math
 import re
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Text, Tuple, Type, Union
+from typing import Any, Callable, NamedTuple, Sequence, Text, Type
 from absl import logging
 from clu import platform
 from etils import epath
@@ -103,17 +103,19 @@ def get_search_space(
   return search_space
 
 
-def tune(trial_fn: TrialFn,
-         experiment_config: base_experiment.BaseExperiment,
-         work_unit: platform.WorkUnit,
-         job_log_dir: epath.Path,
-         study: Optional[str] = None,
-         pythia_port: Optional[int] = None,
-         is_metric_reporting_role: bool = True,
-         tuner_group: Optional[str] = None,
-         max_num_trials: Optional[int] = None,
-         controller_mode: str = 'auto',
-         running_mode: str = 'train') -> None:
+def tune(
+    trial_fn: TrialFn,
+    experiment_config: base_experiment.BaseExperiment,
+    work_unit: platform.WorkUnit,
+    job_log_dir: epath.Path,
+    study: str | None = None,
+    pythia_port: int | None = None,
+    is_metric_reporting_role: bool = True,
+    tuner_group: str | None = None,
+    max_num_trials: int | None = None,
+    controller_mode: str = 'auto',
+    running_mode: str = 'train',
+) -> None:
   """Tune an experiment.
 
   An experiment can be tuned by running a tuning loop, with each iteration
@@ -283,8 +285,9 @@ def tune(trial_fn: TrialFn,
 
 
 def _record_experiment_config(
-    sub_experiments: Dict[str, Type[base_experiment.BaseExperiment]],
-    feedback: pg.tuning.Feedback) -> None:
+    sub_experiments: dict[str, Type[base_experiment.BaseExperiment]],
+    feedback: pg.tuning.Feedback,
+) -> None:
   """Record experiment config as trial metadata."""
   exp_configs = {}
   for subexp_id, subexp_cls in sub_experiments.items():
@@ -320,18 +323,19 @@ def _run_dedicated_controller(
     search_space: pg.DNASpec,
     search_algorithm: pg.DNAGenerator,
     early_stopping_policy: pg.tuning.EarlyStoppingPolicy,
-    max_num_trials: Optional[int] = None,
-    prior_study_ids: Optional[List[int]] = None,
-    add_prior_trials: bool = False
-    ) -> None:
+    max_num_trials: int | None = None,
+    prior_study_ids: list[int] | None = None,
+    add_prior_trials: bool = False,
+) -> None:
   """Runs dedicated controller and waits for its completion."""
   raise NotImplementedError('Dedicated controller is not supported in OSS paxml.')
 
 
 def _verify_running_mode(
-    reward_fn: Optional[automl.BaseReward],
+    reward_fn: automl.BaseReward | None,
     running_mode: str,
-    is_metric_reporting_role: bool) -> None:
+    is_metric_reporting_role: bool,
+) -> None:
   """Makes sure tuning is running in the right mode and config."""
   if reward_fn is None:
     return
@@ -366,13 +370,14 @@ class EarlyStoppingFn:
       self,
       feedback: pg.tuning.Feedback,
       sub_experiment_id: str,
-      reward_fn: Optional[automl.BaseReward],
+      reward_fn: automl.BaseReward | None,
       cross_step_metric_aggregator: automl.CrossStepMetricAggregator,
       is_metric_reporting_role: bool,
       is_last_experiment: bool,
       tuning_step_start: int,
       treats_early_stopped_trials_as_done: bool,
-      train_to_end: bool):
+      train_to_end: bool,
+  ):
     self._feedback = feedback
     self._sub_experiment_id = sub_experiment_id
     self._reward_fn = reward_fn
@@ -396,11 +401,13 @@ class EarlyStoppingFn:
   def train_to_end(self) -> bool:
     return self._train_to_end
 
-  def __call__(self,
-               metrics: Dict[str, float],
-               running_mode: trainer_lib.RunningMode,
-               global_step: int,
-               is_last_ckpt: bool) -> bool:
+  def __call__(
+      self,
+      metrics: dict[str, float],
+      running_mode: trainer_lib.RunningMode,
+      global_step: int,
+      is_last_ckpt: bool,
+  ) -> bool:
     """Returns True if trial should be stopped early."""
     tuning_step = self._tuning_step_start + global_step
     if self._is_metric_reporting_role:
@@ -475,17 +482,19 @@ class EarlyStoppingFn:
     return should_stop
 
   def _compute_reward(
-      self, metrics: Dict[str, float], tuning_step: int) -> float:
+      self, metrics: dict[str, float], tuning_step: int
+  ) -> float:
     if self._reward_fn is None:
       return 0.
     return self._reward_fn(metrics, tuning_step)
 
   def _update_metrics(
       self,
-      metrics: Dict[str, float],
+      metrics: dict[str, float],
       running_mode: trainer_lib.RunningMode,
       tuning_step: int,
-      is_last_ckpt: bool):
+      is_last_ckpt: bool,
+  ):
     """Handle metric update."""
     assert jax.process_index() == 0
 
@@ -548,9 +557,8 @@ class EarlyStoppingFn:
             self._feedback.id, e.step, reward, e.metrics)
 
   def _reward_and_used_metrics(
-      self,
-      all_metrics: Dict[str, float],
-      tuning_step: int) -> Tuple[float, Dict[str, float]]:
+      self, all_metrics: dict[str, float], tuning_step: int
+  ) -> tuple[float, dict[str, float]]:
     """Returns computed reward and used metrics."""
     reward = self._compute_reward(all_metrics, tuning_step)
     if self._reward_fn is None:
@@ -562,9 +570,8 @@ class EarlyStoppingFn:
     return reward, used_metrics
 
   def _complete_trial(
-      self,
-      aggregate_metrics: bool = False,
-      global_step: Optional[int] = None):
+      self, aggregate_metrics: bool = False, global_step: int | None = None
+  ):
     """Adds final measurement to trial based on metric aggregator."""
     # Poll the metrics across steps for aggregation.
     if aggregate_metrics:
@@ -602,31 +609,33 @@ def _write_file_once(file_path: epath.Path, content: Text):
 
 
 class EvalMetrics(NamedTuple):
-  metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
-  scoring_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
-  steps_per_sec: Optional[float] = None
-  input_names: Optional[Sequence[str]] = None
+  metrics_list: Sequence[dict[str, float] | None] | None = None
+  scoring_metrics_list: Sequence[dict[str, float] | None] | None = None
+  steps_per_sec: float | None = None
+  input_names: Sequence[str] | None = None
 
 
 class DecodeMetrics(NamedTuple):
-  metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
-  processed_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
-  seqio_metrics_list: Optional[Sequence[Optional[Dict[str, float]]]] = None
-  steps_per_sec: Optional[float] = None
-  input_names: Optional[Sequence[str]] = None
+  metrics_list: Sequence[dict[str, float] | None] | None = None
+  processed_metrics_list: Sequence[dict[str, float] | None] | None = None
+  seqio_metrics_list: Sequence[dict[str, float] | None] | None = None
+  steps_per_sec: float | None = None
+  input_names: Sequence[str] | None = None
 
 
-def should_early_stop(early_stop_fn: trainer_lib.EarlyStoppingFn,
-                      global_step: int,
-                      is_last_ckpt: bool,
-                      train_weighted_scalars: Optional[
-                          Union[pytypes.WeightedScalars,
-                                pytypes.WeightedScalarsList]] = None,
-                      eval_train_metrics: Optional[Dict[str, float]] = None,
-                      eval_metrics: Optional[EvalMetrics] = None,
-                      decode_metrics: Optional[DecodeMetrics] = None,
-                      num_params: Optional[float] = None,
-                      train_steps_per_sec: Optional[float] = None) -> bool:
+def should_early_stop(
+    early_stop_fn: trainer_lib.EarlyStoppingFn,
+    global_step: int,
+    is_last_ckpt: bool,
+    train_weighted_scalars: pytypes.WeightedScalars
+    | pytypes.WeightedScalarsList
+    | None = None,
+    eval_train_metrics: dict[str, float] | None = None,
+    eval_metrics: EvalMetrics | None = None,
+    decode_metrics: DecodeMetrics | None = None,
+    num_params: float | None = None,
+    train_steps_per_sec: float | None = None,
+) -> bool:
   """Returns True if the training process should stop early."""
   if early_stop_fn is None:
     return False
@@ -659,13 +668,13 @@ def should_early_stop(early_stop_fn: trainer_lib.EarlyStoppingFn,
 
 
 def _aggregate_metrics(
-    train_metrics: Optional[Dict[str, float]] = None,
-    eval_train_metrics: Optional[Dict[str, float]] = None,
-    eval_metrics: Optional[EvalMetrics] = None,
-    decode_metrics: Optional[DecodeMetrics] = None,
-    num_params: Optional[float] = None,
-    train_steps_per_sec: Optional[float] = None,
-) -> Dict[str, Union[float, None]]:
+    train_metrics: dict[str, float] | None = None,
+    eval_train_metrics: dict[str, float] | None = None,
+    eval_metrics: EvalMetrics | None = None,
+    decode_metrics: DecodeMetrics | None = None,
+    num_params: float | None = None,
+    train_steps_per_sec: float | None = None,
+) -> dict[str, float | None]:
   """Aggregate metrics from training, evaluation and decoding for tuning."""
   metrics = {}
   if train_metrics is not None:
@@ -676,10 +685,11 @@ def _aggregate_metrics(
         metrics, eval_train_metrics, 'eval_train/metrics')
 
   def _add_input_based_metrics(
-      input_names: Optional[List[str]],
-      metrics_list: Optional[List[Optional[Dict[str, float]]]],
-      dataset_type: Optional[str] = None,
-      category: Optional[str] = None):
+      input_names: list[str] | None,
+      metrics_list: list[dict[str, float] | None] | None,
+      dataset_type: str | None = None,
+      category: str | None = None,
+  ):
     if input_names is None or metrics_list is None:
       return
     assert len(input_names) == len(metrics_list), (input_names, metrics_list)
@@ -713,7 +723,7 @@ def _aggregate_metrics(
                              'decode_test')
 
   # Add training metrics.
-  def _add_metric_if_not_none(name: str, value: Optional[float]):
+  def _add_metric_if_not_none(name: str, value: float | None):
     if value is not None:
       metrics[name] = value
 
@@ -777,11 +787,13 @@ class TrialDirectoryNameGenerator:
 
   _NON_PATH_FRIENDLY_CHAR_SET = re.compile(r'[^\w\d=_-{}\(\).,\[\]]+')
 
-  def __init__(self,
-               root_dir: epath.Path,
-               search_space: pg.hyper.DynamicEvaluationContext,
-               combined_decision_point_names: Optional[List[str]] = None,
-               total_name_length_threshold: int = 64):
+  def __init__(
+      self,
+      root_dir: epath.Path,
+      search_space: pg.hyper.DynamicEvaluationContext,
+      combined_decision_point_names: list[str] | None = None,
+      total_name_length_threshold: int = 64,
+  ):
     decision_point_names = list(search_space.hyper_dict.keys())  # pytype: disable=attribute-error
     if combined_decision_point_names:
       assert len(decision_point_names) == 1, decision_point_names
@@ -796,7 +808,7 @@ class TrialDirectoryNameGenerator:
     self._include_decision_names = sum(
         len(n) for n in decision_point_names) < total_name_length_threshold
 
-  def parameter_values(self) -> List[Tuple[str, Any]]:
+  def parameter_values(self) -> list[tuple[str, Any]]:
     """Return the current parameter values and its choice indices.
 
     NOTE(daiyip): this function is intended to be called under the tuning loop.

@@ -14,12 +14,13 @@
 # limitations under the License.
 
 """A registry of experiment configurations."""
+
 import collections
 import functools
 import importlib
 import sys
 import traceback
-from typing import Dict, List, Mapping, Optional
+from typing import Mapping
 
 from paxml import base_experiment
 
@@ -41,7 +42,7 @@ class _ExperimentRegistryHelper:
   # Global variable for the experiment configuration registry
   # A mapping from a canonical key to the BaseExperimentT class.
   _registry = {}
-  _registry_tags: Dict[str, List[str]] = {}
+  _registry_tags: dict[str, list[str]] = {}
   # A mapping from a secondary key to all matching canonical keys.
   _secondary_keys = collections.defaultdict(list)
 
@@ -54,7 +55,7 @@ class _ExperimentRegistryHelper:
   _allow_overwrite = False
 
   @classmethod
-  def custom_secondary_keys(cls, canonical_key) -> List[str]:
+  def custom_secondary_keys(cls, canonical_key) -> list[str]:
     """Returns the list of custom secondary keys."""
     ret = []
     parts = canonical_key.split('.')
@@ -69,11 +70,13 @@ class _ExperimentRegistryHelper:
     return ret
 
   @classmethod
-  def register(cls,
-               experiment_class: Optional[BaseExperimentT] = None,
-               *,
-               tags: Optional[List[str]] = None,
-               allow_overwrite=False):
+  def register(
+      cls,
+      experiment_class: BaseExperimentT | None = None,
+      *,
+      tags: list[str] | None = None,
+      allow_overwrite=False,
+  ):
     """Registers an experiment configuration class into the global registry.
 
     If allow_overwrite is True, repeated registering of an existing class
@@ -144,7 +147,7 @@ class _ExperimentRegistryHelper:
     return experiment_class
 
   @classmethod
-  def get(cls, key: str) -> Optional[BaseExperimentT]:
+  def get(cls, key: str) -> BaseExperimentT | None:
     """Retrieves an experiment from the global registry from the input key.
 
     Args:
@@ -168,7 +171,7 @@ class _ExperimentRegistryHelper:
     return cls._registry.get(canonical_keys[0])
 
   @classmethod
-  def get_registry_tags(cls, key: str) -> List[str]:
+  def get_registry_tags(cls, key: str) -> list[str]:
     return cls._registry_tags.get(key, [])
 
   @classmethod

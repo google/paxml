@@ -19,7 +19,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Mapping
 
 from absl import flags
 from absl import logging
@@ -94,9 +94,9 @@ def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
 
 @dataclasses.dataclass(frozen=True)
 class DecodeProgramOutput(programs.ProgramOutput):
-  decode_metrics: Optional[Mapping[str, float]] = None
-  processed_decode_metrics: Optional[Mapping[str, float]] = None
-  seqio_metrics: Optional[Mapping[str, float]] = None
+  decode_metrics: Mapping[str, float] | None = None
+  processed_decode_metrics: Mapping[str, float] | None = None
+  seqio_metrics: Mapping[str, float] | None = None
   num_decode_steps: int = 0
 
 
@@ -238,7 +238,7 @@ class SingleTaskDecodeProgram(programs.Program):
           plain_text_output_fname=f'{filename}.txt',
       )
 
-    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
+    # Convert metrics to dict[str, clu_values.Value] for summary writing.
     metric_values = metric_utils.compute_metric_values(metrics)
     process_metric_values = metric_utils.compute_metric_values(
         processed_metrics
@@ -301,12 +301,12 @@ class SingleTaskDecodeProgram(programs.Program):
       state: TrainState,
       decode_metrics: BaseMetrics,
       process_decode_metrics: BaseMetrics,
-  ) -> Tuple[
+  ) -> tuple[
       int,
-      Dict[str, clu_metrics.Metric],
-      Dict[str, clu_metrics.Metric],
-      List[Tuple[str, Any]],
-      Dict[str, List[JTensor]],
+      dict[str, clu_metrics.Metric],
+      dict[str, clu_metrics.Metric],
+      list[tuple[str, Any]],
+      dict[str, list[JTensor]],
   ]:
     # metrics and processed_metrics are dictionaries of
     # strings -> clu_metrics.Metric objects. metrics is returned from decode()
@@ -438,7 +438,7 @@ class SingleTaskDecodeProgram(programs.Program):
 
   def _get_decode_step(
       self, inputs: NestedJTensor
-  ) -> Tuple[Any, Optional[NestedPartitionSpec]]:
+  ) -> tuple[Any, NestedPartitionSpec | None]:
     """Creates the decode step info if not done before."""
     if not self._decode_step_created:
       self._decode_step_fn, self._decode_step_input_spec = (
@@ -467,7 +467,7 @@ class SingleTaskDecodeProgram(programs.Program):
 
   def decode_input_partition_spec(
       self, inputs: NestedJTensor
-  ) -> Optional[NestedPartitionSpec]:
+  ) -> NestedPartitionSpec | None:
     """The partition spec for the decode inputs."""
     _, input_partition_spec = self._get_decode_step(inputs)
     return input_partition_spec

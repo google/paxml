@@ -22,7 +22,7 @@ import contextlib
 import operator
 import textwrap
 import typing
-from typing import Any, Dict, Generator, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Generator, Iterator, Sequence
 
 from absl import flags
 from absl import logging
@@ -120,7 +120,7 @@ def pretty_repr_shapes(replicated_vars: NestedJTensor,
 
 
 def pretty_repr_provenance(
-    provenance: Union[TensorProvenance, Nested[TensorProvenance]]
+    provenance: TensorProvenance | Nested[TensorProvenance],
 ) -> str:
   provenance_out = pretty_repr(provenance)
   return pretty_format_iters(provenance_out)
@@ -130,8 +130,8 @@ def _yield_subtrees(
     root: NestedJTensor,
     max_level: int,
     level: int = 0,
-    name: Tuple[str, ...] = (),
-) -> Generator[Tuple[Tuple[str, ...], NestedJTensor], None, None]:
+    name: tuple[str, ...] = (),
+) -> Generator[tuple[tuple[str, ...], NestedJTensor], None, None]:
   """Yields subtrees up to max_level."""
   if level < max_level:
     if isinstance(root, dict):
@@ -153,10 +153,9 @@ def _yield_subtrees(
       yield (name, root)
 
 
-def l2_mean(tree: NestedJTensor,
-            prefix: str = '',
-            max_level: int = 4,
-            sep: str = '/') -> Dict[str, jnp.float32]:
+def l2_mean(
+    tree: NestedJTensor, prefix: str = '', max_level: int = 4, sep: str = '/'
+) -> dict[str, jnp.float32]:
   """L2 Norms over pytree."""
 
   def _sq(x):
@@ -184,7 +183,8 @@ def l2_mean(tree: NestedJTensor,
 
 
 def flatten_flax_summaries(
-    summary_tensors: NestedJTensor) -> Dict[str, JTensor]:
+    summary_tensors: NestedJTensor,
+) -> dict[str, JTensor]:
   """Flatten flax style summary pytree to a flat dict.
 
   summary_tensors is a nested dict, e.g.,
@@ -296,8 +296,9 @@ def get_summary_writer(summary_dir: epath.Path) -> Iterator[SummaryWriter]:
       logging.info('Closed a mock-like SummaryWriter.')
 
 
-def flatten_summary_dict(summary_dict: Dict[str, JTensor],
-                         parent_key: Optional[str] = None) -> List[Any]:
+def flatten_summary_dict(
+    summary_dict: dict[str, JTensor], parent_key: str | None = None
+) -> list[Any]:
   """Flattens a summary dictionary."""
   outputs = []
   for key, value in summary_dict.items():
@@ -313,9 +314,9 @@ def flatten_summary_dict(summary_dict: Dict[str, JTensor],
 def write_summary_tensor(
     step_i: int,
     key: str,
-    tensor: Union[float, JTensor, str, Sequence[JTensor]],
+    tensor: float | JTensor | str | Sequence[JTensor],
     summary_type: SummaryType,
-    metadata: Optional[Any] = None,
+    metadata: Any | None = None,
     sample_rate: int = AUDIO_SUMMARY_SAMPLE_RATE,
 ) -> bool:
   """Writes summary in relevant processes."""
@@ -399,12 +400,14 @@ def get_summary_display_name_from_key(key: str) -> str:
   return trimmed + base_layer.get_summary_type_suffix(base_summary_type)
 
 
-def write_summary_entry(summary_writer: SummaryWriter,
-                        step_i: int,
-                        loss: JTensor,
-                        weighted_scalars_list: WeightedScalarsList,
-                        summary_tensors: NestedJTensor,
-                        steps_per_sec: Optional[float] = None) -> None:
+def write_summary_entry(
+    summary_writer: SummaryWriter,
+    step_i: int,
+    loss: JTensor,
+    weighted_scalars_list: WeightedScalarsList,
+    summary_tensors: NestedJTensor,
+    steps_per_sec: float | None = None,
+) -> None:
   """Writes a summary entry into the provided SummaryWriter."""
   work_unit = platform.work_unit()
   # Scalar values must be plain Python types rather than e.g. np.int / np.float.
@@ -520,13 +523,15 @@ class SummaryHandler:
   as well as enabling summary aggregation across several steps.
   """
 
-  def __init__(self,
-               summary_writer: SummaryWriter,
-               write_interval_steps: int,
-               accumulate_interval_steps: Optional[int] = None,
-               log_interval_steps: Optional[int] = None,
-               is_async: bool = False,
-               name: str = '') -> None:
+  def __init__(
+      self,
+      summary_writer: SummaryWriter,
+      write_interval_steps: int,
+      accumulate_interval_steps: int | None = None,
+      log_interval_steps: int | None = None,
+      is_async: bool = False,
+      name: str = '',
+  ) -> None:
     """Constructor.
 
     Args:
@@ -591,13 +596,15 @@ class SummaryHandler:
     else:
       return True
 
-  def process(self,
-              step: int,
-              loss: JTensor,
-              weighted_scalars: WeightedScalars,
-              summary_tensors: NestedJTensor,
-              per_example_out: Optional[NestedJTensor] = None,
-              steps_per_sec: Optional[float] = None) -> bool:
+  def process(
+      self,
+      step: int,
+      loss: JTensor,
+      weighted_scalars: WeightedScalars,
+      summary_tensors: NestedJTensor,
+      per_example_out: NestedJTensor | None = None,
+      steps_per_sec: float | None = None,
+  ) -> bool:
     """Adds summaries for a given step and indicates if summaries were written.
 
     Args:
@@ -654,14 +661,16 @@ class SummaryHandler:
 
     return self.should_write(step)
 
-  def _process(self,
-               step: int,
-               loss: JTensor,
-               weighted_scalars: WeightedScalars,
-               summary_tensors: NestedJTensor,
-               per_example_out: Optional[NestedJTensor] = None,
-               steps_per_sec: Optional[float] = None,
-               should_log: bool = False) -> bool:
+  def _process(
+      self,
+      step: int,
+      loss: JTensor,
+      weighted_scalars: WeightedScalars,
+      summary_tensors: NestedJTensor,
+      per_example_out: NestedJTensor | None = None,
+      steps_per_sec: float | None = None,
+      should_log: bool = False,
+  ) -> bool:
     """Adds summaries for a given step."""
 
     if should_log:
@@ -686,12 +695,14 @@ class SummaryHandler:
     self._write()
     self._clear()
 
-  def _add(self,
-           step: int,
-           loss: JTensor,
-           weighted_scalars: WeightedScalars,
-           summary_tensors: NestedJTensor,
-           steps_per_sec: Optional[float] = None) -> None:
+  def _add(
+      self,
+      step: int,
+      loss: JTensor,
+      weighted_scalars: WeightedScalars,
+      summary_tensors: NestedJTensor,
+      steps_per_sec: float | None = None,
+  ) -> None:
     """Adds/accumulates the current summary values."""
     if self._latest_step >= 0 and step <= self._latest_step:
       logging.warning(

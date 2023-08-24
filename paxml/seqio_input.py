@@ -24,7 +24,7 @@ import enum
 import io
 import os
 import typing
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union, cast
+from typing import Any, Callable, Mapping, Sequence, TextIO, cast
 
 from absl import logging
 from etils import epath
@@ -60,8 +60,9 @@ _LM_SCORE_KEY = 'scores'
 _LM_LABEL_KEY = 'labels'
 
 
-def _update_keys(answers: Dict[str, Any], targets: Mapping[str, Any],
-                 task_name: str) -> None:
+def _update_keys(
+    answers: dict[str, Any], targets: Mapping[str, Any], task_name: str
+) -> None:
   """Insert into answers the keys from targets that only partially match."""
   # We update the dict `answers` in place, but inserting the keys found in
   # `targets` only. Those keys are matched by finding an existing key in answers
@@ -130,7 +131,7 @@ def _convert_bytes_to_str(tree: Any) -> Any:
 
 def select_split(
     task: str,
-    split_name: Union[str, Callable[[str], str]],
+    split_name: str | Callable[[str], str],
 ) -> str:
   """Returns a split name given a split selector (Callable) or str literal."""
   if callable(split_name):
@@ -138,7 +139,7 @@ def select_split(
   return split_name
 
 
-def _add_fake_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
+def _add_fake_enumeration(ex: dict[str, Any]) -> dict[str, Any]:
   ex[SHARD_INDEX_KEY] = tf.cast(-1, tf.int32)
   ex[NUM_SHARDS_KEY] = tf.cast(-1, tf.int32)
   ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(-1, tf.int64)
@@ -146,19 +147,19 @@ def _add_fake_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
   return ex
 
 
-def _is_padding(ex: Dict[str, Any]) -> bool:
+def _is_padding(ex: dict[str, Any]) -> bool:
   return (ex[INDEX_WITHIN_SHARD_KEY] == -1 and ex[SHARD_INDEX_KEY] == -1
           and ex[NUM_SHARDS_KEY] == -1)
 
 
 def _enumerate_dataset(
-    ds: tf.data.Dataset, is_training: bool,
-    shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
+    ds: tf.data.Dataset, is_training: bool, shard_info: seqio.ShardInfo | None
+) -> tf.data.Dataset:
   """Add enumeration fields, only meaningful when is_training=False."""
   if is_training:
     return ds.map(_add_fake_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
 
-  def _add_shard_enumeration(ex: Dict[str, Any]) -> Dict[str, Any]:
+  def _add_shard_enumeration(ex: dict[str, Any]) -> dict[str, Any]:
     shard_index, num_shards = 0, 1
     if shard_info:
       shard_index, num_shards = shard_info.index, shard_info.num_shards
@@ -168,8 +169,9 @@ def _enumerate_dataset(
 
     return ex
 
-  def _fold_in_local_enumeration(index_within_shard: tf.Tensor,
-                                 ex: Dict[str, Any]) -> Dict[str, Any]:
+  def _fold_in_local_enumeration(
+      index_within_shard: tf.Tensor, ex: dict[str, Any]
+  ) -> dict[str, Any]:
     ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(index_within_shard, tf.int64)
     return ex
 
@@ -196,8 +198,8 @@ def is_packing_on(fc: seqio.FeatureConverter) -> bool:
 
 
 def maybe_update_decode_output_keys(
-    process_decode_output: Sequence[Tuple[str, Any]],
-    decode_out: NestedMap) -> Sequence[Tuple[str, Any]]:
+    process_decode_output: Sequence[tuple[str, Any]], decode_out: NestedMap
+) -> Sequence[tuple[str, Any]]:
   """Return outputs with updated keys if using SeqIO enum-based keys.
 
   This method assumes that the order of the per-example kv-pairs returned by
@@ -249,13 +251,14 @@ def should_process_outputs(inp: base_input.BaseInput) -> bool:
 
 def process_outputs(
     inp: base_input.BaseInput,
-    model_outputs: Union[List[Dict[str, Any]], List[Tuple[str, Any]]],
+    model_outputs: list[dict[str, Any]] | list[tuple[str, Any]],
     summary_writer: SummaryWriter,
     metric_type: MetricType,
     step: int,
     output_dir: epath.Path,
     verbose_entries: int = 1,
-    plain_text_output_fname: Optional[str] = None) -> Dict[str, float]:
+    plain_text_output_fname: str | None = None,
+) -> dict[str, float]:
   """Computes SeqIO task-defined metric, write to TB, and returns mapping."""
   inp = typing.cast(SeqIOInput, inp)
   logging.info('Computing %s metrics', metric_type.name)
@@ -433,19 +436,19 @@ class SeqIOInput(base_input.BaseInput):
     _latest_model_step: int = 0
 
   # Required params.
-  mixture_name: Optional[str] = None
-  mixture_or_task: Optional[Union[seqio.Task, seqio.Mixture]] = None
-  split_name: Optional[str] = None
+  mixture_name: str | None = None
+  mixture_or_task: seqio.Task | seqio.Mixture | None = None
+  split_name: str | None = None
   deterministic_input: bool = False
-  task_feature_lengths: Optional[Mapping[str, int]] = None
-  feature_converter: Optional[seqio.FeatureConverter] = None
+  task_feature_lengths: Mapping[str, int] | None = None
+  feature_converter: seqio.FeatureConverter | None = None
   # Optional params.
-  shuffle: Optional[bool] = None
-  repeat: Optional[bool] = None
+  shuffle: bool | None = None
+  repeat: bool | None = None
   use_cached: bool = False
   eval_auto_pad: bool = True
   drop_remainder: bool = True
-  num_batches_to_skip: Optional[int] = None
+  num_batches_to_skip: int | None = None
   # trim_output_features flag allow passing this arg to seqio.get_dataset
   # the default value is True so this change will not affect any current
   # behaviour. the main purpose is for prefixlm to not problematically
@@ -462,14 +465,14 @@ class SeqIOInput(base_input.BaseInput):
   deterministic_input_start_index: pax_fiddle.Config[
       SeqIOInput.DeterministicInput
   ] = pax_fiddle.template_field(DeterministicInput)
-  eval_metrics_targets_length: Optional[int] = None
-  eval_metrics_filter_targets_fields: Optional[List[str]] = None
+  eval_metrics_targets_length: int | None = None
+  eval_metrics_filter_targets_fields: list[str] | None = None
   use_enumeration: bool = True
   annotate_padding_fields: bool = False
-  overridden_vocab: Optional[seqio.Vocabulary] = None
+  overridden_vocab: seqio.Vocabulary | None = None
   dataset: tf.data.Dataset = dataclasses.field(init=False, repr=False)
   _iter: Any = dataclasses.field(init=False, repr=False)
-  _cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = (
+  _cached_targets_with_enum_key: Mapping[str, NestedMap] | None = (
       dataclasses.field(init=False, repr=False)
   )
   is_targets_init: Any = dataclasses.field(init=False, repr=False)
@@ -485,11 +488,11 @@ class SeqIOInput(base_input.BaseInput):
   targets_iter_converted: Any = dataclasses.field(init=False, repr=False)
   targets_iter_ori: Any = dataclasses.field(init=False, repr=False)
   _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
-  enable_symbolic_checkpointing: Optional[bool] = True
-  experimental_enable_index_shuffle: Optional[bool] = True
-  log_preprocessed_targets: Optional[bool] = False
+  enable_symbolic_checkpointing: bool | None = True
+  experimental_enable_index_shuffle: bool | None = True
+  log_preprocessed_targets: bool | None = False
   eval_enable_cache: bool = True
-  eval_num_examples: Optional[int] = None
+  eval_num_examples: int | None = None
   warm_start: bool = True
 
   def __post_init__(self):
@@ -530,7 +533,7 @@ class SeqIOInput(base_input.BaseInput):
 
     # Populated by first call to `self._get_targets_with_enum_key`. Subsequent
     # calls to it short circuit by returning the cached values.
-    self._cached_targets_with_enum_key: Optional[Mapping[str, NestedMap]] = None
+    self._cached_targets_with_enum_key: Mapping[str, NestedMap] | None = None
 
     self.is_targets_init = False
 
@@ -622,7 +625,7 @@ class SeqIOInput(base_input.BaseInput):
     return self.repeat
 
   @property
-  def mixture_or_task_inst(self) -> Union[seqio.Task, seqio.Mixture]:
+  def mixture_or_task_inst(self) -> seqio.Task | seqio.Mixture:
     return self._mixture_or_task_inst
 
   @property
@@ -870,9 +873,11 @@ class SeqIOInput(base_input.BaseInput):
     return features[real_key].vocabulary
 
   def ids_to_strings(
-      self, ids: pytypes.NpTensor,
-      lengths: Union[pytypes.NpTensor, Sequence[pytypes.NpTensor]],
-      key: Optional[str] = None) -> Sequence[str]:
+      self,
+      ids: pytypes.NpTensor,
+      lengths: pytypes.NpTensor | Sequence[pytypes.NpTensor],
+      key: str | None = None,
+  ) -> Sequence[str]:
     vocab = self._get_vocab(key)
 
     if lengths is None:
@@ -884,10 +889,9 @@ class SeqIOInput(base_input.BaseInput):
       ret.append(vocab.decode(row))
     return ret
 
-  def _get_backing_ds(self,
-                      shuffle: bool,
-                      num_epochs: int,
-                      shard_info: Optional[seqio.ShardInfo]) -> tf.data.Dataset:
+  def _get_backing_ds(
+      self, shuffle: bool, num_epochs: int, shard_info: seqio.ShardInfo | None
+  ) -> tf.data.Dataset:
     kwargs = dict(
         sequence_length=self.task_feature_lengths,
         split=self.split_name,
@@ -995,8 +999,9 @@ class SeqIOInput(base_input.BaseInput):
     pad_ds = self._get_one_example_ds(ds).map(_add_pad).repeat(pad_num)
     return ds.concatenate(pad_ds)
 
-  def _filter_ragged_tensor(self, targets_ds: tf.data.Dataset) -> Tuple[
-      tf.data.Dataset, tf.data.Dataset, List[str], List[str]]:
+  def _filter_ragged_tensor(
+      self, targets_ds: tf.data.Dataset
+  ) -> tuple[tf.data.Dataset, tf.data.Dataset, list[str], list[str]]:
     # customized input may contain ragged tensor, which may cause errors in
     # decoding when calling 'as_numpy_iterator()' below. We filter out
     # RaggedTensor here.
@@ -1021,9 +1026,11 @@ class SeqIOInput(base_input.BaseInput):
     )
 
   def _build_predict_metric_inputs_with_prefix(
-      self, answers: Dict[str, NestedMap], verbose_entries: int,
-      plain_text_output: Optional[TextIO] = None) -> Tuple[
-          Sequence[str], Sequence[str]]:
+      self,
+      answers: dict[str, NestedMap],
+      verbose_entries: int,
+      plain_text_output: TextIO | None = None,
+  ) -> tuple[Sequence[str], Sequence[str]]:
     """Builds 1-to-1 mapped predictions and targets lists via prefix matches."""
     assert not self.use_enumeration
     assert self.targets_ds
@@ -1195,9 +1202,11 @@ class SeqIOInput(base_input.BaseInput):
     return targets
 
   def _build_predict_metric_inputs_with_enum(
-      self, answers: Mapping[str, NestedMap], verbose_entries: int,
-      plain_text_output: Optional[TextIO] = None) -> Tuple[
-          Sequence[Any], Sequence[Any]]:
+      self,
+      answers: Mapping[str, NestedMap],
+      verbose_entries: int,
+      plain_text_output: TextIO | None = None,
+  ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Builds 1-to-1 mapped predictions and targets lists using enum fields."""
     assert self.use_enumeration
 
@@ -1253,8 +1262,8 @@ class SeqIOInput(base_input.BaseInput):
     return predictions_list, targets_list
 
   def _build_scoring_metric_inputs_with_labels(
-      self, answers: Dict[Tuple[int], NestedMap],
-      verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
+      self, answers: dict[tuple[int], NestedMap], verbose_entries: int
+  ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Build 1-to-1 mapped scores and targets for metrics via label matching."""
     # TODO(b/241386390): deprecate label-based matching for metrics computation.
     assert self.targets_ds
@@ -1333,8 +1342,8 @@ class SeqIOInput(base_input.BaseInput):
     return scores_list, targets_list
 
   def _build_scoring_metric_inputs_with_enum(
-      self, answers: Dict[str, NestedMap],
-      verbose_entries: int) -> Tuple[Sequence[Any], Sequence[Any]]:
+      self, answers: dict[str, NestedMap], verbose_entries: int
+  ) -> tuple[Sequence[Any], Sequence[Any]]:
     assert self.use_enumeration
     targets = self._get_targets_with_enum_key()
 
@@ -1369,10 +1378,10 @@ class SeqIOInput(base_input.BaseInput):
 
   def compute_metrics(
       self,
-      decoder_outputs: Sequence[Tuple[str, NestedMap]],
-      verbose_entries: Optional[int] = 0,
-      plain_text_output: Optional[TextIO] = None,
-  ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
+      decoder_outputs: Sequence[tuple[str, NestedMap]],
+      verbose_entries: int | None = 0,
+      plain_text_output: TextIO | None = None,
+  ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
     """Computes metrics from the given decoder outputs using predict_metric_fns.
 
     This method is called only on process=0 after aggregating all outputs as
@@ -1463,9 +1472,9 @@ class SeqIOInput(base_input.BaseInput):
 
   def compute_metrics_eval(
       self,
-      eval_outputs: Sequence[Tuple[Optional[str], NestedMap]],
-      verbose_entries: int = 0
-  ) -> Sequence[Mapping[str, Union[seqio.metrics.MetricValue, float]]]:
+      eval_outputs: Sequence[tuple[str | None, NestedMap]],
+      verbose_entries: int = 0,
+  ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
     """Computes metrics from the given eval outputs using score_metric_fns.
 
     This method is called only on process=0 after aggregating all outputs as
@@ -1598,15 +1607,14 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
       self,
       pack: bool = False,
       use_custom_packing_ops: bool = False,
-      weights_on_targets_only: Optional[bool] = None,
+      weights_on_targets_only: bool | None = None,
       apply_length_check: bool = True,
       bos_id: int = 0,
       reverse_bos_padding: bool = False,
       eos_id: int = 1,
       target_has_suffix: bool = False,
-      passthrough_features: Optional[
-          Mapping[str, seqio.FeatureConverter.FeatureSpec]
-      ] = None,
+      passthrough_features: Mapping[str, seqio.FeatureConverter.FeatureSpec]
+      | None = None,
   ) -> None:
     """Args to construct a language model feature converter.
 
@@ -1755,8 +1763,9 @@ class PackedLanguageModelFeatures(LanguageModelFeatures):
     super().__init__(pack=False)
 
   def __call__(
-      self, ds: tf.data.Dataset,
-      task_feature_lengths: Mapping[str, Union[int, Sequence[int]]]
+      self,
+      ds: tf.data.Dataset,
+      task_feature_lengths: Mapping[str, int | Sequence[int]],
   ) -> tf.data.Dataset:
     # don't call super(), we want to bypass all validations & packing operation
     # in the base class as examples are already packed.
@@ -1916,18 +1925,15 @@ class MetricType(enum.Enum):
 
 
 def get_eval_hparams_for_seqio(
-    task_or_mixture_name: Union[str, seqio.Task, seqio.Mixture],
+    task_or_mixture_name: str | seqio.Task | seqio.Mixture,
     batch_size: int,
     feature_lengths: Mapping[str, int],
     seed: int,
     metric_type: MetricType,
-    split_name: Union[str, Callable[[str], str]] = 'validation',
-    feature_converter: Optional[
-        Union[
-            pax_fiddle.Config[seqio.FeatureConverter],
-            seqio.FeatureConverter,
-        ]
-    ] = None,
+    split_name: str | Callable[[str], str] = 'validation',
+    feature_converter: pax_fiddle.Config[seqio.FeatureConverter]
+    | seqio.FeatureConverter
+    | None = None,
     num_infeed_hosts: int = 0,
     use_enumeration: bool = True,
     use_cached: bool = False,
@@ -1935,8 +1941,8 @@ def get_eval_hparams_for_seqio(
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
     check_split_exists: bool = False,
-    eval_loop_num_batches: Optional[int] = None,
-    repeat: Optional[bool] = None,
+    eval_loop_num_batches: int | None = None,
+    repeat: bool | None = None,
     reset_for_eval: bool = True,
     pass_entire_feature_lengths: bool = False,
 ) -> list[pax_fiddle.Config[SeqIOInput]]:

@@ -21,7 +21,7 @@ input specs), including all of that would likely be too verbose.
 """
 
 import dataclasses
-from typing import Any, Dict, Optional, Type
+from typing import Any, Type
 
 import fiddle as fdl
 from fiddle import daglish
@@ -49,9 +49,10 @@ class InitCheckpointRulesFromOtherTask(experimental_top_level_api.CodegenPass):
   def __call__(
       self,
       task: Any,
-      init_checkpoint_experiments: Optional[
-          Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
-      ],
+      init_checkpoint_experiments: dict[
+          str, Type[base_experiment.BaseExperiment] | None
+      ]
+      | None,
   ) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
     if init_checkpoint_experiments is None:

@@ -33,7 +33,6 @@ address using `get_tf_data_service_address()`.
 from absl import flags
 from absl import logging
 import tensorflow as tf
-from typing import Optional
 
 # TODO(b/281571038): When this feature is available in
 # xm_tf_data_service.py, update pax/xm_launch.py to enable the prefix.
@@ -135,7 +134,7 @@ def _get_dispatcher_config() -> tf.data.experimental.service.DispatcherConfig:
   )
 
 
-def get_tf_data_service_address() -> Optional[str]:
+def get_tf_data_service_address() -> str | None:
   return _TF_DATA_SERVICE_ADDRESS.value
 
 

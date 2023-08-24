@@ -17,7 +17,7 @@
 
 import numbers
 import typing
-from typing import Any, Dict, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Sequence
 
 from absl import logging
 import clu.values as clu_values
@@ -40,14 +40,14 @@ WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 
 NestedMap = py_utils.NestedMap
-SummaryValueTypes = Union[
-    clu_values.Scalar,
-    clu_values.Image,
-    clu_values.Text,
-    clu_values.Summary,
-    clu_values.Histogram,
-    clu_values.Audio,
-]
+SummaryValueTypes = (
+    clu_values.Scalar
+    | clu_values.Image
+    | clu_values.Text
+    | clu_values.Summary
+    | clu_values.Histogram
+    | clu_values.Audio
+)
 
 
 _VALUES_TO_SUMMARY_TYPE = {
@@ -70,17 +70,17 @@ def _get_summary_type(
   return _VALUES_TO_SUMMARY_TYPE[type(metric_value)]
 
 
-def compute_metric_values(metrics: Metrics) -> Dict[str, SummaryValueTypes]:
+def compute_metric_values(metrics: Metrics) -> dict[str, SummaryValueTypes]:
   """Given a dict of clu_metrics.Metric objects, returns their values.
 
   Args:
-    metrics: A Dict[str, clu_metrics.Metric] objects with a compute_value()
+    metrics: A dict[str, clu_metrics.Metric] objects with a compute_value()
       function implemented that returns either a clu_values.Value object, a
-      Dict[str, clu_values.Value] objects, a Dict[str, List[clu_values.Value]]
+      dict[str, clu_values.Value] objects, a dict[str, List[clu_values.Value]]
       objects, or a List[clu_values.Value].
 
   Returns:
-    metric_values: A flattened Dict[str, clu_values.Value] objects.
+    metric_values: A flattened dict[str, clu_values.Value] objects.
   """
   logging.info('Computing metric values.')
   metric_values = {}
@@ -88,7 +88,7 @@ def compute_metric_values(metrics: Metrics) -> Dict[str, SummaryValueTypes]:
     logging.info('Computing metric %s', metric_name)
     metric_value = metric.compute_value()
     # compute_value can return either a scalar clu_values.Value object,
-    # a Dict[str, clu_values.Value] objects, a Dict[str, List[clu_values.Value]]
+    # a dict[str, clu_values.Value] objects, a dict[str, List[clu_values.Value]]
     # objects, or a List[clu_values.Value] objects.
     if isinstance(metric_value, dict):
       for key, value in metric_value.items():
@@ -122,14 +122,14 @@ def compute_metric_values(metrics: Metrics) -> Dict[str, SummaryValueTypes]:
 
 
 def write_clu_metric_summaries(
-    metric_values: Dict[str, SummaryValueTypes], step_i: int
+    metric_values: dict[str, SummaryValueTypes], step_i: int
 ) -> None:
   """Given a dict of metric values, writes them out as tensorboard summaries.
 
   This is expected to be called under a summary context.
 
   Args:
-    metric_values: A Dict[str, Any] objects with metric values. These values are
+    metric_values: A dict[str, Any] objects with metric values. These values are
       one of the various clu_values.Value subtypes.
     step_i: An int representing the current step of decoding.
   """
@@ -164,16 +164,14 @@ def write_clu_metric_summaries(
 
 
 def write_seqio_metric_summaries(
-    seqio_metrics: Sequence[
-        Mapping[str, Union[seqio.metrics.MetricValue, float]]
-    ],
+    seqio_metrics: Sequence[Mapping[str, seqio.metrics.MetricValue | float]],
     metric_name_prefix: str,
     step: int,
 ) -> None:
   """Write seqio metric as tensorboard summaries.
 
   Args:
-    seqio_metrics: A sequence of Dict of str to seqio metric value or float.
+    seqio_metrics: A sequence of dict of str to seqio metric value or float.
     metric_name_prefix: A prefix added to metric name.
     step: An int. representing the current step.
   """
@@ -253,9 +251,7 @@ def is_weighted_scalar(v: Any) -> bool:
 
 
 def is_float_convertible(
-    metric_value: Union[
-        numbers.Number, clu_values.Value, seqio.metrics.MetricValue
-    ]
+    metric_value: numbers.Number | clu_values.Value | seqio.metrics.MetricValue,
 ):
   """Returns True if a metricv value is float convertible."""
   return (
@@ -271,13 +267,11 @@ def is_float_convertible(
 
 
 def as_float(
-    metric_value: Union[
-        numbers.Number,
-        clu_values.Scalar,
-        seqio.metrics.Scalar,
-        WeightedScalar,
-        Sequence[WeightedScalar],
-    ]
+    metric_value: numbers.Number
+    | clu_values.Scalar
+    | seqio.metrics.Scalar
+    | WeightedScalar
+    | Sequence[WeightedScalar],
 ) -> float:
   """Returns the aggregated float value from heterogeneous metric value."""
   if is_weighted_scalar(metric_value):
@@ -295,14 +289,12 @@ def as_float(
 
 
 def as_float_dict(
-    metric_output: Union[
-        Dict[str, Union[SummaryValueTypes]],
-        WeightedScalars,
-        WeightedScalarsList,
-        Mapping[str, Union[seqio.metrics.MetricValue, float]],
-    ],
+    metric_output: dict[str, SummaryValueTypes]
+    | WeightedScalars
+    | WeightedScalarsList
+    | Mapping[str, seqio.metrics.MetricValue | float],
     raise_on_non_float_convertible: bool = False,
-) -> Dict[str, float]:
+) -> dict[str, float]:
   """Returns a float dict from heterogeneous metric output."""
   results = {}
   for k, v in metric_output.items():
@@ -315,10 +307,10 @@ def as_float_dict(
 
 
 def update_float_dict(
-    target: Dict[str, float],
-    source: Dict[str, float],
-    prefix: Optional[str] = None,
-) -> Dict[str, float]:
+    target: dict[str, float],
+    source: dict[str, float],
+    prefix: str | None = None,
+) -> dict[str, float]:
   """Inserts items from source dict to target dict with an optional prefix."""
   if prefix is None:
     target.update(source)

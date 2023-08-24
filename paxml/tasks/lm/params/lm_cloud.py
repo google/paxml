@@ -15,7 +15,6 @@
 
 """Decoder-only language model configurations."""
 
-from typing import List
 import jax
 from jax import numpy as jnp
 from paxml import base_experiment
@@ -50,7 +49,7 @@ class SyntheticDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),

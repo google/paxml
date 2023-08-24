@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from absl import logging
 import jax
@@ -66,7 +66,7 @@ class TFRecordBertInput(base_input.BaseInput):
   """
 
   # https://github.com/mlcommons/training/tree/master/language_model/tensorflow/bert#tfrecord-features
-  input_file: Optional[Union[str, List[str]]] = None
+  input_file: str | list[str] | None = None
   max_sequence_length: int = 512
   max_predictions_per_seq: int = 76
   eos_token_id: int = 102
@@ -344,7 +344,7 @@ class SyntheticLmData(base_input_generator.BaseInputGenerator):
 
 
 class TextInput(base_input.BaseInput):
-  """Input generator reading plain text used for eval.
+  r"""Input generator reading plain text used for eval.
 
   Each row in the batch corresponds to a line in the input file. This input
   raises out of range after all input data are returned at least once. Depends
@@ -361,8 +361,8 @@ class TextInput(base_input.BaseInput):
     bytes_repr: Whether the texts are written as bytes representation, e.g. b'Q:
       Who directed?\n\nA:'
   """
-  input_file: Optional[str] = None
-  tokenizer: Optional[py_utils.InstantiableParams] = None
+  input_file: str | None = None
+  tokenizer: py_utils.InstantiableParams | None = None
   max_sequence_length: int = 512
   num_samples: int = 0
   bytes_repr: bool = True
@@ -405,8 +405,11 @@ class TextInput(base_input.BaseInput):
     num_global_batches = (self.computed_num_samples + n - 1) // n
     return num_global_batches * n
 
-  def ids_to_strings(self, ids: pytypes.NpTensor,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
-                     lengths: pytypes.NpTensor) -> List[str]:
+  def ids_to_strings(
+      self,
+      ids: pytypes.NpTensor,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+      lengths: pytypes.NpTensor,
+  ) -> list[str]:
     bytes_list = self.tokenizer_inst.IdsToStrings(ids, lengths).numpy()
     return [b.decode('utf-8') for b in bytes_list]
 

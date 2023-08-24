@@ -14,8 +14,9 @@
 # limitations under the License.
 
 """Tests for programs."""
+
 import os
-from typing import Any, Dict, Tuple, Union
+from typing import Any
 
 from absl.testing import absltest
 from etils import epath
@@ -77,8 +78,8 @@ class TestModel(base_model.BaseModel):
     return self.layer_a(input_batch['image'])
 
   def compute_loss(  # pytype: disable=signature-mismatch  # jax-ndarray
-      self, predictions: Union[JTensor, NestedMap],
-      input_batch: NestedMap) -> Tuple[WeightedScalars, Dict[str, Any]]:
+      self, predictions: JTensor | NestedMap, input_batch: NestedMap
+  ) -> tuple[WeightedScalars, dict[str, Any]]:
     return {'loss': (jnp.sum(predictions), 1)}, NestedMap()  # pytype: disable=bad-return-type  # jax-ndarray
 
   def decode(self, input_batch: base_model.NestedMap):

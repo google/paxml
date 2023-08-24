@@ -16,7 +16,6 @@
 """Tests for trainer_lib."""
 
 import itertools
-from typing import Tuple
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -98,7 +97,7 @@ class TestModel(base_model.BaseModel):
 
   def compute_loss(
       self, predictions: JTensor, input_batch: NestedMap
-  ) -> Tuple[NestedMap, NestedMap]:
+  ) -> tuple[NestedMap, NestedMap]:
     del input_batch
     prediction_loss = jnp.sum(predictions)
     theta_loss = jnp.max(jnp.abs(self.theta.weights))

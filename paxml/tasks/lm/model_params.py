@@ -17,7 +17,7 @@
 
 import math
 import typing
-from typing import Optional, Sequence, Type, cast
+from typing import Sequence, Type, cast
 
 import fiddle as fdl
 from jax import numpy as jnp
@@ -44,7 +44,7 @@ def set_sharding_annotations_v1(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     training_optimized: bool,
     ici_mesh_shape: Sequence[int],
-    dcn_mesh_shape: Optional[Sequence[int]] = None,
+    dcn_mesh_shape: Sequence[int] | None = None,
 ) -> None:
   """Sets the sharding annotations in the task config for the given mesh.
 

@@ -15,8 +15,6 @@
 
 """Provides a utility function for rendering configs with normalization."""
 
-from typing import Optional
-
 from fiddle import graphviz as fiddle_graphviz
 import graphviz
 from paxml.tools.fiddle import config_normalization
@@ -25,8 +23,8 @@ from paxml.tools.fiddle import config_normalization
 def render(
     config,
     *,
-    max_depth: Optional[int] = 4,
-    max_str_length: Optional[int] = 100,
+    max_depth: int | None = 4,
+    max_str_length: int | None = 100,
     remove_defaults: bool = True,
     convert_dataclasses: bool = True,
     remove_sharding_annotations: bool = False,

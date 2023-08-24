@@ -16,7 +16,7 @@
 """A few small code IR nodes for Pax."""
 
 import dataclasses
-from typing import Any, Optional
+from typing import Any
 
 from fiddle._src.codegen.auto_config import code_ir
 import libcst as cst
@@ -36,4 +36,4 @@ class PaxCodegenTask(code_ir.CodegenTask):
   """
 
   highlevel_accesses: dict[str, Any] = dataclasses.field(default_factory=dict)
-  sharding_diff_module: Optional[cst.Module] = None
+  sharding_diff_module: cst.Module | None = None

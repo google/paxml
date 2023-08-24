@@ -21,7 +21,7 @@
 import copy
 import dataclasses
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Type
 
 import fiddle as fdl
 from fiddle import daglish
@@ -88,7 +88,7 @@ def _make_default_factory(node: cst.CSTNode) -> cst.Expr:
   )
 
 
-def _class_attributes(highlevel_settings: Dict[str, Any]) -> List[cst.CSTNode]:
+def _class_attributes(highlevel_settings: dict[str, Any]) -> list[cst.CSTNode]:
   """Returns CST nodes for dataclass fields, given highlevel settings."""
   result = []
   for name, value in highlevel_settings.items():
@@ -141,9 +141,9 @@ def _make_docstring(docstring: str, *, indent: int) -> cst.SimpleStatementLine:
 
 def _make_class_def(
     name: str,
-    bases: List[cst.Arg],
-    body: List[cst.BaseStatement],
-    docstring: Optional[str] = None,
+    bases: list[cst.Arg],
+    body: list[cst.BaseStatement],
+    docstring: str | None = None,
 ) -> cst.ClassDef:
   """Makes a LibCST class definition."""
   if docstring:
@@ -249,9 +249,9 @@ class IrToCst(experimental_top_level_api.CodegenPass):
   """Modified LibCST conversion that doesn't emit imports."""
 
   class_name: str = "Experiment"
-  add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None
+  add_sharding_call: codegen_sharding.AddShardingCall | None = None
   add_boilerplate: bool = True
-  fixture_docstrings: Optional[Dict[str, str]] = None
+  fixture_docstrings: dict[str, str] | None = None
 
   def __call__(self, task: Any) -> Any:
     fixture_docstrings = self.fixture_docstrings or {}
@@ -347,8 +347,8 @@ def code_generator_config(
     lowercase_highlevel_settings: bool = True,
     class_name: str = "Experiment",
     init_checkpoint_experiments_strict: bool = True,
-    add_sharding_call: Optional[codegen_sharding.AddShardingCall] = None,
-    fixture_docstrings: Optional[Dict[str, str]] = None,
+    add_sharding_call: codegen_sharding.AddShardingCall | None = None,
+    fixture_docstrings: dict[str, str] | None = None,
 ):
   """Returns a code generator object.
 
@@ -464,20 +464,16 @@ def codegen_baseline_from_legacy(
     remove_decoder_datasets: bool = False,
     factor_out_sharding_annotations: bool = True,
     lowercase_highlevel_settings: bool = True,
-    additional_sub_fixtures: Optional[
-        Callable[
-            [
-                pax_fiddle.Config[
-                    parameterized_experiment.ParameterizedExperiment
-                ]
-            ],
-            Dict[str, Any],
-        ]
-    ] = None,
-    fixture_docstrings: Optional[Dict[str, str]] = None,
-    init_checkpoint_experiments: Optional[
-        Dict[str, Optional[Type[base_experiment.BaseExperiment]]]
-    ] = None,
+    additional_sub_fixtures: Callable[
+        [pax_fiddle.Config[parameterized_experiment.ParameterizedExperiment]],
+        dict[str, Any],
+    ]
+    | None = None,
+    fixture_docstrings: dict[str, str] | None = None,
+    init_checkpoint_experiments: dict[
+        str, Type[base_experiment.BaseExperiment] | None
+    ]
+    | None = None,
     init_checkpoint_experiments_strict: bool = True,
 ) -> str:
   """Generates code for a baseline configuration, from a legacy BaseExperiment.

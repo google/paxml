@@ -17,7 +17,6 @@
 
 import functools
 import math
-from typing import Dict, List, Optional
 
 from absl import logging
 import fiddle as fdl
@@ -69,14 +68,16 @@ class TaskRegistry(t5.data.TaskRegistry):
   TASK_NAMES = []
 
   @classmethod
-  def add_versioned_tfds_task(cls,
-                              name: str,
-                              *,
-                              versions: List[str],
-                              pinned_version: Optional[str] = None,
-                              tfds_name: str,
-                              tfds_data_dir: Optional[str] = None,
-                              **kwargs) -> List[seqio.Task]:
+  def add_versioned_tfds_task(
+      cls,
+      name: str,
+      *,
+      versions: list[str],
+      pinned_version: str | None = None,
+      tfds_name: str,
+      tfds_data_dir: str | None = None,
+      **kwargs,
+  ) -> list[seqio.Task]:
     tasks = []
     for version in versions:
       tasks.append(
@@ -227,7 +228,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
     )
     return p
 
-  def datasets(self) -> List[pax_fiddle.Config[base_input.BaseInput]]:
+  def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
     return [
         self._dataset_common(is_training=True),
@@ -473,11 +474,11 @@ class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
       reaches this value.
   """
 
-  target_log_pplx: Optional[float] = None
+  target_log_pplx: float | None = None
 
   def __call__(
       self,
-      metrics: Dict[str, float],
+      metrics: dict[str, float],
       running_mode: trainer_lib.RunningMode,
       global_step: int,
       is_last_ckpt: bool,

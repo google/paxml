@@ -21,7 +21,7 @@ import abc
 import collections
 import dataclasses
 import logging
-from typing import Any, Optional, Sequence, Tuple, Union
+from typing import Any, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -156,7 +156,7 @@ class BaseMetrics(
     self._metrics = collections.defaultdict(list)
 
   @abc.abstractmethod
-  def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
+  def aggregate(self, batch_metrics, reshard: bool | None = False):
     """Aggregate metrics across TPUs.
 
     Args:
@@ -176,7 +176,7 @@ class BaseMetrics(
     """Compute final metrics based on internal stored values."""
     pass
 
-  def store(self, batch_metrics, reshard: Optional[bool] = False):
+  def store(self, batch_metrics, reshard: bool | None = False):
     if reshard:
       batch_metrics = self.aggregate(batch_metrics, reshard=True)
     for k in batch_metrics:
@@ -202,11 +202,10 @@ class MeanMetrics(BaseMetrics):
   Attributes:
     metric_keys: List of metrics that will be aggregated and logged.
   """
-  metric_keys: Optional[Sequence[str]] = None
+  metric_keys: Sequence[str] | None = None
   _metrics: Any = dataclasses.field(init=False, repr=False)
 
-  def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-
+  def aggregate(self, batch_metrics, reshard: bool | None = False):
     def _pmap_mean(value, weight):
       assert base_layer.is_running_under_pmap()
       sum_value = jax.lax.psum(
@@ -237,11 +236,10 @@ class MaxMetrics(BaseMetrics):
   Attributes:
     metric_keys: List of metrics that will be aggregated and logged.
   """
-  metric_keys: Optional[Sequence[str]] = None
+  metric_keys: Sequence[str] | None = None
   _metrics: Any = dataclasses.field(init=False, repr=False)
 
-  def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-
+  def aggregate(self, batch_metrics, reshard: bool | None = False):
     def _pmap_max(value, weight):
       assert base_layer.is_running_under_pmap()
       max_value = jax.lax.pmax(value, axis_name=PMAP_PARALLEL_AXIS_NAME)
@@ -271,10 +269,9 @@ class HistogramMetrics(BaseMetrics):
   Attributes:
     histogram_key: Key which contains the histogram data.
   """
-  histogram_key: Optional[str] = None
+  histogram_key: str | None = None
 
-  def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
-
+  def aggregate(self, batch_metrics, reshard: bool | None = False):
     def _pmap_sum(value, weight):
       assert base_layer.is_running_under_pmap()
       value = jax.lax.psum(value, axis_name=PMAP_PARALLEL_AXIS_NAME)
@@ -321,14 +318,14 @@ class CompositeMetrics(BaseMetrics):
   Attributes:
     metrics_p: List of metrics that will be aggregated and logged.
   """
-  metrics_p: Optional[Sequence[pax_fiddle.Config[BaseMetrics]]] = None
+  metrics_p: Sequence[pax_fiddle.Config[BaseMetrics]] | None = None
   metrics_calcs: Any = dataclasses.field(init=False, repr=False)
 
   def __post_init__(self):
     super().__post_init__()
     self.metrics_calcs = [instantiate(m) for m in self.metrics_p]
 
-  def aggregate(self, batch_metrics, reshard: Optional[bool] = False):
+  def aggregate(self, batch_metrics, reshard: bool | None = False):
     all_metrics = collections.defaultdict()
     for m in self.metrics_calcs:
       metrics = m.aggregate(batch_metrics, reshard)
@@ -336,7 +333,7 @@ class CompositeMetrics(BaseMetrics):
         all_metrics[k] = v
     return all_metrics
 
-  def store(self, batch_metrics, reshard: Optional[bool] = False) -> None:
+  def store(self, batch_metrics, reshard: bool | None = False) -> None:
     for m in self.metrics_calcs:
       m.store(batch_metrics, reshard)
 
@@ -371,9 +368,9 @@ class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
       compute_loss).
   """
 
-  loss_key: Optional[str] = None
+  loss_key: str | None = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
+  def aggregate(self, batch_metrics) -> tuple[float, float, float | None]:
     """Computes the aggregated loss over shards.
 
     Args:
@@ -417,10 +414,9 @@ class MultiLossAggregator(LossAggregator):
       first return of compute_loss). Weights are renormalized across shards
       before computing the per key weighted_loss.
   """
-  loss_keys: Optional[Sequence[str]] = None
+  loss_keys: Sequence[str] | None = None
 
-  def aggregate(self, batch_metrics) -> Tuple[float, float, Union[float, None]]:
-
+  def aggregate(self, batch_metrics) -> tuple[float, float, float | None]:
     total_weighted_loss = 0.0
     total_mean_loss = 0.0
     if base_layer.is_running_under_pmap():

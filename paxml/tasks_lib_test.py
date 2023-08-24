@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import re
-from typing import Tuple
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -112,8 +111,9 @@ class TestModel01(base_model.BaseModel):
     self.add_summary('info', ret, verbosity=3)
     return ret
 
-  def compute_loss(self, predictions: JTensor,
-                   input_batch: NestedMap) -> Tuple[NestedMap, NestedMap]:
+  def compute_loss(
+      self, predictions: JTensor, input_batch: NestedMap
+  ) -> tuple[NestedMap, NestedMap]:
     del input_batch
     loss = jnp.sum(predictions)
     loss02 = jnp.max(jnp.abs(self.theta.var01))
@@ -152,7 +152,7 @@ class TestModel02(base_model.BaseModel):
 
   def compute_loss(
       self, predictions: JTensor, input_batch: NestedMap
-  ) -> Tuple[NestedMap, NestedMap]:
+  ) -> tuple[NestedMap, NestedMap]:
     del input_batch
     loss = jnp.sum(predictions)
     per_example_out = NestedMap()
@@ -185,7 +185,7 @@ class TestModel03(base_model.BaseModel):
 
   def compute_loss(
       self, predictions: JTensor, input_batch: NestedMap
-  ) -> Tuple[NestedMap, NestedMap]:
+  ) -> tuple[NestedMap, NestedMap]:
     del input_batch
     loss = jnp.sum(predictions)
     loss02 = jnp.max(jnp.abs(self.theta.var01))

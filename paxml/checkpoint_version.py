@@ -15,8 +15,6 @@
 
 """Stores current checkpoint version and version history."""
 
-from typing import Optional
-
 #
 # Past versions:
 # 1.2
@@ -48,7 +46,7 @@ _VERSION: float = 1.1
 _VERSION_KEY: str = 'version'
 
 
-def get_version(tensorstore_use_ocdbt: Optional[bool] = None) -> float:
+def get_version(tensorstore_use_ocdbt: bool | None = None) -> float:
   if tensorstore_use_ocdbt is None:
     raise ValueError('Must set the value of `tensorstore_use_ocdbt`.')
   if tensorstore_use_ocdbt:

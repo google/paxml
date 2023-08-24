@@ -16,7 +16,7 @@
 """Sharding-specific features of the codegen."""
 
 import dataclasses
-from typing import Any, Optional, Type
+from typing import Any, Type
 
 from fiddle import diffing
 from fiddle.codegen import codegen_diff
@@ -39,7 +39,7 @@ class ModelShardingDiff:
 def sharding_diff(
     experiment_cls: Type[base_experiment.BaseExperiment],
     unshare_sharding_config: bool = True,
-) -> Optional[ModelShardingDiff]:
+) -> ModelShardingDiff | None:
   """Returns a diff that will re-add sharding to a model.
 
   The diff is calculated by removing the sharding from the model for the "diff
@@ -70,7 +70,7 @@ class MakeShardingFiddler(experimental_top_level_api.CodegenPass):
   def __call__(
       self,
       task: Any,
-      model_sharding_diff: Optional[ModelShardingDiff],
+      model_sharding_diff: ModelShardingDiff | None,
   ) -> Any:
     assert isinstance(task, codegen_pax_code_ir.PaxCodegenTask)
     if model_sharding_diff:

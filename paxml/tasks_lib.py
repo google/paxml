@@ -27,7 +27,7 @@ import enum
 import itertools
 import re
 import typing
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, NamedTuple, Sequence
 
 from absl import logging
 from etils import epath
@@ -74,7 +74,7 @@ TrainState = train_states.TrainState
 TensorProvenance = train_states.TensorProvenance
 TrainStateProvenance = train_states.TrainStateProvenance
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
-EarlyStoppingFn = Callable[[Dict[str, float], enum.Flag, int, bool], bool]
+EarlyStoppingFn = Callable[[dict[str, float], enum.Flag, int, bool], bool]
 
 PRNGKey = pytypes.PRNGKey
 RegexStr = str
@@ -100,9 +100,9 @@ EVAL_DEFAULT_MUTABLE_LIST = [
 
 
 def _flatten_dict(
-    node: Dict[str, Any],
+    node: dict[str, Any],
     prefix: str = '',
-) -> List[Tuple[str, Any]]:
+) -> list[tuple[str, Any]]:
   """Flattens a given nested dict and returns <key, value> pairs in a list."""
   ret = []
   if isinstance(node, dict):
@@ -198,7 +198,7 @@ def extract_ema(
   )
 
 
-def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
+def _set_nested_dict_value(node: dict[str, Any], path: str, value: Any) -> None:
   """Sets the value for a nested key.
 
   Based on py_utils.NestedMap.Set(...).
@@ -237,7 +237,7 @@ def _set_nested_dict_value(node: Dict[str, Any], path: str, value: Any) -> None:
 # avoid each user from specifying these common patterns, we keep all the
 # required mappings for optimizer states in one place. Mapping for each
 # optimizer will be introduced one by one after testing.
-def get_optax_opt_load_rules() -> Sequence[Tuple[re.Pattern[str], str]]:
+def get_optax_opt_load_rules() -> Sequence[tuple[re.Pattern[str], str]]:
   rules = [
       # Rules for Adam optimizer.
       # Note extra '/0/' is to account for ScaleByAdamState tuple.
@@ -260,15 +260,15 @@ def get_praxis_opt_state_regex() -> Sequence[re.Pattern[str]]:
 
 
 def _get_var_mapping(
-    varnames: List[str],
-    loading_rules: Sequence[Tuple[re.Pattern[str], str]],
-    ignore_rules: Optional[Sequence[re.Pattern[str]]],
-    is_initialized: Dict[str, str],
+    varnames: list[str],
+    loading_rules: Sequence[tuple[re.Pattern[str], str]],
+    ignore_rules: Sequence[re.Pattern[str]] | None,
+    is_initialized: dict[str, str],
     ckpt_path: str,
     kind: str,
     safe_load: bool,
-    target_partition_specs: Optional[TrainState] = None
-) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    target_partition_specs: TrainState | None = None,
+) -> tuple[dict[str, str], dict[str, Any]]:
   """Creates a mapping from model var names to corresponding var names in ckpt.
   """
 
@@ -353,13 +353,11 @@ def _get_var_mapping(
 
 
 def _assign_model_vars(
-    model_vars: Union[NestedMap, Dict[str, Any]],
-    loaded_vars: Dict[str, Any],
-    model_vars_mapping: Dict[str, str],
-    model_provenance: Union[
-        NestedMap, Dict[str, Any]
-    ],
-    loaded_provenance: Dict[str, Any],
+    model_vars: NestedMap | dict[str, Any],
+    loaded_vars: dict[str, Any],
+    model_vars_mapping: dict[str, str],
+    model_provenance: NestedMap | dict[str, Any],
+    loaded_provenance: dict[str, Any],
 ) -> None:
   """Sets current model vars from loaded model vars using provided mapping."""
   used_vars = set()
@@ -388,9 +386,9 @@ def _make_train_state(
     rules: CheckpointLoadingRules,
     ckpt_train_state: TrainState,
     train_state_pspecs: TrainState,
-    matched_pspecs: Dict[str, Any],
+    matched_pspecs: dict[str, Any],
     load_ema_states: bool,
-) -> Tuple[TrainState, TrainState]:
+) -> tuple[TrainState, TrainState]:
   """Makes changes to checkpoint train states for GDA ckpts."""
   # For GDA checkpoint type, skip loading step / opt states from the
   # checkpoint if rules are set to False. FLAX checkpoint type doesn't support
@@ -564,11 +562,11 @@ def _load_partial_opt_states(
     train_state_provenance: TrainStateProvenance,
     loaded_train_state: TrainState,
     loaded_state_provenance: TrainStateProvenance,
-    loading_rules: Sequence[Tuple[re.Pattern[str], str]],
-    ignore_rules: Optional[Sequence[re.Pattern[str]]],
-    is_opt_states_initialized: Dict[str, str],
+    loading_rules: Sequence[tuple[re.Pattern[str], str]],
+    ignore_rules: Sequence[re.Pattern[str]] | None,
+    is_opt_states_initialized: dict[str, str],
     ckpt_path: str,
-) -> Tuple[TrainState, TrainStateProvenance]:
+) -> tuple[TrainState, TrainStateProvenance]:
   """Loads optimizer state from given checkpoint based on specified rules."""
   opt_states_serialized = flax.serialization.to_state_dict(
       train_state.opt_states)
@@ -636,7 +634,7 @@ def restore_pmap_from_tensorstore(
     checkpoint_type=CheckpointType.GDA,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
-    restore_transformations: Optional[dict[str, Any]] = None,
+    restore_transformations: dict[str, Any] | None = None,
 ):
   """Restores pmap checkpoints from tensorstore.
 
@@ -775,17 +773,17 @@ class CheckpointLoadingRules(NamedTuple):
       input specs information for the pre-trained model initialization.
   """
   task_p: pax_fiddle.Config[SingleTask]
-  load_rules: Sequence[Tuple[RegexStr, str]]
+  load_rules: Sequence[tuple[RegexStr, str]]
   safe_load: bool = False
-  ignore_rules: Optional[Sequence[RegexStr]] = None
-  step: Optional[int] = None
+  ignore_rules: Sequence[RegexStr] | None = None
+  step: int | None = None
   load_step: bool = False
   load_opt_states: bool = False
   load_ema_states: bool = True
   partial_load_opt_states: bool = False
-  input_specs_provider_p: Optional[
-      pax_fiddle.Config[base_input.BaseInputSpecsProvider]
-  ] = None
+  input_specs_provider_p: pax_fiddle.Config[
+      base_input.BaseInputSpecsProvider
+  ] | None = None
 
 
 def get_excluded_var_mask_for_grad_or_opt(
@@ -852,8 +850,8 @@ def create_state_partition_specs(
     mesh_shape: Sequence[int],
     mesh_axis_names: Sequence[str],
     discard_opt_states: bool,
-    learners: Optional[Sequence[learners_lib.Learner]],
-    opt_states: Optional[optax.OptState] = None,
+    learners: Sequence[learners_lib.Learner] | None,
+    opt_states: optax.OptState | None = None,
 ):
   """Creates partition specs for all variables used in training.
 
@@ -935,7 +933,7 @@ def _create_opt_states(
     mdl_vars: NestedJTensor,
     var_weight_hparams: NestedJTensor,
     learners: Sequence[learners_lib.Learner],
-) -> List[NestedJTensor]:
+) -> list[NestedJTensor]:
   """Creates opt_states by applying gradient transformations.
 
   Args:
@@ -969,7 +967,7 @@ def create_state(
     mdl_vars: NestedJTensor,
     var_weight_hparams: NestedJTensor,
     discard_opt_states: bool,
-    learners: Optional[Sequence[learners_lib.Learner]],
+    learners: Sequence[learners_lib.Learner] | None,
 ) -> TrainState:
   """Creates train states that holds all the forward/backward variables.
 
@@ -1008,7 +1006,7 @@ def create_state(
 def create_state_unpadded_shapes(
     var_weight_hparams: NestedJTensor,
     discard_opt_states: bool,
-    learners: Optional[Sequence[learners_lib.Learner]],
+    learners: Sequence[learners_lib.Learner] | None,
 ) -> TrainState:
   """Creates shapes for all variables used in training without padding...
 
@@ -1045,7 +1043,7 @@ def create_state_padded_shapes(
     mesh_shape: Sequence[int],
     mesh_axis_names: Sequence[str],
     discard_opt_states: bool,
-    learners: Optional[Sequence[learners_lib.Learner]],
+    learners: Sequence[learners_lib.Learner] | None,
 ) -> TrainState:
   """Creates shapes for all variables used in training with padding...
 
@@ -1140,8 +1138,8 @@ class SingleTask(base_task.BaseTask):
       output_num_shards: the number of shards for the output container.
     """
     restore_checkpoint_dir: str = ''
-    restore_checkpoint_step: Optional[int] = None
-    inference_runner: Optional[pax_fiddle.Config[BaseInferenceRunner]] = None
+    restore_checkpoint_step: int | None = None
+    inference_runner: pax_fiddle.Config[BaseInferenceRunner] | None = None
     output_format: io_utils.OutputFormatType = (
         io_utils.OutputFormatType.TFRECORD
     )
@@ -1265,36 +1263,36 @@ class SingleTask(base_task.BaseTask):
     save_max_to_keep: int = 10
     max_inflight_steps: int = 2
     summary_interval_steps: int = 100
-    log_train_output_interval_steps: Optional[int] = None
-    summary_accumulate_interval_steps: Optional[int] = None
+    log_train_output_interval_steps: int | None = None
+    summary_accumulate_interval_steps: int | None = None
     async_summary_writing: bool = True
     variable_norm_summary: bool = True
     eval_interval_steps: int = 100
     eval_skip_train: bool = False
     eval_use_ema_states: bool = False
-    inputs_split_mapping: Optional[PartitionSpec] = None
-    init_from_checkpoint_rules: Dict[str, CheckpointLoadingRules] = (
+    inputs_split_mapping: PartitionSpec | None = None
+    init_from_checkpoint_rules: dict[str, CheckpointLoadingRules] = (
         pax_fiddle.instance_field(default_factory=dict)
     )
-    decode_interval_steps: Optional[int] = None
+    decode_interval_steps: int | None = None
     decode_start_after_n_steps: int = 0
     # TODO(zhishuai): verify this for a pjit model.
     decode_use_ema_states: bool = False
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.0
-    profiler_capture_step: Optional[int] = None
-    profiler_max_num_hosts: Optional[int] = None
+    profiler_capture_step: int | None = None
+    profiler_max_num_hosts: int | None = None
     always_use_train_for_model_init: bool = True
     enforce_input_specs: bool = True
     random_seed: int = 1234
-    apply_mutable_list: List[str] = pax_fiddle.instance_field(
+    apply_mutable_list: list[str] = pax_fiddle.instance_field(
         default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST[:]
     )
-    tensorstore_metadata_key: Optional[str] = None
-    enable_input_checkpointing: Optional[bool] = False
-    restore_transformations: Optional[Dict[str, Any]] = None
-    external_checkpoint_path: Optional[epath.Path] = None
-    external_checkpoint_handler: Optional[ocp.CheckpointHandler] = None
+    tensorstore_metadata_key: str | None = None
+    enable_input_checkpointing: bool | None = False
+    restore_transformations: dict[str, Any] | None = None
+    external_checkpoint_path: epath.Path | None = None
+    external_checkpoint_handler: ocp.CheckpointHandler | None = None
 
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
@@ -1321,7 +1319,7 @@ class SingleTask(base_task.BaseTask):
     profiler_num_steps: int = 0
     profiler_min_duration_sec: float = 1.0
     profiler_capture_step: int = 1
-    profiler_max_num_hosts: Optional[int] = None
+    profiler_max_num_hosts: int | None = None
 
   DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
 
@@ -1336,7 +1334,7 @@ class SingleTask(base_task.BaseTask):
     """
 
     random_seed: int = 1234
-    apply_mutable_list: List[str] = pax_fiddle.instance_field(
+    apply_mutable_list: list[str] = pax_fiddle.instance_field(
         default_factory=lambda: EVAL_DEFAULT_MUTABLE_LIST[:]
     )
 
@@ -1375,13 +1373,13 @@ class SingleTask(base_task.BaseTask):
   )
   infer: pax_fiddle.Config[SingleTask.Infer] = pax_fiddle.template_field(Infer)
 
-  metrics: Optional[pax_fiddle.Config[base_layer.BaseLayer]] = None
-  loss_aggregator: Optional[pax_fiddle.Config[base_layer.BaseLayer]] = None
+  metrics: pax_fiddle.Config[base_layer.BaseLayer] | None = None
+  loss_aggregator: pax_fiddle.Config[base_layer.BaseLayer] | None = None
   vn: pax_fiddle.Config[SingleTask.VariationalNoise] = (
       pax_fiddle.template_field(VariationalNoise)
   )
-  infer_writer: Optional[pax_fiddle.Config[SingleTask.InferWriter]] = None
-  early_stopping_fn: Optional[EarlyStoppingFn] = None
+  infer_writer: pax_fiddle.Config[SingleTask.InferWriter] | None = None
+  early_stopping_fn: EarlyStoppingFn | None = None
   _learners: Any = dataclasses.field(init=False, repr=False)
   _metrics_aggregator: Any = dataclasses.field(init=False, repr=False)
   _loss_aggregator_inst: Any = dataclasses.field(init=False, repr=False)
@@ -1463,8 +1461,8 @@ class SingleTask(base_task.BaseTask):
     return self._inference_runner
 
   def create_opt_states(
-      self, mdl_vars: NestedJTensor,
-      var_weight_hparams: NestedJTensor) -> List[NestedJTensor]:
+      self, mdl_vars: NestedJTensor, var_weight_hparams: NestedJTensor
+  ) -> list[NestedJTensor]:
     """Creates opt_states by applying gradient transformations.
 
     Args:
@@ -1580,9 +1578,13 @@ class SingleTask(base_task.BaseTask):
         unpadded_shapes.opt_states,
     )
 
-  def maybe_adjust_train_state(self, step: int, mdl_vars: Dict[
-      str, JTensor], var_weight_hparams: Nested[base_layer.WeightHParams],
-                               prng_key: PRNGKey) -> Dict[str, JTensor]:
+  def maybe_adjust_train_state(
+      self,
+      step: int,
+      mdl_vars: dict[str, JTensor],
+      var_weight_hparams: Nested[base_layer.WeightHParams],
+      prng_key: PRNGKey,
+  ) -> dict[str, JTensor]:
     """Maybe adjust train state.
 
     This is the place to hook in various weight transformations. For example,
@@ -1717,11 +1719,11 @@ class SingleTask(base_task.BaseTask):
       train_state_provenance: TrainStateProvenance,
       ckpt_path: str,
       rules: CheckpointLoadingRules,
-      load_status: List[Any],
-      global_mesh: Optional[jax.sharding.Mesh] = None,
+      load_status: list[Any],
+      global_mesh: jax.sharding.Mesh | None = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
-      target_partition_specs: Optional[TrainState] = None,
-  ) -> Tuple[TrainState, TrainStateProvenance]:
+      target_partition_specs: TrainState | None = None,
+  ) -> tuple[TrainState, TrainStateProvenance]:
     """Applies one CheckpointLoadingRules to train_state."""
     uses_gda = checkpoint_type in {
         CheckpointType.GDA,
@@ -1994,10 +1996,10 @@ class SingleTask(base_task.BaseTask):
       self,
       train_state: TrainState,
       train_state_provenance: TrainStateProvenance,
-      train_state_partition_specs: Optional[TrainState] = None,
-      global_mesh: Optional[jax.sharding.Mesh] = None,
+      train_state_partition_specs: TrainState | None = None,
+      global_mesh: jax.sharding.Mesh | None = None,
       checkpoint_type: CheckpointType = CheckpointType.FLAX,
-  ) -> Tuple[TrainState, TrainStateProvenance, bool]:
+  ) -> tuple[TrainState, TrainStateProvenance, bool]:
     """Applies self.train.init_from_checkpoint_rules to update train_state.
 
     Args:
