@@ -184,6 +184,22 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         force_prefix_structure=self.force_repeat_prefix_structure,
     )
 
+  def _maybe_summarize_all_grad_norms(
+      self, optimizer_name: str, raw_grads: pytypes.NestedJTensor
+  ) -> None:
+    if self.grad_norm_individual_vars:
+      grad_norms = jax.tree_map(lambda x: jnp.sqrt(jnp.sum(x * x)), raw_grads)
+      var_keys = py_utils.extract_prefixed_keys_from_nested_map(grad_norms)
+
+      def add_grad_norm_summary(key, value):
+        base_layer.add_global_summary(
+            f'per_var_grad_norm/{optimizer_name}{key}',
+            value,
+            SummaryType.AGGREGATE_SCALAR,
+        )
+
+      jax.tree_map(add_grad_norm_summary, var_keys, grad_norms)
+
   def scale_gradients(
       self,
       raw_grads: NestedMap,
@@ -219,21 +235,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       clip_gradient_single_norm_to_value = (
           self.optimizer.clip_gradient_single_norm_to_value
       )
+
     # Compute gradient norm.
-
-    if self.grad_norm_individual_vars:
-      grad_norms = jax.tree_map(lambda x: jnp.sqrt(jnp.sum(x * x)), raw_grads)
-      var_keys = py_utils.extract_prefixed_keys_from_nested_map(grad_norms)
-
-      def add_grad_norm_summary(key, value):
-        base_layer.add_global_summary(
-            f'per_var_grad_norm/{optimizer_name}{key}',
-            value,
-            SummaryType.AGGREGATE_SCALAR,
-        )
-
-      jax.tree_map(add_grad_norm_summary, var_keys, grad_norms)
-
+    self._maybe_summarize_all_grad_norms(optimizer_name, raw_grads)
     if (
         self.grad_norm_summary
         or self.check_valid_step
@@ -257,8 +261,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
             jnp.all(jnp.isfinite(grad_norm)),
             jnp.all(jnp.less(grad_norm, keep_threshold)),
         )
-      else:
-        return jnp.all(jnp.isfinite(grad_norm))
+      return jnp.all(jnp.isfinite(grad_norm))
 
     def clip_grads(grads, grad_norm):
       if clip_gradient_norm_to_value:
@@ -346,16 +349,16 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           transformed_grad,
       )
 
-      # Keep the old state if the step is invalid.
       def _update(updated, original):
-        if any([py_utils.is_optax_masked_node(x) for x in (updated, original)]):
+        """Keep the old state if the step is invalid."""
+        if any(py_utils.is_optax_masked_node(x) for x in (updated, original)):
           return updated
-        else:
-          return jnp.where(valid_step, updated, original)
+        return jnp.where(valid_step, updated, original)
 
       new_states = jax.tree_map(
           _update, new_states, states, is_leaf=py_utils.is_optax_masked_node
       )
+
     # Final applied grad norm.
     if self.grad_norm_summary:
       applied_grad_norm = _compute_grad_norm(transformed_grad)
@@ -364,6 +367,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           applied_grad_norm,
           SummaryType.AGGREGATE_SCALAR,
       )
+
     return transformed_grad, new_states
 
   def apply_gradient(
@@ -517,17 +521,16 @@ class MultiOptimizerLearner(Learner):
     optimizer_mask = []
 
     # Aggregate all the auxiliary optimizer masks.
-    for regex, grad_tx_fn in zip(
-        self.auxiliary_regex, self._auxiliary_grad_tx_fn
-    ):
+    for regex in self.auxiliary_regex:
       regexp = re.compile(regex)
       prefix = py_utils.extract_prefixed_keys_from_nested_map(
           var_weight_hparams
       )
-      mask = jax.tree_map(
-          lambda x, regexp=regexp: regexp.match(x) is not None, prefix
+      optimizer_mask.append(
+          jax.tree_map(
+              lambda x, regexp=regexp: regexp.match(x) is not None, prefix
+          )
       )
-      optimizer_mask.append(mask)
 
     # Create the default optimizer mask.
     def check_var_in_auxiliary_regex(*args):
@@ -562,14 +565,26 @@ class MultiOptimizerLearner(Learner):
     Returns:
       Optax sharded gradient transformation.
     """
-    optimizer_chain = []
     optimizer_mask, default_mask = self.get_masks(var_weight_hparams)
+    use_optax_gradient_transforms = isinstance(
+        self.optimizer, optimizers.OptaxOptimizer
+    )
 
-    if isinstance(self.optimizer, optimizers.OptaxOptimizer):
-      use_optax_gradient_transforms = True
-    else:
-      use_optax_gradient_transforms = False
-
+    optimizer_chain = []
+    # Include ema in the beginning before masking
+    if self.optimizer.ema_decay > 0.0:
+      optimizer_chain.append(
+          optimizers.apply_ema_weights(
+              decay=self.optimizer.ema_decay,
+              use_optax_gradient_transformations=use_optax_gradient_transforms,
+          ),
+      )
+    optimizer_chain.append(
+        optimizers.sharded_masked(
+            self._grad_tx_fn(var_weight_hparams, include_ema=False),
+            default_mask,
+        ),
+    )
     for mask, grad_tx_fn in zip(optimizer_mask, self._auxiliary_grad_tx_fn):
       optimizer_chain.append(
           optimizers.sharded_masked(
@@ -578,29 +593,11 @@ class MultiOptimizerLearner(Learner):
           )
       )
 
-    optimizer_chain.insert(
-        0,
-        optimizers.sharded_masked(
-            self._grad_tx_fn(var_weight_hparams, include_ema=False),
-            default_mask,
-        ),
-    )
-
-    # Include ema in the beginning before masking
-    op = self.optimizer
-    if op.ema_decay > 0.0:
-      optimizer_chain.insert(
-          0,
-          optimizers.apply_ema_weights(
-              decay=op.ema_decay,
-              use_optax_gradient_transformations=use_optax_gradient_transforms,
-          ),
-      )
-
     if use_optax_gradient_transforms:
       grad_tx = optax.chain(*optimizer_chain)
     else:
       grad_tx = optimizers.sharded_chain(*optimizer_chain)
+
     # Finally, apply vectorization on prefix dims.
     if self.vectorize_on_repeat_prefix:
       grad_tx = opt_vec.get_transformations_with_vectorized_repeat_prefix(
