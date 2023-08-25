@@ -10,10 +10,10 @@
 * Support for [tf.data.experimental.service](https://www.tensorflow.org/api_docs/python/tf/data/experimental/service).
 ## Note
 *   Version: 1.1.0
-*   Build Date: 20230712
-*   Paxml commit: b8e021a18d20816d713eea7e0c9056becea1823a
+*   Build Date: 20230824
+*   Paxml commit: fe4d87fe90dcbe2ef6db881d495c7d40270a3033
 *   Praxis version: 1.1.0
-*   Praxis commit: f457672aa6193621a4ebf2f7d9c9acf62e0513f6
+*   Praxis commit: 2a7d0407871502a1d79dcd0e01411e73f1d15d36
 # Version: 1.0.0
 ## Major Features and Improvements
 * **Fiddle** - Pax's layer library, Praxis, now has layers and BaseParameterizable configured with [Fiddle](https://github.com/google/fiddle), a Python-first configuration library. Fiddle reduces boilerplate, and adds productivity features including history tracking, graphviz visualization, support for aliasing objects, and more.
