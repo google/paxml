@@ -13,7 +13,7 @@ orbax-checkpoint==0.3.5
 praxis==1.1.0
 protobuf==3.19.6
 pyglove==0.4.2
-seqio==0.0.16
+seqio==0.0.17
 t5==0.9.4
 tensorflow~=2.9.2
 tensorflow-text~=2.9.0
