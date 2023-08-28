@@ -691,10 +691,11 @@ class SeqIOInput(base_input.BaseInput):
         num_epochs=-1 if self.should_repeat else 1,
         shard_info=self._shard_info)
     ds = self._pad_to_batch_size(ds)
+    # Note, we do not set num_parallel_calls, as that will make
+    # symbolic input data checkpoints huge.
     ds = ds.batch(
         self.batch_size,
         drop_remainder=self.drop_remainder,
-        num_parallel_calls=tf.data.AUTOTUNE,
     )
     if self.num_batches_to_skip:
       if self.is_training:
