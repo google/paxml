@@ -1288,6 +1288,7 @@ def decode_step(
     var_weight_hparams: NestedWeightHParams,
     inputs: JTensor | NestedMap,
     fprop_dtype: jnp.dtype = jnp.float32,
+    apply_mutable_list: Sequence[str] = (DECODE_CACHE, SUMMARIES),
 ) -> tuple[tuple[Any, Any, Any], NestedMap]:
   """Decodes a model for a single step.
 
@@ -1298,6 +1299,8 @@ def decode_step(
     var_weight_hparams: A pytree of WeightHParams for the model variables.
     inputs: A batch of inputs to model.decode().
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
+    apply_mutable_list: A list of allowed collections to be mutated during
+      decode apply.
 
   Returns:
     A tuple of (weighted_scalars, results, eval_metrics) as computed
@@ -1328,10 +1331,7 @@ def decode_step(
         inputs,
         method=model.decode,
         rngs=apply_rng_keys,
-        mutable=[
-            DECODE_CACHE,
-            SUMMARIES,
-        ],
+        mutable=apply_mutable_list,
     )
     # DECODE_CACHE are not read by caller. But they can be large. Tell XLA DCE
     # to remove it from output. Note MLP decoder don't have DECODE_CACHE.
@@ -1371,7 +1371,13 @@ def _decode_step_for_partitioner(
   del static_args  # Unused.
   (weighted_scalars, per_example_out, updated_metrics), updated_vars = (
       decode_step(
-          task.model, states, prng_key, var_weight_hparams, inputs, fprop_dtype
+          task.model,
+          states,
+          prng_key,
+          var_weight_hparams,
+          inputs,
+          fprop_dtype,
+          task.hparams.decode.apply_mutable_list,
       )
   )
   # TODO(laigd): move this inside decode_step(). None of the existing callers

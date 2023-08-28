@@ -99,6 +99,12 @@ EVAL_DEFAULT_MUTABLE_LIST = [
 ]
 
 
+DECODE_DEFAULT_MUTABLE_LIST = [
+    base_layer.DECODE_CACHE,
+    base_layer.SUMMARIES,
+]
+
+
 def _flatten_dict(
     node: dict[str, Any],
     prefix: str = '',
@@ -1312,6 +1318,8 @@ class SingleTask(base_task.BaseTask):
       profiler_capture_step: The step index at which to capture a code profile.
       profiler_max_num_hosts: If set, limit profiling only on the specified
         number of hosts.
+      apply_mutable_list: A list of allowed collections to be mutated during
+        decode apply.
     """
 
     prng_key_fold_with_batch_index: bool = False
@@ -1320,6 +1328,9 @@ class SingleTask(base_task.BaseTask):
     profiler_min_duration_sec: float = 1.0
     profiler_capture_step: int = 1
     profiler_max_num_hosts: int | None = None
+    apply_mutable_list: Sequence[str] = pax_fiddle.instance_field(
+        default_factory=lambda: DECODE_DEFAULT_MUTABLE_LIST[:]
+    )
 
   DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
 
