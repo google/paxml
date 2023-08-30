@@ -112,39 +112,40 @@ class SearchHParams:
 
   Attributes:
     search_algorithm: Hyperparameters for search algorithm.
-    search_reward: Hyperparameters for search reward.
-      If None, 0 will be used as objective, which shall be used only
-      for grid search or random search.
-    early_stopping: An optional population-wise early stopping policy.
-      If None, no population-wise early stopping policy will be used, though
-      users still can raise `automl.EarlyStoppingError` to early terminate a
-      a single trial during training/evaluation.
+    search_reward: Hyperparameters for search reward. If None, 0 will be used as
+      objective, which shall be used only for grid search or random search.
+    early_stopping: An optional population-wise early stopping policy. If None,
+      no population-wise early stopping policy will be used, though users still
+      can raise `automl.EarlyStoppingError` to early terminate a a single trial
+      during training/evaluation.
     cross_step_metric_aggregator: Hyperparameters for cross-step metric
       aggregator. If None, `automl.LastReportedMetricValues` will be used.
     max_num_trials: Max number of trials for the search.
-    errors_to_skip: An optional field to specify on what errors the trial
-      should be skipped. It's in the form of a list of (ExceptionType) or
+    errors_to_skip: An optional field to specify on what errors the trial should
+      be skipped. It's in the form of a list of (ExceptionType) or
       (ExceptionType, regexForError). For example, if users specify:
       `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
-      RuntimeError or errors that match 'XLACompilation.*' will be treated as
-      to skip.
+      RuntimeError or errors that match 'XLACompilation.*' will be treated as to
+      skip.
     prior_study_ids: An optional list of Vizier study GUIDs to warm up current
-      search. All completed trials from previous studies will be feedback to
-      the controller via the `pg.DNAGenerator.recover` interface.
+      search. All completed trials from previous studies will be feedback to the
+      controller via the `pg.DNAGenerator.recover` interface.
     add_prior_trials: If True, trials from previous studies will be copied to
       current study. Effective only when `prior_study_ids` is set.
     add_experiment_config_to_metadata: If True (default), serialized experiment
-      config will be added to trial metadata for helping meta-learning later.
-      If the study will be very large and users don't want to store the
-      experiment config, set it to False.
-    treats_early_stopped_trials_as_done: If True, early stopped trials will
-      be treated as done, whose rewards will be fed back to the controller,
-      except for those trials who haven't added any measurements.
+      config will be added to trial metadata for helping meta-learning later. If
+      the study will be very large and users don't want to store the experiment
+      config, set it to False.
+    treats_early_stopped_trials_as_done: If True, early stopped trials will be
+      treated as done, whose rewards will be fed back to the controller, except
+      for those trials who haven't added any measurements.
     train_to_end: If True, training will not be stopped until it reaches
       `num_train_steps`. If False, training will be stopped when there is no
       further eval/decode steps.
     enable_dataset_tuning: If False, skip instantiating the dataset to look for
       tunable variables.
+    vizier_service_endpoint: Vizier service endpoint. This is used for debugging
+      only.
   """
   search_algorithm: pax_fiddle.Config[BaseAlgorithm] | None = None
   search_reward: pax_fiddle.Config[BaseReward] | None = None
@@ -162,6 +163,7 @@ class SearchHParams:
   treats_early_stopped_trials_as_done: bool = False
   train_to_end: bool = False
   enable_dataset_tuning: bool = False
+  vizier_service_endpoint: str | None = None
 
 
 class MetricType(enum.Enum):
