@@ -90,10 +90,12 @@ def filter_nestedmap(full_specs, partial_specs):
     return full_specs
 
 
-def compile_for_auto_sharding(step_fn: Any,
-                              train_state: TrainState,
-                              step_key: PRNGKey,
-                              inputs_shape_dtype: NestedShapeDtypeLike):
+def compile_for_auto_sharding(
+    step_fn: Any,
+    train_state: TrainState,
+    step_key: PRNGKey,
+    inputs_shape_dtype: NestedShapeDtypeLike,
+):
   """Compiles step_fn ahead of time to extract the shardings.
 
   The sharding is returned by the auto spmd partitioner and is attached on the
@@ -200,7 +202,8 @@ class StepFn(Protocol):
       inputs: Inputs drawn from the input pipeline.
       fprop_dtype: Fprop datatype, can be either jnp.float32 or jnp.bfloat16.
       var_weight_hparams: A pytree of WeightHParams for the model variables.
-      static_args: Encapsulates any static arguments needed by the step function.
+      static_args: Encapsulates any static arguments needed by the step
+        function.
 
     Returns:
       A tuple (new_train_state, output), where:
@@ -229,7 +232,8 @@ class PartitionedStepFn(Protocol):
       train_state: The current TrainState.
       prng_key: The PRNGKey.
       inputs: Inputs drawn from the input pipeline.
-      static_args: Encapsulates any static arguments needed by the step function.
+      static_args: Encapsulates any static arguments needed by the step
+        function.
 
     Returns:
       (Same as StepFn.__call__) A tuple (new_train_state, output), where:
@@ -1140,7 +1144,8 @@ class PjitPartitioner(Partitioner):
         is_eval,
         fn_in_partition_specs,
         fn_out_partition_specs,
-        use_pspec_on_array_inputs=use_pspec_on_array_inputs)
+        use_pspec_on_array_inputs=use_pspec_on_array_inputs,
+    )
     return partitioned_step_fn
 
 
@@ -1266,7 +1271,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         is_eval,
         fn_in_partition_specs,
         fn_out_partition_specs,
-        use_pspec_on_array_inputs=True)
+        use_pspec_on_array_inputs=True,
+    )
 
     logging.info(
         (
@@ -1483,4 +1489,56 @@ def create_partitioner(
       )
     else:
       partitioner = PjitPartitioner(init_is_eval, reshard_inputs, jax_task)
+  return partitioner
+
+
+def create_experiment_or_default_partitioner(
+    *,
+    # experiment_config must be an Any to avoid circular dependecy,
+    # but should be a base_experiment.BaseExperiment.
+    experiment_config: Any,
+    jax_task: tasks_lib.SingleTask,
+    running_mode: RunningMode,
+    checkpoint_type: CheckpointType,
+    input_p: pax_fiddle.Config[base_input.BaseInput],
+    enable_auto_sharding: bool,
+) -> Partitioner:
+  """Creates the partitioner from the experiment or a default partitioner.
+
+  This is a convenience function that wraps `create_partitioner` if the
+  `experiment_config.partitioner` returns `None`. In such case (experiment
+  config does not provide a partitioner) this method will delegate partitioner
+  creation to `create_partitioner`.
+
+  Args:
+    experiment_config: The experiment configuration.
+    jax_task: The instantiated task for this experiment.
+    running_mode: The RunningMode enum that this partitioner will be used for.
+    checkpoint_type: The type of the checkpoint, which influences whether inputs
+      are resharded when the experiment config did not provide a partitioner.
+    input_p: A fiddle config of the eval or decode datasets. Used to determine
+      input sharding when constructing a default partitioner.
+    enable_auto_sharding: A boolean indicating wither to shard based on the
+      `input_p` parameter.
+
+  Returns:
+    A Partitioner instance either built from the experiment config or from
+    a default based on the input fiddle config.
+  """
+  partitioner = experiment_config.partitioner()
+  if partitioner is None:
+    # For the input pipeline on the Pathways client, the inputs are numpy
+    # arrays. We rely on the Pathways to transfer the inputs, since
+    # jax.device_put() has a larger performance overhead.
+    reshard_inputs = (
+        checkpoint_type != CheckpointType.PERSISTENCE
+        or input_p.experimental_remote_input
+    )
+    partitioner = create_partitioner(
+        jax_task,
+        init_is_eval=True,
+        reshard_inputs=reshard_inputs,
+        auto_sharding_mode=running_mode if enable_auto_sharding else None,
+        auto_sharding_input_params=input_p if enable_auto_sharding else None,
+    )
   return partitioner

@@ -433,18 +433,13 @@ def evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = (
-      checkpoint_type != CheckpointType.PERSISTENCE or
-      eval_input_p[0].experimental_remote_input
-  )
-  partitioner = partitioning.create_partitioner(
-      jax_task,
-      init_is_eval=True,
-      reshard_inputs=reshard_inputs,
-      auto_sharding_mode=RunningMode.EVAL if enable_auto_sharding else None,
-      auto_sharding_input_params=eval_input_p[0]
-      if enable_auto_sharding
-      else None,
+  partitioner = partitioning.create_experiment_or_default_partitioner(
+      experiment_config=experiment_config,
+      jax_task=jax_task,
+      running_mode=RunningMode.EVAL,
+      checkpoint_type=checkpoint_type,
+      input_p=eval_input_p[0],
+      enable_auto_sharding=enable_auto_sharding,
   )
   input_for_shape = None
   if not jax_task.train.always_use_train_for_model_init:
@@ -626,18 +621,13 @@ def decode(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
-  reshard_inputs = (
-      checkpoint_type != CheckpointType.PERSISTENCE or
-      combined_input_ps[0].experimental_remote_input
-  )
-  partitioner = partitioning.create_partitioner(
-      jax_task,
-      init_is_eval=True,
-      reshard_inputs=reshard_inputs,
-      auto_sharding_mode=RunningMode.DECODE if enable_auto_sharding else None,
-      auto_sharding_input_params=combined_input_ps[0]
-      if enable_auto_sharding
-      else None,
+  partitioner = partitioning.create_experiment_or_default_partitioner(
+      experiment_config=experiment_config,
+      jax_task=jax_task,
+      running_mode=RunningMode.DECODE,
+      checkpoint_type=checkpoint_type,
+      input_p=combined_input_ps[0],
+      enable_auto_sharding=enable_auto_sharding,
   )
   input_for_shape = None
   if not jax_task.train.always_use_train_for_model_init:
@@ -824,9 +814,12 @@ def _common_eval_or_decode_loop(
   # have been written in the mean time.
   last_checkpoint_step = int(
       py_utils.maybe_unreplicate_for_fully_replicated(
-          partitioned_train_state.step))
-  logging.info('Evaluation loop starting from step `%d`...',
-               last_checkpoint_step)
+          partitioned_train_state.step
+      )
+  )
+  logging.info(
+      'Evaluation loop starting from step `%d`...', last_checkpoint_step
+  )
 
   eval_runner.setup_eval_programs()
   eval_runner.setup_decode_programs(decode_output_pickle)
@@ -926,8 +919,8 @@ def infer_and_write(
       maybe_use_persistence_checkpointing, task.hparams
   )
   reshard_inputs = (
-      checkpoint_type != CheckpointType.PERSISTENCE or
-      inputs_p[0].experimental_remote_input
+      checkpoint_type != CheckpointType.PERSISTENCE
+      or inputs_p[0].experimental_remote_input
   )
   partitioner = partitioning.create_partitioner(
       task, reshard_inputs=reshard_inputs
@@ -1043,7 +1036,7 @@ def infer_and_write_pmap(
           output_format=infer_writer_p.output_format,
       )
 
-    for step in (range(num_steps) if num_steps >= 0 else itertools.count()):
+    for step in range(num_steps) if num_steps >= 0 else itertools.count():
       logging.info('Evaling input batch %d', step + 1)
       try:
         batch = input_gen.get_next()

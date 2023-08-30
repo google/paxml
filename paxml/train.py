@@ -203,20 +203,14 @@ def train_and_evaluate(
 
   logging.info('[PAX STATUS]: Initializing partitioner')
   # Creates the partitioner, which will be set up later.
-  partitioner = experiment_config.partitioner()
-  if not partitioner:
-    # For the input pipeline on the Pathways client, the inputs are numpy
-    # arrays. We rely on the Pathways to transfer the inputs, since
-    # jax.device_put() has a larger performance overhead.
-    reshard_inputs = (
-        checkpointer.checkpoint_type != CheckpointType.PERSISTENCE
-        or train_input_p.experimental_remote_input
-    )
-    partitioner = partitioning.create_partitioner(
-        jax_task,
-        reshard_inputs=reshard_inputs,
-        auto_sharding_mode=RunningMode.TRAIN if enable_auto_sharding else None,
-    )
+  partitioner = partitioning.create_experiment_or_default_partitioner(
+      experiment_config=experiment_config,
+      jax_task=jax_task,
+      running_mode=RunningMode.TRAIN,
+      checkpoint_type=checkpointer.checkpoint_type,
+      input_p=train_input_p,
+      enable_auto_sharding=enable_auto_sharding,
+  )
   specs_provider_p = experiment_config.get_input_specs_provider_params()
   if issubclass(specs_provider_p.cls, base_input.DatasetInputSpecsProvider):
     specs_provider_p.input_p = partitioner.preprocess_input_config(
