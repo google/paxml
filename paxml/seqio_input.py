@@ -643,10 +643,8 @@ class SeqIOInput(base_input.BaseInput):
     # tf.data `warm_start` feature is newly added and only available on TF
     # nightly, but not the latest stable version(2.12).
     # TODO(rxsang): Remove checking `hasattr` once TF2.13 is released.
-    if self.warm_start and (
-        hasattr(options.experimental_optimization, 'warm_start')
-    ):
-      options.experimental_optimization.warm_start = True
+    if self.warm_start and (hasattr(options, 'experimental_warm_start')):
+      options.experimental_warm_start = True
 
     if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
       options.experimental_symbolic_checkpoint = True
