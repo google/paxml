@@ -25,6 +25,7 @@ from typing import Any, Mapping, Sequence
 
 from absl import flags
 from absl import logging
+from clu import periodic_actions
 from etils import epath
 import jax
 from jax import monitoring
@@ -281,8 +282,8 @@ class BaseTrainProgram(Program):
       )
 
     # Initializes other states.
-    self._train_unpadded_global_batch_size = (
-        train_input.get_global_batch_size(train_input)
+    self._train_unpadded_global_batch_size = train_input.get_global_batch_size(
+        train_input
     )
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
@@ -292,6 +293,10 @@ class BaseTrainProgram(Program):
     self._train_summary_last_time = time.time()
     self._train_summary_last_step = init_step - 1
     self._pending_train_losses = _InflightQueue(train_p.max_inflight_steps)
+
+    self._report_progress = periodic_actions.ReportProgress(
+        num_train_steps=self._task.train.num_train_steps
+    )
 
   def should_run(self, state: TrainState, step: int) -> bool:
     return step < self._task.train.num_train_steps
@@ -369,6 +374,7 @@ class BaseTrainProgram(Program):
     ):
       eval_train_metrics = self._maybe_run_eval_train(new_state, new_step)
 
+    self._report_progress(new_step)
     return TrainProgramOutput(
         new_state,
         loss=train_outputs.loss,

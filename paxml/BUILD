@@ -535,6 +535,7 @@ pytype_strict_library(
         ":xla_passthrough",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
+        # Implicit clu.periodic_actions dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
