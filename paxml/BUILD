@@ -353,6 +353,7 @@ pytype_strict_library(
     deps = [
         ":summary_utils",
         # Implicit absl.logging dependency.
+        # Implicit clu.metrics dependency.
         # Implicit clu.values dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
@@ -619,16 +620,16 @@ pytype_strict_library(
         ":base_metrics",
         ":checkpoint_types",
         ":learners",
+        ":metric_utils",
         ":sgf",
-        ":summary_utils",
         ":tasks_lib",
         ":train_states",
         # Implicit absl.logging dependency.
+        # Implicit clu.metrics dependency.
         # Implicit etils dependency.
         # Implicit fiddle dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
-        "//paxml:checkpoints",
         "//praxis:asserts",
         "//praxis:base_hyperparams",
         "//praxis:base_input",

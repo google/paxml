@@ -17,9 +17,10 @@
 
 import numbers
 import typing
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, Tuple
 
 from absl import logging
+import clu.metrics as clu_metrics
 import clu.values as clu_values
 import jax
 from jax import numpy as jnp
@@ -161,6 +162,22 @@ def write_clu_metric_summaries(
       summary_utils.write_summary_tensor(
           step_i, metric_name, metric_value.value, summary_type
       )
+
+
+def compute_and_write_clu_metric_summaries(metrics: Metrics, step: int) -> None:
+  """Compute clu_metrics.Metric objects values and write them out as summaries.
+
+  Args:
+    metrics: A Dict[str, clu_metrics.Metric] objects with a compute_value()
+      function implemented that returns either a clu_values.Value object, a
+      Dict[str, clu_values.Value] objects, a Dict[str, List[clu_values.Value]]
+      objects, or a List[clu_values.Value].
+    step: An int representing the current step of decoding.
+  """
+  if metrics:
+    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
+    clu_metric_values = compute_metric_values(metrics)
+    write_clu_metric_summaries(clu_metric_values, step)
 
 
 def write_seqio_metric_summaries(
@@ -318,3 +335,56 @@ def update_float_dict(
     for k, v in source.items():
       target[f'{prefix}/{k}'] = v
   return target
+
+
+def merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
+  """Merges updated metric data with existing metrics."""
+  if metrics:
+    if set(metrics.keys()) != set(updated_metrics.keys()):
+      raise ValueError(
+          'metrics and updated_metrics keys don`t match. '
+          f'metrics keys: {metrics.keys()} '
+          f'updated_metrics keys: {updated_metrics.keys()}'
+      )
+
+    for key in metrics:
+      metrics[key] = metrics[key].merge(updated_metrics[key])
+  else:
+    metrics = updated_metrics
+  return metrics
+
+
+def extract_weighted_scalars_and_clu_metrics(
+    metrics: dict[str, Any]
+) -> Tuple[WeightedScalars, Metrics]:
+  """Extracts weighted scalars and clu metrics from metrics dict.
+
+  Args:
+    metrics: Metrics data output by the model.
+
+  Returns:
+    A tuple of weighted scalars or clu.metrics. Only one of these will be
+    returned by the model in its outputs, so one of the
+    tuple elements will be an empty dictionary.
+  """
+  if isinstance(metrics, NestedMap):
+    metric_values = metrics.Flatten()
+  else:
+    metric_values = metrics.values()
+
+  for metric_value in metric_values:
+    if is_weighted_scalar(metric_value):
+      return metrics, {}
+    elif isinstance(metric_value, clu_metrics.Metric):
+      return {}, metrics
+    else:
+      raise TypeError(
+          '`metrics` must be a `WeightedScalars` or `clu.Metrics`. Instead its'
+          ' type is %s.'
+          % type(metrics)
+      )
+  raise TypeError(
+      '`metrics` must be a `WeightedScalars` or `clu.Metrics`. Instead its'
+      ' type is %s.'
+      % type(metrics)
+  )

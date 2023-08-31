@@ -779,9 +779,14 @@ class BaseEvalProgram(Program):
     logging.info(
         'Starting eval %s with num_steps=%d', self._name, self._eval_num_steps
     )
-    num_steps, loss, summary_tensors, metrics, per_example_scores = (
-        self._run_eval_loop(state)
-    )
+    (
+        num_steps,
+        loss,
+        summary_tensors,
+        metrics,
+        per_example_scores,
+        clu_metrics,
+    ) = self._run_eval_loop(state)
     logging.info('Finished eval on %s', self._name)
 
     # Flatten scoring outputs to simplify input for metrics eval computation.
@@ -836,6 +841,9 @@ class BaseEvalProgram(Program):
     summary_utils.write_summary_entry(
         self._eval_summary_writer, step, loss, metrics, summary_tensors
     )
+
+    metric_utils.compute_and_write_clu_metric_summaries(clu_metrics, step)
+
     maybe_write_eval_outputs(
         EvaluationMode.EVAL, output_dir, step, flat_scoring_outputs
     )
@@ -852,6 +860,7 @@ class BaseEvalProgram(Program):
     summary_tensor_dict = {}
     metrics = collections.defaultdict(list)
     per_example_scores = []
+    clu_metrics = {}
 
     step_num = 0
     # self._eval_num_steps < 0 indicates running until input out of range.
@@ -887,13 +896,27 @@ class BaseEvalProgram(Program):
       weighted_scalars = eval_outputs.weighted_scalars
       per_example_out = eval_outputs.per_example_out
       summary_tensors = eval_outputs.summary_tensors
+      eval_step_clu_metrics_out = eval_outputs.clu_metrics
+
       xla_passthrough.merge_back_xla_unsupported_batch(
           per_example_out, unsupported_inputs
       )
       logging.info('Finished eval step %d for %s', step_num, self._name)
-      loss, weighted_scalars, per_example_out, summary_tensors = (
+      (
+          loss,
+          weighted_scalars,
+          per_example_out,
+          summary_tensors,
+          eval_step_clu_metrics_out,
+      ) = (
           py_utils.maybe_unreplicate_for_fully_replicated(out)
-          for out in (loss, weighted_scalars, per_example_out, summary_tensors)
+          for out in (
+              loss,
+              weighted_scalars,
+              per_example_out,
+              summary_tensors,
+              eval_step_clu_metrics_out,
+          )
       )
 
       losses += [loss]
@@ -902,8 +925,10 @@ class BaseEvalProgram(Program):
           summary_tensor_dict[k] += [v]
         else:
           summary_tensor_dict[k] = [v]
+
       for k in weighted_scalars:
         metrics[k].append(weighted_scalars[k])
+
       # Use jax.device_get to overlap the device -> host memory transfer.
       # Make a copy on the transferred tensor since running
       # py_utils.tree_unstack() on XLA-backed numpy arrays is inefficient
@@ -912,7 +937,19 @@ class BaseEvalProgram(Program):
           jax.tree_map(lambda x: x.copy(), jax.device_get(per_example_out))
       )
 
-    return step_num, losses, summary_tensor_dict, metrics, per_example_scores
+      # Merge clu.metrics to update for each minibatch.
+      clu_metrics = metric_utils.merge_clu_metrics(
+          clu_metrics, eval_step_clu_metrics_out
+      )
+
+    return (
+        step_num,
+        losses,
+        summary_tensor_dict,
+        metrics,
+        per_example_scores,
+        clu_metrics,
+    )
 
   @abc.abstractmethod
   def eval_step(

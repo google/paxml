@@ -19,9 +19,10 @@ import dataclasses
 import enum
 import functools
 import pprint
-from typing import Any, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence, Tuple
 
 from absl import logging
+import clu.metrics
 from etils import epath
 import fiddle as fdl
 from flax import struct as flax_struct
@@ -44,7 +45,11 @@ from praxis import pax_fiddle
 from praxis import py_utils
 from praxis import pytypes
 
-# summary_utils is slow to import, so we do it lazily.
+
+# Those modules are slow to import, so we do it lazily.
+metric_utils = lazy_loader.LazyLoader(
+    'metric_utils', globals(), 'paxml.metric_utils'
+)
 summary_utils = lazy_loader.LazyLoader(
     'summary_utils', globals(), 'paxml.summary_utils'
 )
@@ -500,18 +505,36 @@ def _maybe_to_float32(x: JTensor) -> JTensor:
   return x
 
 
+def _aggregate_clu_metrics(
+    clu_metrics: pytypes.Metrics,
+) -> dict[str, clu.metrics.Metric]:
+  # Gathers the metrics across workers, and then aggregate them.
+  # Note that it's important to disable tiling (tiled=False by default) when
+  # calling all_gather(), so that clu_metrics.Metric.reduce() can aggregate
+  # the value correctly using jax.lax.scan.
+  assert base_layer.is_running_under_pmap()
+  aggregated_clu_metrics = {}
+  for metric_name, metric in clu_metrics.items():
+    aggregated_clu_metrics[metric_name] = jax.lax.all_gather(
+        metric, axis_name=PMAP_PARALLEL_AXIS_NAME
+    ).reduce()
+  return aggregated_clu_metrics
+
+
 # TODO(pax): maybe move to metric_utils.py.
 def _maybe_aggregate_metrics_summaries(
     loss_aggregator: base_metrics.LossAggregator,
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: dict[str, Any],
-) -> tuple[
+    clu_metrics: Optional[pytypes.Metrics] = None,
+) -> Tuple[
     JTensor,
     JTensor,
     JTensor | None,
     WeightedScalars,
     SummaryDict,
+    dict[str, Any],
     dict[str, Any],
 ]:
   """If in pmap, aggregate metrics and summaries across model replicas.
@@ -522,6 +545,7 @@ def _maybe_aggregate_metrics_summaries(
     weighted_scalars: a WeightedScalars.
     summary_dict: a SummaryDict.
     per_example_out: a NestedMap of per example values.
+    clu_metrics: A dict of clu.metrics.
 
   Returns:
     (weighted_loss, mean_loss, loss_weight, aggregated_metrics,
@@ -535,12 +559,21 @@ def _maybe_aggregate_metrics_summaries(
     aggregated_scalars - the aggregated weighted scalars dict.
     aggregated_summaries - the aggregated summaries.
     per_example_out - the aggregated per_example_out.
+    aggregated_clu_metrics - the aggregated clu_metrics.
   """
-  # compute weighted loss and mean across shards
+  # Compute weighted loss and mean across shards.
+  # Models will return one of `WeightedScalars` or `clu_metrics`. Loss
+  # aggregation from `clu_metrics` is not yet supported.
+  if clu_metrics and len(clu_metrics.keys()) > 0:
+    raise NotImplementedError(
+        'Loss aggregation from `clu.Metrics` is currently unsupported'
+    )
+
   weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
       weighted_scalars
   )
 
+  aggregated_clu_metrics = None
   if base_layer.is_running_under_pmap():
     # aggregate data across devices.
     aggregated_scalars = type(weighted_scalars)()
@@ -551,12 +584,16 @@ def _maybe_aggregate_metrics_summaries(
       )
       sum_weight = jax.lax.psum(weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
       aggregated_scalars[key] = (sum_value / (sum_weight + 1e-8), sum_weight)
+
     aggregated_summaries = summary_utils.aggregate_per_replica_summaries(
         summary_dict
     )
     per_example_out = jax.lax.all_gather(
         per_example_out, axis_name=PMAP_PARALLEL_AXIS_NAME, tiled=True
     )
+
+    if clu_metrics:
+      aggregated_clu_metrics = _aggregate_clu_metrics(clu_metrics)
   else:
     # No aggregation of weighted scalars is needed.
     aggregated_scalars = weighted_scalars
@@ -570,6 +607,7 @@ def _maybe_aggregate_metrics_summaries(
       aggregated_scalars,
       aggregated_summaries,
       per_example_out,
+      aggregated_clu_metrics,
   )
 
 
@@ -801,12 +839,16 @@ def _get_default_loss_fn(
 
     with base_layer.JaxContext.new_context(hparams=context_p):
       k1, k2, k3 = jax.random.split(prng_key, 3)
-      (weighted_scalars, per_example_output), updated_vars = apply_fn(
+      (metrics, per_example_output), updated_vars = apply_fn(
           model=jax_task.model,
           variables=mdl_vars,
           inputs=inputs,
           mutable=jax_task.hparams.train.apply_mutable_list,
           rngs={PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3},
+      )
+
+      weighted_scalars, clu_metrics = (
+          metric_utils.extract_weighted_scalars_and_clu_metrics(metrics)
       )
 
       # Fetch all the summary tensors.
@@ -822,11 +864,13 @@ def _get_default_loss_fn(
           aggregated_scalars,
           aggregated_summaries,
           per_example_output,
+          aggregated_clu_metrics,
       ) = _maybe_aggregate_metrics_summaries(
           loss_aggregator=jax_task.loss_aggregator_inst,
           weighted_scalars=weighted_scalars,
           summary_dict=summary_tensors,
           per_example_out=per_example_output,
+          clu_metrics=clu_metrics,
       )
       # metrics and summary_tensors no longer needed.
       del weighted_scalars
@@ -849,6 +893,7 @@ def _get_default_loss_fn(
             forward_updated_vars,
             aggregated_summaries,
             per_example_output,
+            aggregated_clu_metrics,
         ),
     )
 
@@ -1052,6 +1097,7 @@ def train_step_single_learner(
       fwd_updated_vars,
       fwd_summary_tensors,
       per_example_out,
+      clu_metrics,
   ) = aux_info.aux_info
 
   # weighted_loss is only needed for computing gradients, but otherwise, not
@@ -1164,6 +1210,7 @@ def train_step_single_learner(
       weighted_scalars=weighted_scalars,
       per_example_out=per_example_out,
       summary_tensors=summary_tensors,
+      clu_metrics=clu_metrics,
   )
 
 
@@ -1226,14 +1273,19 @@ def eval_step_single_learner(
       inputs, [py_utils.PROVENANCE_PREFIX]
   )
   with base_layer.JaxContext.new_context(hparams=context_p):
-    prng_key, k1, k2, k3 = jax.random.split(prng_key, 4)
+    _, k1, k2, k3 = jax.random.split(prng_key, 4)
     apply_rng_keys = {PARAMS: k1, RANDOM: k2, NON_PAX_RNG_KEY: k3}
-    (weighted_scalars, per_example_out), updated_vars = model.apply(
+    outputs, updated_vars = model.apply(
         mdl_vars,
         inputs,
         mutable=jax_task.hparams.evaluate.apply_mutable_list,
         method=model.__call__,
         rngs=apply_rng_keys,
+    )
+
+    metrics, per_example_out = outputs
+    weighted_scalars, clu_metrics = (
+        metric_utils.extract_weighted_scalars_and_clu_metrics(metrics)
     )
 
     summary_tensors = updated_vars.get(SUMMARIES, {})
@@ -1249,11 +1301,13 @@ def eval_step_single_learner(
         aggregated_scalars,
         aggregated_summaries,
         per_example_out,
+        aggregated_clu_metrics,
     ) = _maybe_aggregate_metrics_summaries(
         jax_task.loss_aggregator_inst,
         weighted_scalars,
         summary_tensors,
         per_example_out,
+        clu_metrics,
     )
 
     # weighted_scalars and summary_tensors no longer needed.
@@ -1261,16 +1315,21 @@ def eval_step_single_learner(
     del summary_tensors
 
   if fprop_dtype == jnp.bfloat16:
-    (mean_loss, aggregated_scalars, per_example_out, aggregated_summaries) = (
-        jax.tree_map(
-            _maybe_to_float32,
-            (
-                mean_loss,
-                aggregated_scalars,
-                per_example_out,
-                aggregated_summaries,
-            ),
-        )
+    (
+        mean_loss,
+        aggregated_scalars,
+        per_example_out,
+        aggregated_summaries,
+        aggregated_clu_metrics,
+    ) = jax.tree_map(
+        _maybe_to_float32,
+        (
+            mean_loss,
+            aggregated_scalars,
+            per_example_out,
+            aggregated_summaries,
+            aggregated_clu_metrics,
+        ),
     )
 
   return None, StepFnOutput(
@@ -1278,6 +1337,7 @@ def eval_step_single_learner(
       weighted_scalars=aggregated_scalars,
       per_example_out=per_example_out,
       summary_tensors=aggregated_summaries,
+      clu_metrics=aggregated_clu_metrics,
   )
 
 
@@ -1397,17 +1457,7 @@ def _decode_step_for_partitioner(
     summary_tensors = summary_utils.aggregate_per_replica_summaries(
         summary_tensors
     )
-
-    # Gathers the metrics across workers, and then aggregate them.
-    # Note that it's important to disable tiling (tiled=False by default) when
-    # calling all_gather(), so that clu_metrics.Metric.reduce() can aggregate
-    # the value correctly using jax.lax.scan.
-    aggregated_metrics = {}
-    for metric_name, metric in updated_metrics.items():
-      aggregated_metrics[metric_name] = jax.lax.all_gather(
-          metric, axis_name=PMAP_PARALLEL_AXIS_NAME
-      ).reduce()
-    updated_metrics = aggregated_metrics
+    updated_metrics = _aggregate_clu_metrics(updated_metrics)
 
   return None, StepFnOutput(
       loss=None,

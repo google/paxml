@@ -65,7 +65,6 @@ instantiate = base_hyperparams.instantiate
 BaseMetrics = base_metrics.BaseMetrics
 EvaluationMode = io_utils.EvaluationMode
 JTensor = pytypes.JTensor
-Metrics = pytypes.Metrics
 NestedMap = py_utils.NestedMap
 NestedJTensor = pytypes.NestedJTensor
 NestedPartitionSpec = pytypes.NestedPartitionSpec
@@ -73,23 +72,6 @@ SummaryWriter = 'tf.summary.SummaryWriter'  # pylint:disable=invalid-name
 StepFnOutput = trainer_lib.StepFnOutput
 TrainState = train_states.TrainState
 PRNGKey = pytypes.PRNGKey
-
-
-def _merge_clu_metrics(metrics: Metrics, updated_metrics: Metrics) -> Metrics:
-  """Merges existing eval metrics with updated metric data."""
-  if metrics:
-    if set(metrics.keys()) != set(updated_metrics.keys()):
-      raise ValueError(
-          'metrics and updated_metrics keys don`t match. '
-          f'metrics keys: {metrics.keys()} '
-          f'updated_metrics keys: {updated_metrics.keys()}'
-      )
-
-    for key in metrics:
-      metrics[key] = metrics[key].merge(updated_metrics[key])
-  else:
-    metrics = updated_metrics
-  return metrics
 
 
 @dataclasses.dataclass(frozen=True)
@@ -385,7 +367,7 @@ class SingleTaskDecodeProgram(programs.Program):
       summary_tensors = unreplicated_decode_out.summary_tensors
 
       # Merge clu.metrics to update for each minibatch.
-      metrics = _merge_clu_metrics(metrics, updated_metrics)
+      metrics = metric_utils.merge_clu_metrics(metrics, updated_metrics)
 
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
         all_summary_tensors[key].append(tensor)
@@ -424,7 +406,7 @@ class SingleTaskDecodeProgram(programs.Program):
         process_decode_metrics.store(process_weighted_scalars)
         processed_decodes.extend(processed_out)
         if processed_metric_updates:
-          processed_metrics = _merge_clu_metrics(
+          processed_metrics = metric_utils.merge_clu_metrics(
               processed_metrics, processed_metric_updates
           )
 

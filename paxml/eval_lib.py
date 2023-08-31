@@ -26,7 +26,6 @@ import typing
 from typing import Any, Sequence
 
 from absl import logging
-from clu import metrics as clu_metrics
 from etils import epath
 import jax
 import numpy as np
