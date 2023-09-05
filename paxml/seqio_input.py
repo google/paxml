@@ -989,6 +989,12 @@ class SeqIOInput(base_input.BaseInput):
     num_batches_all = multihost_utils.process_allgather(
         jnp.array([local_num_batches]), tiled=False)
     num_batches = np.max(num_batches_all)
+
+    # Previous allgather produces dummy values in mock TPU, so overwrite the
+    # value to prevent assertion failure.
+    if py_utils.is_mock_tpu_backend():
+      num_batches = local_num_batches
+
     pad_num = num_batches * self.batch_size - local_num
     assert pad_num >= 0
     logging.info(

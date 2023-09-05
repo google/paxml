@@ -218,6 +218,8 @@ flags.DEFINE_integer(
 
 # Debugging flag
 
+  # Google-internal train step override-like flag definition.
+
 
 @py_utils.benchmark('[PAX STATUS]: ')
 def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
@@ -282,6 +284,10 @@ def run_experiment(
   if FLAGS.mode == 'train':
     work_unit.set_task_status(f'Train experiment {FLAGS.exp} at'
                               f' {job_log_dir}')
+
+    override_num_train_steps = None
+    # Google-internal train step override-like flag usage.
+
     train.train_and_evaluate(
         experiment_config=experiment_config,
         job_log_dir=job_log_dir,
@@ -296,6 +302,7 @@ def run_experiment(
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
         exit_after_ondemand_checkpoint=FLAGS.exit_after_ondemand_checkpoint,
+        override_num_train_steps=override_num_train_steps,
     )
 
   elif FLAGS.mode == 'eval':

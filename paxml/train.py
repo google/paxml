@@ -108,6 +108,7 @@ def train_and_evaluate(
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
     exit_after_ondemand_checkpoint: bool = False,
+    override_num_train_steps: int | None = None,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -138,10 +139,18 @@ def train_and_evaluate(
     tensorstore_use_ocdbt: Uses OCDBT format for saving new checkpoints.
     exit_after_ondemand_checkpoint: If True, exists immediately after saving an
       on-demand checkpoint due to preemption.
+    override_num_train_steps: If not None, it will override the num_train_steps
+      defined in the train task.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
+
+  if override_num_train_steps:
+    logging.info(
+        'Override num_train_steps to 1 for mock backend run started by Mitto'
+    )
+    task_p.train.num_train_steps = override_num_train_steps
 
   # in case the user passed in a string dtype, convert it to an actual dtype
   task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
