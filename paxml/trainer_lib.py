@@ -573,7 +573,7 @@ def _maybe_aggregate_metrics_summaries(
       weighted_scalars
   )
 
-  aggregated_clu_metrics = None
+  aggregated_clu_metrics = clu_metrics
   if base_layer.is_running_under_pmap():
     # aggregate data across devices.
     aggregated_scalars = type(weighted_scalars)()
