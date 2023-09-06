@@ -219,6 +219,7 @@ def train_and_evaluate(
       checkpoint_type=checkpointer.checkpoint_type,
       input_p=train_input_p,
       enable_auto_sharding=enable_auto_sharding,
+      init_is_eval=False,
   )
   specs_provider_p = experiment_config.get_input_specs_provider_params()
   if issubclass(specs_provider_p.cls, base_input.DatasetInputSpecsProvider):

@@ -439,6 +439,7 @@ def evaluate(
       checkpoint_type=checkpoint_type,
       input_p=eval_input_p[0],
       enable_auto_sharding=enable_auto_sharding,
+      init_is_eval=True,
   )
   input_for_shape = None
   if not jax_task.train.always_use_train_for_model_init:
@@ -627,6 +628,7 @@ def decode(
       checkpoint_type=checkpoint_type,
       input_p=combined_input_ps[0],
       enable_auto_sharding=enable_auto_sharding,
+      init_is_eval=True,
   )
   input_for_shape = None
   if not jax_task.train.always_use_train_for_model_init:

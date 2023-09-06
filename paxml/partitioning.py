@@ -1502,6 +1502,7 @@ def create_experiment_or_default_partitioner(
     checkpoint_type: CheckpointType,
     input_p: pax_fiddle.Config[base_input.BaseInput],
     enable_auto_sharding: bool,
+    init_is_eval: bool = False,
 ) -> Partitioner:
   """Creates the partitioner from the experiment or a default partitioner.
 
@@ -1518,8 +1519,10 @@ def create_experiment_or_default_partitioner(
       are resharded when the experiment config did not provide a partitioner.
     input_p: A fiddle config of the eval or decode datasets. Used to determine
       input sharding when constructing a default partitioner.
-    enable_auto_sharding: A boolean indicating wither to shard based on the
+    enable_auto_sharding: A boolean indicating whether to shard based on the
       `input_p` parameter.
+    init_is_eval: A boolean indicating whether to initialize
+      abstract_init_with_metadata in eval mode.
 
   Returns:
     A Partitioner instance either built from the experiment config or from
@@ -1536,7 +1539,7 @@ def create_experiment_or_default_partitioner(
     )
     partitioner = create_partitioner(
         jax_task,
-        init_is_eval=True,
+        init_is_eval=init_is_eval,
         reshard_inputs=reshard_inputs,
         auto_sharding_mode=running_mode if enable_auto_sharding else None,
         auto_sharding_input_params=input_p if enable_auto_sharding else None,
