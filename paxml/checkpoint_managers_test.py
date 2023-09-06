@@ -837,6 +837,11 @@ class CheckpointManagerTest(parameterized.TestCase):
       # with no per-item subdirectories.
       (step_dir / 'metadata').rmtree()
       for d in (step_dir / 'state').iterdir():  # parameter directories
+        # Sharding file stores sharding info for this checkpoint under the
+        # checkpoint directory. This is independent from the steps of the
+        # checkpoint. b/279969796 for more details.
+        if d.name == '_sharding':
+          continue
         if checkpoint_type == CheckpointType.GDA:
           assert d.is_dir(), d
           (step_dir / d.name).mkdir()
