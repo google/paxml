@@ -210,6 +210,12 @@ class SingleTaskDecodeProgram(programs.Program):
       filename = self._output_dir / programs.get_filename(
           train_step, EvaluationMode.DECODE.value
       )
+      if flags.FLAGS.pax_only_aggregate_summaries:
+        verbose_entries = 0
+        plain_text_output_fname = None
+      else:
+        verbose_entries = 1
+        plain_text_output_fname = f'{filename}.txt'
       seqio_metric_values = seqio_input.process_outputs(
           self.decode_input,
           processed_decodes,
@@ -217,7 +223,8 @@ class SingleTaskDecodeProgram(programs.Program):
           seqio_input.MetricType.PREDICT,
           train_step,
           self._output_dir,
-          plain_text_output_fname=f'{filename}.txt',
+          verbose_entries=verbose_entries,
+          plain_text_output_fname=plain_text_output_fname,
       )
 
     # Convert metrics to dict[str, clu_values.Value] for summary writing.

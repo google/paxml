@@ -276,12 +276,15 @@ def process_outputs(
         model_outputs, verbose_entries=verbose_entries,
         plain_text_output=plain_text_output)
 
-    logging.info('Writing plain decoder output to %s', plain_text_output_fname)
-    dirname = os.path.dirname(plain_text_output_fname)
-    if not tf.io.gfile.exists(dirname):
-      tf.io.gfile.makedirs(dirname)
-    with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
-      f.write(plain_text_output.getvalue())
+    if plain_text_output_fname is not None:
+      logging.info(
+          'Writing plain decoder output to %s', plain_text_output_fname
+      )
+      dirname = os.path.dirname(plain_text_output_fname)
+      if not tf.io.gfile.exists(dirname):
+        tf.io.gfile.makedirs(dirname)
+      with tf.io.gfile.GFile(plain_text_output_fname, 'w') as f:
+        f.write(plain_text_output.getvalue())
 
   else:
     raise ValueError(f'unsupported metric type: {metric_type}')
