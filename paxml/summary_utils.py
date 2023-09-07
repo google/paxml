@@ -100,19 +100,28 @@ def pretty_format_iters(input_str: str) -> str:
   return '\n'.join(l for l in input_str.splitlines() if (l and not l.isspace()))
 
 
-def pretty_repr_shapes(replicated_vars: NestedJTensor,
-                       is_vars_replicated) -> str:
-  """Returns a pretty representation of the variable shapes."""
+def pretty_repr_shapes(
+    replicated_vars: NestedJTensor,
+    is_vars_replicated: bool,
+    with_dtype: bool = False,
+) -> str:
+  """Returns a pretty representation of the variable shapes and dtype."""
+
+  def maybe_dtype_str(x: JTensor) -> str:
+    if with_dtype:
+      return f' {x.dtype}'
+    else:
+      return ''
 
   def pps(x: JTensor) -> str:
     """Remove leading dim from replicated model vars."""
     if is_vars_replicated:
-      return 'x'.join(str(e) for e in x.shape[1:])
+      return 'x'.join(str(e) for e in x.shape[1:]) + maybe_dtype_str(x)
     else:
       # If var is not replicated, no need to remove the first dim.
       # Retrieves the global shape for Jax array; otherwise host-local shape.
       x_sda = x
-      return 'x'.join(str(e) for e in x_sda.shape)
+      return 'x'.join(str(e) for e in x_sda.shape) + maybe_dtype_str(x)
 
   out = jax.tree_map(pps, replicated_vars)
   out = pretty_repr(out)
