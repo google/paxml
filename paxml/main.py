@@ -200,7 +200,7 @@ flags.DEFINE_string(
     'If set, directory used to store datasets prepared by '
     'TensorFlow Datasets that are not available in the public TFDS GCS '
     'bucket.')
-  # Google-internal TFDS override-like flag definition.
+# Google-internal TFDS override-like flag definition.
 
 ## multiprocessing GPU flags
 flags.DEFINE_bool(
@@ -218,7 +218,7 @@ flags.DEFINE_integer(
 
 # Debugging flag
 
-  # Google-internal train step override-like flag definition.
+# Google-internal train step override-like flag definition.
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
@@ -465,7 +465,7 @@ def _main(argv: Sequence[str]) -> None:
     # seqio import is slow so avoid module-level import
     import seqio
     seqio.set_tfds_data_dir_override(FLAGS.tfds_data_dir)
-  # Google-internal setting of TFDS override-like param.
+    # Google-internal setting of TFDS override-like param.
 
   should_initialize_jax_distributed = (
       FLAGS.jax_fully_async_checkpoint or FLAGS.multiprocess_gpu)
