@@ -405,10 +405,10 @@ class SingleTaskDecodeProgram(programs.Program):
                   self.decode_input, per_example_out
               )
           )
-
-        processed_out = seqio_input.maybe_update_decode_output_keys(
-            processed_out, per_example_out
-        )
+        if processed_out:
+          processed_out = seqio_input.maybe_update_decode_output_keys(
+              processed_out, per_example_out
+          )
 
         process_decode_metrics.store(process_weighted_scalars)
         processed_decodes.extend(processed_out)
