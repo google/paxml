@@ -353,6 +353,7 @@ class CompositeMetrics(BaseMetrics):
 
 
 def _get_loss_weight_and_value(val) -> tuple[float, float]:
+  """Returns the loss and loss weight from a metric value."""
   if metric_utils.is_weighted_scalar(val):
     loss, loss_weight = val
   elif isinstance(val, WeightedScalarCluMetric):
