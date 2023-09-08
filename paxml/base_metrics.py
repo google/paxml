@@ -33,7 +33,10 @@ from praxis import base_layer
 from praxis import lazy_loader
 from praxis import pax_fiddle
 
-# summary_utils is slow to import, so we do it lazily.
+# These are slow to import, so we do it lazily.
+metric_utils = lazy_loader.LazyLoader(
+    'metric_utils', globals(), 'paxml.metric_utils'
+)
 summary_utils = lazy_loader.LazyLoader(
     'summary_utils', globals(), 'paxml.summary_utils'
 )
@@ -349,6 +352,22 @@ class CompositeMetrics(BaseMetrics):
     return metrics
 
 
+def _get_loss_weight_and_value(val) -> tuple[float, float]:
+  if metric_utils.is_weighted_scalar(val):
+    loss, loss_weight = val
+  elif isinstance(val, WeightedScalarCluMetric):
+    loss = val.compute()
+    loss_weight = val.weight
+  else:
+    raise TypeError(
+        'Only `WeightedScalar` and `WeightedScalarCluMetric` types are'
+        f' supported by `LossAggregator` received type {type(val)} instead.'
+        ' Please implement your custom LossAggregator for this type of'
+        ' metric.'
+    )
+  return loss, loss_weight
+
+
 class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
   """Base class for aggregating loss metrics.
 
@@ -387,7 +406,7 @@ class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
     loss_key = self.loss_key
 
     assert loss_key in batch_metrics
-    loss, loss_weight = batch_metrics[loss_key]
+    loss, loss_weight = _get_loss_weight_and_value(batch_metrics[loss_key])
     loss_weight = jax.lax.stop_gradient(loss_weight)
 
     if base_layer.is_running_under_pmap():
@@ -424,8 +443,7 @@ class MultiLossAggregator(LossAggregator):
     if base_layer.is_running_under_pmap():
       for key in self.loss_keys:
         assert key in batch_metrics
-
-        loss, loss_weight = batch_metrics[key]
+        loss, loss_weight = _get_loss_weight_and_value(batch_metrics[key])
         loss_weight = jax.lax.stop_gradient(loss_weight)
         sum_weight = jax.lax.psum(
             loss_weight, axis_name=PMAP_PARALLEL_AXIS_NAME)
@@ -439,7 +457,7 @@ class MultiLossAggregator(LossAggregator):
 
     else:
       for key in self.loss_keys:
-        loss, loss_weight = batch_metrics[key]
+        loss, loss_weight = _get_loss_weight_and_value(batch_metrics[key])
         loss_weight = jax.lax.stop_gradient(loss_weight)
 
         total_weighted_loss += loss

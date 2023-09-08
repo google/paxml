@@ -16,6 +16,7 @@
 """Tests for Paxml base_metrics."""
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import jax
 import jax.numpy as jnp
 from paxml import base_metrics
@@ -29,7 +30,7 @@ instantiate = base_layer.instantiate
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 
-def _decode(feats):
+def _decode(feats, return_clu_loss_metrics=False):
   b, t, d = feats.shape
   mean_val = jnp.mean(feats)
   max_val = jnp.max(feats)
@@ -40,15 +41,20 @@ def _decode(feats):
   hist = hist.at[val[1]].add(1)
   hist = hist.at[0].set(1)
   nframes = jnp.array(b * t)
-  metrics = {
-      'mean': (mean_val, nframes),
-      'max': (max_val, nframes),
-      'min': (min_val, nframes),
-      'hist': (hist, nframes),
-      'loss': (mean_val, nframes),
-      'loss_a': (mean_val + 10, nframes),
-      'loss_b': (mean_val + 20, nframes),
-  }
+  if not return_clu_loss_metrics:
+    metrics = {
+        'mean': (mean_val, nframes),
+        'max': (max_val, nframes),
+        'min': (min_val, nframes),
+        'hist': (hist, nframes),
+        'loss': (mean_val, nframes),
+        'loss_a': (mean_val + 10, nframes),
+        'loss_b': (mean_val + 20, nframes),
+    }
+  else:
+    metrics = {
+        'loss': base_metrics.WeightedScalarCluMetric.create(mean_val, nframes),
+    }
   return metrics
 
 
@@ -105,7 +111,8 @@ class BaseMetricsTest(test_utils.TestCase):
 
 class LossAggregatorTest(test_utils.TestCase):
 
-  def test_loss_aggregate_metrics(self):
+  @parameterized.parameters(False, True)
+  def test_loss_aggregate_metrics(self, use_clu_loss_metrics: bool):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
 
     loss_metrics_p = pax_fiddle.Config(
@@ -114,7 +121,7 @@ class LossAggregatorTest(test_utils.TestCase):
     loss_aggregator = instantiate(loss_metrics_p)
 
     def _decode_step(feats):
-      metrics = _decode(feats)
+      metrics = _decode(feats, use_clu_loss_metrics)
       weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(metrics)
       return weighted_loss, mean_loss, loss_weight
 
@@ -126,6 +133,8 @@ class LossAggregatorTest(test_utils.TestCase):
     self.assertAllClose(loss_weight,
                         jnp.mean(weighted_loss) / jnp.mean(mean_loss))
 
+  # Note: this test isn't parameterized like the test above because
+  # `metrics_aggregator` doesn't support aggregating `clu.Metrics`.
   def test_multiloss_aggregate_metrics(self):
     feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
 

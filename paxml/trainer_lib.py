@@ -565,13 +565,13 @@ def _maybe_aggregate_metrics_summaries(
   # Models will return one of `WeightedScalars` or `clu_metrics`. Loss
   # aggregation from `clu_metrics` is not yet supported.
   if clu_metrics and len(clu_metrics.keys()) > 0:
-    raise NotImplementedError(
-        'Loss aggregation from `clu.Metrics` is currently unsupported'
+    weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
+        clu_metrics
     )
-
-  weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
-      weighted_scalars
-  )
+  else:
+    weighted_loss, mean_loss, loss_weight = loss_aggregator.aggregate(
+        weighted_scalars
+    )
 
   aggregated_clu_metrics = clu_metrics
   if base_layer.is_running_under_pmap():

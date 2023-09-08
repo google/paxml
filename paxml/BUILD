@@ -125,6 +125,7 @@ pytype_strict_library(
     name = "base_metrics",
     srcs = ["base_metrics.py"],
     deps = [
+        ":metric_utils",
         # Implicit clu.metrics dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
@@ -924,6 +925,7 @@ py_strict_test(
     deps = [
         ":base_metrics",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
         # Implicit jax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
