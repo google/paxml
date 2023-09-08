@@ -125,7 +125,8 @@ pytype_strict_library(
     name = "base_metrics",
     srcs = ["base_metrics.py"],
     deps = [
-        ":summary_utils",
+        # Implicit clu.metrics dependency.
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",

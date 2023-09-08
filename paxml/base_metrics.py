@@ -23,6 +23,8 @@ import dataclasses
 import logging
 from typing import Any, Sequence
 
+from clu import metrics as clu_metrics
+import flax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -446,3 +448,34 @@ class MultiLossAggregator(LossAggregator):
     # Returns `None` for loss weight given that there is a loss weight
     # for each key, and no summary of them is particularly sensible.
     return total_weighted_loss, total_mean_loss, None
+
+
+@flax.struct.dataclass
+class WeightedScalarCluMetric(clu_metrics.Metric):
+  """Computes the weighted average of a scalar.
+
+  The inputs & result are always a scalar. To create an object of this class,
+  pls use the method `create()` with the arguments `value` and `weight`.
+
+  See also documentation of `clu.Metric`.
+  """
+
+  weighted_value: jnp.float32
+  weight: jnp.float32
+
+  @classmethod
+  def create(
+      cls,
+      value: jnp.ndarray,
+      weight: jnp.ndarray,
+  ):
+    return cls(weighted_value=value * weight, weight=weight)
+
+  def merge(self, other: WeightedScalarCluMetric) -> WeightedScalarCluMetric:
+    return type(self)(
+        weight=self.weight + other.weight,
+        weighted_value=(self.weighted_value + other.weighted_value),
+    )
+
+  def compute(self) -> Any:
+    return self.weighted_value / self.weight
