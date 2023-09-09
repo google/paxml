@@ -91,6 +91,8 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       individual variable as summaries.
     var_norm_summary: Whether or not to export accumulated var_norm summaries.
       Disable to save some compute.
+    var_norm_individual_vars: Whether or not to export var_norm for each
+      individual variable as summaries.
     check_valid_step: Whether or not to run sanity check to ensure that the
       training step is valid.
     vectorize_on_repeat_prefix: Whether to vectorize optimizers on the
