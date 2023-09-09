@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import functools
 import pprint
-from typing import Any, Optional, Protocol, Sequence, Tuple
+from typing import Any, Protocol, Sequence
 
 from absl import logging
 import clu.metrics
@@ -527,8 +527,8 @@ def _maybe_aggregate_metrics_summaries(
     weighted_scalars: WeightedScalars,
     summary_dict: SummaryDict,
     per_example_out: dict[str, Any],
-    clu_metrics: Optional[pytypes.Metrics] = None,
-) -> Tuple[
+    clu_metrics: pytypes.Metrics | None = None,
+) -> tuple[
     JTensor,
     JTensor,
     JTensor | None,
