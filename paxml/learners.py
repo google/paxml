@@ -130,6 +130,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   grad_norm_summary: bool = True
   grad_norm_individual_vars: bool = False
   var_norm_summary: bool = True
+  var_norm_individual_vars: bool = False
   check_valid_step: bool = True
   vectorize_on_repeat_prefix: bool = True
   force_repeat_prefix_structure: bool = False
@@ -184,21 +185,20 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         force_prefix_structure=self.force_repeat_prefix_structure,
     )
 
-  def _maybe_summarize_all_grad_norms(
-      self, optimizer_name: str, raw_grads: pytypes.NestedJTensor
+  def summarize_norms(
+      self, summary_prefix: str, tensors: pytypes.NestedJTensor
   ) -> None:
-    if self.grad_norm_individual_vars:
-      grad_norms = jax.tree_map(lambda x: jnp.sqrt(jnp.sum(x * x)), raw_grads)
-      var_keys = py_utils.extract_prefixed_keys_from_nested_map(grad_norms)
+    norms = jax.tree_map(lambda x: jnp.sqrt(jnp.sum(x * x)), tensors)
+    keys = py_utils.extract_prefixed_keys_from_nested_map(tensors)
 
-      def add_grad_norm_summary(key, value):
-        base_layer.add_global_summary(
-            f'per_var_grad_norm/{optimizer_name}{key}',
-            value,
-            SummaryType.AGGREGATE_SCALAR,
-        )
+    def add_grad_norm_summary(key, value):
+      base_layer.add_global_summary(
+          f'{summary_prefix}/{key}',
+          value,
+          SummaryType.AGGREGATE_SCALAR,
+      )
 
-      jax.tree_map(add_grad_norm_summary, var_keys, grad_norms)
+    jax.tree_map(add_grad_norm_summary, keys, norms)
 
   def scale_gradients(
       self,
@@ -237,7 +237,11 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       )
 
     # Compute gradient norm.
-    self._maybe_summarize_all_grad_norms(optimizer_name, raw_grads)
+    if self.grad_norm_individual_vars:
+      summary_prefix = 'per_var_grad_norm'
+      if optimizer_name:
+        summary_prefix += '/' + optimizer_name
+      self.summarize_norms(summary_prefix, raw_grads)
     if (
         self.grad_norm_summary
         or self.check_valid_step
@@ -408,6 +412,8 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       base_layer.add_global_summary(
           'learning/var_norm', var_norm, SummaryType.AGGREGATE_SCALAR
       )
+    if self.var_norm_individual_vars:
+      self.summarize_norms('per_var_norm', old_vars)
 
     # TODO(yonghui): implement skip_zero_gradients.
     # TODO(yonghui): implement numerical checks.
