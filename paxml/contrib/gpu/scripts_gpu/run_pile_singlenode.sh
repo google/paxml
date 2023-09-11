@@ -26,6 +26,14 @@ LOG_DIR=${6:-"test_logdir"}
 
 export VOCAB_PATH=$VOCAB_PATH
 
+BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_triton_gemm=false
+                       --xla_gpu_simplify_all_fp_conversions --xla_gpu_enable_async_all_gather=true
+                       --xla_gpu_enable_async_reduce_scatter=true  --xla_gpu_enable_highest_priority_async_stream=true
+                       --xla_gpu_enable_triton_softmax_fusion=false  --xla_gpu_all_reduce_combine_threshold_bytes=51200
+                       --xla_gpu_graph_level=0 --xla_gpu_enable_async_all_reduce=true"}
+export XLA_FLAGS="$BASE_XLA_FLAGS ${XLA_FLAGS:-}"
+
+
 mkdir -p ${LOG_DIR}
 python3 -u -m paxml.main \
     --job_log_dir=${LOG_DIR} \

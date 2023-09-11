@@ -57,6 +57,7 @@ TaskRegistry.add_versioned_tfds_task(
     ],
     output_features=GPT_OUTPUT_FEATURES_LM,
     metric_fns=[],
+    shuffle_buffer_size=100000,
 )
 
 LAMBADA_OUTPUT_FEATURES = {
@@ -111,7 +112,8 @@ class PileUnsupervisedDataset(base_experiment.BaseExperiment):
         use_cached=False,
         repeat=True if is_training else False,
         feature_converter=seqio_input.LanguageModelFeatures(
-            pack=True if is_training else False, use_custom_packing_ops=False
+            pack=(self.PACKED_INPUT if is_training else False),
+            use_custom_packing_ops=False
         ),
         is_training=is_training,
         input_random_seed=(

@@ -197,8 +197,9 @@ class Lambada126M(GPT126M, LambadaDataset):
 class GPT5B(Pile126M):
 
   USE_REPEATED_LAYER = True
-  ICI_MESH_SHAPE = [1,4,2]
-  DCN_MESH_SHAPE = [32,1,1]
+  ICI_MESH_SHAPE = [1,8,1]
+  DCN_MESH_SHAPE = [1,32,1]
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_WITH_NO_BATCH_DIM
   MAX_STEPS = 75000
 
   PERCORE_BATCH_SIZE = 8
@@ -220,6 +221,23 @@ class GPT5B(Pile126M):
   LR_COS_DECAY_START = LR_COS_WARMUP+1
   LR_COS_DECAY_END = 62500
 
+  CHECKPOINT_EVERY_N_STEPS = 250
+  SUMMARY_INTERVAL_STEPS=10
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+
+    model_p = task_p.model
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+    if issubclass(
+      fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
+      stacked_p = stacked_p.block
+
+    stacked_p.input_dropout_prob = 0.1
+    stacked_p.residual_dropout_prob = 0.1
+    stacked_p.atten_dropout_prob = 0.1
+    return task_p
 
 ## 96 node
 @experiment_registry.register
