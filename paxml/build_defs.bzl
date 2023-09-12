@@ -80,6 +80,7 @@ def pax_targets(
         smoke_test_args = None,
         smoke_test_kwargs = None,
         # Internal enable fragmented build argument, toggled to True.
+        # Internal tooling mock backend attribute
         main_src = "//paxml:main.py"):
     """Macro to define a collection of Pax targets with custom dependencies.
 
@@ -294,6 +295,8 @@ def pax_targets(
         exec_properties = {"mem": "20g"},  # validate_config is a very large executable.
         # Implicit py_binary flag
     )
+
+    # Internal tooling mock backend target
 
 def export_test(
         name,
