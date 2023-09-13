@@ -869,8 +869,12 @@ class PjitPartitioner(Partitioner):
         def _identity(x):
           return x
 
-        with self._global_mesh:
-          return pjit.pjit(_identity, in_shardings=None, out_shardings=None)(k)
+        rep_sharding = jax.sharding.NamedSharding(
+            self._global_mesh, jax.sharding.PartitionSpec()
+        )
+        return jax.jit(
+            _identity, in_shardings=rep_sharding, out_shardings=rep_sharding
+        )(k)
 
       self._broadcast_key_fn = _broadcast_key
 
@@ -1029,12 +1033,24 @@ class PjitPartitioner(Partitioner):
     logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
     logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
 
-    extra_kwargs = dict(in_shardings=fn_in_partition_specs)
+    fn_in_shardings = jax.tree_map(
+        lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
+        if not isinstance(p, pjit.AUTO)
+        else p,
+        fn_in_partition_specs,
+    )
+    fn_out_shardings = jax.tree_map(
+        lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
+        if not isinstance(p, pjit.AUTO)
+        else p,
+        fn_out_partition_specs,
+    )
+    extra_kwargs = dict(in_shardings=fn_in_shardings)
     if not use_pspec_on_array_inputs:
       extra_kwargs = {}
-    pjitted_fn = pjit.pjit(
+    pjitted_fn = jax.jit(
         step_fn,
-        out_shardings=fn_out_partition_specs,
+        out_shardings=fn_out_shardings,
         # For training, TrainState is the first argument and return value. We
         # setup donation/alias to minimize device memory usage.
         donate_argnums=() if is_eval else (0,),
