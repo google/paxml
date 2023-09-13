@@ -416,6 +416,7 @@ class SeqIOInput(base_input.BaseInput):
       form the targets (see self._build_predict_metric_inputs_with_enum()). This
       can cause OOM if the dataset is large. To avoid this, use this field to
       specify that only a subset of fields in each example should be saved.
+    read_config: Custom ReadConfig used by all TF DataLoader.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -497,6 +498,7 @@ class SeqIOInput(base_input.BaseInput):
   eval_enable_cache: bool = True
   eval_num_examples: int | None = None
   warm_start: bool = True
+  read_config: tfds.ReadConfig | None = None
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -511,7 +513,7 @@ class SeqIOInput(base_input.BaseInput):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
       self.input_random_seed = 42
-    self.configure_tf_data_options()
+    self.configure_tf_data_options(self.read_config)
     super().__post_init__()
     self._validate_hparams()
 
@@ -639,25 +641,32 @@ class SeqIOInput(base_input.BaseInput):
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
 
-  def configure_tf_data_options(self):
-    read_config = tfds.ReadConfig()
-    options = tf.data.Options()
+  def configure_tf_data_options(
+      self, read_config: tfds.ReadConfig | None = None
+  ):
+    if read_config is None:
+      read_config = tfds.ReadConfig()
+
+    if read_config.options is None:
+      read_config.options = tf.data.Options()
 
     # tf.data `warm_start` feature is newly added and only available on TF
     # nightly, but not the latest stable version(2.12).
     # TODO(rxsang): Remove checking `hasattr` once TF2.13 is released.
-    if self.warm_start and (hasattr(options, 'experimental_warm_start')):
-      options.experimental_warm_start = True
+    if self.warm_start and (
+        hasattr(read_config.options, 'experimental_warm_start')
+    ):
+      read_config.options.experimental_warm_start = True
 
     if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
-      options.experimental_symbolic_checkpoint = True
+      read_config.options.experimental_symbolic_checkpoint = True
       read_config.experimental_index_shuffle = (
           self.experimental_enable_index_shuffle
       )
       # Disable readahead for random access used by index shuffle.
       if self.experimental_enable_index_shuffle:
         read_config.override_readahead = tfds.Readahead.DISABLE
-    read_config.options = options
+
     seqio.set_tfds_read_config_override(read_config)
 
   def _get_num_eval_examples(self) -> int:
