@@ -1130,11 +1130,11 @@ def train_step_single_learner(
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         var_weight_hparams, excluded_for_opt
     )
-    # The grads for the fp8 params exist as the updated params to replace the
-    # old ones. They have no corresponding opt states and should be excluded for
-    # optimizer computations.
+    # Updating fp8_params is special: the new values are simply their grads. So,
+    # we exclude their grads in the optimizer update.
+    fp8_var_mask = tasks_lib.get_fp8_var_mask(var_weight_hparams)
     non_fp8_grads = tasks_lib.filter_vars_for_grad_or_opt(
-        grads, excluded_for_opt
+        grads, fp8_var_mask
     )
     transformed_grads, new_opt_states = learner.update_states(
         non_fp8_grads, states.opt_states[0], vars_with_opt, wps_with_opt
@@ -1149,7 +1149,6 @@ def train_step_single_learner(
         vars_with_opt,
     )
     # Replace old fp8 params with their grads.
-    fp8_var_mask = tasks_lib.get_fp8_var_mask(var_weight_hparams)
     mdl_vars = jax.tree_map(
         lambda e, new, old: new if e else old,
         fp8_var_mask,
