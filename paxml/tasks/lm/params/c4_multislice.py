@@ -256,3 +256,37 @@ class C4SpmdGpt3AdamDataParallel2x16x16(c4.C4SpmdGpt3AdamOrgHP):
     task_p.summary_verbosity = 0
 
     return task_p
+
+
+@experiment_registry.register
+class C4Spmd32BAdam1xv5_256(C4Spmd22BAdam1xv4_128):
+  """GPT-3 config with 32B params.
+
+  Model Parameters: Global batch size = 1 * 128 * 1 * 16 = 2048
+  """
+
+  NUM_LAYERS = 40
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = MODEL_DIMS * 4
+  NUM_HEADS = 32
+  DIMS_PER_HEAD = 256
+  PERCORE_BATCH_SIZE = 2
+  MAX_SEQ_LEN = 2048
+  VOCAB_SIZE = 32768
+
+  FPROP_DTYPE = jnp.bfloat16
+  USE_REPEATED_LAYER = True
+  SUMMARY_INTERVAL_STEPS = 10
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
+
+  ICI_MESH_SHAPE = [1, 128, 1]
+
+
+@experiment_registry.register
+class C4Spmd32BAdam2xv5_256(C4Spmd32BAdam1xv5_256):
+  """GPT-3 config with 32B params.
+
+  Model Parameters: Global batch size = 2 * 1 * 128 * 1 * 16 = 4096
+  """
+
+  DCN_MESH_SHAPE = [2, 1, 1]
