@@ -78,7 +78,9 @@ def get_checkpointer(
         )
     )
   elif checkpoint_type == CheckpointType.FLAX:
-    checkpointer = FlaxCheckpointer(FlaxCheckpointHandler())
+    checkpointer = FlaxCheckpointer(
+        FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
+    )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
   return checkpointer
@@ -437,10 +439,14 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   _param_names: PyTree = None
 
   def __init__(
-      self, *args, enforce_restore_shape_check: bool = False, **kwargs
+      self,
+      *args,
+      enforce_restore_shape_check: bool = False,
+      use_ocdbt: bool = False,
+      **kwargs,
   ):
     self._enforce_restore_shape_check = enforce_restore_shape_check
-    super().__init__(*args, **kwargs)
+    super().__init__(use_ocdbt=use_ocdbt, *args, **kwargs)
     self._write_tree_metadata = self._use_ocdbt
 
   def _set_param_names(self, param_names: PyTree):
@@ -615,10 +621,9 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   Should only be used in conjunction with FlaxCheckpointer.
   """
 
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
-    self._use_ocdbt = False
-    self._write_tree_metadata = False
+  def __init__(self, use_ocdbt: bool = False, *args, **kwargs):
+    super().__init__(use_ocdbt=use_ocdbt, *args, **kwargs)
+    self._write_tree_metadata = self._use_ocdbt
 
   async def async_save(
       self,

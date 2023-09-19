@@ -187,7 +187,7 @@ class CheckpointManagerTest(parameterized.TestCase):
   ):
     if checkpoint_type == CheckpointType.FLAX:
       checkpointer = checkpoints.FlaxCheckpointer(
-          checkpoints.FlaxCheckpointHandler()
+          checkpoints.FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
       )
     elif checkpoint_type == CheckpointType.GDA:
       checkpointer = ocp.Checkpointer(
