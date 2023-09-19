@@ -54,6 +54,7 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer = pax_fiddle.Config(optimizers.Sgd)
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.1
     if global_clip_norm:
       learner_p.optimizer.clip_gradient_norm_to_value = global_clip_norm
     elif single_clip_norm:
@@ -100,6 +101,8 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     learner_p.optimizer.momentum = momentum
     learner_p.optimizer.nesterov = nesterov
+    decoupled_weight_decay = 0.2
+    learner_p.optimizer.decoupled_weight_decay = decoupled_weight_decay
 
     learner_instance = instantiate(learner_p)
 
@@ -165,6 +168,11 @@ class LearnersTest(test_utils.TestCase):
     #     ScaleByScheduleState(count=DeviceArray(0, dtype=int32)),
     # )
     updated_grads, updated_state = sgd.update(grads, opt_states[2])
+    updated_grads = jax.tree_map(
+        lambda g, p: g - lr * decoupled_weight_decay * p,
+        updated_grads,
+        old_vars,
+    )
     logging.info('updated_state: %s', updated_state)
     self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])
     self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
@@ -188,6 +196,7 @@ class LearnersTest(test_utils.TestCase):
         min_ratio=0.1,
         max=1.0,
     )
+    learner_params.optimizer.decoupled_weight_decay = 0.1
     lr_scdule_inst = instantiate(learner_params.optimizer.lr_schedule)
 
     def lr_schedule(step):
@@ -263,25 +272,34 @@ class LearnersTest(test_utils.TestCase):
     self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
 
   @parameterized.parameters(
-      (0.5, 2.0, True),
-      (1.5, 3.0, False),
-      (10., 0.1, True),
-      (100., 2.0, False),
+      (0.5, 2.0, 0.1, 0.0, True),
+      (1.5, 3.0, 0.0, 0.5, False),
+      (10.0, 0.1, 2.0, 5.0, True),
+      (100.0, 2.0, 50.0, 1.0, False),
   )
-  def test_multioptimizer_learner(self, lr_multiplier1, lr_multiplier2,
-                                  use_vq_ngrams):
+  def test_multioptimizer_learner(
+      self,
+      lr_multiplier1,
+      lr_multiplier2,
+      decoupled_weight_decay1,
+      decoupled_weight_decay2,
+      use_vq_ngrams,
+  ):
     learner_p = pax_fiddle.Config(learners.MultiOptimizerLearner)
     learner_p.name = 'learner'
     learner_p.loss_name = 'loss'
     learner_p.optimizer = pax_fiddle.Config(optimizers.Sgd)
     learner_p.optimizer.learning_rate = 1.
+    learner_p.optimizer.decoupled_weight_decay = 0.2
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1 = pax_fiddle.Config(optimizers.Sgd)
     aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = lr_multiplier1
+    aux_p1.decoupled_weight_decay = decoupled_weight_decay1
     aux_p2 = pax_fiddle.Config(optimizers.Sgd)
     aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = lr_multiplier2
+    aux_p2.decoupled_weight_decay = decoupled_weight_decay2
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
     learner_p.auxiliary_regex = ['.*ngram', '.*transformer']
@@ -333,8 +351,12 @@ class LearnersTest(test_utils.TestCase):
       transformed_grads, _ = learner_instance.update_states(
           grads, opt_states, old_vars, var_weight_hparams)
 
-    expected_grad1 = -lr_multiplier1 * grad1
-    expected_grad2 = -lr_multiplier1 * grad2
+    expected_grad1 = -lr_multiplier1 * (
+        grad1 + decoupled_weight_decay1 * emb_var1
+    )
+    expected_grad2 = -lr_multiplier1 * (
+        grad2 + decoupled_weight_decay1 * emb_var2
+    )
     if use_vq_ngrams:
       new_grad1 = (
           transformed_grads.lm.ngrammer.ngram_layer.ngram_table[0].emb_var)
@@ -345,27 +367,32 @@ class LearnersTest(test_utils.TestCase):
       new_grad2 = transformed_grads.lm.ngrammer.ngram_table[1].emb_var
     self.assertAllClose(new_grad1, expected_grad1)
     self.assertAllClose(new_grad2, expected_grad2)
-    expected_grad_transformer = -lr_multiplier2 * grads.lm.transformer.w
+    expected_grad_transformer = -lr_multiplier2 * (
+        grads.lm.transformer.w
+        + (decoupled_weight_decay2 * old_vars.lm.transformer.w)
+    )
     new_grad_transformer = transformed_grads.lm.transformer.w
-    expected_grad_ffn = -grads.lm.ffn.k
+    expected_grad_ffn = -grads.lm.ffn.k - 0.2 * old_vars.lm.ffn.k
     new_grad_ffn = transformed_grads.lm.ffn.k
     self.assertAllClose(new_grad_transformer, expected_grad_transformer)
     self.assertAllClose(new_grad_ffn, expected_grad_ffn)
 
   @parameterized.parameters(
-      (0.5, 2.0, True, True),
-      (1.5, 3.0, False, True),
-      (10.0, 0.1, True, True),
-      (100.0, 2.0, False, True),
-      (0.5, 2.0, True, False),
-      (1.5, 3.0, False, False),
-      (10.0, 0.1, True, False),
-      (100.0, 2.0, False, False),
+      (0.5, 2.0, 0.1, 0.0, True, True),
+      (1.5, 3.0, 0.0, 0.5, False, True),
+      (10.0, 0.1, 2.0, 5.0, True, True),
+      (100.0, 2.0, 50.0, 1.0, False, True),
+      (0.5, 2.0, 0.1, 0.0, True, False),
+      (1.5, 3.0, 0.0, 0.5, False, False),
+      (10.0, 0.1, 2.0, 5.0, True, False),
+      (100.0, 2.0, 50.0, 1.0, False, False),
   )
   def test_multioptimizer_learner_with_optax_optimizers(
       self,
       lr_multiplier1,
       lr_multiplier2,
+      decoupled_weight_decay1,
+      decoupled_weight_decay2,
       use_vq_ngrams,
       vectorize_on_repeat_prefix,
   ):
@@ -380,14 +407,17 @@ class LearnersTest(test_utils.TestCase):
     learner_p.vectorize_on_repeat_prefix = vectorize_on_repeat_prefix
     learner_p.optimizer.learning_rate = learning_rate
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.2
     aux_p1 = pax_fiddle.Config(optimizers.OptaxOptimizer)
     aux_p1.grad_tx = optax.sgd(learning_rate=lr_multiplier1, momentum=0.9)
     aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = lr_multiplier1
+    aux_p1.decoupled_weight_decay = decoupled_weight_decay1
     aux_p2 = pax_fiddle.Config(optimizers.OptaxOptimizer)
     aux_p2.grad_tx = optax.sgd(learning_rate=lr_multiplier2, momentum=0.9)
     aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = lr_multiplier2
+    aux_p2.decoupled_weight_decay = decoupled_weight_decay2
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
     learner_p.auxiliary_regex = ['.*ngram', '.*transformer']
@@ -502,8 +532,12 @@ class LearnersTest(test_utils.TestCase):
           grads, opt_state, old_vars, var_weight_hparams
       )
 
-    expected_grad1 = -lr_multiplier1 * grad_v1
-    expected_grad2 = -lr_multiplier1 * grad_v2
+    expected_grad1 = -lr_multiplier1 * (
+        grad_v1 + decoupled_weight_decay1 * emb_var1
+    )
+    expected_grad2 = -lr_multiplier1 * (
+        grad_v2 + decoupled_weight_decay1 * emb_var2
+    )
     if use_vq_ngrams:
       new_grad1 = transformed_grads.lm.ngrammer.ngram_layer.ngram_table[
           0
@@ -516,9 +550,12 @@ class LearnersTest(test_utils.TestCase):
       new_grad2 = transformed_grads.lm.ngrammer.ngram_table[1].emb_var
     self.assertAllClose(new_grad1, expected_grad1)
     self.assertAllClose(new_grad2, expected_grad2)
-    expected_grad_transformer = -lr_multiplier2 * grads.lm.transformer.w
+    expected_grad_transformer = -lr_multiplier2 * (
+        grads.lm.transformer.w
+        + (decoupled_weight_decay2 * old_vars.lm.transformer.w)
+    )
     new_grad_transformer = transformed_grads.lm.transformer.w
-    expected_grad_ffn = -grads.lm.ffn.k
+    expected_grad_ffn = -grads.lm.ffn.k - 0.2 * old_vars.lm.ffn.k
     new_grad_ffn = transformed_grads.lm.ffn.k
     self.assertAllClose(new_grad_transformer, expected_grad_transformer)
     self.assertAllClose(new_grad_ffn, expected_grad_ffn)
@@ -530,12 +567,15 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer = optimizers.Adam.HParamsA()
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.1
     aux_p1 = optimizers.Adam.HParamsA()
     aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
+    aux_p1.decoupled_weight_decay = 0.2
     aux_p2 = pax_fiddle.Config(optimizers.Adagrad)
     aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = 3.0
+    aux_p2.decoupled_weight_decay = 0.3
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
     learner_p.auxiliary_regex = ['.*ngram', '.*transformer']
@@ -580,12 +620,15 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer = optimizers.Adam.HParamsA()
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.1
     aux_p1 = optimizers.Adam.HParamsA()
     aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
+    aux_p1.decoupled_weight_decay = 0.2
     aux_p2 = pax_fiddle.Config(optimizers.Adagrad)
     aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.learning_rate = 3.0
+    aux_p2.decoupled_weight_decay = 0.3
 
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
     learner_p.auxiliary_regex = ['.*ngrammer', '.*ngram']
@@ -630,14 +673,17 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.decay_method = 'pow'
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.1
     aux_p1 = pax_fiddle.Config(optimizers.ShardedAdafactor)
     aux_p1.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p1.learning_rate = 2.0
     aux_p1.decay_method = 'pow'
+    aux_p1.decoupled_weight_decay = 0.2
     aux_p2 = pax_fiddle.Config(optimizers.ShardedAdafactor)
     aux_p2.lr_schedule = pax_fiddle.Config(schedules.Constant)
     aux_p2.decay_method = 'adam'
     aux_p2.learning_rate = 3.0
+    aux_p2.decoupled_weight_decay = 0.3
 
     # Add auxiliary optimizers.
     learner_p.auxiliary_optimizers = [aux_p1, aux_p2]
@@ -653,6 +699,7 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer.learning_rate = 1.
     learner_p.optimizer.decay_method = 'pow'
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+    learner_p.optimizer.decoupled_weight_decay = 0.1
     learner_instance_single = instantiate(learner_p)
 
     # Define device mesh.
