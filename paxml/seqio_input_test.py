@@ -1122,7 +1122,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
           ),
           is_training=False,
           batch_size=batch_size,
-          use_enumeration=True,
           reset_for_eval=True,
           # multi-process configs
           num_infeed_hosts=num_hosts,

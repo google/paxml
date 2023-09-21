@@ -17,10 +17,10 @@
 
 from __future__ import annotations
 
-import collections
 import copy
 import dataclasses
 import enum
+import functools
 import io
 import os
 import typing
@@ -139,25 +139,42 @@ def select_split(
   return split_name
 
 
-def _add_fake_enumeration(ex: dict[str, Any]) -> dict[str, Any]:
-  ex[SHARD_INDEX_KEY] = tf.cast(-1, tf.int32)
-  ex[NUM_SHARDS_KEY] = tf.cast(-1, tf.int32)
-  ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(-1, tf.int64)
+def _add_fake_enumeration(ex: dict[str, Any], fake_val) -> dict[str, Any]:
+  ex[SHARD_INDEX_KEY] = tf.cast(fake_val, tf.int32)
+  ex[NUM_SHARDS_KEY] = tf.cast(fake_val, tf.int32)
+  ex[INDEX_WITHIN_SHARD_KEY] = tf.cast(fake_val, tf.int64)
 
   return ex
 
 
 def _is_padding(ex: dict[str, Any]) -> bool:
-  return (ex[INDEX_WITHIN_SHARD_KEY] == -1 and ex[SHARD_INDEX_KEY] == -1
-          and ex[NUM_SHARDS_KEY] == -1)
+  return (
+      ex[INDEX_WITHIN_SHARD_KEY] == -1
+      and ex[SHARD_INDEX_KEY] == -1
+      and ex[NUM_SHARDS_KEY] == -1
+  )
 
 
 def _enumerate_dataset(
-    ds: tf.data.Dataset, is_training: bool, shard_info: seqio.ShardInfo | None
+    ds: tf.data.Dataset,
+    is_training: bool,
+    shard_info: seqio.ShardInfo | None,
+    is_mock_tpu: bool = False,
 ) -> tf.data.Dataset:
   """Add enumeration fields, only meaningful when is_training=False."""
   if is_training:
-    return ds.map(_add_fake_enumeration, num_parallel_calls=tf.data.AUTOTUNE)
+    return ds.map(
+        functools.partial(_add_fake_enumeration, fake_val=-1),
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
+  if is_mock_tpu:
+    # Mock tpu backend gives back dummy tensor values of 1, so we mock the
+    # enumeration fields so that it doesn't cause an error when computing
+    # metrics.
+    return ds.map(
+        functools.partial(_add_fake_enumeration, fake_val=1),
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
 
   def _add_shard_enumeration(ex: dict[str, Any]) -> dict[str, Any]:
     shard_index, num_shards = 0, 1
@@ -373,7 +390,6 @@ class SeqIOInput(base_input.BaseInput):
       overrides the task feature lengths for targets when processing the targets
       as ground truths to compute eval metrics. It has no effect on get_next(),
       but only affects compute_metrics(). If set to None, won't truncate.
-    use_enumeration: whether to use enumeration in both batch generation
       (get_next()) and metrics computation. When this param is set to True,
       we'll return a NestedMap including enumeration related provenance fields,
       which will assign each example a globally-unique ID within a given
@@ -471,7 +487,6 @@ class SeqIOInput(base_input.BaseInput):
   ] = pax_fiddle.template_field(DeterministicInput)
   eval_metrics_targets_length: int | None = None
   eval_metrics_filter_targets_fields: list[str] | None = None
-  use_enumeration: bool = True
   annotate_padding_fields: bool = False
   overridden_vocab: seqio.Vocabulary | None = None
   dataset: tf.data.Dataset = dataclasses.field(init=False, repr=False)
@@ -484,12 +499,10 @@ class SeqIOInput(base_input.BaseInput):
   _shard_info: Any = dataclasses.field(init=False, repr=False)
   _len_full_ds: Any = dataclasses.field(init=False, repr=False)
   targets_ds: Any = dataclasses.field(init=False, repr=False)
-  targets_ds_converted: Any = dataclasses.field(init=False, repr=False)
   targets_ds_ori: Any = dataclasses.field(init=False, repr=False)
   ds_non_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
   ds_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
   targets_iter: Any = dataclasses.field(init=False, repr=False)
-  targets_iter_converted: Any = dataclasses.field(init=False, repr=False)
   targets_iter_ori: Any = dataclasses.field(init=False, repr=False)
   _num_eval_examples: Any = dataclasses.field(init=False, repr=False)
   enable_symbolic_checkpointing: bool | None = True
@@ -508,7 +521,6 @@ class SeqIOInput(base_input.BaseInput):
     if (
         not self.is_training
         and self.input_random_seed is None
-        and self.use_enumeration
     ):
       # Since we want the enumeration to be deterministic, in the case that
       # there's no explicit seed set, we default to a fixed seed for evals.
@@ -604,6 +616,11 @@ class SeqIOInput(base_input.BaseInput):
       )
 
   @property
+  def is_mock_tpu(self) -> bool:
+    """Indicates whether running Mock TPU backend."""
+    return 'MOCK_TPU' in str(jax.devices()[0])
+
+  @property
   def is_deterministic(self) -> bool:
     """Indicates whether this SeqIOInput is deterministic or not."""
     return False
@@ -677,7 +694,6 @@ class SeqIOInput(base_input.BaseInput):
     """
     if (
         not self.is_training
-        and self.batch_size
         and self.eval_loop_num_batches
         and not self.reset_for_eval
     ):
@@ -729,7 +745,6 @@ class SeqIOInput(base_input.BaseInput):
     if self.eval_metrics_targets_length:
       sequence_length['targets'] = self.eval_metrics_targets_length
     sharded_datasets = []
-    sharded_datasets_converted = []
 
     largest_shard = 0
     for host_idx in range(self.num_infeed_hosts):
@@ -768,12 +783,9 @@ class SeqIOInput(base_input.BaseInput):
         )
         self._len_full_ds += shard_num_examples
       ds_shard = ds_shard.repeat(num_epochs)
-      if self.use_enumeration:
-        ds_shard = _enumerate_dataset(ds_shard, self.is_training, shard_info)
-      else:
-        sharded_datasets_converted.append(
-            self.feature_converter(ds_shard, self.task_feature_lengths)
-        )
+      ds_shard = _enumerate_dataset(
+          ds_shard, self.is_training, shard_info, self.is_mock_tpu
+      )
       sharded_datasets.append(ds_shard)
 
     choice_dataset = tf.data.Dataset.range(self.num_infeed_hosts).repeat(
@@ -782,10 +794,6 @@ class SeqIOInput(base_input.BaseInput):
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
     )
-    if not self.use_enumeration:
-      self.targets_ds_converted = tf.data.experimental.choose_from_datasets(
-          sharded_datasets_converted, choice_dataset
-      )
 
   def _gen_filtered_artifacts(self) -> None:
     """Create filtered targets artifacts."""
@@ -799,10 +807,6 @@ class SeqIOInput(base_input.BaseInput):
   def _gen_targets_iter(self) -> None:
     """Generate targets iterator."""
     self.targets_iter = self.targets_ds.as_numpy_iterator()
-    if not self.use_enumeration:
-      self.targets_iter_converted = (
-          self.targets_ds_converted.as_numpy_iterator()
-      )
     # Create iterator for ori_targets_ds, which may have ragged tensors and thus
     # can't safely be called with `as_numpy_iterator()`
     # (see `_filter_ragged_tensor()`)
@@ -915,16 +919,15 @@ class SeqIOInput(base_input.BaseInput):
         try_in_mem_cache=self.try_in_mem_cache,
     )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
-
+    assert self.feature_converter
     ds = self.feature_converter(
         ds, task_feature_lengths=self.task_feature_lengths
     )
 
-    if self.use_enumeration:
-      # We want to add enumeration provenance fields *after* applying all
-      # feature converters since feature converters don't pass through
-      # unrecognized fields by default
-      ds = _enumerate_dataset(ds, self.is_training, shard_info)
+    # We want to add enumeration provenance fields *after* applying all
+    # feature converters since feature converters don't pass through
+    # unrecognized fields by default
+    ds = _enumerate_dataset(ds, self.is_training, shard_info, self.is_mock_tpu)
 
     return ds
 
@@ -953,8 +956,7 @@ class SeqIOInput(base_input.BaseInput):
       if not isinstance(b, py_utils.NestedMap):
         b = py_utils.NestedMap.FromNestedDict(b)
       b.eval_sample_weights = 0.0
-      if self.use_enumeration:
-        b = _add_fake_enumeration(b)
+      b = _add_fake_enumeration(b, fake_val=-1)
       if self.annotate_padding_fields and hasattr(b, 'weights'):
         b.weights *= 0
         if hasattr(b, 'paddings'):
@@ -1042,128 +1044,6 @@ class SeqIOInput(base_input.BaseInput):
         ds_ragged_tensor_keys,
     )
 
-  def _build_predict_metric_inputs_with_prefix(
-      self,
-      answers: dict[str, NestedMap],
-      verbose_entries: int,
-      plain_text_output: TextIO | None = None,
-  ) -> tuple[Sequence[str], Sequence[str]]:
-    """Builds 1-to-1 mapped predictions and targets lists via prefix matches."""
-    assert not self.use_enumeration
-    assert self.targets_ds
-    # Prepare ground truth label data by dumping out seqio eval dataset and
-    # get a dict key-ed by detokenized inputs (tokenized inputs are truncated
-    # to inputs_length).
-    inputs_length = self.task_feature_lengths['inputs']
-    assert inputs_length is not None
-
-    # Note that lists are used per prefix since there may be duplicates
-    targets = collections.defaultdict(list)
-    examples = collections.defaultdict(list)
-    num_examples = 0
-    while (
-        self._num_eval_examples < 0
-        or num_examples < self._num_eval_examples
-    ):
-      num_examples += 1
-      try:
-        example = next(self.targets_iter)
-        if 'inputs' not in self.ds_non_ragged_tensor_keys:
-          example_orig = next(self.targets_iter_ori)
-      except (tf.errors.OutOfRangeError, StopIteration) as exc:
-        if self._num_eval_examples > 0:
-          raise StopIteration(
-              'Exhausted eval data with reset_for_eval=False after'
-              f' {num_examples-1} examples (batch_size={self.batch_size})'
-          ) from exc
-        logging.info('Exhausted eval data after %d steps', num_examples - 1)
-        self._gen_targets_iter()
-        break
-
-      # Note that we intentionally do not use 'inputs_pretokenized' here because
-      # it might be very different from the round-trip results below, which
-      # wouldn't match with the keys we get from the model inference path.
-      if 'inputs' in self.ds_non_ragged_tensor_keys:
-        inputs = example['inputs'][np.newaxis, :]
-      else:
-        # ragged tensor may have multiple elements of various lengths. We
-        # linearize all inputs into one array.
-        assert (
-            'inputs' in example_orig
-        ), '"inputs" field is required but not found'
-        inputs = example_orig['inputs'].flat_values.numpy()[np.newaxis, :]
-      key = self.ids_to_strings(inputs, lengths=[inputs_length], key='src')[0]  # pytype: disable=wrong-arg-types
-      t = _get_targets_str(example, self.mixture_or_task_inst)
-      targets[key].append(self.task_inst.postprocess_fn(
-          t, example=example, is_target=True))
-      examples[key].append(example)
-
-    # In case the prefix returned by the model are prefixes of the keys
-    # re-constructed here. This can sometimes be needed due to truncation of
-    # the original key during input processing.
-    _update_keys(answers, targets, self.mixture_or_task_inst.name)
-
-    # Construct (decode output, seqio target) lists by joining on seqio's
-    # detok(tok(features['inputs'])[:task_feature_lengths['inputs']])).
-    predictions_list = []
-    targets_list = []
-    for k in targets:
-      if k not in answers:
-        raise ValueError(
-            f'Example not found in decoder output (key={k}): {targets[k]}')
-      ans = answers[k]
-      answer = ans[_LM_DECODER_OUT_KEY]
-      seqio_postprocessed_predictions = []
-      for target, e in zip(targets[k], examples[k]):
-        targets_list.append(target)
-        prediction = self.task_inst.postprocess_fn(
-            answer, example=e, is_target=False)
-        predictions_list.append(prediction)
-        seqio_postprocessed_predictions.append(prediction)
-
-      # Mutate 'ans' dictionary which is written to disk afterwards
-      ans['seqio_targets'] = targets[k]
-      ans['seqio_postprocessed_predictions'] = _convert_bytes_to_str(
-          seqio_postprocessed_predictions
-      )
-    eval_data_size = (
-        self._num_eval_examples
-        if self._num_eval_examples > 0
-        else self._len_full_ds
-    )
-    logging.info(
-        'Data %s has %s examples for computing eval metrics.',
-        self.name,
-        eval_data_size,
-    )
-    if eval_data_size != len(predictions_list):
-      raise ValueError(
-          f'Data {self.name} expects {eval_data_size} examples for computing'
-          f' eval metrics, got {len(predictions_list)}.'
-      )
-
-    # Log a few examples for inspection and sanity check.
-    it = iter(targets)
-    for i in range(verbose_entries):
-      k = next(it)
-      ans = answers[k]
-      e = examples[k][0]
-      answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.task_inst.postprocess_fn(
-          answer, example=e, is_target=False)
-      target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.task_inst.postprocess_fn(
-          target, example=e, is_target=True)
-      logging.info(
-          'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.', i, k,
-          answer_processed, answer, target_processed, target)
-
-    # Optionally log all examples for inspection in text format
-    if plain_text_output is not None:
-      _log_plain_text_output(answers, plain_text_output)
-
-    return predictions_list, targets_list
-
   def _get_targets_with_enum_key(self) -> Mapping[str, NestedMap]:
     assert self.targets_ds
     if self._cached_targets_with_enum_key is not None:
@@ -1225,8 +1105,6 @@ class SeqIOInput(base_input.BaseInput):
       plain_text_output: TextIO | None = None,
   ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Builds 1-to-1 mapped predictions and targets lists using enum fields."""
-    assert self.use_enumeration
-
     targets = self._get_targets_with_enum_key()
 
     predictions_list = []
@@ -1278,90 +1156,9 @@ class SeqIOInput(base_input.BaseInput):
 
     return predictions_list, targets_list
 
-  def _build_scoring_metric_inputs_with_labels(
-      self, answers: dict[tuple[int], NestedMap], verbose_entries: int
-  ) -> tuple[Sequence[Any], Sequence[Any]]:
-    """Build 1-to-1 mapped scores and targets for metrics via label matching."""
-    # TODO(b/241386390): deprecate label-based matching for metrics computation.
-    assert self.targets_ds
-    # Prepare ground truth label data by dumping out seqio eval dataset and
-    # produce a dict key-ed by tuple of `labels` token ids.
-    targets = collections.defaultdict(list)
-    num_examples = 0
-    while (
-        self._num_eval_examples < 0
-        or num_examples < self._num_eval_examples
-    ):
-      num_examples += 1
-      try:
-        example = next(self.targets_iter)
-        example_convert = next(self.targets_iter_converted)
-      except (tf.errors.OutOfRangeError, StopIteration) as exc:
-        if self._num_eval_examples > 0:
-          raise StopIteration(
-              'Exhausted eval data with reset_for_eval=False after'
-              f' {num_examples-1} examples (batch_size={self.batch_size})'
-          ) from exc
-        logging.info(
-            'Exhausted target eval data after %d examples', num_examples - 1
-        )
-        self._gen_targets_iter()
-        break
-
-      key = tuple(example_convert[_LM_LABEL_KEY])
-      targets[key].append(example)
-
-    # Construct (scoring output, seqio target) lists by joining on label tokens
-    targets_list = []
-    scores_list = []
-    verbose_entries_idx = 0
-    for k in targets:
-      if k not in answers:
-        raise ValueError(
-            f'Example not found in eval output (key={k}): {targets[k][0]}')
-      ans = answers[k]
-      target = targets[k]
-      score = ans[_LM_SCORE_KEY]
-      prefix_targets_list = []
-      for e in targets[k]:
-        target_post = self.task_inst.postprocess_fn(
-            target, example=e, is_target=True)
-        targets_list.append(target_post)
-        prefix_targets_list.append(target_post)
-        scores_list.append(score)
-        if verbose_entries_idx < verbose_entries:
-          logging.info(
-              'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
-              'is_correct=%s\ntarget=%s\nscore=%s\n\n',
-              e.get('inputs_pretokenized', 'None'),
-              e.get('targets_pretokenized', 'None'), e.get('is_correct', 'N/A'),
-              target_post, score)
-          verbose_entries_idx += 1
-      ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(
-          prefix_targets_list
-      )
-    eval_data_size = (
-        self._num_eval_examples
-        if self._num_eval_examples > 0
-        else self._len_full_ds
-    )
-    logging.info(
-        'Data %s has %s examples for computing eval metrics.',
-        self.name,
-        eval_data_size,
-    )
-    if eval_data_size != len(scores_list):
-      raise ValueError(
-          f'Data {self.name} expects {eval_data_size} examples for computing'
-          f' eval metrics, got {len(scores_list)}.'
-      )
-
-    return scores_list, targets_list
-
   def _build_scoring_metric_inputs_with_enum(
       self, answers: dict[str, NestedMap], verbose_entries: int
   ) -> tuple[Sequence[Any], Sequence[Any]]:
-    assert self.use_enumeration
     targets = self._get_targets_with_enum_key()
 
     # Construct (scoring output, seqio target) lists by joining on enum ID
@@ -1404,18 +1201,13 @@ class SeqIOInput(base_input.BaseInput):
     This method is called only on process=0 after aggregating all outputs as
     seqio task's metric_fns take in a global view of examples.
 
-    This function basically does the following (for self.use_enumeration=False):
-      1. Iterate through SeqIO task's dataset to construct both (a) the
-        input prefix-based key, and (b) the task.postprocess_fn(ex['targets']),
-        which is the target that is used to compute metrics.
-      2. Iterate through the keys generated in (1) to "left-join" with the
-        decoder_outputs mapping.
-      3. Feed the prefix-key mapped list of decoder_outputs and targets through
-        all task.predict_metric_fns.
-      4. Optionally log a couple entries for inspection.
-      5. Optionally log all entries in text format for inspection.
-
-    When self.use_enumeration=True, we'll match based on enumeration IDs.
+    This function does the following:
+      1. Calls self._build_predict_metric_inputs_with_enum(), which generates
+        the predictions_list (the model's decoded_output) and corresponding
+        targets_list (the ground truth target).
+      2. Feed the lists from 1. through all task.predict_metric_fns.
+      3. Optionally log a couple entries for inspection.
+      4. Optionally log all entries in text format for inspection.
 
     For tasks with score_metric_fns, use compute_metrics_eval() below.
 
@@ -1466,18 +1258,11 @@ class SeqIOInput(base_input.BaseInput):
       self._gen_targets_artifacts()
 
     answers = dict(decoder_outputs)
-    if self.use_enumeration:
-      (predictions_list, targets_list) = (
-          self._build_predict_metric_inputs_with_enum(
-              answers, verbose_entries, plain_text_output
-          )
-      )
-    else:
-      (predictions_list, targets_list) = (
-          self._build_predict_metric_inputs_with_prefix(
-              answers, verbose_entries, plain_text_output
-          )
-      )
+    (predictions_list, targets_list) = (
+        self._build_predict_metric_inputs_with_enum(
+            answers, verbose_entries, plain_text_output
+        )
+    )
 
     metrics = []
     for fn in task.predict_metric_fns:
@@ -1497,17 +1282,15 @@ class SeqIOInput(base_input.BaseInput):
     This method is called only on process=0 after aggregating all outputs as
     seqio task's metric_fns take in a global view of examples.
 
-    This function basically does the following (for use_enumeration=False):
-      1. Iterate through SeqIO task's dataset to construct both (a) the 'labels'
-        tokens based key, and (b) the task.postprocess_fn(ex['targets']),
-        which is the target that is used to compute metrics.
-      2. Iterate through the keys generated in (1) to "left-join" with the
-        decoder_outputs mapping.
+    This function does the following:
+      1. Calls self._build_scoring_metric_inputs_with_enum(), which generates
+        the scores_list (the model's eval_ouptuts) and corresponding
+        targets_list (the ground truth target).
+      2. Feed the lists from 1) through all task.predict_metric_fns.
       3. Feed the prefix-key mapped list of decoder_outputs and targets through
         all task.predict_metric_fns.
       4. Optionally log a couple entries for inspection.
 
-    When self.use_enumeration=True, we'll match based on enumeration IDs.
 
     For tasks with predict_metric_fns, use compute_metrics() above.
 
@@ -1556,17 +1339,10 @@ class SeqIOInput(base_input.BaseInput):
     if not self.is_targets_init:
       self._gen_targets_artifacts()
 
-    if self.use_enumeration:
-      answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
-      scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
-          answers, verbose_entries)
-    else:
-      answers = {}
-      for _, ex_d in eval_outputs:
-        key = tuple(ex_d[_LM_LABEL_KEY])
-        answers[key] = ex_d
-      scores_list, targets_list = self._build_scoring_metric_inputs_with_labels(
-          answers, verbose_entries)
+    answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
+    scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
+        answers, verbose_entries
+    )
 
     metrics = []
     for fn in task.score_metric_fns:
@@ -1952,7 +1728,6 @@ def get_eval_hparams_for_seqio(
     | seqio.FeatureConverter
     | None = None,
     num_infeed_hosts: int = 0,
-    use_enumeration: bool = True,
     use_cached: bool = False,
     shuffle: bool = None,
     require_metric_fns: bool = True,
@@ -2000,8 +1775,6 @@ def get_eval_hparams_for_seqio(
       ensure that the data is sharded into these many shards. If
       num_infeed_hosts is 0, it will be given a default value by the trainer; if
       it is still not set during __init__, a value of 1 will be used.
-    use_enumeration: whether to use enumeration in both batch generation
-      (get_next()) and metrics computation. For details, see SeqIOInput attrs.
     use_cached: whether to use cached data.
     shuffle: whether to shuffle data.
     require_metric_fns: whether to require that SeqIO tasks have metric_fns.
@@ -2085,7 +1858,6 @@ def get_eval_hparams_for_seqio(
     hp = cloneable_p.clone().set(
         mixture_or_task=task,
         name=task.name,
-        use_enumeration=use_enumeration,
         use_cached=use_cached,
     )
     # Allow selecting split based on `Callable` `split_name` if mixture contains
