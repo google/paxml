@@ -1108,8 +1108,10 @@ py_strict_test(
         ":trainer_lib",
         ":tuning_lib",
         # Implicit absl.testing.absltest.absltest dependency.
+        # Implicit absl.testing.parameterized dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
+        # Implicit jax dependency.
         "//praxis:base_hyperparams",
         "//praxis:pax_fiddle",
         # Implicit pyglove dependency.

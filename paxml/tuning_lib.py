@@ -17,6 +17,7 @@
 
 import inspect
 import math
+import os
 import re
 from typing import Any, Callable, NamedTuple, Sequence, Text, Type
 from absl import logging
@@ -651,19 +652,35 @@ def should_early_stop(
   # evaluation or decoding takes place.
   train_metrics = None
   if train_weighted_scalars is not None:
-    if is_last_ckpt or running_mode.has_eval or running_mode.has_decode:
+    if (
+        is_last_ckpt
+        or running_mode.has_eval
+        or running_mode.has_decode
+        or os.getenv('PAXML_EARLY_STOP_ALWAYS_AGGREGATE_TRAIN_METRICS', '')
+        == 'true'
+    ):
       train_weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-          train_weighted_scalars)
+          train_weighted_scalars
+      )
       train_metrics = metric_utils.as_float_dict(train_weighted_scalars)
       logging.info(
-          ('Aggregate train weighted scalars as tuning metrics. '
-           'Metrics=%s, WeightedScalars=%s'),
-          train_metrics, train_weighted_scalars)
+          (
+              'Aggregate train weighted scalars as tuning metrics. '
+              'Metrics=%s, WeightedScalars=%s'
+          ),
+          train_metrics,
+          train_weighted_scalars,
+      )
 
   # Aggregate metrics for tuning.
-  tuning_metrics = _aggregate_metrics(train_metrics, eval_train_metrics,
-                                      eval_metrics, decode_metrics, num_params,
-                                      train_steps_per_sec)
+  tuning_metrics = _aggregate_metrics(
+      train_metrics,
+      eval_train_metrics,
+      eval_metrics,
+      decode_metrics,
+      num_params,
+      train_steps_per_sec,
+  )
   return early_stop_fn(tuning_metrics, running_mode, global_step, is_last_ckpt)
 
 

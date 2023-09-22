@@ -17,11 +17,15 @@
 
 import dataclasses
 import math
+import os
 from typing import Any, Callable, Type
+from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from clu import platform
 from etils import epath
+import jax
 from paxml import automl
 from paxml import base_experiment
 from paxml import trainer_lib
@@ -785,8 +789,9 @@ class TuneTest(absltest.TestCase):
             eval_interval_steps=10,
             decode_interval_steps=10,
             save_interval_steps=400,
-            train_to_end=True))
-
+            train_to_end=True,
+        )
+    )
 
 def get_trial_dirname(
     search_space_fun,
@@ -877,6 +882,49 @@ class TrialDirnameTest(absltest.TestCase):
     self.assertEqual(
         str(get_trial_dirname(_fn, 1, pg.DNA([0, 'xyz']))),
         'root/1/x=1|y=(CUSTOM)')
+
+
+class ShouldEarlyStopTest(parameterized.TestCase):
+  """Tests for should_early_stop."""
+
+  @parameterized.parameters([
+      ('true', ['train_steps_per_sec', 'train/metric_0']),
+      ('', ['train_steps_per_sec']),
+  ])
+  def test_tune_always_aggregate_train_metrics(
+      self,
+      test_paxml_early_stop_always_aggregate_train_metrics,
+      expected_tuning_metrics_keys,
+  ):
+    mock_early_stop_fn = mock.Mock()
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            'PAXML_EARLY_STOP_ALWAYS_AGGREGATE_TRAIN_METRICS': (
+                test_paxml_early_stop_always_aggregate_train_metrics
+            )
+        },
+    ):
+      tuning_lib.should_early_stop(
+          mock_early_stop_fn,
+          global_step=10,
+          train_steps_per_sec=2.5,
+          train_weighted_scalars={
+              'metric_0': (jax.numpy.array([0, 1]), jax.numpy.array([1, 0]))
+          },
+          is_last_ckpt=False,
+          eval_metrics=None,
+          decode_metrics=None,
+      )
+
+    mock_early_stop_fn.assert_called_once_with(
+        mock.ANY, trainer_lib.RunningMode.TRAIN, 10, False
+    )
+    self.assertEqual(
+        set(mock_early_stop_fn.call_args.args[0].keys()),
+        set(expected_tuning_metrics_keys),
+    )
 
 
 if __name__ == '__main__':
