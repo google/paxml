@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Callable
+import math
 from typing import Any
 
 from flax import struct
@@ -231,8 +232,17 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
   inner_batch_size: int | None = None
 
   def _clip_and_mean_gradients(
-      self, grads: NestedMap, l2_norm_clip: float = 1.0
+      self,
+      grads: NestedMap,
+      l2_norm_clip: float = 1.0,
+      microbatch_size: int = 1,
   ) -> tuple[NestedMap, float, int]:
+    def _reshape_and_mean(g):
+      return jnp.mean(
+          jnp.reshape(g, [-1, microbatch_size, *g.shape[1:]]), axis=1
+      )
+
+    grads = jax.tree_map(_reshape_and_mean, grads)
     grads_flat, grads_treedef = jax.tree_flatten(grads)
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_norm_clip
@@ -299,14 +309,23 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     # Get batch size.
     inputs_flat, _ = jax.tree_flatten(inputs)
     batch_size = inputs_flat[0].shape[0]
+    microbatch_size = inputs_flat[0].shape[1]
 
     if self.inner_batch_size is None:
-      inner_batch_size = batch_size
+      inner_batch_size = batch_size * microbatch_size
     else:
       inner_batch_size = self.inner_batch_size
-    if batch_size % inner_batch_size != 0:
-      raise ValueError('`batch_size` must be divisible by `inner_batch_size`.')
-    num_iters = batch_size // inner_batch_size
+
+    if batch_size * microbatch_size % inner_batch_size != 0:
+      raise ValueError(
+          '`batch_size * microbatch_size` must be divisible by'
+          ' `inner_batch_size`.'
+      )
+
+    batch_splits = math.gcd(batch_size, inner_batch_size)
+    microbatch_splits = inner_batch_size // batch_splits
+
+    num_iters = batch_size // batch_splits
     inner_prng_keys = jax.random.split(prng_key, num_iters)
 
     grad_fn = jax.vmap(
@@ -316,7 +335,15 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     )
 
     def reshape_batch(x):
-      return jnp.reshape(x, [-1, inner_batch_size, *x.shape[1:]])
+      return jnp.reshape(
+          x,
+          [
+              -1,
+              inner_batch_size,
+              microbatch_size // microbatch_splits,
+              *x.shape[2:],
+          ],
+      )
 
     # Reshape input so that inner batches are stacked on axis 0.
     inputs = jax.tree_map(reshape_batch, inputs)
@@ -332,7 +359,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
       # Clip and aggregate gradients.
       grads, frac_clipped, _ = self._clip_and_mean_gradients(
-          grads, aux.loss_weight * self.l2_norm_clip
+          grads, aux.loss_weight[0] * self.l2_norm_clip, microbatch_splits
       )
       # Aggregate values and aux.
       values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
