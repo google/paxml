@@ -605,7 +605,7 @@ sentencepiece==0.1.99
     #   lingvo
     #   seqio-nightly
     #   t5
-seqio-nightly==0.0.17.dev20230922
+seqio-nightly==0.0.17.dev20230925
     # via
     #   -r paxml-requirements.in
     #   t5
