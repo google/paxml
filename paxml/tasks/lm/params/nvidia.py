@@ -15,12 +15,15 @@
 
 """Language Model configurations on the T5/C4 dataset. Contributed by NVIDIA."""
 
+import fiddle as fdl
 import math
+import numpy as np
 from jax import numpy as jnp
 from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.tasks.lm.params import c4
 from paxml.tasks.lm.params import lm_cloud
+from paxml.tasks.lm.model_params import maybe_setup_moe_params
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -463,3 +466,37 @@ class NVIDIA175B_FSDP(NVIDIA1_3B):
   DIMS_PER_HEAD = 128
   MODEL_DIMS = 12288
   HIDDEN_DIMS = 4 * 12288
+
+## 26.8B params
+# fits on 16 A100-80G GPUs
+@experiment_registry.register
+class MoELarge(NVIDIA1_3B):
+
+  NUM_LAYERS = 12
+  NUM_HEADS = 32
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 16384
+  DIMS_PER_HEAD = 128
+
+  NUM_EXPERTS = 16
+  NUM_GROUPS = 16
+
+  ## train on 16 GPUs
+  ICI_MESH_SHAPE = [1,8,1]
+  DCN_MESH_SHAPE = [1,2,1]
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+
+    model_p = task_p.model
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    if self.USE_REPEATED_LAYER:
+      stacked_p = stacked_p.block
+
+    stacked_p.moe_layers = list(np.arange(self.NUM_LAYERS))
+    stacked_p.num_groups = self.NUM_GROUPS
+    stacked_p.num_experts = self.NUM_EXPERTS
+
+    maybe_setup_moe_params(stacked_p)
+
+    return task_p
