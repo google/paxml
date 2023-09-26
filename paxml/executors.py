@@ -446,7 +446,10 @@ def _train_and_evaluate_common(
         decode_programs
         and train_p.decode_interval_steps
         and (
-            step_i % train_p.decode_interval_steps == 0
+            (
+                step_i % train_p.decode_interval_steps == 0
+                and step_i >= train_p.decode_start_after_n_steps
+            )
             or step_i >= train_p.num_train_steps
         )
     ):
