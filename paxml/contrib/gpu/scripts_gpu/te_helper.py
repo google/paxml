@@ -59,6 +59,16 @@ class StackedTransformer(transformers.StackedTransformer):
         p_i.num_attention_heads = self.num_heads
         p_i.hidden_size = self.model_dims
         p_i.mlp_hidden_size = self.hidden_dims
+
+        p_i.dropout_rng_name = base_layer.RANDOM
+        p_i.attention_dropout = self.atten_dropout_prob or self.dropout_prob
+        p_i.hidden_dropout = self.residual_dropout_prob or self.dropout_prob
+        p_i.intermediate_dropout = self.relu_dropout_prob or self.dropout_prob
+        if self.residual_droppath_prob > 0.0:
+            p_i.drop_path = (
+                self.residual_droppath_prob * i / max(1, self.num_layers)
+            )
+
         assert self.dim_per_head == self.model_dims // self.num_heads
         assert self.packed_input == False
         assert len(self.moe_layers) == 0
