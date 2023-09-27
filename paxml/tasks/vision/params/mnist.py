@@ -130,7 +130,7 @@ def _cross_entropy_loss(targets, preds):
 
 
 def _compute_accuracy(targets, preds):
-  accuracy = (targets == jnp.argmax(preds, axis=-1)).astype(jnp.float32)
+  accuracy = (targets == jnp.argmax(preds, axis=-1)).astype(jnp.float32)  # pytype: disable=wrong-arg-types  # jnp-type
   return jnp.mean(accuracy)
 
 
