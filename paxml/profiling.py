@@ -31,6 +31,7 @@ class Profiler:
       default_duration_sec: float = 5.0,
       tag: str | None = None,
       max_num_hosts: int | None = None,
+      capture_host_profile: bool = False,
   ) -> None:
     """Constructor.
 
@@ -47,12 +48,14 @@ class Profiler:
       max_num_hosts: If max_num_hosts is unspecified, all hosts of devices will
         be chosen. Otherwise, at most max_num_hosts will be chosen. This option
         only works with pathways.
+      capture_host_profile: Capture host CPU profile as well.
     """
     self._capture_num_steps = num_steps
     self._capture_min_duration_sec = min_duration_sec
     self._capture_default_duration_sec = default_duration_sec
     self._tag = tag
     self._max_num_hosts = max_num_hosts
+    self._capture_host_profile = capture_host_profile
     self._step_duration_sec = 0.
     self._step_count = 0
 

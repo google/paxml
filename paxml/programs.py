@@ -289,6 +289,7 @@ class BaseTrainProgram(Program):
         num_steps=train_p.profiler_num_steps,
         min_duration_sec=train_p.profiler_min_duration_sec,
         max_num_hosts=train_p.profiler_max_num_hosts,
+        capture_host_profile=train_p.profiler_capture_host_profile,
     )
     self._train_summary_last_time = time.time()
     self._train_summary_last_step = init_step - 1

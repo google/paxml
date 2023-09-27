@@ -1233,6 +1233,7 @@ class SingleTask(base_task.BaseTask):
         No trace is captured if set to None.
       profiler_max_num_hosts: If set, limit profiling only on the specified
         number of hosts.
+      profiler_capture_host_profile: If True, capture host CPU profile as well.
       always_use_train_for_model_init: Boolean indicating whether to use the new
         flow for model initialization. With this new flow, dedicated evaluation
         and decoding-only jobs rely on training inputs for model initialization.
@@ -1287,6 +1288,7 @@ class SingleTask(base_task.BaseTask):
     profiler_min_duration_sec: float = 1.0
     profiler_capture_step: int | None = None
     profiler_max_num_hosts: int | None = None
+    profiler_capture_host_profile: bool = False
     always_use_train_for_model_init: bool = True
     enforce_input_specs: bool = True
     random_seed: int = 1234
