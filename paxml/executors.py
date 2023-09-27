@@ -395,7 +395,7 @@ def _train_and_evaluate_common(
     if not train_program.should_run(partitioned_train_state, step_i):
       logging.info(
           (
-              'Training loop completed (step (`%d`) greater than '
+              'Training loop completed (step (`%d`) greater than or equal to '
               'num_train_step (`%d`).'
           ),
           step_i,
