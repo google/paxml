@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-r"""A simple utility to dump experiment hparams to a txt file.
+r"""A simple utility to dump experiment hparams to stdout or a txt file.
 
 The binary target `:dump_hparams` is defined by `pax_targets()` in the `BUILD`
 file.
@@ -23,7 +23,11 @@ python paxml/tools/dump_hparams.py \
     --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
     --params_ofile=/tmp/bert.txt
 
-To examine post-init model params, specify one more parameter:
+Alternatively, omitting --params_ofile just prints to stdout, which might be
+useful in shell pipelines.
+
+You may also additionally specify --post_init_params_ofile, to write a second
+file consisting of the post-init model params (this takes longer to generate):
   --post_init_params_ofile=/tmp/lm_post.txt
 """
 

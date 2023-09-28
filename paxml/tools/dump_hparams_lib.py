@@ -24,6 +24,7 @@ import os
 from absl import app
 from absl import flags
 from absl import logging
+from etils import epath
 from fiddle import absl_flags
 import jax
 import numpy as np
@@ -31,24 +32,26 @@ from paxml import base_experiment
 from paxml import experiment_registry
 from praxis import base_hyperparams
 from praxis import base_layer
-from praxis import pax_fiddle
+from praxis import pax_fiddle as fdl
 from praxis import py_utils
+from praxis import pytypes
 import pyglove as pg
-import tensorflow.compat.v2 as tf
 
 
-flags.DEFINE_string('exp', None, 'A registered experiment name.')
-flags.DEFINE_string('params_ofile', None, 'Dump pre-init params to this file.')
-flags.mark_flag_as_required('params_ofile')
-flags.DEFINE_string('post_init_params_ofile', None,
-                    'If not None, Dump post-init params to this file.')
+_EXP = flags.DEFINE_string('exp', None, 'A registered experiment name.')
+_OUTFILE = epath.DEFINE_path(
+    'params_ofile', '/dev/stdout', 'Dump pre-init params to this.'
+)
+_POST_INIT_OUTFILE = epath.DEFINE_path(
+    'post_init_params_ofile',
+    None,
+    'If not None, Dump post-init params to this file.',
+)
 
-FLAGS = flags.FLAGS
-BaseExperimentT = base_experiment.BaseExperimentT
 instantiate = base_layer.instantiate
 
 
-def _get_experiment(experiment_name: str) -> BaseExperimentT:
+def _get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
   """Retrieves a experiment config from the global registry."""
   experiment_class = experiment_registry.get(experiment_name)
   if experiment_class is None:
@@ -62,21 +65,25 @@ def _get_experiment(experiment_name: str) -> BaseExperimentT:
   return experiment_class
 
 
-def _write_post_init_model_hparams_file(model_param, filepath,
-                                        input_specs) -> None:
+def _write_post_init_model_hparams_file(
+    model_param: fdl.Config[base_layer.BaseLayer],
+    filepath: epath.Path,
+    input_specs: pytypes.NestedShapeDtypeStruct,
+) -> None:
   """Dumps post init model hparams file."""
   model = instantiate(model_param)
 
   # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
   # (and check for dcn_mesh_shape too).
   if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
-    input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                               input_specs)
+    input_specs = jax.tree_map(
+        py_utils.get_global_input_shape_dtype, input_specs
+    )
 
   hyper_params = model.abstract_init_with_mdl_config(input_specs)
   params_inits = model.abstract_init_with_metadata(input_specs)
 
-  with tf.io.gfile.GFile(filepath, 'w') as fout:
+  with filepath.open('w') as fout:
     hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
     fout.write(hyper_params_dump)
     fout.write('\n\n')
@@ -113,15 +120,15 @@ def _extract_num_cores(model_p) -> int | None:
 def _main(argv) -> None:
   del argv  # unused.
 
-  if FLAGS.exp is not None:
-    logging.info('Dumping out params for experiment: %s', FLAGS.exp)
-    experiment_config = _get_experiment(FLAGS.exp)()
+  if _EXP.value is not None:
+    logging.info('Dumping out params for experiment: %s', _EXP.value)
+    experiment_config = _get_experiment(_EXP.value)()
   else:
     logging.info('Dumping out params from fiddle configuration')
     cfg = absl_flags.create_buildable_from_flags(
         module=None, allow_imports=True
     )
-    experiment_config = pax_fiddle.build(cfg)
+    experiment_config = fdl.build(cfg)
 
   # NOTE(daiyip): putting `task()`, `datasets()` and `decoder_datasets()` under
   # an AutoML context allows dynamic evaluation of hyperparameters that is to
@@ -135,10 +142,13 @@ def _main(argv) -> None:
   prev_xla_flags = os.getenv('XLA_FLAGS')
   flags_str = prev_xla_flags or ''
   # Don't override user-specified device count, or other XLA flags.
-  if (num_cores is not None and
-      'xla_force_host_platform_device_count' not in flags_str):
+  if (
+      num_cores is not None
+      and 'xla_force_host_platform_device_count' not in flags_str
+  ):
     os.environ['XLA_FLAGS'] = (
-        flags_str + f'--xla_force_host_platform_device_count={num_cores}')
+        flags_str + f'--xla_force_host_platform_device_count={num_cores}'
+    )
 
   # Note datasets and decoder_datasets must be called after setting XLA_FLAGS
   # because it may run JAX and initialized XLA backend without XLA_FLAGS.
@@ -146,7 +156,7 @@ def _main(argv) -> None:
     datasets = experiment_config.datasets()
     dec_datasets = experiment_config.decoder_datasets()
 
-  with tf.io.gfile.GFile(FLAGS.params_ofile, 'w') as params_file:
+  with _OUTFILE.value.open('w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
     for dataset in datasets:
       params_file.write(base_hyperparams.nested_struct_to_text(dataset))
@@ -160,27 +170,28 @@ def _main(argv) -> None:
     params_file.write(base_hyperparams.nested_struct_to_text(task_p))
     # TODO(b/236417790): Dump input specs for model weight initialization.
 
-  if FLAGS.post_init_params_ofile:
+  if _POST_INIT_OUTFILE.value:
     input_specs_provider = instantiate(
-        experiment_config.get_input_specs_provider_params())
+        experiment_config.get_input_specs_provider_params()
+    )
     input_specs = input_specs_provider.get_input_specs()
 
     if task_p.model.dcn_mesh_shape is not None:
-      device_mesh = py_utils.create_device_mesh(
-          task_p.model.ici_mesh_shape,
-          task_p.model.dcn_mesh_shape,
-          contiguous_submeshes=task_p.model.contiguous_submeshes,
-      )
       context_manager = jax.sharding.Mesh(
-          device_mesh, task_p.model.mesh_axis_names
+          py_utils.create_device_mesh(
+              task_p.model.ici_mesh_shape,
+              task_p.model.dcn_mesh_shape,
+              contiguous_submeshes=task_p.model.contiguous_submeshes,
+          ),
+          task_p.model.mesh_axis_names,
       )
     else:
       context_manager = contextlib.nullcontext()
 
     with context_manager:
-      _write_post_init_model_hparams_file(task_p.model,
-                                          FLAGS.post_init_params_ofile,
-                                          input_specs)
+      _write_post_init_model_hparams_file(
+          task_p.model, _POST_INIT_OUTFILE.value, input_specs
+      )
 
 
 def main():
