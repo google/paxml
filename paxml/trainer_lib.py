@@ -1562,7 +1562,7 @@ def initialize_partitioned_model_states(
       train_state_partition_specs,
   )
 
-  init_fn = jax.jit(
+  init_fn = pjit.pjit(
       init_model_from_seed,
       in_shardings=prng_key_shardings,
       out_shardings=train_state_shardings,

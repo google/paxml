@@ -872,7 +872,7 @@ class PjitPartitioner(Partitioner):
         rep_sharding = jax.sharding.NamedSharding(
             self._global_mesh, jax.sharding.PartitionSpec()
         )
-        return jax.jit(
+        return pjit.pjit(
             _identity, in_shardings=rep_sharding, out_shardings=rep_sharding
         )(k)
 
@@ -1048,7 +1048,7 @@ class PjitPartitioner(Partitioner):
     extra_kwargs = dict(in_shardings=fn_in_shardings)
     if not use_pspec_on_array_inputs:
       extra_kwargs = {}
-    pjitted_fn = jax.jit(
+    pjitted_fn = pjit.pjit(
         step_fn,
         out_shardings=fn_out_shardings,
         # For training, TrainState is the first argument and return value. We
