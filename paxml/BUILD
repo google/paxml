@@ -687,7 +687,9 @@ pytype_strict_library(
     deps = [
         ":automl",
         ":base_experiment",
+        ":base_task",
         ":metric_utils",
+        ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.logging dependency.
         # Implicit clu.platform dependency.

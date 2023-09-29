@@ -15,6 +15,7 @@
 
 """Tuning loop for PAX."""
 
+import copy
 import inspect
 import math
 import os
@@ -26,7 +27,9 @@ from etils import epath
 import jax
 from paxml import automl
 from paxml import base_experiment
+from paxml import base_task
 from paxml import metric_utils
+from paxml import tasks_lib
 from paxml import trainer_lib
 from praxis import base_hyperparams
 from praxis import pax_fiddle
@@ -102,6 +105,57 @@ def get_search_space(
         f'`automl.parameter_sweep. Experiment class: '
         f'{experiment_config.__class__}.')
   return search_space
+
+
+def _maybe_override_for_warm_start(
+    sub_experiment_cls: Type[base_experiment.BaseExperiment],
+    feedback: pg.tuning.Feedback,
+) -> Type[base_experiment.BaseExperiment]:
+  """Overrides the task() method to start from a specified checkpoint."""
+  checkpoint_path = feedback.checkpoint_to_warm_start_from
+
+  class OverriddenExperiment(sub_experiment_cls):
+    """This is a modified version of $sub_experiment_cls."""
+
+    def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
+      task_p = super().task()
+      if checkpoint_path and not hasattr(
+          self, 'get_input_specs_provider_params'
+      ):
+        logging.error(
+            'The experiment configuration has not defined'
+            ' "get_input_specs_provider_params": %s',
+            task_p,
+        )
+      task_copy = copy.deepcopy(task_p)
+      if checkpoint_path:
+        logging.info(
+            'Overriding checkpoint_path (Trial.id=%s) to %s',
+            feedback.id,
+            checkpoint_path,
+        )
+        # The following code makes sense any time $checkpoint_path is True,
+        # i.e. for Freeze/Thaw when generation > 0.
+        task_copy.train.init_from_checkpoint_rules = {
+            checkpoint_path: tasks_lib.CheckpointLoadingRules(
+                task_p=task_p,
+                load_rules=[(r'(.*)', '{}')],
+                # Load_step=False implies that each chunk of training starts
+                # with step=0; this makes the learning_rate schedule and
+                # num_train_steps simpler, but requires extra work when
+                # displaying on TensorBoard.  Load_step=true would have the step
+                # count continuing to increase across a warm-start, and have the
+                # opposite effects.
+                load_step=False,
+                load_opt_states=True,
+                input_specs_provider_p=self.get_input_specs_provider_params(),
+            )
+        }
+      else:
+        logging.info('No warm-start checkpoint_path on Trial %s', feedback.id)
+      return task_copy
+
+  return OverriddenExperiment
 
 
 def tune(
@@ -257,6 +311,9 @@ def tune(
 
       for i, (sub_experiment_id, sub_experiment_cls) in enumerate(
           sub_experiments.items()):
+        sub_experiment_cls = _maybe_override_for_warm_start(
+            sub_experiment_cls, feedback
+        )
         early_stopping_fn = EarlyStoppingFn(
             feedback=feedback,
             sub_experiment_id=sub_experiment_id,
