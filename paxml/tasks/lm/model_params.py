@@ -35,6 +35,7 @@ from praxis.layers import activations
 from praxis.layers import embedding_softmax
 from praxis.layers import models
 from praxis.layers import transformer_models
+from praxis.layers.injection import fp8_nvidia_gpu as fp8_ops
 
 NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
@@ -534,6 +535,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   ACTIVATION_CLS = activations.ReLU
   USE_GATED_ACTIVATION = False
   DECAY_END = 100000
+  USE_FP8 = False
 
   # optimizer related
   DROPOUT_PROB = 0.0
@@ -619,6 +621,10 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.norm_policy = self.NORM_POLICY
     transformer_layer_p.tr_atten_tpl.use_bias = False
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
+
+    if self.USE_FP8:
+      fp8_ops.tr_set_fp8_quantization(transformer_layer_p)
+
     transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
         self.ACTIVATION_CLS
     )
