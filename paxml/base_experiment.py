@@ -21,6 +21,8 @@ to a specific ML experiment.
 
 import abc
 from typing import Type, TypeVar
+import warnings
+
 from paxml import automl_interfaces
 from paxml import base_executor
 from paxml import base_task
@@ -51,6 +53,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     Raises a ValueError exception if there is no training split or there are
     multiple of them.
     """
+    warnings.warn(
+        '`training_dataset` is deprecated in favor of `train_datasets`.',
+        DeprecationWarning,
+    )
     training_splits = [s for s in self.datasets() if s.is_training]
     if not training_splits:
       raise ValueError(
@@ -61,6 +67,10 @@ class BaseExperiment(metaclass=abc.ABCMeta):
           'Found multiple training split datasets in this experiment '
           f'config (`{self.datasets()}`).')
     return training_splits[0]
+
+  def train_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+    """Returns the list of dataset parameters for training."""
+    return [dataset for dataset in self.datasets() if dataset.is_training]
 
   def eval_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for evaluation."""

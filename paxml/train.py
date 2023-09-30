@@ -163,7 +163,7 @@ def train_and_evaluate(
           'Expecting pax_fiddle.Config[BaseInput] from datasets(), got:'
           f' {inp.ToText()}'
       )
-  train_input_p = experiment_config.training_dataset()
+  train_input_p = experiment_config.train_datasets()[0]
   logging.info('[PAX STATUS]: Done getting dataset configurations.')
 
   logging.info('train_input_p:')

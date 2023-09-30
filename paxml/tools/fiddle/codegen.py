@@ -444,9 +444,7 @@ _DEFAULT_FIXTURE_DOCSTRINGS = {
     ),
     "eval_datasets_fixture": "Returns configuration for eval datasets.",
     "decoder_datasets_fixture": "Returns configuration for decoder datasets.",
-    "training_dataset_fixture": (
-        "Returns configuration for the training dataset."
-    ),
+    "train_datasets_fixture": "Returns configuration for train datasets.",
     "init_from_checkpoint_rules_fixture": (
         "Returns configuration for checkpoint initialization rules."
     ),
@@ -488,7 +486,7 @@ def codegen_baseline_from_legacy(
 
   Args:
     experiment_cls: Class used for the experiment.
-    has_train_dataset: Whether the configuration has a training dataset. If not,
+    has_train_dataset: Whether the configuration has train datasets. If not,
       then the resulting ParameterizedExperiment config's train_dataset field
       will not be populated.
     has_input_specs_provider: Whether the experiment has an input specs provider
@@ -596,7 +594,7 @@ def codegen_baseline_from_legacy(
       "model_fixture": overall_config.task.model,
   }
   if has_train_dataset:
-    sub_fixtures["training_dataset_fixture"] = overall_config.training_dataset
+    sub_fixtures["train_datasets_fixture"] = overall_config.train_datasets
   if overall_config.eval_datasets:
     sub_fixtures["eval_datasets_fixture"] = overall_config.eval_datasets
   if has_input_specs_provider:
@@ -655,7 +653,7 @@ def codegen_experiment_diff(
       for the baseline configuration.
     lowercase_highlevel_settings: Lowercase the high-level variable names. If
       not provided, this will be inferred from the baseline configuration.
-    has_train_dataset: Whether the configuration has a training dataset. If not,
+    has_train_dataset: Whether the configuration has train datasets. If not,
       then the resulting ParameterizedExperiment config's train_dataset field
       will not be populated.
     has_input_specs_provider: Whether the experiment has an input specs provider

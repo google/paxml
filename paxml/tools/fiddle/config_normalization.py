@@ -108,9 +108,9 @@ class ExperimentNormalizer:
     new_kwargs = {}
     if "task" in kwargs:
       new_kwargs["task"] = self.task_normalizer(experiment_config.task)
-    if "training_dataset" in kwargs:
-      new_kwargs["training_dataset"] = self.dataset_normalizer(
-          experiment_config.training_dataset
+    if "train_datasets" in kwargs:
+      new_kwargs["train_datasets"] = self.dataset_normalizer(
+          experiment_config.train_datasets
       )
     # Note: The below just skips the normalizer for `remove_eval_datasets`, we
     # have to actually remove it below.

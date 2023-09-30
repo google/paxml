@@ -42,7 +42,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
         return pax_fiddle.Config(
             ParameterizedExperiment,
             task=pax_fiddle.Config(tasks_lib.SingleTask, model=model_cfg),
-            training_dataset=train_dataset_cfg,
+            train_datasets=[train_dataset_cfg],
             eval_datasets=[eval_dataset_cfg],
         )
 
@@ -76,7 +76,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
       self,
       *,
       task: pax_fiddle.Config[base_task.BaseTask],
-      training_dataset: pax_fiddle.Config[base_input.BaseInput] | None = None,
+      train_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
       eval_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
       decoder_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
       input_specs_provider: pax_fiddle.Config[base_input.BaseInputSpecsProvider]
@@ -89,7 +89,8 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
 
     Args:
       task: The config for the task.
-      training_dataset: The training dataset config to use.
+      train_datasets: A sequence of dataset configs for training. If not
+        provided, defaults to an empty sequence.
       eval_datasets: A sequence of dataset configs for evaluation. If not
         provided, defaults to an empty sequence.
       decoder_datasets: A sequence of dataset configs for decoding. If not
@@ -98,11 +99,12 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
         If not provided, a `DatasetInputSpecsProvider` will be created using the
         training dataset.
     """
-    if training_dataset is not None and not training_dataset.is_training:
-      raise ValueError(
-          f"The training dataset with name {training_dataset.name!r} must have"
-          " `is_training` set to `True`."
-      )
+    for train_dataset in train_datasets:
+      if not train_dataset.is_training:
+        raise ValueError(
+            f"The training dataset with name {train_dataset.name!r} must have"
+            " `is_training` set to `True`."
+        )
     for eval_dataset in eval_datasets:
       if eval_dataset.is_training:
         raise ValueError(
@@ -116,7 +118,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
             " `is_training` set to `False`."
         )
     self._task = task
-    self._training_dataset = training_dataset
+    self._train_datasets = list(train_datasets)
     self._eval_datasets = list(eval_datasets)
     self._decoder_datasets = list(decoder_datasets)
     self._input_specs_provider = input_specs_provider
@@ -127,16 +129,12 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
     return self._task
 
   def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
-    """Returns the union of training and eval dataset configs."""
-    return (
-        [self._training_dataset] if self._training_dataset else []
-    ) + self.eval_datasets()
+    """Returns the union of train and eval dataset configs."""
+    return self.train_datasets() + self.eval_datasets()
 
-  def training_dataset(self) -> pax_fiddle.Config[base_input.BaseInput]:
-    """Returns the training dataset config. Raises an error if it is `None`."""
-    if self._training_dataset is None:
-      raise ValueError("No training dataset was provided.")
-    return self._training_dataset
+  def train_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+    """Returns the list of training dataset configs."""
+    return self._train_datasets
 
   def eval_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of evaluation dataset configs."""

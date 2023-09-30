@@ -40,16 +40,17 @@ class ExampleInputSpecsProvider(base_input.BaseInputSpecsProvider):
 
 
 def example_experiment_cfg():
-  training_dataset_cfg = pax_fiddle.Config(
-      base_input.BaseInput, name='train', is_training=True
-  )
   return pax_fiddle.Config(
       parameterized_experiment.ParameterizedExperiment,
       task=pax_fiddle.Config(
           tasks_lib.SingleTask,
           model=pax_fiddle.Config(models.ClassificationMLPModel),
       ),
-      training_dataset=training_dataset_cfg,
+      train_datasets=[
+          pax_fiddle.Config(
+              base_input.BaseInput, name='train', is_training=True
+          )
+      ],
       eval_datasets=[pax_fiddle.Config(base_input.BaseInput, name='eval')],
       decoder_datasets=[pax_fiddle.Config(base_input.BaseInput, name='decode')],
       input_specs_provider=pax_fiddle.Config(ExampleInputSpecsProvider),
@@ -63,13 +64,11 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     self.assertIsInstance(experiment_cfg.task, pax_fiddle.Config)
     experiment = pax_fiddle.build(experiment_cfg)
     self.assertEqual(experiment.task(), experiment_cfg.task)
-    self.assertEqual(
-        experiment.training_dataset(), experiment_cfg.training_dataset
-    )
+    self.assertEqual(experiment.train_datasets(), experiment_cfg.train_datasets)
     self.assertEqual(experiment.eval_datasets(), experiment_cfg.eval_datasets)
     self.assertEqual(
         experiment.datasets(),
-        [experiment_cfg.training_dataset] + experiment_cfg.eval_datasets,
+        experiment_cfg.train_datasets + experiment_cfg.eval_datasets,
     )
     self.assertEqual(
         experiment.decoder_datasets(), experiment_cfg.decoder_datasets
@@ -81,7 +80,7 @@ class ParameterizedExperimentTest(test_utils.TestCase):
 
   def test_training_dataset_with_is_training_false_throws_error(self):
     experiment_cfg = example_experiment_cfg()
-    experiment_cfg.training_dataset.is_training = False
+    experiment_cfg.train_datasets[0].is_training = False
     expected_msg = (
         r"The training dataset with name 'train' must have"
         r' `is_training` set to `True`\.'
@@ -89,9 +88,9 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     with self.assertRaisesRegex(ValueError, expected_msg):
       pax_fiddle.build(experiment_cfg)
 
-  def test_datasets_without_training_dataset(self):
+  def test_datasets_without_train_datasets(self):
     experiment_cfg = example_experiment_cfg()
-    del experiment_cfg.training_dataset
+    del experiment_cfg.train_datasets
     experiment = pax_fiddle.build(experiment_cfg)
     self.assertEqual(experiment.datasets(), experiment_cfg.eval_datasets)
 
@@ -99,11 +98,11 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     experiment_cfg = example_experiment_cfg()
     del experiment_cfg.eval_datasets
     experiment = pax_fiddle.build(experiment_cfg)
-    self.assertEqual(experiment.datasets(), [experiment_cfg.training_dataset])
+    self.assertEqual(experiment.datasets(), experiment_cfg.train_datasets)
 
-  def test_datasets_without_training_or_eval_datasets(self):
+  def test_datasets_without_train_or_eval_datasets(self):
     experiment_cfg = example_experiment_cfg()
-    del experiment_cfg.training_dataset
+    del experiment_cfg.train_datasets
     del experiment_cfg.eval_datasets
     experiment = pax_fiddle.build(experiment_cfg)
     self.assertEmpty(experiment.datasets())
@@ -128,12 +127,11 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     with self.assertRaisesRegex(ValueError, expected_msg):
       pax_fiddle.build(experiment_cfg)
 
-  def test_no_training_dataset_throws_error(self):
+  def test_train_datasets_fallback(self):
     experiment_cfg = example_experiment_cfg()
-    del experiment_cfg.training_dataset
+    del experiment_cfg.train_datasets
     experiment = pax_fiddle.build(experiment_cfg)
-    with self.assertRaisesRegex(ValueError, 'No training dataset was provided'):
-      experiment.training_dataset()
+    self.assertEmpty(experiment.train_datasets())
 
   def test_eval_datasets_fallback(self):
     experiment_cfg = example_experiment_cfg()
@@ -158,7 +156,7 @@ class ParameterizedExperimentTest(test_utils.TestCase):
         base_input.DatasetInputSpecsProvider,
     )
     self.assertEqual(
-        input_specs_provider_params.input_p, experiment_cfg.training_dataset
+        input_specs_provider_params.input_p, experiment_cfg.train_datasets[0]
     )
 
 

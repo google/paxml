@@ -52,7 +52,7 @@ def extract_input_specs(
     logging.info('Extracting input specs info from input pipeline.')
     try:
       # Clone it since we may mutate a few attributes below.
-      train_input_p = experiment_config.training_dataset().clone()
+      train_input_p = experiment_config.train_datasets()[0].clone()
     except ValueError:
       logging.info('Could not find a training input pipeline for %s',
                    experiment_config)

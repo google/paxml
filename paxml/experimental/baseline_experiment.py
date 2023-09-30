@@ -117,7 +117,7 @@ def lower(
       a given BaselineExperiment subclass.
 
   Returns:
-    Low-level configuration, which normally has `task`, `training_dataset`,
+    Low-level configuration, which normally has `task`, `train_datasets`,
     `eval_datasets`, `decoder_datasets`, and `input_specs_provider` attributes.
   """
   make_experiment = fdl.get_callable(config)

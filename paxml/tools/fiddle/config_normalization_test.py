@@ -43,34 +43,36 @@ class ConfigNormalizationTest(absltest.TestCase):
 
   def test_convert_dataclasses(self):
     dataset_config = (
-        test_fixtures.SampleExperimentWithDatasets().training_dataset()
+        test_fixtures.SampleExperimentWithDatasets().train_datasets()
     )
-    dataset_config.batch_size = pax_fiddle.Config(_get_a, Foo(a=100))
+    dataset_config[0].batch_size = pax_fiddle.Config(_get_a, Foo(a=100))
     config = pax_fiddle.Config(
         parameterized_experiment.ParameterizedExperiment,
-        training_dataset=dataset_config,
+        train_datasets=dataset_config,
     )
-    self.assertIsInstance(config.training_dataset.batch_size.foo, Foo)
+    self.assertIsInstance(config.train_datasets[0].batch_size.foo, Foo)
     normalized = config_normalization.default_normalizer()(config)
     self.assertIsInstance(
-        normalized.training_dataset.batch_size.foo, fdl.Config
+        normalized.train_datasets[0].batch_size.foo, fdl.Config
     )
 
   def test_converts_nested_maps(self):
     dataset_config = (
-        test_fixtures.SampleExperimentWithDatasets().training_dataset()
+        test_fixtures.SampleExperimentWithDatasets().train_datasets()
     )
-    dataset_config.batch_size = pytypes.NestedMap(foo=1234)
+    dataset_config[0].batch_size = pytypes.NestedMap(foo=1234)
     config = pax_fiddle.Config(
         parameterized_experiment.ParameterizedExperiment,
-        training_dataset=dataset_config,
+        train_datasets=dataset_config,
     )
-    self.assertIsInstance(config.training_dataset.batch_size, pytypes.NestedMap)
+    self.assertIsInstance(
+        config.train_datasets[0].batch_size, pytypes.NestedMap
+    )
     normalized = config_normalization.default_normalizer()(config)
     self.assertNotIsInstance(
-        normalized.training_dataset.batch_size, pytypes.NestedMap
+        normalized.train_datasets[0].batch_size, pytypes.NestedMap
     )
-    self.assertIs(type(normalized.training_dataset.batch_size.base), dict)
+    self.assertIs(type(normalized.train_datasets[0].batch_size.base), dict)
 
   def test_lowlevel_config(self):
     task_config = (

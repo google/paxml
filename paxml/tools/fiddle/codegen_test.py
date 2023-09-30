@@ -396,7 +396,7 @@ class CodegenOutputsTest(absltest.TestCase):
         task = pax_fiddle.PaxConfig(tasks_lib.SingleTask,
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
-            task=task, training_dataset=self.training_dataset_fixture(),
+            task=task, train_datasets=self.train_datasets_fixture(),
             eval_datasets=self.eval_datasets_fixture())
 
       def model_fixture(self) ->
@@ -406,11 +406,11 @@ class CodegenOutputsTest(absltest.TestCase):
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def training_dataset_fixture(self) ->
-          pax_fiddle.PaxConfig[base_input.BaseInput]:
-        """Returns configuration for the training dataset."""
-        return pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=1024,
-            is_training=True)
+      def train_datasets_fixture(self) ->
+          list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
+        """Returns configuration for train datasets."""
+        return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=1024,
+            is_training=True)]
 
       def eval_datasets_fixture(self) ->
           list[pax_fiddle.PaxConfig[base_input.BaseInput]]:

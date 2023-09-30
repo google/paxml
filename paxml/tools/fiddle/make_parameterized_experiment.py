@@ -41,10 +41,10 @@ def from_legacy(
     experiment_cls: Subclass of BaseExperiment.
     normalizer: Object that will normalize the output configuration. Pass None
       if you don't want any normalization.
-    has_train_dataset: Whether the experiment has a training dataset. Usually
-      this is true, but some experiments may be inference-only, and calling
-      their .training_dataset() method might raise an error. Set this to False
-      in those cases.
+    has_train_dataset: Whether the experiment has train datasets. Usually this
+      is true, but some experiments may be inference-only, and calling their
+      .train_datasets() method might raise an error. Set this to False in those
+      cases.
     has_input_specs_provider: Likewise, usually it's safe to leave this as its
       default (True), but for occasional situations like testing, it may be
       reasonable to disable.
@@ -69,7 +69,7 @@ def from_legacy(
       eval_datasets=eval_datasets,
   )
   if has_train_dataset:
-    overall_config.training_dataset = experiment.training_dataset()
+    overall_config.train_datasets = experiment.train_datasets()
   if has_input_specs_provider:
     overall_config.input_specs_provider = (
         experiment.get_input_specs_provider_params()
