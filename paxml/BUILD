@@ -1044,7 +1044,7 @@ py_strict_test(
 py_strict_test(
     name = "seqio_input_test",
     srcs = ["seqio_input_test.py"],
-    shard_count = 3,
+    shard_count = 8,
     deps = [
         ":seqio_input",
         # Implicit absl.testing.absltest.absltest dependency.
