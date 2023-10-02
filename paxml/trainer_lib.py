@@ -1732,29 +1732,8 @@ def get_train_input_specs_for_model_init(
 
   # All pjit models specify at least the ICI mesh shape.
   if task.model.mesh_shape is not None:
-    # Pjit - handle the fractional batch size case.
-    batch_size = jax.tree_util.tree_leaves(train_input_specs)[0].shape[0]
-    num_devices = jax.local_device_count()
-
-    # Each device needs at least one example.
-    batch_size = max(num_devices, batch_size)
-
-    # And each device needs to receive identically-shape tensors.
-    if batch_size % num_devices != 0:
-      batch_size = ((batch_size + num_devices) // num_devices) * num_devices
-
-    # The batch size we assign here is the global batch size (the convention for
-    # models parallelized with pjit).
     train_input_specs = jax.tree_map(
-        lambda x: jax.ShapeDtypeStruct(  # pylint: disable=g-long-lambda
-            shape=[batch_size * jax.process_count(), *x.shape[1:]],
-            dtype=x.dtype,
-        ),
-        train_input_specs,
-    )
-    logging.info(
-        'Modified spec for pjit global batch size: %s',
-        pprint.pformat(train_input_specs),
+        py_utils.get_global_input_shape_dtype, train_input_specs
     )
 
   return train_input_specs
