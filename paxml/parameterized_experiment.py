@@ -16,6 +16,7 @@
 """Defines a parameterizable BaseExperiment subclass."""
 
 from typing import Sequence
+import warnings
 
 from paxml import base_experiment
 from paxml import base_task
@@ -81,6 +82,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
       decoder_datasets: Sequence[pax_fiddle.Config[base_input.BaseInput]] = (),
       input_specs_provider: pax_fiddle.Config[base_input.BaseInputSpecsProvider]
       | None = None,
+      training_dataset: pax_fiddle.Config[base_input.BaseInput] | None = None,
   ):
     """Initializes a `ParameterizedExpermiment` instance.
 
@@ -98,6 +100,7 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
       input_specs_provider: The config for a `BaseInputSpecsProvider` subclass.
         If not provided, a `DatasetInputSpecsProvider` will be created using the
         training dataset.
+      training_dataset: (Deprecated) A training dataset config to use.
     """
     for train_dataset in train_datasets:
       if not train_dataset.is_training:
@@ -122,6 +125,19 @@ class ParameterizedExperiment(base_experiment.BaseExperiment):
     self._eval_datasets = list(eval_datasets)
     self._decoder_datasets = list(decoder_datasets)
     self._input_specs_provider = input_specs_provider
+
+    if training_dataset is not None:
+      warnings.warn(
+          "`training_dataset` is deprecated in favor of `train_datasets`.",
+          DeprecationWarning,
+      )
+      if not training_dataset.is_training:
+        raise ValueError(
+            f"The training dataset with name {training_dataset.name!r} must"
+            " have `is_training` set to `True`."
+        )
+      self._train_datasets.append(training_dataset)
+
     super().__init__()
 
   def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
