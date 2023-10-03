@@ -769,7 +769,7 @@ tzdata==2023.3
     # via pandas
 uri-template==1.3.0
     # via jsonschema
-urllib3==1.26.16
+urllib3==1.26.17
     # via
     #   google-auth
     #   requests
