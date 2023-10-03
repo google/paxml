@@ -77,7 +77,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     return [dataset for dataset in self.datasets() if not dataset.is_training]
 
   # Optional. Returns a list of datasets to be decoded.
-  # When specified, all decoder datasets must have unique names.
+  # When specified, all decode datasets must have unique names.
   def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for decoder."""
     return []
@@ -147,9 +147,9 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """
     return None
 
-  def train_program(self) -> programs.BaseTrainProgram:
-    """Returns the train program to use for training the model."""
-    return programs.SingleTaskTrainProgram()
+  def train_programs(self) -> list[programs.BaseTrainProgram]:
+    """Returns the list of train program to use for model training."""
+    return [programs.SingleTaskTrainProgram()]
 
   def eval_programs(self) -> list[programs.BaseEvalProgram]:
     """Returns the list of eval programs to use for model evaluation."""

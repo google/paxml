@@ -229,7 +229,7 @@ def train_and_evaluate(
 
   # Creates the train/eval/decode programs.
   logging.info('[PAX STATUS]: Initializing train program.')
-  train_program = experiment_config.train_program()
+  train_program = experiment_config.train_programs()[0]
 
   logging.info('[PAX STATUS]: Initializing eval programs.')
   eval_programs = []
