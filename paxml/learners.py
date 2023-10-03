@@ -24,6 +24,7 @@ from typing import Any, Sequence
 from absl import logging
 import jax
 from jax import numpy as jnp
+from jax import tree_util as jtu
 import optax
 from paxml import sgf
 from praxis import asserts
@@ -44,11 +45,11 @@ SummaryType = base_layer.SummaryType
 instantiate = base_hyperparams.instantiate
 
 
-def _compute_grad_norm(grads: NestedMap) -> JTensor:
-  """Computes total grad norm."""
-  grad_norms_squared = jax.tree_map(lambda x: jnp.sum(x * x), grads)
-  grad_norms_squared, _ = jax.tree_util.tree_flatten(grad_norms_squared)
-  return jnp.sqrt(jnp.sum(jnp.stack(grad_norms_squared)))
+def _compute_norm(grads: pytypes.NestedJTensor) -> jax.Array:
+  """Computes total norm."""
+  norms_sq = jtu.tree_leaves(jtu.tree_map(lambda x: jnp.sum(x * x), grads))
+  norms_sq = norms_sq or jnp.zeros([])  # Empty list case
+  return jnp.sqrt(jnp.sum(jnp.stack(norms_sq)))
 
 
 class Learner(base_hyperparams.FiddleBaseParameterizable):
@@ -250,7 +251,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         or clip_gradient_norm_to_value
         or clip_gradient_single_norm_to_value
     ):
-      raw_grad_norm = _compute_grad_norm(raw_grads)
+      raw_grad_norm = _compute_norm(raw_grads)
       if self.grad_norm_summary:
         base_layer.add_global_summary(
             'learning/' + optimizer_name + 'raw_grad_norm',
@@ -316,7 +317,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     )
 
     if self.grad_norm_summary:
-      clipped_grad_norm = _compute_grad_norm(grads)
+      clipped_grad_norm = _compute_norm(grads)
       base_layer.add_global_summary(
           'learning/' + optimizer_name + 'clipped_grad_norm',
           clipped_grad_norm,
@@ -367,7 +368,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     # Final applied grad norm.
     if self.grad_norm_summary:
-      applied_grad_norm = _compute_grad_norm(transformed_grad)
+      applied_grad_norm = _compute_norm(transformed_grad)
       base_layer.add_global_summary(
           'learning/applied_grad_norm',
           applied_grad_norm,
@@ -407,12 +408,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     if self.var_norm_summary:
       # Add a summary of total var norm.
-      var_squared = jax.tree_map(lambda x: jnp.sum(x * x), old_vars)
-      var_squared, _ = jax.tree_util.tree_flatten(var_squared)
-      var_squared = jnp.concatenate([x[jnp.newaxis] for x in var_squared])
-      var_norm = jnp.sqrt(jnp.sum(var_squared))
       base_layer.add_global_summary(
-          'learning/var_norm', var_norm, SummaryType.AGGREGATE_SCALAR
+          'learning/var_norm',
+          _compute_norm(old_vars),
+          SummaryType.AGGREGATE_SCALAR,
       )
     if self.var_norm_individual_vars:
       self.summarize_norms('per_var_norm', old_vars)
@@ -436,13 +435,13 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       logging.info('var: %s, target_magnitude: %f', var_key, target_magnitude)
       return old_var + transformed_grad * target_magnitude
 
-    var_is_learnable = jax.tree_util.tree_map(
+    var_is_learnable = jtu.tree_map(
         lambda x: not base_layer.var_not_trainable(x), var_weight_hparams
     )
 
     var_keys = py_utils.extract_prefixed_keys_from_nested_map(old_vars)
 
-    return jax.tree_util.tree_map(
+    return jtu.tree_map(
         _adjust_var,
         old_vars,
         transformed_grads,
