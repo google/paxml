@@ -893,7 +893,6 @@ def create_state_partition_specs(
           var_weight_hparams, excluded
       )
       grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
-      assert isinstance(grad_tx, optimizers.ShardedGradientTransformation)
       if isinstance(grad_tx, optimizers.ShardedGradientTransformation):
         opt_var_weight_hparams.append(
             grad_tx.init_partition_spec(var_weight_hparams_for_opt)
@@ -904,6 +903,9 @@ def create_state_partition_specs(
                 grad_tx, var_weight_hparams_for_opt, opt_states[index]
             )
         )
+      else:
+        raise ValueError(f'Unsupported gradient transformation: {grad_tx}')
+
       index += 1
 
     opt_var_partition_specs = base_layer.var_partition_specs(
