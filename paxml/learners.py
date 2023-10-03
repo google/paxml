@@ -412,9 +412,13 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     # TODO(yonghui): implement skip_zero_gradients.
     # TODO(yonghui): implement numerical checks.
 
-    def _adjust_var(old_var, transformed_grad, is_learnable, var_wh, var_key):
+    def _adjust_var(old_var, transformed_grad, is_learnable,
+                    is_overwrite_with_grad, var_wh, var_key):
       if not is_learnable:
         return old_var
+
+      if is_overwrite_with_grad:
+        return transformed_grad
 
       if not self.scale_update_by_var_norm:
         return old_var + transformed_grad
@@ -432,6 +436,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         lambda x: not base_layer.var_not_trainable(x), var_weight_hparams
     )
 
+    var_is_overwrite_with_grad = jax.tree_util.tree_map(
+        lambda x: base_layer.var_overwrite_with_gradient(x), var_weight_hparams
+    )
+
     var_keys = py_utils.extract_prefixed_keys_from_nested_map(old_vars)
 
     return jax.tree_util.tree_map(
@@ -439,6 +447,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         old_vars,
         transformed_grads,
         var_is_learnable,
+        var_is_overwrite_with_grad,
         var_weight_hparams,
         var_keys,
     )

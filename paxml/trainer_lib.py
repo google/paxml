@@ -1130,31 +1130,41 @@ def train_step_single_learner(
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         var_weight_hparams, excluded_for_opt
     )
-    # Exclude the overwrite_with_gradient params, since they don't go through
-    # the optimizer and they don't have corresponding opt states.
+
+    # Except for the overwrite_with_gradient params, we use the update_states()
+    # to compute the optimizer states and transformed grads.
     overwrite_var_mask = \
         tasks_lib.get_overwrite_with_gradient_var_mask(var_weight_hparams)
-    normal_grads = tasks_lib.filter_vars_for_grad_or_opt(
+    grads_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         grads, overwrite_var_mask
     )
     transformed_grads, new_opt_states = learner.update_states(
-        normal_grads, states.opt_states[0], vars_with_opt, wps_with_opt
+        grads_with_opt, states.opt_states[0], vars_with_opt, wps_with_opt
     )
-    vars_with_opt = learner.apply_gradient(
-        vars_with_opt, transformed_grads, wps_with_opt
+
+    # As long as the params have grads, we use the apply_gradients to compute
+    # the new values.
+    vars_with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+        mdl_vars, excluded_for_grad
     )
+    wps_with_grad = tasks_lib.filter_vars_for_grad_or_opt(
+        var_weight_hparams, excluded_for_grad
+    )
+    transformed_grads = jax.tree_map(
+        lambda e, g, t_g: g if e else t_g,
+        overwrite_var_mask,
+        grads,
+        transformed_grads,
+    )
+    vars_with_grad = learner.apply_gradient(
+        vars_with_grad, transformed_grads, wps_with_grad
+    )
+
     mdl_vars = jax.tree_map(
         lambda e, old, new: old if e else new,
         excluded_for_grad,
         mdl_vars,
-        vars_with_opt,
-    )
-    # Update 'overwrite_with_gradient' params.
-    mdl_vars = jax.tree_map(
-        lambda e, new, old: new if e else old,
-        overwrite_var_mask,
-        grads,
-        mdl_vars,
+        vars_with_grad,
     )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:
