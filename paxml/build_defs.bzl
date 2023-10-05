@@ -91,6 +91,7 @@ def pax_targets(
     ":main_mpm", an MPM target, which contains main.par, that can be used
         in the xm launcher with --binary_type=mpm_target. Only available if
         `add_main_mpm_target` is True.
+    # Internal mock backend target docstring
     ":all_experiments_smoke_test", a Python test that runs a sanity check
         on all registered experiments.
     ":dump_hparams", a Python util binary that writes experiment hparams to
@@ -120,6 +121,7 @@ def pax_targets(
           match one of these regexes in order to be smoke tested.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
+      # Internal mock backend docstrings
       main_src: The src file for the ":main" target created.
     """
     if not experiments:
@@ -296,7 +298,7 @@ def pax_targets(
         # Implicit py_binary flag
     )
 
-    # Internal tooling mock backend target
+    # Internal mock backend target.
 
 def export_test(
         name,
