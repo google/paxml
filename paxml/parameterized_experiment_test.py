@@ -52,7 +52,7 @@ def example_experiment_cfg():
           )
       ],
       eval_datasets=[pax_fiddle.Config(base_input.BaseInput, name='eval')],
-      decoder_datasets=[pax_fiddle.Config(base_input.BaseInput, name='decode')],
+      decode_datasets=[pax_fiddle.Config(base_input.BaseInput, name='decode')],
       input_specs_provider=pax_fiddle.Config(ExampleInputSpecsProvider),
   )
 
@@ -71,7 +71,7 @@ class ParameterizedExperimentTest(test_utils.TestCase):
         experiment_cfg.train_datasets + experiment_cfg.eval_datasets,
     )
     self.assertEqual(
-        experiment.decoder_datasets(), experiment_cfg.decoder_datasets
+        experiment.decode_datasets(), experiment_cfg.decode_datasets
     )
     self.assertEqual(
         experiment.get_input_specs_provider_params(),
@@ -117,11 +117,11 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     with self.assertRaisesRegex(ValueError, expected_msg):
       pax_fiddle.build(experiment_cfg)
 
-  def test_decoder_dataset_with_is_training_true_throws_error(self):
+  def test_decode_dataset_with_is_training_true_throws_error(self):
     experiment_cfg = example_experiment_cfg()
-    experiment_cfg.decoder_datasets[0].is_training = True
+    experiment_cfg.decode_datasets[0].is_training = True
     expected_msg = (
-        r"The decoder dataset with name 'decode' must have"
+        r"The decode dataset with name 'decode' must have"
         r' `is_training` set to `False`\.'
     )
     with self.assertRaisesRegex(ValueError, expected_msg):
@@ -139,11 +139,11 @@ class ParameterizedExperimentTest(test_utils.TestCase):
     experiment = pax_fiddle.build(experiment_cfg)
     self.assertEmpty(experiment.eval_datasets())
 
-  def test_decoder_datasets_fallback(self):
+  def test_decode_datasets_fallback(self):
     experiment_cfg = example_experiment_cfg()
-    del experiment_cfg.decoder_datasets
+    del experiment_cfg.decode_datasets
     experiment = pax_fiddle.build(experiment_cfg)
-    self.assertEmpty(experiment.decoder_datasets())
+    self.assertEmpty(experiment.decode_datasets())
 
   def test_input_specs_provider_fallback(self):
     experiment_cfg = example_experiment_cfg()

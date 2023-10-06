@@ -96,7 +96,7 @@ class ExperimentNormalizer:
   task_normalizer: TaskNormalizer
   dataset_normalizer: DatasetNormalizer
   remove_eval_datasets: bool
-  remove_decoder_datasets: bool
+  remove_decode_datasets: bool
 
   def __call__(
       self,
@@ -118,16 +118,16 @@ class ExperimentNormalizer:
       new_kwargs["eval_datasets"] = self.dataset_normalizer(
           experiment_config.eval_datasets
       )
-    if "decoder_datasets" in kwargs and not self.remove_decoder_datasets:
-      new_kwargs["decoder_datasets"] = self.dataset_normalizer(
-          experiment_config.decoder_datasets
+    if "decode_datasets" in kwargs and not self.remove_decode_datasets:
+      new_kwargs["decode_datasets"] = self.dataset_normalizer(
+          experiment_config.decode_datasets
       )
 
     result = fdl.copy_with(experiment_config, **new_kwargs)
     if "eval_datasets" in kwargs and self.remove_eval_datasets:
       del result.eval_datasets
-    if "decoder_datasets" in kwargs and self.remove_decoder_datasets:
-      del result.decoder_datasets
+    if "decode_datasets" in kwargs and self.remove_decode_datasets:
+      del result.decode_datasets
     return result
 
 
@@ -163,7 +163,7 @@ class ConfigNormalizer:
       registry, please use that.
     remove_eval_datasets: Whether to remove/clear eval_datasets, even if they
       exist.
-    remove_decoder_datasets: Whether to remove/clear decoder_datasets, even if
+    remove_decode_datasets: Whether to remove/clear decode_datasets, even if
       they exist.
   """
 
@@ -174,7 +174,7 @@ class ConfigNormalizer:
   unshare_sharding_config: bool = True
   convert_seqio_task_objects: bool = True
   remove_eval_datasets: bool = False
-  remove_decoder_datasets: bool = False
+  remove_decode_datasets: bool = False
 
   @auto_config.auto_config
   def experiment_normalizer(self):
@@ -182,7 +182,7 @@ class ConfigNormalizer:
         task_normalizer=self.task_normalizer(),
         dataset_normalizer=self.dataset_normalizer(),
         remove_eval_datasets=self.remove_eval_datasets,
-        remove_decoder_datasets=self.remove_decoder_datasets,
+        remove_decode_datasets=self.remove_decode_datasets,
     )
 
   @auto_config.auto_config

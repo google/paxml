@@ -159,7 +159,7 @@ def _main(argv) -> None:
     if _CHECK_LEVEL.value >= 8:
       _ = instantiate(dataset)
 
-  dec_datasets = experiment_config.decoder_datasets()
+  dec_datasets = experiment_config.decode_datasets()
   for dataset in dec_datasets:
     if _CHECK_LEVEL.value >= 8:
       _ = instantiate(dataset)

@@ -600,7 +600,7 @@ def decode(
   if restore_checkpoint_dir:
     restore_checkpoint_dir = epath.Path(restore_checkpoint_dir)
 
-  decoder_inputs = experiment_config.decoder_datasets()
+  decoder_inputs = experiment_config.decode_datasets()
   eval_inputs = [v for v in experiment_config.datasets() if not v.is_training]
   if not run_eval:
     eval_inputs = []
@@ -911,7 +911,7 @@ def infer_and_write(
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   task = instantiate(task_p)
   model = task.model
-  inputs_p = experiment_config.decoder_datasets()
+  inputs_p = experiment_config.decode_datasets()
   prng_key = jax.random.PRNGKey(task.infer.random_seed)
   train_input_specs = _get_train_input_specs(task, experiment_config)
 

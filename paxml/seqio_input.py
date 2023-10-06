@@ -1741,7 +1741,7 @@ def get_eval_hparams_for_seqio(
   """Returns a list of SeqIOInput configs for SeqIO Task/Mixture for eval.
 
   This is the easiest way to configure eval hparams in datasets() (for scoring
-  metrics) and decoder_datasets() (for prediction metrics) from SeqIO
+  metrics) and decode_datasets() (for prediction metrics) from SeqIO
   Task/Mixture name and a few required params. A SeqIOInput config is
   created for each Task, i.e. Mixtures are split into component Tasks, as each
   Task is evaled separately.
@@ -1764,7 +1764,7 @@ def get_eval_hparams_for_seqio(
       consistency, especially for few-shot tasks, where the seed affects the
       prompts selected.
     metric_type: The type of metrics to return hparams for. Configure PREDICT
-      type in decoder_datasets() and SCORE type in datasets().
+      type in decode_datasets() and SCORE type in datasets().
     split_name: The split to use for evaluation, defaults to 'validation'. This
       may optionally be a callable that takes a str task name (i.e. a member of
       the provided mixture) and returns the name of the split to use for each

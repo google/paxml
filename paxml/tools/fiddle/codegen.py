@@ -443,7 +443,7 @@ _DEFAULT_FIXTURE_DOCSTRINGS = {
         "Returns configuration for the input specs provider."
     ),
     "eval_datasets_fixture": "Returns configuration for eval datasets.",
-    "decoder_datasets_fixture": "Returns configuration for decoder datasets.",
+    "decode_datasets_fixture": "Returns configuration for decode datasets.",
     "train_datasets_fixture": "Returns configuration for train datasets.",
     "init_from_checkpoint_rules_fixture": (
         "Returns configuration for checkpoint initialization rules."
@@ -459,7 +459,7 @@ def codegen_baseline_from_legacy(
     unshare_sharding_config: bool = True,
     remove_defaults: bool = True,
     remove_eval_datasets: bool = False,
-    remove_decoder_datasets: bool = False,
+    remove_decode_datasets: bool = False,
     factor_out_sharding_annotations: bool = True,
     lowercase_highlevel_settings: bool = True,
     additional_sub_fixtures: Callable[
@@ -504,7 +504,7 @@ def codegen_baseline_from_legacy(
       templates that may actually be unused or equal to their default values.
     remove_eval_datasets: Whether to remove/clear eval_datasets, even if they
       exist.
-    remove_decoder_datasets: Whether to remove/clear decoder_datasets, even if
+    remove_decode_datasets: Whether to remove/clear decode_datasets, even if
       they exist.
     factor_out_sharding_annotations: Whether to remove sharding annotations.
     lowercase_highlevel_settings: Lowercase the high-level variable names.
@@ -542,7 +542,7 @@ def codegen_baseline_from_legacy(
       unshare_sharding_config=unshare_sharding_config,
       remove_defaults=remove_defaults,
       remove_eval_datasets=remove_eval_datasets,
-      remove_decoder_datasets=remove_decoder_datasets,
+      remove_decode_datasets=remove_decode_datasets,
       convert_seqio_task_objects=True,
   )
   overall_config = make_parameterized_experiment.from_legacy(
@@ -603,8 +603,8 @@ def codegen_baseline_from_legacy(
     )
   if additional_sub_fixtures:
     sub_fixtures.update(additional_sub_fixtures(overall_config))
-  if overall_config.decoder_datasets:
-    sub_fixtures["decoder_datasets_fixture"] = overall_config.decoder_datasets
+  if overall_config.decode_datasets:
+    sub_fixtures["decode_datasets_fixture"] = overall_config.decode_datasets
   try:
     init_from_checkpoint_rules = (
         overall_config.task.train.init_from_checkpoint_rules

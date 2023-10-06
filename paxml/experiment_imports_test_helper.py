@@ -49,8 +49,11 @@ class ExperimentImportsTestHelper(absltest.TestCase):
 
     tags: list[str] = registry.get_registry_tags(name)
 
-    dataset_splits = (experiment_params.datasets()
-                      + experiment_params.decoder_datasets())
+    if hasattr(experiment_params, 'decode_datasets'):
+      decode_datasets = experiment_params.decode_datasets()
+    else:
+      decode_datasets = experiment_params.decoder_datasets()
+    dataset_splits = experiment_params.datasets() + decode_datasets
     # Registered experiment configurations must have at least a dataset split.
     self.assertNotEmpty(dataset_splits)
     for s in dataset_splits:

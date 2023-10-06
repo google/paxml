@@ -100,7 +100,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
   LEARNING_RATE = pg.oneof([0.1, 0.01, 0.001])
   UNUSED_PARAM = pg.oneof(range(5))
   DATASET_PARAM1 = pg.oneof(['foo', 'bar'])
-  DECODER_DATASET_PARAM1 = pg.oneof(['x', 'y', 'z'])
+  DECODE_DATASET_PARAM1 = pg.oneof(['x', 'y', 'z'])
 
   def task(self):
     return MockTask(
@@ -123,16 +123,16 @@ class TuningExperiment(base_experiment.BaseExperiment):
         )
     ]
 
-  def decoder_datasets(self):
-    # NOTE(daiyip): `decoder_dataset_param2` shall NOT appear in the search
-    # space: its evaluation is delayed until instantiation, and decoder
+  def decode_datasets(self):
+    # NOTE(daiyip): `decode_dataset_param2` shall NOT appear in the search
+    # space: its evaluation is delayed until instantiation, and decode
     # datasets are not instantiated during search space inspection.
     return [
         pax_fiddle.Config(
             MockDataset,
-            dataset_param1=self.DECODER_DATASET_PARAM1,
+            dataset_param1=self.DECODE_DATASET_PARAM1,
             dataset_param2=(
-                lambda: pg.oneof(range(3), name='decoder_dataset_param2')
+                lambda: pg.oneof(range(3), name='decode_dataset_param2')
             ),
         )
     ]
@@ -337,7 +337,7 @@ def run_experiment(experiment_config: base_experiment.BaseExperiment,
   del work_unit, job_log_dir
   task_p = experiment_config.task()
   _ = experiment_config.datasets()
-  _ = experiment_config.decoder_datasets()
+  _ = experiment_config.decode_datasets()
   reward = task_p['learning_rate'] * task_p['batch_size'] * 1
   if reward > 5:
     reward = math.nan
@@ -380,7 +380,7 @@ def run_experiment_with_train_metrics_only(
   del work_unit, job_log_dir
   _ = experiment_config.task()
   _ = experiment_config.datasets()
-  _ = experiment_config.decoder_datasets()
+  _ = experiment_config.decode_datasets()
 
   _ = tuning_lib.should_early_stop(
       early_stopping_fn,
@@ -402,7 +402,7 @@ def run_experiment_without_reporting_metrics(
   del work_unit, job_log_dir
   _ = experiment_config.task()
   _ = experiment_config.datasets()
-  _ = experiment_config.decoder_datasets()
+  _ = experiment_config.decode_datasets()
 
   # Reach to the final step without reporting any metrics.
   _ = tuning_lib.should_early_stop(
@@ -416,14 +416,18 @@ class GetSearchSpaceTest(absltest.TestCase):
 
   def test_joint_space_from_class_attributes_and_runtime_call(self):
     search_space = tuning_lib.get_search_space(TuningExperiment())
-    self.assertEqual(search_space.hyper_dict, pg.Dict({
-        'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
-        'batch_size': pg.oneof([16, 32, 64], name='batch_size'),
-        'DATASET_PARAM1': pg.oneof(['foo', 'bar'], name='DATASET_PARAM1'),
-        'dataset_param2': pg.oneof(range(3), name='dataset_param2'),
-        'DECODER_DATASET_PARAM1': pg.oneof(['x', 'y', 'z'],
-                                           name='DECODER_DATASET_PARAM1'),
-    }))
+    self.assertEqual(
+        search_space.hyper_dict,
+        pg.Dict({
+            'LEARNING_RATE': pg.oneof([0.1, 0.01, 0.001], name='LEARNING_RATE'),
+            'batch_size': pg.oneof([16, 32, 64], name='batch_size'),
+            'DATASET_PARAM1': pg.oneof(['foo', 'bar'], name='DATASET_PARAM1'),
+            'dataset_param2': pg.oneof(range(3), name='dataset_param2'),
+            'DECODE_DATASET_PARAM1': pg.oneof(
+                ['x', 'y', 'z'], name='DECODE_DATASET_PARAM1'
+            ),
+        }),
+    )
     self.assertEqual(search_space.dna_spec.space_size, 3 * 3 * 2 * 3 * 3)
 
   def test_parameter_sweep_space_with_cartesian_product(self):
@@ -492,7 +496,7 @@ class TuneTest(absltest.TestCase):
     # Make sure experiment config is saved as trial metadata.
     actual = result.trials[0].metadata.get('experiment_config')
     actual['config']['']['datasets'][0] = 'MOCK_DATASET_CONFIG'
-    actual['config']['']['decoder_datasets'][0] = 'MOCK_DATASET_CONFIG'
+    actual['config']['']['decode_datasets'][0] = 'MOCK_DATASET_CONFIG'
     actual['config']['']['task'] = 'MOCK_TASK_CONFIG'
     self.assertEqual(
         actual,
@@ -502,7 +506,7 @@ class TuneTest(absltest.TestCase):
             'config': {
                 '': pg.Dict(
                     datasets=['MOCK_DATASET_CONFIG'],
-                    decoder_datasets=['MOCK_DATASET_CONFIG'],
+                    decode_datasets=['MOCK_DATASET_CONFIG'],
                     task='MOCK_TASK_CONFIG',
                 )
             },

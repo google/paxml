@@ -141,18 +141,18 @@ class ConfigNormalizationTest(absltest.TestCase):
     )(config)
     self.assertNotIn("eval_datasets", fdl.ordered_arguments(normalized))
 
-  def test_removes_decoder_datasets(self):
+  def test_removes_decode_datasets(self):
     config = make_parameterized_experiment.from_legacy(
-        test_fixtures.SampleExperimentWithDecoderDatasets,
+        test_fixtures.SampleExperimentWithDecodeDatasets,
         normalizer=config_normalization.noop_normalizer(),
         has_train_dataset=False,
         has_input_specs_provider=False,
     )
-    self.assertIn("decoder_datasets", fdl.ordered_arguments(config))
+    self.assertIn("decode_datasets", fdl.ordered_arguments(config))
     normalized = config_normalization.ConfigNormalizer(
-        remove_decoder_datasets=True
+        remove_decode_datasets=True
     )(config)
-    self.assertNotIn("decoder_datasets", fdl.ordered_arguments(normalized))
+    self.assertNotIn("decode_datasets", fdl.ordered_arguments(normalized))
 
 
 if __name__ == "__main__":

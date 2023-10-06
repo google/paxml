@@ -91,9 +91,12 @@ flags.DEFINE_bool(
     'This can be set to True if we do not want an additional job '
     'to run continuous eval.')
 flags.DEFINE_bool(
-    'decode_during_train', False, 'If True, then the training loop '
-    'includes running decode over decoder_datasets(). This can be set to True '
-    'if we do not want an additional job to run continuous decode.')
+    'decode_during_train',
+    False,
+    'If True, then the training loop '
+    'includes running decode over decode_datasets(). This can be set to True '
+    'if we do not want an additional job to run continuous decode.',
+)
 flags.DEFINE_bool(
     'eval_during_decode', False, 'If True, then the decoder run will '
     'include running eval over the non-training data in datasets(). This is '

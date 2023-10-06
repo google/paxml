@@ -67,9 +67,9 @@ def write_hparams_file(
       for dataset in model_config.datasets():
         hparams_file.write(base_hyperparams.nested_struct_to_text(dataset))
         hparams_file.write('\n\n')
-      for decoder_dataset in model_config.decoder_datasets():
+      for decode_dataset in model_config.decode_datasets():
         hparams_file.write(
-            base_hyperparams.nested_struct_to_text(decoder_dataset)
+            base_hyperparams.nested_struct_to_text(decode_dataset)
         )
         hparams_file.write('\n\n')
       hparams_file.write(
@@ -246,7 +246,7 @@ def train_and_evaluate(
       and task_p.train.decode_interval_steps is not None
       and task_p.train.decode_interval_steps > 0
   ):
-    decode_input_p = experiment_config.decoder_datasets()
+    decode_input_p = experiment_config.decode_datasets()
   else:
     decode_input_p = []
   # TODO(wangpeng): Make decode programs configurable.

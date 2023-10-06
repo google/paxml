@@ -421,13 +421,13 @@ class CodegenOutputsTest(absltest.TestCase):
         code.split(), expected.split(), msg=_update_expected_text(code)
     )
 
-  def test_codegen_with_decoder_datasets(self):
+  def test_codegen_with_decode_datasets(self):
     code = codegen.codegen_baseline_from_legacy(
-        test_fixtures.SampleExperimentWithDecoderDatasets,
+        test_fixtures.SampleExperimentWithDecodeDatasets,
         has_input_specs_provider=False,
         has_train_dataset=False,
     )
-    expected = module_docstring("SampleExperimentWithDecoderDatasets") + '''
+    expected = module_docstring("SampleExperimentWithDecodeDatasets") + '''
     import dataclasses
     from paxml.experimental import baseline_experiment
     from paxml import parameterized_experiment
@@ -438,8 +438,8 @@ class CodegenOutputsTest(absltest.TestCase):
 
 
     @dataclasses.dataclass
-    class SampleExperimentWithDecoderDatasetsNewBaseline(baseline_experiment.BaselineExperiment):
-      """Experiment definition for SampleExperimentWithDecoderDatasets."""
+    class SampleExperimentWithDecodeDatasetsNewBaseline(baseline_experiment.BaselineExperiment):
+      """Experiment definition for SampleExperimentWithDecodeDatasets."""
       foo_setting: int = 4123
       derived_setting: int = 8246
       derived_list_setting: list = dataclasses.field(default_factory=lambda:
@@ -452,7 +452,7 @@ class CodegenOutputsTest(absltest.TestCase):
             model=self.model_fixture())
         return pax_fiddle.PaxConfig(parameterized_experiment.ParameterizedExperiment,
             task=task, eval_datasets=[],
-            decoder_datasets=self.decoder_datasets_fixture())
+            decode_datasets=self.decode_datasets_fixture())
 
       def model_fixture(self) ->
           pax_fiddle.PaxConfig[test_fixtures.SampleModel]:
@@ -461,9 +461,9 @@ class CodegenOutputsTest(absltest.TestCase):
             my_setting=self.foo_setting, derived_setting=self.derived_setting,
             derived_list_setting=self.derived_list_setting)
 
-      def decoder_datasets_fixture(self) ->
+      def decode_datasets_fixture(self) ->
           list[pax_fiddle.PaxConfig[base_input.BaseInput]]:
-        """Returns configuration for decoder datasets."""
+        """Returns configuration for decode datasets."""
         return [pax_fiddle.PaxConfig(base_input.BaseInput, batch_size=256)]
     '''
     self.assertEqual(

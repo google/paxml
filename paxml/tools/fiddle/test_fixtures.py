@@ -110,9 +110,9 @@ class SampleExperimentWithDatasets(SampleExperiment):
     ]
 
 
-class SampleExperimentWithDecoderDatasets(SampleExperiment):
+class SampleExperimentWithDecodeDatasets(SampleExperiment):
 
-  def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+  def decode_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     return [
         pax_fiddle.Config(
             base_input.BaseInput,

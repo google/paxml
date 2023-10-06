@@ -76,10 +76,18 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the list of dataset parameters for evaluation."""
     return [dataset for dataset in self.datasets() if not dataset.is_training]
 
+  def decode_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
+    """Returns the list of dataset parameters for decoding."""
+    return self.decoder_datasets()
+
   # Optional. Returns a list of datasets to be decoded.
   # When specified, all decode datasets must have unique names.
   def decoder_datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns the list of dataset parameters for decoder."""
+    warnings.warn(
+        '`decoder_dataset` is deprecated in favor of `decode_datasets`.',
+        DeprecationWarning,
+    )
     return []
 
   @abc.abstractmethod
@@ -162,7 +170,7 @@ class BaseExperiment(metaclass=abc.ABCMeta):
     """Returns the list of decode_programs to use for model decode."""
     decode_program_list = [
         decode_programs.SingleTaskDecodeProgram(input_p)
-        for input_p in self.decoder_datasets()
+        for input_p in self.decode_datasets()
     ]
     return decode_program_list
 

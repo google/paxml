@@ -130,7 +130,7 @@ def _main(argv) -> None:
     )
     experiment_config = fdl.build(cfg)
 
-  # NOTE(daiyip): putting `task()`, `datasets()` and `decoder_datasets()` under
+  # NOTE(daiyip): putting `task()`, `datasets()` and `decode_datasets()` under
   # an AutoML context allows dynamic evaluation of hyperparameters that is to
   # be swept. The first values of all `pg.oneof` will be used.
   automl_context = pg.hyper.DynamicEvaluationContext(require_hyper_name=True)
@@ -150,11 +150,11 @@ def _main(argv) -> None:
         flags_str + f'--xla_force_host_platform_device_count={num_cores}'
     )
 
-  # Note datasets and decoder_datasets must be called after setting XLA_FLAGS
+  # Note datasets and decode_datasets must be called after setting XLA_FLAGS
   # because it may run JAX and initialized XLA backend without XLA_FLAGS.
   with automl_context.collect():
     datasets = experiment_config.datasets()
-    dec_datasets = experiment_config.decoder_datasets()
+    dec_datasets = experiment_config.decode_datasets()
 
   with _OUTFILE.value.open('w') as params_file:
     params_file.write('============= Trainer / Evaler datasets.\n\n')
@@ -162,7 +162,7 @@ def _main(argv) -> None:
       params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')
 
-    params_file.write('============= Decoder datasets.\n\n')
+    params_file.write('============= Decode datasets.\n\n')
     for dataset in dec_datasets:
       params_file.write(base_hyperparams.nested_struct_to_text(dataset))
       params_file.write('\n\n')

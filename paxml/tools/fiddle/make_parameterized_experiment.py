@@ -60,9 +60,9 @@ def from_legacy(
       for dataset_config in dataset_configs
       if not dataset_config.is_training
   ]
-  decoder_datasets = experiment.decoder_datasets()
-  if not isinstance(decoder_datasets, list):
-    decoder_datasets = list(decoder_datasets)
+  decode_datasets = experiment.decode_datasets()
+  if not isinstance(decode_datasets, list):
+    decode_datasets = list(decode_datasets)
   overall_config = pax_fiddle.Config(
       parameterized_experiment.ParameterizedExperiment,
       task=task_config,
@@ -74,8 +74,8 @@ def from_legacy(
     overall_config.input_specs_provider = (
         experiment.get_input_specs_provider_params()
     )
-  if decoder_datasets:
-    overall_config.decoder_datasets = decoder_datasets
+  if decode_datasets:
+    overall_config.decode_datasets = decode_datasets
 
   # Now run normalization, and return the result.
   return normalizer(overall_config) if normalizer else overall_config

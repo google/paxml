@@ -118,7 +118,7 @@ def lower(
 
   Returns:
     Low-level configuration, which normally has `task`, `train_datasets`,
-    `eval_datasets`, `decoder_datasets`, and `input_specs_provider` attributes.
+    `eval_datasets`, `decode_datasets`, and `input_specs_provider` attributes.
   """
   make_experiment = fdl.get_callable(config)
   if not inspect.ismethod(make_experiment):

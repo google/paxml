@@ -90,7 +90,7 @@ def get_search_space(
         if d.is_training:
           _ = instantiate(d)
 
-      _ = experiment_config.decoder_datasets()
+      _ = experiment_config.decode_datasets()
 
   search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
   if (automl.COMBINED_DECISION_ATTR in search_space.hyper_dict
@@ -200,22 +200,22 @@ def tune(
     study: Vizier study name.
     pythia_port: Pythia port for hosting Vizier algorithms.
     is_metric_reporting_role: Whether current process is in the role for
-      reporting metrics. Among train/eval/decoder, only one role can report
+      reporting metrics. Among train/eval/decode, only one role can report
       metrics to the controller at the moment.
     tuner_group: The identifier for the tuner group that current process belongs
       to. If None, all processes will be working on different trials. When
-      specified, paired training, eval and decoder processes should use the
-      same tuner group, which will get the same trial during tuning. Only one
-      process (with is_metric_reporting_role=True) should report the measurement
-      and signal the completion or stopping of the training.
-    max_num_trials: An optional max number of trials for current tuning.
-      If not None, it will override the default max number of trials specified
-      by the `search` method of the experiment.
-    controller_mode: One of 'primary', 'secondary', 'auto'.
-      If primary, current processs will only work as the controller, without
-      running tuning workload. If secondary, current process will only run
-      tuning workload. Otherwise, current process may elect controller role
-      in a background thread, and run the tuning workload in the main thread.
+      specified, paired training, eval and decode processes should use the same
+      tuner group, which will get the same trial during tuning. Only one process
+      (with is_metric_reporting_role=True) should report the measurement and
+      signal the completion or stopping of the training.
+    max_num_trials: An optional max number of trials for current tuning. If not
+      None, it will override the default max number of trials specified by the
+      `search` method of the experiment.
+    controller_mode: One of 'primary', 'secondary', 'auto'. If primary, current
+      processs will only work as the controller, without running tuning
+      workload. If secondary, current process will only run tuning workload.
+      Otherwise, current process may elect controller role in a background
+      thread, and run the tuning workload in the main thread.
     running_mode: One of 'train', 'eval', 'decode', 'decode_once' and 'infer',
       Indicating the running mode that the worker is in.
   """
@@ -358,9 +358,9 @@ def _record_experiment_config(
             base_hyperparams.nested_struct_to_text(ds)
             for ds in subexp.datasets()
         ],
-        'decoder_datasets': [
+        'decode_datasets': [
             base_hyperparams.nested_struct_to_text(ds)
-            for ds in subexp.decoder_datasets()
+            for ds in subexp.decode_datasets()
         ],
         'task': base_hyperparams.nested_struct_to_text(subexp.task()),
     }

@@ -1221,7 +1221,7 @@ class SingleTask(base_task.BaseTask):
         `CheckpointLoadingRules`. See doc string on CheckpointLoadingRules on
         how these rules are interpreted.
       decode_interval_steps: How frequently to run decode on the model on the
-        decoder_datasets() in terms of the number of training steps. Skipped if
+        decode_datasets() in terms of the number of training steps. Skipped if
         this value is not a positive int. Set to 0 to disable decode steps.
       decode_start_after_n_steps: Starts decoder after N steps.
       decode_use_ema_states: If True, use ema states to run decode during train,
