@@ -308,9 +308,9 @@ def _train_and_evaluate_common(
     eval_programs: Sequence[programs.BaseEvalProgram],
     decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
     total_num_params,
-    early_stopping_fn,
+    early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
     checkpointer,
-    job_log_dir,
+    job_log_dir: epath.Path,
     eval_prng_seed,
     decode_prng_seed,
     is_vars_replicated,
@@ -476,6 +476,11 @@ def _train_and_evaluate_common(
         INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1
     )
 
+    # NOTE: By specifying the $checkpoint_path up to 'checkpoints' (instead of
+    # going further) the checkpoint restore code will automatically grab the
+    # checkpoint with the largest $step count.
+    # NOTE: $checkpoint_path should probably be obtained from the checkpointer.
+    checkpoint_path = job_log_dir / 'checkpoints'
     if early_stopping_fn is not None:
       if tuning_lib.should_early_stop(
           early_stopping_fn,
@@ -499,6 +504,7 @@ def _train_and_evaluate_common(
           decode_metrics=decode_metrics,
           train_steps_per_sec=steps_per_sec,
           num_params=total_num_params,
+          checkpoint_path=checkpoint_path,
       ):
         logging.info(
             (

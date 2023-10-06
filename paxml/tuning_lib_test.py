@@ -920,10 +920,15 @@ class ShouldEarlyStopTest(parameterized.TestCase):
           is_last_ckpt=False,
           eval_metrics=None,
           decode_metrics=None,
+          checkpoint_path='/foo',
       )
 
     mock_early_stop_fn.assert_called_once_with(
-        mock.ANY, trainer_lib.RunningMode.TRAIN, 10, False
+        mock.ANY,
+        trainer_lib.RunningMode.TRAIN,
+        10,
+        False,
+        '/foo',
     )
     self.assertEqual(
         set(mock_early_stop_fn.call_args.args[0].keys()),

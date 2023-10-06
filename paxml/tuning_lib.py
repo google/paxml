@@ -465,6 +465,7 @@ class EarlyStoppingFn:
       running_mode: trainer_lib.RunningMode,
       global_step: int,
       is_last_ckpt: bool,
+      checkpoint_path: epath.Path | None,
   ) -> bool:
     """Returns True if trial should be stopped early."""
     tuning_step = self._tuning_step_start + global_step
@@ -481,7 +482,12 @@ class EarlyStoppingFn:
           # We only handle metric updates on main host.
           if jax.process_index() == 0:
             self._update_metrics(
-                metrics, running_mode, tuning_step, is_last_ckpt)
+                metrics,
+                running_mode,
+                tuning_step,
+                is_last_ckpt,
+                checkpoint_path=str(checkpoint_path),
+            )
         finally:
           # NOTE(daiyip): we synchronize all hosts after each eval/decode step
           # so all of them can move to the next train step or stop uniformly.
@@ -505,12 +511,20 @@ class EarlyStoppingFn:
                   f'(trial={self._feedback.id}, step={global_step})')
             elif self._is_last_experiment:
               self._complete_trial(
-                  aggregate_metrics=True, global_step=tuning_step + 1)
+                  aggregate_metrics=True,
+                  global_step=tuning_step + 1,
+                  checkpoint_path=str(checkpoint_path),
+              )
         else:
           try:
             if jax.process_index() == 0:
               self._update_metrics(
-                  metrics, running_mode, tuning_step, is_last_ckpt)
+                  metrics,
+                  running_mode,
+                  tuning_step,
+                  is_last_ckpt,
+                  checkpoint_path=str(checkpoint_path),
+              )
           finally:
             py_utils.sync_global_devices(
                 f'Sync on trial {self._feedback.id} with training metrics at '
@@ -552,6 +566,7 @@ class EarlyStoppingFn:
       running_mode: trainer_lib.RunningMode,
       tuning_step: int,
       is_last_ckpt: bool,
+      checkpoint_path: str | None,
   ):
     """Handle metric update."""
     assert jax.process_index() == 0
@@ -568,7 +583,11 @@ class EarlyStoppingFn:
       if math.isnan(reward):
         raise FloatingPointError('Reward is NaN.')
       self._feedback.add_measurement(
-          reward, metrics=used_metrics, step=tuning_step)
+          reward,
+          metrics=used_metrics,
+          step=tuning_step,
+          checkpoint_path=checkpoint_path,
+      )
 
       logging.info(
           'Measurement is reported to trial %d (sub-experiment=%s) at step '
@@ -581,7 +600,10 @@ class EarlyStoppingFn:
         # `feedback.done` should be called just once per trial.
         if self._is_last_experiment:
           self._complete_trial(
-              aggregate_metrics=True, global_step=tuning_step + 1)
+              aggregate_metrics=True,
+              global_step=tuning_step + 1,
+              checkpoint_path=checkpoint_path,
+          )
     except automl.EarlyStoppingError as e:
       # Calling the reward_fn triggers `EarlyStoppingError`, which indicates
       # user signaled early stopping.
@@ -608,7 +630,7 @@ class EarlyStoppingFn:
             step=e.step,
             metrics=e.metrics,
             checkpoint_path=e.checkpoint)
-        self._complete_trial()
+        self._complete_trial(checkpoint_path=checkpoint_path)
         logging.info(
             'Trial %d is early stopped at step %s with reward %f which '
             'will be fed back to the controller. Metrics: %s.',
@@ -628,7 +650,10 @@ class EarlyStoppingFn:
     return reward, used_metrics
 
   def _complete_trial(
-      self, aggregate_metrics: bool = False, global_step: int | None = None
+      self,
+      aggregate_metrics: bool = False,
+      global_step: int | None = None,
+      checkpoint_path: str | None = None,
   ):
     """Adds final measurement to trial based on metric aggregator."""
     # Poll the metrics across steps for aggregation.
@@ -645,7 +670,11 @@ class EarlyStoppingFn:
       final_reward, used_metrics = self._reward_and_used_metrics(
           final_metrics, global_step)
       self._feedback.add_measurement(
-          final_reward, used_metrics, step=global_step)
+          final_reward,
+          used_metrics,
+          step=global_step,
+          checkpoint_path=checkpoint_path,
+      )
       logging.info(
           'Final measurement is reported to trial %d at step %d '
           'with reward value %f and metrics %s.',
@@ -693,6 +722,7 @@ def should_early_stop(
     decode_metrics: DecodeMetrics | None = None,
     num_params: float | None = None,
     train_steps_per_sec: float | None = None,
+    checkpoint_path: epath.Path | None = None,
 ) -> bool:
   """Returns True if the training process should stop early."""
   if early_stop_fn is None:
@@ -738,7 +768,9 @@ def should_early_stop(
       num_params,
       train_steps_per_sec,
   )
-  return early_stop_fn(tuning_metrics, running_mode, global_step, is_last_ckpt)
+  return early_stop_fn(
+      tuning_metrics, running_mode, global_step, is_last_ckpt, checkpoint_path
+  )
 
 
 def _aggregate_metrics(

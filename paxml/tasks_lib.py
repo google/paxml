@@ -74,7 +74,11 @@ TrainState = train_states.TrainState
 TensorProvenance = train_states.TensorProvenance
 TrainStateProvenance = train_states.TrainStateProvenance
 NO_PREFIX_KEY = optimizer_prefix_vectorization.NO_PREFIX_KEY
-EarlyStoppingFn = Callable[[dict[str, float], enum.Flag, int, bool], bool]
+
+# f(metrics, running_mode, global_step, is_last_ckpt, checkpoint_path) -> stop
+EarlyStoppingFn = Callable[
+    [dict[str, float], enum.Flag, int, bool, epath.Path], bool
+]
 
 PRNGKey = pytypes.PRNGKey
 RegexStr = str

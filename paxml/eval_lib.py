@@ -800,6 +800,7 @@ def _common_eval_or_decode_loop(
     eval_runner: _EvalRunner,
     partitioner: partitioning.Partitioner,
     decode_output_pickle: bool = True,
+    checkpoint_path: epath.Path | None = None,
 ):
   step_prefix = checkpoint_paths.checkpoint_prefix(checkpointer.checkpoint_type)
   step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
@@ -850,6 +851,7 @@ def _common_eval_or_decode_loop(
         is_last_ckpt,
         eval_metrics=eval_metrics,
         decode_metrics=decode_metrics,
+        checkpoint_path=checkpoint_path,
     ):
       logging.info(
           (
