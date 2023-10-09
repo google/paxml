@@ -1264,6 +1264,8 @@ class SingleTask(base_task.BaseTask):
         checkpoints present in the main directory.
       external_checkpoint_handler: An ocp.CheckpointHandler defining logic for
         loading the checkpoint.
+      report_progress_hook: Whether to use clu's ReportProgress hook to report
+        the progress of the experiment.
     """
 
     learner: pax_fiddle.Config[learners_lib.Learner] = (
@@ -1306,6 +1308,7 @@ class SingleTask(base_task.BaseTask):
     restore_transformations: dict[str, Any] | None = None
     external_checkpoint_path: epath.Path | None = None
     external_checkpoint_handler: ocp.CheckpointHandler | None = None
+    report_progress_hook: bool = False
 
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
