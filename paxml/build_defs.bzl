@@ -79,6 +79,7 @@ def pax_targets(
         smoke_test_py_test_rule = py_strict_test,
         smoke_test_args = None,
         smoke_test_kwargs = None,
+        dump_input_specs_kwargs = None,
         # Internal enable fragmented build argument, toggled to True.
         # Internal tooling mock backend attribute
         main_src = "//paxml:main.py"):
@@ -121,6 +122,8 @@ def pax_targets(
           match one of these regexes in order to be smoke tested.
       smoke_test_kwargs: Additional kwargs that are passed to the
           :all_experiments_smoke_test target.
+      dump_input_specs_kwargs: Additional kwargs that are passed to the
+          :dump_input_specs target.
       # Internal mock backend docstrings
       main_src: The src file for the ":main" target created.
     """
@@ -244,6 +247,7 @@ def pax_targets(
         prefix_name,
         dump_input_specs_name,
     )
+    dump_input_specs_kwargs = dump_input_specs_kwargs or {}
     export_binary(
         name = dump_input_specs_name,
         main = "//paxml/tools:dump_input_specs.py",
@@ -256,6 +260,7 @@ def pax_targets(
             # Implicit tensorflow_no_contrib dependency.
         ] + extra_deps,
         exp_sources = exp_sources,
+        **dump_input_specs_kwargs
     )
 
     model_analysis_name = "model_analysis"
