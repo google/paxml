@@ -38,6 +38,7 @@ pytype_library(
     deps = [
         ":lm_cloud",
         # Implicit absl.logging dependency.
+        # Implicit etils dependency.
         # Implicit fiddle dependency.
         # Implicit jax dependency.
         "//paxml:base_experiment",

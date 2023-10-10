@@ -19,6 +19,7 @@ import functools
 import math
 
 from absl import logging
+from etils import epath
 import fiddle as fdl
 import jax
 from jax import numpy as jnp
@@ -482,6 +483,7 @@ class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
       running_mode: trainer_lib.RunningMode,
       global_step: int,
       is_last_ckpt: bool,
+      checkpoint_path: epath.Path,
   ) -> bool:
     """Returns True if run should be stopped early."""
     if 'eval_test_C4Validation/metrics/log_pplx' not in metrics.keys():
