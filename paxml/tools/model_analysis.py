@@ -72,7 +72,8 @@ from praxis import py_utils
 _USAGE = flags.DEFINE_string(
     'usage',
     'flops',
-    'The purpose of using this script. Pls choose from [flops, fprop, params].',
+    'The purpose of using this script. Pls choose from [flops, fprop, params,'
+    ' debug].',
 )
 _EXP = flags.DEFINE_string(
     'exp',
@@ -81,6 +82,17 @@ _EXP = flags.DEFINE_string(
 )
 _FPROP_FUNC = flags.DEFINE_string(
     'fprop_func', 'compute_predictions', 'The function used in fprop.'
+)
+_BS = flags.DEFINE_integer(
+    'bs',
+    -1,
+    'The batch size. If -1, then use the original batch size from datasets.',
+)
+_DEBUG_FILE_PATTERN = flags.DEFINE_string(
+    'debug_file_pattern',
+    '',
+    'Debug file pattern to use. If empty, then an all-zero tensor would be'
+    ' used.',
 )
 
 
@@ -93,14 +105,22 @@ class ExperimentParser:
   fprop: a forward pass, mainly for the debugging purpose.
   """
 
-  def __init__(self, exp_name: str, seed: int = 1202):
+  def __init__(
+      self, exp_name: str, bs: int, debug_file_pattern: str, seed: int = 1202
+  ):
     self.exp_name = exp_name
+    self.bs = bs
+    self.debug_file_pattern = debug_file_pattern
     exp_class = self._get_experiment(exp_name)
     exp = exp_class()
+    if self.bs != -1:
+      exp.PERCORE_BATCH_SIZE = self.bs
+    else:
+      self.bs = exp.PERCORE_BATCH_SIZE
     self.exp = exp
 
     self.seed = seed
-    self.prng_key = jax.random.PRNGKey(1202)
+    self.prng_key = jax.random.PRNGKey(self.seed)
     _, self.init_key = jax.random.split(self.prng_key)
 
   def _get_experiment(self, experiment_name: str):
@@ -131,10 +151,44 @@ class ExperimentParser:
     return input_specs
 
   def _generate_datum(self):
-    input_specs = self._extract_input_specs()
-    datum = jax.tree_map(
-        lambda x: jnp.zeros(shape=x.shape, dtype=x.dtype), input_specs
-    )
+    if not self.debug_file_pattern:
+      input_specs = self._extract_input_specs()
+      datum = jax.tree_map(
+          lambda x: jnp.zeros(shape=x.shape, dtype=x.dtype), input_specs
+      )
+    else:
+      input_p = self.exp.datasets()[0]
+      assert hasattr(input_p, 'input')
+
+      if hasattr(input_p.input, 'file_pattern'):
+        input_p.input.file_pattern = self.debug_file_pattern
+      elif hasattr(input_p.input, 'input_file'):
+        input_p.input.input_file = self.debug_file_pattern
+      else:
+        raise ValueError(
+            'Neither file_pattern nor input_file was found in the input params.'
+        )
+
+      if hasattr(input_p.input, 'bucket_batch_limit'):
+        bucket_len = len(input_p.input.bucket_batch_limit)
+        input_p.input.bucket_batch_limit = [self.bs] * bucket_len
+      elif hasattr(input_p.input, 'args'):
+        input_p.input.args.batch = self.bs
+      data = input_p.Instantiate()
+      datum = data.get_next()
+
+    if datum:
+      print('\n==========input=========')
+      if 'src' in datum:
+        for key in datum['src']:
+          print(key, ':', jnp.shape(datum['src'][key]))
+      else:
+        for domain in datum.keys():
+          print(f'-- {domain} --')
+          for key in datum[domain]['src']:
+            print(key, ':', jnp.shape(datum[domain]['src'][key]))
+      print('=======================')
+
     return datum
 
   def _extract_model(self, datum):
@@ -184,7 +238,7 @@ class ExperimentParser:
         hparams=base_layer.JaxContext.HParams(do_eval=True)
     ):
       model_fprop(datum)
-      print('Run finishes successfully.')
+      print('FProp finishes successfully.')
 
   def print_variables_info(self):
     task_p = self.exp.task()
@@ -256,10 +310,15 @@ class ExperimentParser:
 
 
 def main(unused_argv):
-  if _USAGE.value not in ['flops', 'fprop', 'params']:
-    raise ValueError(f'Usage {_USAGE.value} is not supported yet.')
+  if _USAGE.value not in ['flops', 'fprop', 'params', 'debug']:
+    raise ValueError(
+        f'Usage {_USAGE.value} is not supported yet. Pls choose from [flops,'
+        ' fprop, params, debug].'
+    )
 
-  exp_parser = ExperimentParser(_EXP.value)
+  exp_parser = ExperimentParser(
+      _EXP.value, _BS.value, _DEBUG_FILE_PATTERN.value
+  )
 
   if _USAGE.value == 'params':
     exp_parser.print_variables_info()
