@@ -908,7 +908,30 @@ class LearnersTest(test_utils.TestCase):
     state = grad_tx.init(variables)
     logging.info(state)
     opt_states_pspec = opt_vec.partition_params(grad_tx, var_hparams, state)
+
     logging.info('opt_states_pspec=%s', opt_states_pspec)
+
+    self.assertIn(opt_vec.NO_PREFIX_KEY, opt_states_pspec.keys())
+    self.assertIn('p#2.2#tsdata,smdl.', opt_states_pspec.keys())
+    self.assertIn('p#2#i-1', opt_states_pspec.keys())
+
+    pspec_1 = opt_states_pspec['p#2#i-1']
+    pspec_2 = opt_states_pspec[opt_vec.NO_PREFIX_KEY]
+    pspec_3 = opt_states_pspec['p#2.2#tsdata,smdl.']
+
+    opt_idx = 2
+    self.assertEqual(pspec_1[opt_idx].a.shape, ())
+    self.assertEqual(pspec_1[opt_idx].a.repeat_prefix, [2])
+    self.assertEqual(pspec_1[opt_idx].a.repeat_prefix_split_dims_mapping, [-1])
+    self.assertEqual(pspec_2[opt_idx].b.shape, (2,))
+    self.assertEmpty(pspec_2[opt_idx].b.repeat_prefix or [])
+    self.assertEqual(pspec_3[opt_idx].c.shape, ())
+    self.assertEqual(pspec_3[opt_idx].c.repeat_prefix, [2, 2])
+    self.assertEqual(
+        pspec_3[opt_idx].c.repeat_prefix_split_dims_mapping,
+        [('data', 'mdl'), None],
+    )
+
     logging.info('Prefix vectorization state after init .. ')
     # Computed update is 0 + state, and state is sum of each variable.
     update, state = grad_tx.update(
