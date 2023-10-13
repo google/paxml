@@ -337,20 +337,21 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       transformed_grad, new_states pair.
     """
     orig_grads = grads
+    orig_var_weight_hparams = var_weight_hparams
 
     # Omit the `overwrite_with_gradient` parameters as they are unnecessary for
     # the optimizer state update. Gradient overwriting takes place at the very
     # end of the function to update the transformed gradients.
-    var_is_overwrite_with_grad = jax.tree_util.tree_map(
-        lambda x: base_layer.var_overwrite_with_gradient(x), var_weight_hparams)
-    def _filter_var(old):
+    def _filter_owg(original):
       return jax.tree_map(
-          lambda v, e: py_utils.BpropMaskedNode() if e else v, old,
-          var_is_overwrite_with_grad
+          lambda o, h: (py_utils.BpropMaskedNode() if
+                        base_layer.var_overwrite_with_gradient(h) else o),
+          original,
+          orig_var_weight_hparams,
       )
-    old_vars = _filter_var(old_vars)
-    var_weight_hparams = _filter_var(var_weight_hparams)
-    grads = _filter_var(grads)
+    old_vars = _filter_owg(old_vars)
+    var_weight_hparams = _filter_owg(var_weight_hparams)
+    grads = _filter_owg(grads)
 
     grads, valid_step = self.scale_gradients(grads)
     transformed_grad, new_states = self.get_grad_tx(var_weight_hparams).update(
@@ -384,8 +385,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       )
 
     transformed_grad = jax.tree_map(
-        lambda e, g, t_g: g if e else t_g,
-        var_is_overwrite_with_grad,
+        lambda h, g, t_g: (g if base_layer.var_overwrite_with_gradient(h) else
+                           t_g),
+        orig_var_weight_hparams,
         orig_grads,
         transformed_grad,
     )
