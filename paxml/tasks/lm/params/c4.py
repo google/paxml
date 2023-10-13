@@ -161,6 +161,8 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
   MAX_SEQ_LEN = 1024
   TRAINING_SEED = 9876
   TRAINING_NUM_BATCHES_TO_SKIP = None
+  TRAIN_MIXTURE = 'c4_lm_v301_gpt'
+  EVAL_MIXTURE = 'c4_lm_v301_gpt_eval_tokenized'
 
   def _dataset_common(
       self, is_training
@@ -204,9 +206,7 @@ class C4UnsupervisedDataset(base_experiment.BaseExperiment):
     p = pax_fiddle.Config(
         seqio_input.SeqIOInput,
         name='C4Train' if is_training else 'C4Validation',
-        mixture_name='c4_lm_v301_gpt'
-        if is_training
-        else 'c4_lm_v301_gpt_eval_tokenized',
+        mixture_name=self.TRAIN_MIXTURE if is_training else self.EVAL_MIXTURE,
         split_name='train2' if is_training else 'validation_tokenized_5662seqs',
         task_feature_lengths={'targets': self.MAX_SEQ_LEN},
         use_cached=False,
