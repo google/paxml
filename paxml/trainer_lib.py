@@ -1124,47 +1124,25 @@ def train_step_single_learner(
     ):
       # Make updated non-trainable vars visible to EMA.
       mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
+    excluded_for_learner = jax.tree_map(
+        lambda eo, eg: eo and eg, excluded_for_opt, excluded_for_grad)
     vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        mdl_vars, excluded_for_opt
+        mdl_vars, excluded_for_learner
     )
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        var_weight_hparams, excluded_for_opt
-    )
-
-    # Except for the overwrite_with_gradient params, we use the update_states()
-    # to compute the optimizer states and transformed grads.
-    overwrite_var_mask = \
-        tasks_lib.get_overwrite_with_gradient_var_mask(var_weight_hparams)
-    grads_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        grads, overwrite_var_mask
+        var_weight_hparams, excluded_for_learner
     )
     transformed_grads, new_opt_states = learner.update_states(
-        grads_with_opt, states.opt_states[0], vars_with_opt, wps_with_opt
+        grads, states.opt_states[0], vars_with_opt, wps_with_opt
     )
-
-    # As long as the params have grads, we use the apply_gradients to compute
-    # the new values.
-    vars_with_grad = tasks_lib.filter_vars_for_grad_or_opt(
-        mdl_vars, excluded_for_grad
+    vars_with_opt = learner.apply_gradient(
+        vars_with_opt, transformed_grads, wps_with_opt
     )
-    wps_with_grad = tasks_lib.filter_vars_for_grad_or_opt(
-        var_weight_hparams, excluded_for_grad
-    )
-    transformed_grads = jax.tree_map(
-        lambda e, g, t_g: g if e else t_g,
-        overwrite_var_mask,
-        grads,
-        transformed_grads,
-    )
-    vars_with_grad = learner.apply_gradient(
-        vars_with_grad, transformed_grads, wps_with_grad
-    )
-
     mdl_vars = jax.tree_map(
         lambda e, old, new: old if e else new,
         excluded_for_grad,
         mdl_vars,
-        vars_with_grad,
+        vars_with_opt,
     )
 
     for collection in [NON_TRAINABLE] + NON_PAX_VAR_COLLECTION:

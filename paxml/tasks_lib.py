@@ -792,14 +792,6 @@ class CheckpointLoadingRules(NamedTuple):
   ] | None = None
 
 
-def get_overwrite_with_gradient_var_mask(
-    var_weight_hparams: NestedJTensor,
-) -> NestedMap:
-  """Returns whether each var is in over_with_gradient collection."""
-  return jax.tree_util.tree_map(
-      lambda x: base_layer.var_overwrite_with_gradient(x), var_weight_hparams)
-
-
 def get_excluded_var_mask_for_grad_or_opt(
     var_weight_hparams: NestedJTensor,
     learner: learners_lib.Learner,
@@ -821,11 +813,9 @@ def get_excluded_var_mask_for_grad_or_opt(
         var_weight_hparams, learner.bprop_variable_exclusion
     )
   if mask_all_overwrite_with_gradient:
-    overwrite_var_mask = \
-        get_overwrite_with_gradient_var_mask(var_weight_hparams)
     excluded_for_grad = jax.tree_map(
-        lambda is_overwrite, e: is_overwrite or e,
-        overwrite_var_mask,
+        lambda x, e: base_layer.var_overwrite_with_gradient(x) or e,
+        var_weight_hparams,
         excluded_for_grad,
     )
   if mask_all_non_trainable:

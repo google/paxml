@@ -336,6 +336,21 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     Returns:
       transformed_grad, new_states pair.
     """
+    orig_grads = grads
+
+    # Omit the `overwrite_with_gradient` parameters as they are unnecessary for
+    # the optimizer state update. Gradient overwriting takes place at the very
+    # end of the function to update the transformed gradients.
+    var_is_overwrite_with_grad = jax.tree_util.tree_map(
+        lambda x: base_layer.var_overwrite_with_gradient(x), var_weight_hparams)
+    def _filter_var(old):
+      return jax.tree_map(
+          lambda v, e: py_utils.BpropMaskedNode() if e else v, old,
+          var_is_overwrite_with_grad
+      )
+    old_vars = _filter_var(old_vars)
+    var_weight_hparams = _filter_var(var_weight_hparams)
+    grads = _filter_var(grads)
 
     grads, valid_step = self.scale_gradients(grads)
     transformed_grad, new_states = self.get_grad_tx(var_weight_hparams).update(
@@ -367,6 +382,13 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           applied_grad_norm,
           SummaryType.AGGREGATE_SCALAR,
       )
+
+    transformed_grad = jax.tree_map(
+        lambda e, g, t_g: g if e else t_g,
+        var_is_overwrite_with_grad,
+        orig_grads,
+        transformed_grad,
+    )
 
     return transformed_grad, new_states
 
@@ -412,12 +434,11 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     # TODO(yonghui): implement skip_zero_gradients.
     # TODO(yonghui): implement numerical checks.
 
-    def _adjust_var(old_var, transformed_grad, is_learnable,
-                    is_overwrite_with_grad, var_wh, var_key):
+    def _adjust_var(old_var, transformed_grad, is_learnable, var_wh, var_key):
       if not is_learnable:
         return old_var
 
-      if is_overwrite_with_grad:
+      if base_layer.var_overwrite_with_gradient(var_wh):
         return transformed_grad
 
       if not self.scale_update_by_var_norm:
@@ -436,10 +457,6 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         lambda x: not base_layer.var_not_trainable(x), var_weight_hparams
     )
 
-    var_is_overwrite_with_grad = jax.tree_util.tree_map(
-        lambda x: base_layer.var_overwrite_with_gradient(x), var_weight_hparams
-    )
-
     var_keys = py_utils.extract_prefixed_keys_from_nested_map(old_vars)
 
     return jax.tree_util.tree_map(
@@ -447,7 +464,6 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
         old_vars,
         transformed_grads,
         var_is_learnable,
-        var_is_overwrite_with_grad,
         var_weight_hparams,
         var_keys,
     )
