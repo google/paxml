@@ -448,7 +448,9 @@ def write_summary_entry(
         metric_weights = value[1]
         sum_metric_weights += np.sum(metric_weights)
         weighted_sum_metric_values += np.sum(metric_values * metric_weights)
-      weighted_average = weighted_sum_metric_values / sum_metric_weights
+      weighted_average = weighted_sum_metric_values / np.maximum(
+          sum_metric_weights, 1e-6
+      )
       logging.info('  %s=%f (weight=%f)', key, weighted_average,
                    sum_metric_weights)
       status_msg += f', {key}={weighted_average}'
