@@ -623,7 +623,12 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.tr_atten_tpl.combine_qkv = self.COMBINE_QKV
 
     if self.USE_FP8:
-      fp8_ops.tr_set_fp8_quantization(transformer_layer_p)
+      transformer_layer_p.tr_atten_tpl.proj_tpl.einsum_tpl = \
+          pax_fiddle.Config(fp8_ops.Fp8EinsumOp)
+      transformer_layer_p.tr_atten_tpl.combined_qkv_proj_tpl.einsum_tpl = \
+          pax_fiddle.Config(fp8_ops.Fp8EinsumOp)
+      transformer_layer_p.tr_fflayer_tpl.fflayer_tpl.linear_tpl.einsum_tpl = \
+          pax_fiddle.Config(fp8_ops.Fp8EinsumOp)
 
     transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(
         self.ACTIVATION_CLS
