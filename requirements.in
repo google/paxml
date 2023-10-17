@@ -6,7 +6,7 @@ clu
 etils
 flax
 graphviz
-jax @ git+https://github.com/google/jax
+jax==0.4.18
 lingvo
 numpy
 orbax-checkpoint

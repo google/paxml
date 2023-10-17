@@ -124,7 +124,7 @@ executing==2.0.0
     # via stack-data
 fastjsonschema==2.18.1
     # via nbformat
-fiddle @ git+https://github.com/google/fiddle
+fiddle==0.2.11
     # via -r praxis-requirements.in
 filelock==3.12.4
     # via
@@ -206,7 +206,7 @@ ipywidgets==8.1.1
     # via jupyter
 isoduration==20.11.0
     # via jsonschema
-jax @ git+https://github.com/google/jax
+jax==0.4.18
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
