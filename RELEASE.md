@@ -1,3 +1,13 @@
+# Version: 1.2.0
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 1.2.0
+*   Build Date: 20231016
+*   Paxml commit: 4486d690773ba5d15d9e54b05a4e916b1a955de9
+*   Praxis version: 1.2.0
+*   Praxis commit: 7bd63412bf86a68e09fcd9455f76a4909d19377e
 # Version: 1.1.0
 ## Major Features and Improvements
 * Support multislice on Cloud TPU: example configs and instructions added ([link](https://github.com/google/paxml#pax-on-multislice)).
