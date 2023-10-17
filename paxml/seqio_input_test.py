@@ -685,10 +685,12 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
   def test_compute_metrics(self, shuffle):
     task_name = 'compute_metrics'
     targets = [f'ex target{i}' for i in range(5)]
+    inputs = [f'ex input{i}' for i in range(5)]
     ds = tf.data.Dataset.from_tensor_slices({
         'inputs': [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
         'targets': [[10, 9], [7, 6], [5, 4], [3, 2], [1, 2]],
         'targets_pretokenized': targets,
+        'inputs_pretokenized': inputs,
     })
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
@@ -738,6 +740,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         'inputs': [7, 8],
         'targets': [3, 9],
         'targets_pretokenized': 'ex target',
+        'inputs_pretokenized': 'ex input',
     }).repeat(13)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
     _register_dummy_task(task_name, dataset_fn)
@@ -793,6 +796,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       ex = next(enumerated_iter)
       enum_id = py_utils.get_enumeration_id(ex)
       ex.update({'scores': scores[i]})
+      ex.update({'decoded_substr': 0})
       eval_output.append((enum_id, ex))
     return eval_output
 
@@ -878,7 +882,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     scores = np.array([1.0, 2.5], dtype=np.float32)
     eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
     _ = inp.compute_metrics_eval(eval_output)
-    self.assertIn('seqio_postprocessed_targets', eval_output[0][1])
     if log_preprocessed_targets:
       self.assertIn('seqio_preprocessed_targets', eval_output[0][1])
     else:

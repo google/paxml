@@ -548,7 +548,7 @@ class SeqIOInput(base_input.BaseInput):
         self.split_name,
     )
 
-    # Populated by first call to `self._get_targets_with_enum_key`. Subsequent
+    # Populated by first call to `self._get_targets`. Subsequent
     # calls to it short circuit by returning the cached values.
     self._cached_targets_with_enum_key: Mapping[str, NestedMap] | None = None
 
@@ -1044,7 +1044,7 @@ class SeqIOInput(base_input.BaseInput):
         ds_ragged_tensor_keys,
     )
 
-  def _get_targets_with_enum_key(self) -> Mapping[str, NestedMap]:
+  def _get_targets(self) -> Mapping[str, NestedMap]:
     assert self.targets_ds
     if self._cached_targets_with_enum_key is not None:
       return self._cached_targets_with_enum_key
@@ -1098,118 +1098,30 @@ class SeqIOInput(base_input.BaseInput):
       self._cached_targets_with_enum_key = targets  # populate cache
     return targets
 
-  def _build_predict_metric_inputs_with_enum(
-      self,
-      answers: Mapping[str, NestedMap],
-      verbose_entries: int,
-      plain_text_output: TextIO | None = None,
-  ) -> tuple[Sequence[Any], Sequence[Any]]:
-    """Builds 1-to-1 mapped predictions and targets lists using enum fields."""
-    targets = self._get_targets_with_enum_key()
-
-    predictions_list = []
-    targets_list = []
-    # Construct (decode output, seqio target) lists by joining on enum IDs.
-    # "Left-join" using targets constructed since outputs may have been padded.
-    for k in targets:
-      if k not in answers:
-        raise ValueError(
-            f'Example not found in decoder output (key={k}): {targets[k]}')
-      ans = answers[k]
-      answer = ans[_LM_DECODER_OUT_KEY]
-
-      # postprocess model's decoder output
-      prediction = self.task_inst.postprocess_fn(
-          answer, example=targets[k], is_target=False)
-      predictions_list.append(prediction)
-
-      # postprocess target example for target decoder output str
-      t = _get_targets_str(targets[k], self.mixture_or_task_inst)
-      seqio_target = self.task_inst.postprocess_fn(
-          t, example=targets[k], is_target=True)
-      targets_list.append(seqio_target)
-
-      # Mutate 'ans' dictionary which is written to disk afterwards
-      ans['seqio_targets'] = seqio_target
-      ans['seqio_postprocessed_predictions'] = (
-          _convert_bytes_to_str(prediction))
-
-    # Log a few examples for inspection and sanity check.
-    it = iter(targets)
-    for i in range(verbose_entries):
-      k = next(it)
-      ans = answers[k]
-      e = targets[k]
-      answer = ans[_LM_DECODER_OUT_KEY]
-      answer_processed = self.task_inst.postprocess_fn(
-          answer, example=e, is_target=False)
-      target = _get_targets_str(e, self.mixture_or_task_inst)
-      target_processed = self.task_inst.postprocess_fn(
-          target, example=e, is_target=True)
-      logging.info(
-          'Example %d:\nPROMPT=%s\nMODEL=%s\nFROM %s\nLABEL=%s FROM %s.',
-          i, ans['prefix'], answer_processed, answer, target_processed, target)
-
-    # Optionally log all examples for inspection in text format
-    if plain_text_output is not None:
-      _log_plain_text_output(answers, plain_text_output)
-
-    return predictions_list, targets_list
-
-  def _build_scoring_metric_inputs_with_enum(
-      self, answers: dict[str, NestedMap], verbose_entries: int
-  ) -> tuple[Sequence[Any], Sequence[Any]]:
-    targets = self._get_targets_with_enum_key()
-
-    # Construct (scoring output, seqio target) lists by joining on enum ID
-    targets_list = []
-    scores_list = []
-    verbose_entries_idx = 0
-    for k in targets:
-      if k not in answers:
-        raise ValueError(
-            f'Example not found in eval output (key={k}): {targets[k]}')
-      ans = answers[k]
-      score = ans[_LM_SCORE_KEY]
-      example = targets[k]
-      target_post = self.task_inst.postprocess_fn(
-          targets[k]['targets'], example=example, is_target=True)
-      targets_list.append(target_post)
-      scores_list.append(score)
-      if verbose_entries_idx < verbose_entries:
-        logging.info(
-            'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
-            'is_correct=%s\ntarget=%s\nscore=%s\n\n',
-            example.get('inputs_pretokenized', 'None'),
-            example.get('targets_pretokenized', 'None'),
-            example.get('is_correct', 'N/A'), target_post, score)
-        verbose_entries_idx += 1
-      if self.log_preprocessed_targets:
-        ans['seqio_preprocessed_targets'] = _convert_bytes_to_str(example)
-      ans['seqio_postprocessed_targets'] = _convert_bytes_to_str(target_post)
-
-    return scores_list, targets_list
-
   def compute_metrics(
       self,
       decoder_outputs: Sequence[tuple[str, NestedMap]],
+      score_metrics: bool = False,
       verbose_entries: int | None = 0,
       plain_text_output: TextIO | None = None,
   ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
-    """Computes metrics from the given decoder outputs using predict_metric_fns.
+    """Computes metrics from the given decoder outputs using metric_obj.
 
     This method is called only on process=0 after aggregating all outputs as
-    seqio task's metric_fns take in a global view of examples.
+    seqio task's metric_obj take in a global view of examples.
 
-    This function does the following:
-      1. Calls self._build_predict_metric_inputs_with_enum(), which generates
-        the predictions_list (the model's decoded_output) and corresponding
-        targets_list (the ground truth target).
-      2. Feed the lists from 1. through all task.predict_metric_fns.
-      3. Optionally log a couple entries for inspection.
-      4. Optionally log all entries in text format for inspection.
+    This function basically does the following (for self.use_enumeration=False):
+      1. Iterate through SeqIO task's dataset to construct both (a) the
+        input prefix-based key, and (b) the task.postprocess_fn(ex['targets']),
+        which is the target that is used to compute metrics.
+      2. Iterate through the keys generated in (1) to "left-join" with the
+        decoder_outputs mapping.
+      3. Feed the prefix-key mapped list of decoder_outputs and targets through
+        all task.metric_objs.
+      4. Optionally log a couple entries for inspection.
+      5. Optionally log all entries in text format for inspection.
 
-    For tasks with score_metric_fns, use compute_metrics_eval() below.
+    When self.use_enumeration=True, we'll match based on enumeration IDs.
 
     Arguments:
       decoder_outputs: a sequence of (str, dict) where the 0-th arg of the tuple
@@ -1217,13 +1129,15 @@ class SeqIOInput(base_input.BaseInput):
         outputs and seqio's target sequences when computing metrics. This is
         typically just the output of a model's `process_decode_out` method, but
         can also be read from disk using `io_utils.load_outputs()`.
+      score_metrics: whether to caluclate score metrics (score_metrics=True) or
+        prediction metrics (score_metrics=False).
       verbose_entries: int, how many entries to log for inspection and sanity
         checking.
       plain_text_output: optional output file to write decoder outputs in plain
         text format for easier inspection
 
     Returns:
-      The results of predict_metric_fns computed on the decoder outputs.
+      The results of metric_obj computed on the decoder outputs.
       Typically a list of metrics, each element being a mapping from a string
       metric name to a float.
     """
@@ -1235,10 +1149,6 @@ class SeqIOInput(base_input.BaseInput):
           self.name,
       )
       return []
-    # If there are no seqio decode/predict metrics to compute return empty list
-    if not task.predict_metric_fns:
-      logging.info('no predict_metric_fns defined on task: %s', task.name)
-      return []
     if is_packing_on(self.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
@@ -1246,111 +1156,138 @@ class SeqIOInput(base_input.BaseInput):
 
     if not decoder_outputs:
       return []
-    if _LM_DECODER_OUT_KEY not in decoder_outputs[0][1]:
+    if score_metrics:
+      key = _LM_SCORE_KEY
+    else:
+      key = _LM_DECODER_OUT_KEY
+
+    if key not in decoder_outputs[0][1]:
       logging.warning(
-          ('LanguageModel output format with "%s" key is expected, but '
-           'the key was not found in decoder_outputs (b/244434890)'),
-          _LM_DECODER_OUT_KEY)
+          (
+              'LanguageModel output format with "%s" key is expected, but '
+              'the key was not found in decoder_outputs (b/244434890)'
+          ),
+          key,
+      )
       return []
 
     # Create targets artifacts if they don't exist yet
     if not self.is_targets_init:
       self._gen_targets_artifacts()
 
-    answers = dict(decoder_outputs)
-    (predictions_list, targets_list) = (
-        self._build_predict_metric_inputs_with_enum(
-            answers, verbose_entries, plain_text_output
+    model_out = dict(decoder_outputs)
+    target = self._get_targets()
+
+    targets = []
+    model_outs = []
+    for ex in target:
+      if ex not in model_out:
+        raise ValueError(
+            f'Example not found in {self.name} decoder output (key={ex}):'
+            f' {target[ex]}'
         )
+      out = model_out[ex]
+      model_outs.append(out[key])
+      targets.append(target[ex])
+      if self.log_preprocessed_targets and score_metrics:
+        out['seqio_preprocessed_targets'] = _convert_bytes_to_str(target[ex])
+
+    # Log a few examples for inspection and sanity check.
+    it = iter(target)
+    for i in range(verbose_entries):
+      k = next(it)
+      if k not in model_out:
+        raise ValueError(
+            f'Example not found in {self.name} decoder output (key={k}):'
+            f' {target[k]}'
+        )
+      out = model_out[k]
+      e = target[k]
+      answer = out[key]
+      t = _get_targets_str(e, self.mixture_or_task_inst)
+      logging.info(
+          'Example %d:\nPROMPT=%s\nANSWER=%s\nTARGET=%s.', i, k, answer, t
+      )
+
+    # Optionally log all examples for inspection in text format
+    if plain_text_output is not None:
+      _log_plain_text_output(model_out, plain_text_output)
+
+    return self._compute_metric_values(
+        score_metrics,
+        task.metric_objs,
+        targets,
+        model_outs,
+        task.output_features,
     )
 
+  def _compute_metric_values(
+      self,
+      score_metrics: bool,
+      metric_objs: Sequence[seqio.metrics.Metric],
+      targets: Sequence[Mapping[str, Any]],
+      model_outs: Sequence[Mapping[str, Any]],
+      output_features: Mapping[str, Any],
+  ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
     metrics = []
-    for fn in task.predict_metric_fns:
-      m = fn(targets_list, predictions_list)
-      logging.info('Metrics: %s', m)
-      metrics.append(m)
+    for metric_obj in metric_objs:
+      if hasattr(metric_obj, 'model_output_type'):
+        # NOTE: metric_obj contain both PREDICTION and SCORE metrics.
+        # We assume that score metrics have a ModelOutputType explicitly set
+        # that is *not* PREDICTION or PREDICTION_WITH_AUX.
+        if (
+            metric_obj.model_output_type
+            == seqio.metrics.ModelOutputType.PREDICTION
+            or metric_obj.model_output_type
+            == metric_obj.model_output_type.PREDICTION_WITH_AUX
+        ) and score_metrics:
+          # Got prediction metric, but expected scoring metric. Skip metric
+          # calculation.
+          continue
+        # We assume that a metric is a prediction metric if ModelOutputType is
+        # explicitly not SCORE or SCORE_WITH_INTERMEDIATES *or if not set*.
+        if (
+            metric_obj.model_output_type == seqio.metrics.ModelOutputType.SCORE
+            or metric_obj.model_output_type
+            == metric_obj.model_output_type.SCORE_WITH_INTERMEDIATES
+        ) and not score_metrics:
+          # Got score metric, but expected prediction metric. Skip metric
+          # calculation.
+          continue
+      else:
+        raise ValueError(
+            f'Metric {metric_obj} does not have any model_output_type'
+        )
+
+      metric_instance = metric_obj.from_model_output(
+          targets, np.array(model_outs), output_features
+      )
+      if isinstance(metric_instance, seqio.metrics.CollectingMetric):
+        metric_value, _ = metric_instance.actual_compute(
+            targets, output_features
+        )
+      elif isinstance(metric_instance, seqio.metrics.LegacyMetric):
+        metric_value = metric_instance.compute()
+      else:
+        logging.error('Unsupported metric type %s.', type(metric_instance))
+        return []
+
+      metrics.append(metric_value)
+      logging.info('Metrics: %s', metric_value)
 
     return metrics
 
+  # TODO(cschuldt): Remove this and use compute_metrics() instead.
   def compute_metrics_eval(
       self,
       eval_outputs: Sequence[tuple[str | None, NestedMap]],
       verbose_entries: int = 0,
   ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
-    """Computes metrics from the given eval outputs using score_metric_fns.
-
-    This method is called only on process=0 after aggregating all outputs as
-    seqio task's metric_fns take in a global view of examples.
-
-    This function does the following:
-      1. Calls self._build_scoring_metric_inputs_with_enum(), which generates
-        the scores_list (the model's eval_ouptuts) and corresponding
-        targets_list (the ground truth target).
-      2. Feed the lists from 1) through all task.predict_metric_fns.
-      3. Feed the prefix-key mapped list of decoder_outputs and targets through
-        all task.predict_metric_fns.
-      4. Optionally log a couple entries for inspection.
-
-
-    For tasks with predict_metric_fns, use compute_metrics() above.
-
-    Args:
-      eval_outputs: A list of flattened scoring outputs. Each element is a map
-        from string to NestedMap, and is expected to have keys `labels` and
-        `scores`. `labels` is int32 token ids of length [T], where T is the
-        sequence length.
-      verbose_entries: int, how many entries to log for inspection and sanity
-        checking.
-
-    Returns:
-      The results of score_metric_fns computed on the eval outputs.
-      Typically a list of metrics, each element being a mapping from a string
-      metric name to a float.
-    """
-    task = self.mixture_or_task_inst
-    if not isinstance(task, seqio.Task):
-      logging.warning(
-          (
-              'compute_metrics_eval() is only supported for seqio.Tasks, '
-              'got %s for %s.'
-          ),
-          type(task),
-          self.name,
-      )
-      return []
-    if not task.score_metric_fns:
-      logging.info('no score_metric_fns defined on task: %s', task.name)
-      return []
-    if is_packing_on(self.feature_converter):
-      logging.error('Will not compute metrics on %s since using a '
-                    'FeatureConverter with pack=True.', task.name)
-      return []
-
-    if not eval_outputs:
-      return []
-    if _LM_SCORE_KEY not in eval_outputs[0][1]:
-      logging.warning(
-          ('LanguageModel output format with "%s" key is expected, but '
-           'the key was not found in eval_outputs (b/244434890)'),
-          _LM_SCORE_KEY)
-      return []
-
-    # Create targets artifacts if they don't exist yet
-    if not self.is_targets_init:
-      self._gen_targets_artifacts()
-
-    answers = dict([(k, v) for k, v in eval_outputs if not _is_padding(v)])
-    scores_list, targets_list = self._build_scoring_metric_inputs_with_enum(
-        answers, verbose_entries
+    return self.compute_metrics(
+        decoder_outputs=eval_outputs,
+        score_metrics=True,
+        verbose_entries=verbose_entries,
     )
-
-    metrics = []
-    for fn in task.score_metric_fns:
-      m = fn(targets_list, scores_list)
-      logging.info('Metrics: %s', m)
-      metrics.append(m)
-
-    return metrics
 
 
 ###############################################################################
