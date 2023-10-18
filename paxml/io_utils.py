@@ -186,6 +186,8 @@ class JnpEncoder(json.JSONEncoder):
       return float(o)
     elif isinstance(o, np.ndarray):
       return o.tolist()
+    elif isinstance(o, tf.Tensor):
+      return o.numpy().tolist()
     elif isinstance(o, bytes):
       return o.decode('utf-8')
     elif dataclasses.is_dataclass(o):

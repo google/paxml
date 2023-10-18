@@ -979,6 +979,7 @@ pytype_strict_test(
     deps = [
         ":io_utils",
         # Implicit absl.flags dependency.
+        # Implicit absl.logging dependency.
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
         # Implicit etils dependency.

@@ -112,6 +112,17 @@ class IoUtilsTest(parameterized.TestCase):
     self.assertTrue(pathlib.Path(filename).exists())
     self.assertEqual(_read_jsonl_file(filename), [v for (_, v) in kv])
 
+  def test_tensorflow_tensor(self):
+    filename = epath.Path(FLAGS.test_tmpdir) / 'kv2.jsonl'
+    kv = [(
+        'key1',
+        {'a': tf.constant(numpy.array([1.0, 2.0]), dtype=tf.float32)},
+    )]
+    io_utils.write_key_value_pairs(filename, kv)
+    self.assertTrue(pathlib.Path(filename).exists())
+    data = _read_jsonl_file(filename)
+    self.assertEqual(data[0]['a'], [1.0, 2.0])
+
   @parameterized.named_parameters(
       ('_eval', io_utils.EvaluationMode.EVAL),
       ('_decode', io_utils.EvaluationMode.DECODE),
