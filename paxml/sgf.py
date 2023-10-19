@@ -37,12 +37,13 @@ NestedJTensor = pytypes.NestedJTensor
 NestedMap = py_utils.NestedMap
 PRNGKey = pytypes.PRNGKey
 PARAMS = base_layer.PARAMS
+ScalarFloat = pytypes.ScalarFloat
 
 
 @struct.dataclass
 class GradAuxInfo:
   aux_info: Any
-  loss_weight: float = 1.0
+  loss_weight: float | ScalarFloat = 1.0
 
 
 @struct.dataclass
