@@ -1175,11 +1175,17 @@ class SeqIOInput(base_input.BaseInput):
     if not self.is_targets_init:
       self._gen_targets_artifacts()
 
-    model_out = dict(decoder_outputs)
+    if score_metrics:
+      model_out = dict(
+          [(k, v) for k, v in decoder_outputs if not _is_padding(v)]
+      )
+    else:
+      model_out = dict(decoder_outputs)
     target = self._get_targets()
 
     targets = []
     model_outs = []
+    verbose_entries_idx = 0
     for ex in target:
       if ex not in model_out:
         raise ValueError(
@@ -1189,25 +1195,55 @@ class SeqIOInput(base_input.BaseInput):
       out = model_out[ex]
       model_outs.append(out[key])
       targets.append(target[ex])
-      if self.log_preprocessed_targets and score_metrics:
-        out['seqio_preprocessed_targets'] = _convert_bytes_to_str(target[ex])
 
-    # Log a few examples for inspection and sanity check.
-    it = iter(target)
-    for i in range(verbose_entries):
-      k = next(it)
-      if k not in model_out:
-        raise ValueError(
-            f'Example not found in {self.name} decoder output (key={k}):'
-            f' {target[k]}'
-        )
-      out = model_out[k]
-      e = target[k]
-      answer = out[key]
-      t = _get_targets_str(e, self.mixture_or_task_inst)
-      logging.info(
-          'Example %d:\nPROMPT=%s\nANSWER=%s\nTARGET=%s.', i, k, answer, t
-      )
+      if score_metrics:
+        if self.task_inst.postprocess_fn is not None:
+          target_post = self.task_inst.postprocess_fn(
+              target[ex]['targets'], example=target[ex], is_target=True
+          )
+          out['seqio_postprocessed_targets'] = _convert_bytes_to_str(
+              target_post
+          )
+        if self.log_preprocessed_targets:
+          out['seqio_preprocessed_targets'] = _convert_bytes_to_str(target[ex])
+      else:
+        # Prediction metrics
+        if self.task_inst.postprocess_fn is not None:
+          t = _get_targets_str(target[ex], self.mixture_or_task_inst)
+          seqio_target = self.task_inst.postprocess_fn(
+              t, example=target[ex], is_target=True
+          )
+          # postprocess model's decoder output
+          prediction = self.task_inst.postprocess_fn(
+              out[key], example=target[ex], is_target=False
+          )
+          # Mutate 'out' dictionary which is written to disk afterwards
+          out['seqio_targets'] = seqio_target
+          out['seqio_postprocessed_predictions'] = _convert_bytes_to_str(
+              prediction
+          )
+
+      if verbose_entries is not None and verbose_entries_idx < verbose_entries:
+        # Log a few examples for inspection and sanity check.
+        if score_metrics:
+          logging.info(
+              'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
+              'is_correct=%s\nscore=%s\n\n',
+              target.get('inputs_pretokenized', 'None'),
+              target.get('targets_pretokenized', 'None'),
+              target.get('is_correct', 'N/A'),
+              out[key],
+          )
+        else:
+          t = _get_targets_str(target[ex], self.mixture_or_task_inst)
+          logging.info(
+              'Example %d:\nPROMPT=%s\nANSWER=%s\nTARGET=%s.',
+              verbose_entries_idx,
+              ex,
+              out[key],
+              t,
+          )
+        verbose_entries_idx += 1
 
     # Optionally log all examples for inspection in text format
     if plain_text_output is not None:
