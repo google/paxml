@@ -978,10 +978,10 @@ def _get_default_grad_fn(
 def _log_bprop_include_exclude_list(
     var_weight_hparams: NestedWeightHParams, excluded_for_grad: NestedMap
 ) -> None:
-  flat_var_prefix = jax.tree_flatten(
+  flat_var_prefix = jax.tree_util.tree_flatten(
       py_utils.extract_prefixed_keys_from_nested_map(var_weight_hparams)
   )[0]
-  flat_mask = jax.tree_flatten(excluded_for_grad)[0]
+  flat_mask = jax.tree_util.tree_flatten(excluded_for_grad)[0]
   for prefix, excluded in zip(flat_var_prefix, flat_mask):
     if excluded:
       logging.info('Bprop excluded var: %s', prefix)

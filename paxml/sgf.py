@@ -135,12 +135,12 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     ), f'Clipping bound must be positive. {l2_norm_clip} is provided.'
 
     # Clip the per-core mean gradient.
-    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    grads_flat, grads_treedef = jax.tree_util.tree_flatten(grads)
     global_grad_norm = optax.global_norm(grads_flat)
     divisor = jnp.maximum(global_grad_norm / l2_norm_clip, 1.0)
     num_clipped = jnp.greater(divisor, 1.0)
     clipped_flat = [g / divisor for g in grads_flat]
-    clipped = jax.tree_unflatten(grads_treedef, clipped_flat)
+    clipped = jax.tree_util.tree_unflatten(grads_treedef, clipped_flat)
 
     return clipped, num_clipped, global_grad_norm
 
@@ -154,7 +154,9 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     prng_keys = jax.random.split(
         prng_key, len(jax.tree_util.tree_leaves(grads))
     )
-    prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
+    prng_tree = jax.tree_util.tree_unflatten(
+        jax.tree_util.tree_structure(grads), prng_keys
+    )
 
     if base_layer.is_running_under_pmap():
       # Note: when running under pmap, loss_weight is set to 1/num_devices.
@@ -244,11 +246,11 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       )
 
     grads = jax.tree_map(_reshape_and_mean, grads)
-    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    grads_flat, grads_treedef = jax.tree_util.tree_flatten(grads)
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_norm_clip
     )
-    sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
+    sum_grads = jax.tree_util.tree_unflatten(grads_treedef, sum_clipped)
 
     # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
@@ -267,7 +269,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     prng_keys = jax.random.split(
         prng_key, len(jax.tree_util.tree_leaves(grads))
     )
-    prng_tree = jax.tree_unflatten(jax.tree_structure(grads), prng_keys)
+    prng_tree = jax.tree_util.tree_unflatten(
+        jax.tree_util.tree_structure(grads), prng_keys
+    )
 
     if base_layer.is_running_under_pmap():
       # Note: when running under pmap, loss_weight is set to 1/num_devices.
@@ -308,9 +312,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     inputs = self._prepare_inputs(inputs)
 
     # Get batch size.
-    inputs_flat, _ = jax.tree_flatten(inputs)
-    batch_size = inputs_flat[0].shape[0]
-    microbatch_size = inputs_flat[0].shape[1]
+    input_leaf = jax.tree_util.tree_leaves(inputs)[0]
+    batch_size = input_leaf.shape[0]
+    microbatch_size = input_leaf.shape[1]
 
     if self.inner_batch_size is None:
       inner_batch_size = batch_size * microbatch_size
@@ -508,7 +512,7 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     params_with_sq_norms = jax.tree_map(
         lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
     )
-    (loss, aux), grad_with_sq_norms = grad_fn(
+    (_, aux), grad_with_sq_norms = grad_fn(
         {**mdl_vars_grad, PARAMS: params_with_sq_norms},
         mdl_vars_nograd_and_inputs,
         prng_key,
