@@ -34,8 +34,6 @@ BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"--xla_gpu_enable_latency_hiding_scheduler=true
 export XLA_FLAGS="$BASE_XLA_FLAGS ${XLA_FLAGS:-}"
 
 
-TRAIN_GPUS=$(( NUM_GPUS * SLURM_JOB_NUM_NODES ))
-
 ## NOTE: 126M trained with pure data parallel
 mkdir -p $LOG_DIR
 python3 -u -m paxml.main \
@@ -43,7 +41,8 @@ python3 -u -m paxml.main \
     --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.Pile126M \
     --tfds_data_dir=$TFDS_DATA_DIR \
     --fdl.FPROP_DTYPE=\"${PREC}\" \
-    --fdl.ICI_MESH_SHAPE="[${TRAIN_GPUS}, 1, 1]" \
+    --fdl.ICI_MESH_SHAPE="[${NUM_GPUS},1,1]" \
+    --fdl.DCN_MESH_SHAPE="[${SLURM_JOB_NUM_NODES},1,1]" \
     --fdl.PERCORE_BATCH_SIZE=$PERCORE_BATCH_SIZE \
     --multiprocess_gpu \
     --server_addr=${SLURM_LAUNCH_NODE_IPADDR}:12345 \

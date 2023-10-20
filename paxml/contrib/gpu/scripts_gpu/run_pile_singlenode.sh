@@ -40,6 +40,7 @@ python3 -u -m paxml.main \
     --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.Pile126M \
     --fdl.FPROP_DTYPE=\"${PREC}\" \
     --fdl.ICI_MESH_SHAPE="[${NUM_GPUS}, 1, 1]" \
+    --fdl.DCN_MESH_SHAPE="[1,1,1]" \
     --fdl.PERCORE_BATCH_SIZE=$PERCORE_BATCH_SIZE \
     --tfds_data_dir=$TFDS_DATA_DIR \
     --alsologtostderr \
