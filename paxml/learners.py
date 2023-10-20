@@ -343,6 +343,26 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     Returns:
       transformed_grad, new_states pair.
     """
+    orig_grads = grads
+    orig_var_weight_hparams = var_weight_hparams
+
+    # Omit the `overwrite_with_gradient` parameters as they are unnecessary for
+    # the optimizer state update. Gradient overwriting takes place at the very
+    # end of the function to update the transformed gradients.
+    def _filter_owg(original):
+      return jax.tree_map(
+          lambda o, h: (
+              py_utils.BpropMaskedNode()
+              if base_layer.var_overwrite_with_gradient(h)
+              else o
+          ),
+          original,
+          orig_var_weight_hparams,
+      )
+
+    old_vars = _filter_owg(old_vars)
+    var_weight_hparams = _filter_owg(var_weight_hparams)
+    grads = _filter_owg(grads)
 
     grads, valid_step = self.scale_gradients(grads)
     transformed_grad, new_states = self.get_grad_tx(var_weight_hparams).update(
@@ -374,6 +394,15 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           applied_grad_norm,
           SummaryType.AGGREGATE_SCALAR,
       )
+
+    transformed_grad = jax.tree_map(
+        lambda h, g, t_g: (
+            g if base_layer.var_overwrite_with_gradient(h) else t_g
+        ),
+        orig_var_weight_hparams,
+        orig_grads,
+        transformed_grad,
+    )
 
     return transformed_grad, new_states
 
@@ -422,6 +451,9 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     def _adjust_var(old_var, transformed_grad, is_learnable, var_wh, var_key):
       if not is_learnable:
         return old_var
+
+      if base_layer.var_overwrite_with_gradient(var_wh):
+        return transformed_grad
 
       if not self.scale_update_by_var_norm:
         return old_var + transformed_grad

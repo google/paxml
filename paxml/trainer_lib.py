@@ -1124,11 +1124,14 @@ def train_step_single_learner(
     ):
       # Make updated non-trainable vars visible to EMA.
       mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
+    excluded_for_learner = jax.tree_map(
+        lambda eo, eg: eo and eg, excluded_for_opt, excluded_for_grad
+    )
     vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        mdl_vars, excluded_for_opt
+        mdl_vars, excluded_for_learner
     )
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        var_weight_hparams, excluded_for_opt
+        var_weight_hparams, excluded_for_learner
     )
     transformed_grads, new_opt_states = learner.update_states(
         grads, states.opt_states[0], vars_with_opt, wps_with_opt

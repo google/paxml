@@ -800,6 +800,7 @@ def get_excluded_var_mask_for_grad_or_opt(
     var_weight_hparams: NestedJTensor,
     learner: learners_lib.Learner,
     mask_all_non_trainable: bool,
+    mask_all_overwrite_with_gradient: bool = False,
 ) -> NestedMap:
   """Returns whether each var should be excluded for grad/optimizer."""
   if learner.keep_optimizer_state_for_excluded_vars:
@@ -814,6 +815,12 @@ def get_excluded_var_mask_for_grad_or_opt(
   else:
     excluded_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_exclusion
+    )
+  if mask_all_overwrite_with_gradient:
+    excluded_for_grad = jax.tree_map(
+        lambda x, e: base_layer.var_overwrite_with_gradient(x) or e,
+        var_weight_hparams,
+        excluded_for_grad,
     )
   if mask_all_non_trainable:
     excluded_for_grad = jax.tree_util.tree_map(
@@ -830,7 +837,10 @@ def get_excluded_var_mask_for_opt(
 ) -> NestedMap:
   """Returns whether each var should be excluded for optimizer."""
   return get_excluded_var_mask_for_grad_or_opt(
-      var_weight_hparams, learner, learner.optimizer.ema_decay == 0.0
+      var_weight_hparams,
+      learner,
+      learner.optimizer.ema_decay == 0.0,
+      True,
   )
 
 
