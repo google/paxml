@@ -171,8 +171,8 @@ class LossAggregatorTest(test_utils.TestCase):
 class WeightedScalarCluMetricTest(test_utils.TestCase):
 
   def test_weighted_scalar_metric(self):
-    values1 = jnp.array([1])
-    weights1 = jnp.array([0.1])
+    values1 = jnp.array([1, 2, 3])
+    weights1 = jnp.array([0.1, 0.2, 0.3])
     metric1 = base_metrics.WeightedScalarCluMetric.create(
         weight=weights1,
         value=values1,
@@ -181,8 +181,8 @@ class WeightedScalarCluMetricTest(test_utils.TestCase):
         metric1.compute(), jnp.average(values1, weights=weights1)
     )
 
-    values2 = jnp.array([2])
-    weights2 = jnp.array([0.2])
+    values2 = jnp.array([4, 5, 6])
+    weights2 = jnp.array([0.4, 0.5, 0.6])
     metric2 = base_metrics.WeightedScalarCluMetric.create(
         weight=weights2,
         value=values2,
@@ -197,8 +197,8 @@ class WeightedScalarCluMetricTest(test_utils.TestCase):
         ),
     )
 
-    values3 = jnp.array([3])
-    weights3 = jnp.array([0.3])
+    values3 = jnp.array([7, 8, 9])
+    weights3 = jnp.array([1.1, 2.2, 3.3])
     metric3 = base_metrics.WeightedScalarCluMetric.create(
         weight=weights3,
         value=values3,

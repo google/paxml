@@ -473,7 +473,7 @@ class MultiLossAggregator(LossAggregator):
 class WeightedScalarCluMetric(clu_metrics.Metric):
   """Computes the weighted average of a scalar.
 
-  The inputs & result are always a scalar. To create an object of this class,
+  The result is always a scalar. To create an object of this class,
   pls use the method `create()` with the arguments `value` and `weight`.
 
   See also documentation of `clu.Metric`.
@@ -488,12 +488,15 @@ class WeightedScalarCluMetric(clu_metrics.Metric):
       value: jnp.ndarray,
       weight: jnp.ndarray,
   ):
-    return cls(weighted_value=value * weight, weight=weight)
+    return cls(
+        weighted_value=jnp.sum(jnp.multiply(value, weight)),
+        weight=jnp.sum(weight),
+    )
 
   def merge(self, other: WeightedScalarCluMetric) -> WeightedScalarCluMetric:
     return type(self)(
-        weight=self.weight + other.weight,
-        weighted_value=(self.weighted_value + other.weighted_value),
+        weight=jnp.add(self.weight, other.weight),
+        weighted_value=jnp.add(self.weighted_value, other.weighted_value),
     )
 
   def compute(self) -> Any:
