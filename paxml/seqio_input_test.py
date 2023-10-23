@@ -81,13 +81,15 @@ def _dummy_score_metric(targets: Sequence[Any],
 def _register_dummy_task(
     task_name: str,
     dataset_fn: Callable[[str, bool, int | None], tf.data.Dataset],
+    metric_fns: Sequence[seqio.metrics_lib.MetricFnCallable] | None,
 ) -> seqio.Task:
   """Register a dummy task for testing eval metrics."""
   output_feature_names = ('inputs', 'targets')
   return seqio.TaskRegistry.add(
       task_name,
       source=seqio.FunctionDataSource(
-          dataset_fn=dataset_fn, splits=['train', 'validation']),
+          dataset_fn=dataset_fn, splits=['train', 'validation']
+      ),
       preprocessors=[seqio.preprocessors.append_eos],
       postprocess_fn=None,
       output_features={
@@ -95,7 +97,8 @@ def _register_dummy_task(
           feat: seqio.Feature(mock.Mock(eos_id=True))
           for feat in output_feature_names
       },
-      metric_fns=[_dummy_metric, _dummy_score_metric])
+      metric_fns=metric_fns,
+  )
 
 
 class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
@@ -681,8 +684,12 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         batch_pack.tgt.task_ids,
         np.array([[3, 17, 9, 1, 13, 7, 1, 0]], dtype=np.int32))
 
-  @parameterized.parameters(True, False)
-  def test_compute_metrics(self, shuffle):
+  @parameterized.parameters(
+      dict(shuffle=True, metric_fns=[_dummy_metric, _dummy_score_metric]),
+      dict(shuffle=False, metric_fns=[_dummy_metric, _dummy_score_metric]),
+      dict(shuffle=True, metric_fns=None),
+  )
+  def test_compute_metrics(self, shuffle, metric_fns):
     task_name = 'compute_metrics'
     targets = [f'ex target{i}' for i in range(5)]
     inputs = [f'ex input{i}' for i in range(5)]
@@ -693,7 +700,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         'inputs_pretokenized': inputs,
     })
     dataset_fn = lambda split, shuffle_files, seed=None: ds
-    _register_dummy_task(task_name, dataset_fn)
+    _register_dummy_task(task_name, dataset_fn, metric_fns)
     p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
@@ -722,8 +729,13 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     # Reset targets
     inp._gen_targets_artifacts()
     m = inp.compute_metrics(decoder_outputs)
-    self.assertLen(m, 1)
-    self.assertEqual(m[0]['accuracy'], targets + ['ex pred'] * len(inp.dataset))
+    if metric_fns is None:
+      self.assertEmpty(m)
+    else:
+      self.assertLen(m, 1)
+      self.assertEqual(
+          m[0]['accuracy'], targets + ['ex pred'] * len(inp.dataset)
+      )
 
   @parameterized.named_parameters(
       ('repeat', True, 10, 1),
@@ -743,7 +755,9 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         'inputs_pretokenized': 'ex input',
     }).repeat(13)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
-    _register_dummy_task(task_name, dataset_fn)
+    _register_dummy_task(
+        task_name, dataset_fn, [_dummy_metric, _dummy_score_metric]
+    )
     decoder_outputs = []
     # simulate multi-host setup by iterating on multiple input generators
     for host_index in range(num_hosts):
@@ -800,7 +814,11 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       eval_output.append((enum_id, ex))
     return eval_output
 
-  def test_compute_metrics_eval(self):
+  @parameterized.parameters(
+      dict(metric_fns=[_dummy_metric, _dummy_score_metric]),
+      dict(metric_fns=None),
+  )
+  def test_compute_metrics_eval(self, metric_fns):
     task_name = 'compute_metrics_eval'
     x = [{
         'inputs': [7, 8],
@@ -811,7 +829,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     }]
     ds = seqio.test_utils.create_default_dataset(x)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
-    _register_dummy_task(task_name, dataset_fn)
+    _register_dummy_task(task_name, dataset_fn, metric_fns)
     p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'
@@ -825,8 +843,11 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     scores = np.array([1.0, 2.5], dtype=np.float32)
     eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
     m = inp.compute_metrics_eval(eval_output)
-    self.assertLen(m, 1)
-    self.assertEqual(m[0]['total_score'], 3.5)
+    if metric_fns is None:
+      self.assertEmpty(m)
+    else:
+      self.assertLen(m, 1)
+      self.assertEqual(m[0]['total_score'], 3.5)
 
   def test_instantiatee_with_mixture(self):
     task_name = 'test_task'
@@ -839,7 +860,9 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     }]
     ds = seqio.test_utils.create_default_dataset(x)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
-    _register_dummy_task(task_name, dataset_fn)
+    _register_dummy_task(
+        task_name, dataset_fn, [_dummy_metric, _dummy_score_metric]
+    )
     seqio.MixtureRegistry.add(
         'test_eval_mixture', ['test_task'],
         default_rate=1.0)
@@ -868,7 +891,9 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     }]
     ds = seqio.test_utils.create_default_dataset(x)
     dataset_fn = lambda split, shuffle_files, seed=None: ds
-    _register_dummy_task(task_name, dataset_fn)
+    _register_dummy_task(
+        task_name, dataset_fn, [_dummy_metric, _dummy_score_metric]
+    )
     p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = task_name
     p.split_name = 'validation'

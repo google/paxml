@@ -209,6 +209,35 @@ def _get_num_examples(ds: tf.data.Dataset) -> int:
   return num_examples
 
 
+def _any_prediction_metric_objs(
+    metric_objs: Sequence[seqio.metrics.Metric],
+) -> bool:
+  """Returns True if any prediction metric objects are present in metric_objs."""
+  for metric_obj in metric_objs:
+    if hasattr(metric_obj, 'model_output_type'):
+      if (
+          metric_obj.model_output_type
+          == seqio.metrics.ModelOutputType.PREDICTION
+          or metric_obj.model_output_type
+          == metric_obj.model_output_type.PREDICTION_WITH_AUX
+      ):
+        return True
+  return False
+
+
+def _any_score_metric_objs(metric_objs: Sequence[seqio.metrics.Metric]) -> bool:
+  """Returns True if any score metric objects are present in metric_objs."""
+  for metric_obj in metric_objs:
+    if hasattr(metric_obj, 'model_output_type'):
+      if (
+          metric_obj.model_output_type == seqio.metrics.ModelOutputType.SCORE
+          or metric_obj.model_output_type
+          == metric_obj.model_output_type.SCORE_WITH_INTERMEDIATES
+      ):
+        return True
+  return False
+
+
 def is_packing_on(fc: seqio.FeatureConverter) -> bool:
   """Safely checks whether a given feature converter has packing turned on."""
   return hasattr(fc, '_pack') and fc.pack
@@ -1149,6 +1178,28 @@ class SeqIOInput(base_input.BaseInput):
           self.name,
       )
       return []
+
+    # If there are no seqio score- or decode/predict metrics to compute,
+    # return empty list
+    if score_metrics:
+      if not task.score_metric_fns and not _any_score_metric_objs(
+          task.metric_objs
+      ):
+        logging.info(
+            'no score_metric_fns or score metric objs defined on task: %s',
+            task.name,
+        )
+        return []
+    else:
+      if not task.predict_metric_fns and not _any_prediction_metric_objs(
+          task.metric_objs
+      ):
+        logging.info(
+            'no predict_metric_fns or prediction objs defined on task: %s',
+            task.name,
+        )
+        return []
+
     if is_packing_on(self.feature_converter):
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
