@@ -141,7 +141,8 @@ class StackedTransformer(transformers.StackedTransformer):
             inputs=x_in,
             attention_mask=attention_mask,
             encoded=cross_inputs,
-            encoder_decoder_mask=cross_attention_mask)
+            encoder_decoder_mask=cross_attention_mask,
+            deterministic=self.do_eval)
         x_out = checkpoint_name(x_out, 'transformer_layer_out')
     return x_out
 
