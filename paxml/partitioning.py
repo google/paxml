@@ -638,15 +638,13 @@ class PmapPartitioner(Partitioner):
           var_weight_hparams=metadata.var_weight_hparams,
       )
 
-    logging.info(
-        'train state shapes: %s', jax.tree_map(lambda x: x.shape, train_state)
-    )
+    logging.info('train state shapes: %s', jax.tree_map(jnp.shape, train_state))
     replicated_train_state = trainer_lib.replicate_model_state(train_state)
     # Unreplicated model states are not needed anymore at that point.
     del train_state
     logging.info(
         'replicated train state shapes: %s',
-        jax.tree_map(lambda x: x.shape, replicated_train_state),
+        jax.tree_map(jnp.shape, replicated_train_state),
     )
 
     # From now on, different replicas should use different random seeds.
@@ -850,7 +848,7 @@ class PjitPartitioner(Partitioner):
       )
     logging.info(
         'partitioned train state shapes (global shape): %s',
-        jax.tree_map(lambda x: x.shape, partitioned_train_state),
+        jax.tree_map(jnp.shape, partitioned_train_state),
     )
 
     # We do not fold in jax.process_index in contrast to the pmap version and
@@ -1060,7 +1058,7 @@ class PjitPartitioner(Partitioner):
     return trainer_lib.bind_mesh(pjitted_fn, self.global_mesh)
 
   def _get_state_unpadded_shapes(self, metadata: TrainStateMetadata):
-    return jax.tree_map(lambda x: x.shape, metadata.unpadded_global_shapes)
+    return jax.tree_map(jnp.shape, metadata.unpadded_global_shapes)
 
   def _pad_states(
       self, metadata: TrainStateMetadata, unpadded_state: TrainState
@@ -1296,8 +1294,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
             ' train_state_metadata=%s, prng_key=%s, inputs=%s'
         ),
         metadata.unpadded_global_shapes,
-        jax.tree_map(lambda x: x.shape, self._init_key),
-        jax.tree_map(lambda x: x.shape, inputs_shape_dtype),
+        jax.tree_map(jnp.shape, self._init_key),
+        jax.tree_map(jnp.shape, inputs_shape_dtype),
     )
     # NOTE(pax-dev): The following is currently incompatible with variable
     # uneven-sharding padding.

@@ -393,17 +393,13 @@ def initialize_model_state(
         summary_verbosity=jax_task.summary_verbosity,
     )
     with base_layer.JaxContext.new_context(hparams=context_p):
-      inputs = jax.tree_map(
-          lambda x: jnp.zeros(x.shape, x.dtype), inputs_shape_dtype
-      )
+      inputs = jax.tree_map(jnp.zeros_like, inputs_shape_dtype)
       if model.hparams.fprop_dtype == jnp.bfloat16:
         inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
 
   initial_vars = init_fn(init_key)
-  logging.info(
-      'initial_vars: %s', jax.tree_map(lambda x: x.shape, initial_vars)
-  )
+  logging.info('initial_vars: %s', jax.tree_map(jnp.shape, initial_vars))
 
   # In case jax_task.model wraps a t5x model, let's remove the params_axes
   # variable collection.
@@ -990,6 +986,24 @@ def _log_bprop_include_exclude_list(
       logging.info('Bprop included var: %s', prefix)
 
 
+def get_excluded_var_masks(
+    var_weight_hparams: NestedWeightHParams, learner: learners_lib.Learner
+) -> tuple[NestedMap, NestedMap]:
+  """Return the variables excluded for gradients and optimizer states."""
+  # Skip variables for gradients.
+  excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
+      var_weight_hparams, learner
+  )
+  _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
+
+  # Excluded for optimizer states.
+  excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
+      var_weight_hparams,
+      learner,
+  )
+  return excluded_for_grad, excluded_for_opt
+
+
 # TODO(yonghui): refactor to pass in learner separately.
 def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
@@ -1063,16 +1077,8 @@ def train_step_single_learner(
 
   _, subkey = jax.random.split(prng_key)
 
-  # Skip variables for gradients.
-  excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
+  excluded_for_grad, excluded_for_opt = get_excluded_var_masks(
       var_weight_hparams, learner
-  )
-  _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
-
-  # Excluded for optimizer states.
-  excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
-      var_weight_hparams,
-      learner,
   )
 
   # Construct and call the grad function.
@@ -1520,7 +1526,7 @@ def initialize_partitioned_model_states(
       state_specs.to_eval_state() if discard_opt_states else state_specs
   )
   train_state_unpadded_shapes = jax.tree_map(
-      lambda x: x.shape,
+      jnp.shape,
       jax_task.create_train_state_unpadded_shapes(
           var_weight_hparams, discard_opt_states
       ),
