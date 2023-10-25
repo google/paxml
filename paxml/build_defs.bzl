@@ -82,7 +82,8 @@ def pax_targets(
         dump_input_specs_kwargs = None,
         # Internal enable fragmented build argument, toggled to True.
         # Internal tooling mock backend attribute
-        main_src = "//paxml:main.py"):
+        main_src = "//paxml:main.py",
+        model_analysis_kwargs = None):
     """Macro to define a collection of Pax targets with custom dependencies.
 
     It currently defines the following targets:
@@ -126,6 +127,8 @@ def pax_targets(
           :dump_input_specs target.
       # Internal mock backend docstrings
       main_src: The src file for the ":main" target created.
+      model_analysis_kwargs: Additional kwargs that are passed to the
+          :model_analysis target.
     """
     if not experiments:
         fail("pax_targets() expects a non-empty list of deps that defines " +
@@ -268,6 +271,7 @@ def pax_targets(
         prefix_name,
         model_analysis_name,
     )
+    model_analysis_kwargs = model_analysis_kwargs or {}
     export_binary(
         name = model_analysis_name,
         main = "//paxml/tools:model_analysis.py",
@@ -284,6 +288,7 @@ def pax_targets(
             "//praxis:py_utils",
         ] + extra_deps,
         exp_sources = exp_sources,
+        **model_analysis_kwargs
     )
 
     validate_config_name = "validate_config"
