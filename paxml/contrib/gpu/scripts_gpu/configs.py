@@ -100,7 +100,8 @@ def configure_gpt3_task(
 class GPT126M(TransformerLmSpmdAdam):
 
   USE_REPEATED_LAYER = False
-  ICI_MESH_SHAPE = [64,1,1]
+  ICI_MESH_SHAPE = [8, 1, 1]
+  DCN_MESH_SHAPE = [8, 1, 1]
   FPROP_DTYPE = jnp.bfloat16
   MAX_STEPS = 600000
 
@@ -235,8 +236,6 @@ class GPT5B(Pile126M):
       stacked_p = stacked_p.block
 
     stacked_p.input_dropout_prob = 0.1
-    stacked_p.residual_dropout_prob = 0.1
-    stacked_p.atten_dropout_prob = 0.1
     return task_p
 
 
