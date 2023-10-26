@@ -115,7 +115,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertEqual(metric_values['test'].value, 5)
 
     with summary_utils.get_summary_writer(test_dir):
-      metric_utils.write_clu_metric_summaries(metric_values, step_i=0)
+      summary_utils.write_clu_metric_summaries(metric_values, step_i=0)
 
   def test_list_compute_metric_values(self):
     @flax.struct.dataclass
@@ -252,7 +252,7 @@ class MetricUtilsTest(absltest.TestCase):
     metric_values = metric_utils.compute_metric_values(metrics)
     test_dir = self._test_dir()
     with summary_utils.get_summary_writer(test_dir):
-      metric_utils.write_clu_metric_summaries(metric_values, step_i=0)
+      summary_utils.write_clu_metric_summaries(metric_values, step_i=0)
 
   def test_write_seqio_metric_summaries(self):
     @flax.struct.dataclass
@@ -276,8 +276,9 @@ class MetricUtilsTest(absltest.TestCase):
     metric_values = metric_utils.compute_metric_values(metrics)
     test_dir = self._test_dir()
     with summary_utils.get_summary_writer(test_dir):
-      metric_utils.write_seqio_metric_summaries(
-          [metric_values], step=0, metric_name_prefix='test_prefix')
+      summary_utils.write_seqio_metric_summaries(
+          [metric_values], step=0, metric_name_prefix='test_prefix'
+      )
 
   def is_float_convertible(self):
     self.assertTrue(metric_utils.is_float_convertible(0.1))

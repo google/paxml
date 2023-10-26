@@ -25,12 +25,10 @@ import clu.values as clu_values
 import jax
 from jax import numpy as jnp
 import numpy as np
-from paxml import summary_utils
 # Internal platform import
 from praxis import py_utils
 from praxis import pytypes
 import seqio
-from tensorflow.compat.v2 import summary as tf_summary
 
 # internal runtime import
 
@@ -41,37 +39,9 @@ WeightedScalars = pytypes.WeightedScalars
 WeightedScalarsList = pytypes.WeightedScalarsList
 
 NestedMap = py_utils.NestedMap
-SummaryValueTypes = (
-    clu_values.Scalar
-    | clu_values.Image
-    | clu_values.Text
-    | clu_values.Summary
-    | clu_values.Histogram
-    | clu_values.Audio
-)
 
 
-_VALUES_TO_SUMMARY_TYPE = {
-    clu_values.Scalar: summary_utils.SummaryType.SCALAR,
-    clu_values.Text: summary_utils.SummaryType.TEXT,
-    clu_values.Image: summary_utils.SummaryType.IMAGE,
-    # Videos (GIFs) are written to tensorboard as clu.values.summary.
-    clu_values.Summary: summary_utils.SummaryType.VIDEO,
-    clu_values.Histogram: summary_utils.SummaryType.HISTOGRAM,
-    clu_values.Audio: summary_utils.SummaryType.AUDIO,
-}
-
-
-def _get_summary_type(
-    metric_value: SummaryValueTypes,
-) -> summary_utils.SummaryType:
-  """Infers metric summary type from the metric value type."""
-  if type(metric_value) not in _VALUES_TO_SUMMARY_TYPE:
-    raise ValueError(f'Unknown metric value type: {type(metric_value)}.')
-  return _VALUES_TO_SUMMARY_TYPE[type(metric_value)]
-
-
-def compute_metric_values(metrics: Metrics) -> dict[str, SummaryValueTypes]:
+def compute_metric_values(metrics: Metrics) -> dict[str, Any]:
   """Given a dict of clu_metrics.Metric objects, returns their values.
 
   Args:
@@ -120,129 +90,6 @@ def compute_metric_values(metrics: Metrics) -> dict[str, SummaryValueTypes]:
           f'{metric_name}: {type(metric_value)}.'
       )
   return metric_values
-
-
-def write_clu_metric_summaries(
-    metric_values: dict[str, SummaryValueTypes], step_i: int
-) -> None:
-  """Given a dict of metric values, writes them out as tensorboard summaries.
-
-  This is expected to be called under a summary context.
-
-  Args:
-    metric_values: A dict[str, Any] objects with metric values. These values are
-      one of the various clu_values.Value subtypes.
-    step_i: An int representing the current step of decoding.
-  """
-  if not metric_values:
-    return
-
-  logging.info('Summarizing metrics.')
-  for metric_name, metric_value in metric_values.items():
-    logging.info('Summarizing metric %s', metric_name)
-    summary_type = _get_summary_type(metric_value)
-    # Pass both value and metadata to write_summary_tensor for video summary.
-    if isinstance(metric_value, clu_values.Summary):
-      summary_utils.write_summary_tensor(
-          step_i,
-          metric_name,
-          metric_value.value,
-          summary_type,
-          metric_value.metadata,
-      )
-    elif isinstance(metric_value, clu_values.Audio):
-      summary_utils.write_summary_tensor(
-          step_i,
-          metric_name,
-          metric_value.value,
-          summary_type,
-          sample_rate=metric_value.sample_rate,
-      )
-    else:
-      summary_utils.write_summary_tensor(
-          step_i, metric_name, metric_value.value, summary_type
-      )
-
-
-def compute_and_write_clu_metric_summaries(metrics: Metrics, step: int) -> None:
-  """Compute clu_metrics.Metric objects values and write them out as summaries.
-
-  Args:
-    metrics: A Dict[str, clu_metrics.Metric] objects with a compute_value()
-      function implemented that returns either a clu_values.Value object, a
-      Dict[str, clu_values.Value] objects, a Dict[str, List[clu_values.Value]]
-      objects, or a List[clu_values.Value].
-    step: An int representing the current step of decoding.
-  """
-  if metrics:
-    # Convert metrics to Dict[str, clu_values.Value] for summary writing.
-    clu_metric_values = compute_metric_values(metrics)
-    write_clu_metric_summaries(clu_metric_values, step)
-
-
-def write_seqio_metric_summaries(
-    seqio_metrics: Sequence[Mapping[str, seqio.metrics.MetricValue | float]],
-    metric_name_prefix: str,
-    step: int,
-) -> None:
-  """Write seqio metric as tensorboard summaries.
-
-  Args:
-    seqio_metrics: A sequence of dict of str to seqio metric value or float.
-    metric_name_prefix: A prefix added to metric name.
-    step: An int. representing the current step.
-  """
-  for m_dict in seqio_metrics:
-    for k, v in m_dict.items():
-      metric_name = f'{metric_name_prefix}/{k}'
-      if isinstance(v, seqio.metrics.Text):
-        metric_str = (
-            v.textdata.decode() if isinstance(v.textdata, bytes) else v.textdata
-        )
-        logging.info(
-            'Writing summary of %s with string value %s.',
-            metric_name,
-            metric_str,
-        )
-        tf_summary.text(metric_name, metric_str, step=step)
-        continue
-
-      if isinstance(v, seqio.metrics.Audio):
-        logging.info('Writing summary of %s with audio.', metric_name)
-        tf_summary.audio(
-            metric_name,
-            v.audiodata,
-            v.sample_rate,
-            step=step,
-            max_outputs=v.max_outputs,
-        )
-        continue
-
-      if isinstance(v, seqio.metrics.Image):
-        logging.info('Writing summary of %s with image.', metric_name)
-        tf_summary.image(
-            metric_name,
-            v.image,
-            step=step,
-            max_outputs=v.max_outputs)
-        continue
-
-      if isinstance(v, seqio.metrics.Histogram):
-        tf_summary.histogram(metric_name, v.values, buckets=v.bins, step=step)
-        continue
-
-      if isinstance(v, seqio.metrics.Generic):
-        tf_summary.write(metric_name, v.tensor, metadata=v.metadata, step=step)
-        continue
-
-      if isinstance(v, seqio.metrics.Scalar):
-        v = float(v.value)
-      else:
-        v = float(v)
-      logging.info('Writing summary of %s with value %.4f.', metric_name, v)
-      summary_utils.write_summary_tensor(
-          step, metric_name, v, summary_utils.SummaryType.AGGREGATE_SCALAR
-      )
 
 
 def is_scalar(v: Any) -> bool:
@@ -306,7 +153,7 @@ def as_float(
 
 
 def as_float_dict(
-    metric_output: dict[str, SummaryValueTypes]
+    metric_output: dict[str, Any]
     | WeightedScalars
     | WeightedScalarsList
     | Mapping[str, seqio.metrics.MetricValue | float],

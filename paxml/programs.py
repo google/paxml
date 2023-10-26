@@ -468,6 +468,7 @@ class BaseTrainProgram(Program):
         train_outputs.summary_tensors,
         per_example_out=train_outputs.per_example_out,
         steps_per_sec=steps_per_sec,
+        clu_metrics=train_outputs.clu_metrics,
     )
     logging.debug('[PAX STATUS]:  Wrote summaries (attempted).')
     return steps_per_sec
@@ -850,10 +851,10 @@ class BaseEvalProgram(Program):
           '  %s=%f (weight=%f)', key, weighted_average, sum_metric_weights
       )
     summary_utils.write_summary_entry(
-        self._eval_summary_writer, step, loss, metrics, summary_tensors
+        self._eval_summary_writer, step, loss, metrics, {}, summary_tensors
     )
 
-    metric_utils.compute_and_write_clu_metric_summaries(clu_metrics, step)
+    summary_utils.compute_and_write_clu_metric_summaries(clu_metrics, step)
 
     maybe_write_eval_outputs(
         EvaluationMode.EVAL, output_dir, step, flat_scoring_outputs

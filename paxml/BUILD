@@ -352,7 +352,6 @@ pytype_strict_library(
     name = "metric_utils",
     srcs = ["metric_utils.py"],
     deps = [
-        ":summary_utils",
         # Implicit absl.logging dependency.
         # Implicit clu.metrics dependency.
         # Implicit clu.values dependency.
@@ -385,6 +384,7 @@ pytype_strict_library(
     srcs = ["seqio_input.py"],
     deps = [
         ":metric_utils",
+        ":summary_utils",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
@@ -431,9 +431,11 @@ pytype_strict_library(
     name = "summary_utils",
     srcs = ["summary_utils.py"],
     deps = [
+        ":metric_utils",
         ":train_states",
         # Implicit absl.flags dependency.
         # Implicit absl.logging dependency.
+        # Implicit clu.values dependency.
         # Implicit clu.platform dependency.
         # Implicit etils dependency.
         # Implicit flax dependency.
@@ -442,6 +444,7 @@ pytype_strict_library(
         "//praxis:base_layer",
         "//praxis:py_utils",
         "//praxis:pytypes",
+        # Implicit seqio dependency.
         # Implicit tensorflow_no_contrib dependency.
     ],
 )
@@ -518,7 +521,6 @@ pytype_strict_library(
     srcs = ["programs.py"],
     deps = [
         ":io_utils",
-        ":metric_utils",
         ":partitioning",
         ":seqio_input",
         ":summary_utils",
@@ -541,7 +543,6 @@ pytype_strict_library(
         "//praxis:py_utils",
         "//praxis:pytypes",
         "//praxis:trees",
-        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
@@ -616,6 +617,7 @@ pytype_strict_library(
         ":learners",
         ":metric_utils",
         ":sgf",
+        ":summary_utils",
         ":tasks_lib",
         ":train_states",
         # Implicit absl.logging dependency.
@@ -1055,6 +1057,8 @@ py_strict_test(
     name = "summary_utils_test",
     srcs = ["summary_utils_test.py"],
     deps = [
+        ":base_metrics",
+        ":metric_utils",
         ":summary_utils",
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit absl.testing.parameterized dependency.
@@ -1071,6 +1075,7 @@ py_strict_test(
         ":checkpoints",
         ":learners",
         ":partitioning",
+        ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.

@@ -33,6 +33,7 @@ from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
 from paxml import metric_utils
+from paxml import summary_utils
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import pax_fiddle
@@ -354,8 +355,9 @@ def process_outputs(
 
   # write metrics to tensorboard
   with summary_writer.as_default():
-    metric_utils.write_seqio_metric_summaries(
-        seqio_metrics, metric_name_prefix, step)
+    summary_utils.write_seqio_metric_summaries(
+        seqio_metrics, metric_name_prefix, step
+    )
 
   # convert metrics to {string: float} mapping
   metrics = {}

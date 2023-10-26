@@ -255,8 +255,10 @@ class SingleTaskDecodeProgram(programs.Program):
                 else summary_utils.AUDIO_SUMMARY_SAMPLE_RATE
             ),
         )
-      metric_utils.write_clu_metric_summaries(metric_values, train_step)
-      metric_utils.write_clu_metric_summaries(process_metric_values, train_step)
+      summary_utils.write_clu_metric_summaries(metric_values, train_step)
+      summary_utils.write_clu_metric_summaries(
+          process_metric_values, train_step
+      )
 
     programs.maybe_write_eval_outputs(
         EvaluationMode.DECODE,
