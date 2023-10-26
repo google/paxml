@@ -112,11 +112,7 @@ to free up the TPUs.
 
 ### Run on GPU
 
-Installing jax on GPU:
-
-```bash
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-```
+Note: NVIDIA has released an updated version of Pax with H100 FP8 support and broad GPU performance improvements. Please visit the [NVIDIA Rosetta](https://github.com/NVIDIA/JAX-Toolbox/tree/main/rosetta/rosetta/projects/pax) repository for more details and usage instructions.
 
 #### Run PGLE workflow on GPU
 
