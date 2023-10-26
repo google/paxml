@@ -33,6 +33,8 @@ from praxis import base_input
 from praxis import pytypes
 import tensorflow.compat.v2 as tf
 
+from paxml import preemption  # mapped to internal
+
 
 Nested = pytypes.Nested
 # TODO(pax-dev): pytyping doesn't like either
@@ -254,6 +256,10 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
         checkpoint_type=self._checkpoint_type,
         use_digit_step_subdirectory=self._use_digit_step_subdirectory,
     )
+
+  def reached_preemption(self, step: int) -> bool:
+    """Returns True if a preemption sync point has been reached."""
+    return preemption.reached_preemption_sync_point(step)
 
   def should_save(self, step: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
