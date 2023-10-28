@@ -495,8 +495,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   ) -> PyTree:
 
     def _replace_param_info_name(info, name):
-      # Note: not replacing the name is intentional.
-      return dataclasses.replace(info, path=info.path.parent / name)
+      return dataclasses.replace(info, name=name, path=info.path.parent / name)
 
     directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
     # Hack to replace parameter names.
