@@ -74,6 +74,7 @@ pytype_strict_library(
         # Implicit numpy dependency.
         "//paxml:base_experiment",
         "//paxml:experiment_registry",
+        "//paxml:experiment_utils",
         "//praxis:base_hyperparams",
         "//praxis:base_layer",
         "//praxis:pax_fiddle",

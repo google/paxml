@@ -30,6 +30,7 @@ import jax
 import numpy as np
 from paxml import base_experiment
 from paxml import experiment_registry
+from paxml import experiment_utils
 from praxis import base_hyperparams
 from praxis import base_layer
 from praxis import pax_fiddle as fdl
@@ -46,6 +47,11 @@ _POST_INIT_OUTFILE = epath.DEFINE_path(
     'post_init_params_ofile',
     None,
     'If not None, Dump post-init params to this file.',
+)
+_CLS_VARS_OUTFILE = epath.DEFINE_path(
+    'cls_vars_ofile',
+    None,
+    'If not None, Dump experiment_cls_vars this file.',
 )
 
 instantiate = base_layer.instantiate
@@ -90,6 +96,17 @@ def _write_post_init_model_hparams_file(
 
     params_inits_text = base_hyperparams.nested_struct_to_text(params_inits)
     fout.write(params_inits_text)
+
+
+def _write_cls_vars_file(
+    exp_config: base_experiment.BaseExperiment,
+    filepath: epath.Path,
+) -> None:
+  """Dumps experiment_cls_vars.txt of a model's type to file."""
+  filepath.parent.mkdir(parents=True, exist_ok=True)
+  with filepath.open('w') as fout:
+    cls_vars_summary = experiment_utils.get_cls_vars_summary(type(exp_config))
+    fout.write(cls_vars_summary)
 
 
 def _extract_num_cores(model_p) -> int | None:
@@ -193,6 +210,8 @@ def _main(argv) -> None:
           task_p.model, _POST_INIT_OUTFILE.value, input_specs
       )
 
+  if _CLS_VARS_OUTFILE.value:
+    _write_cls_vars_file(experiment_config, _CLS_VARS_OUTFILE.value)
 
 def main():
   app.run(_main, flags_parser=absl_flags.flags_parser)
