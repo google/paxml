@@ -28,6 +28,7 @@ import os
 import pprint
 import random
 import re
+import sys
 import time
 import typing
 from typing import Sequence
@@ -223,6 +224,12 @@ flags.DEFINE_integer(
 # Debugging flag
 
 # Google-internal train step override-like flag definition.
+
+_FIDDLE_CONFIG = absl_flags.DEFINE_fiddle_config(
+    'fdl',
+    help_string='Fiddle configs parsed from the command line.',
+    default_module=sys.modules[__name__],
+)
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
@@ -485,13 +492,31 @@ def _main(argv: Sequence[str]) -> None:
   if FLAGS.exp is not None:
     experiment_config = get_experiment(FLAGS.exp)()
   elif absl_flags.fdl_flags_supplied():
+    # Use the legacy Fiddle flags API to parse command line Fiddle flags.
     cfg = absl_flags.create_buildable_from_flags(
         module=None, allow_imports=True)
     experiment_config = pax_fiddle.build(cfg)
+    logging.warning(
+        'Legacy Fiddle flags API usage detected. Please use the new Fiddle'
+        ' command line flag `fdl` with various commands to specify the'
+        ' config and any overrides. Please see'
+        ' `fiddle/docs/flags_code_lab.md` for more'
+        ' documentation on Fiddle flags usage.'
+    )
+  elif _FIDDLE_CONFIG.value is not None:
+    # This uses the new Fiddle flags API `DEFINE_fiddle_config()` to parse
+    # command line Fiddle flags. See
+    # `fiddle/docs/flags_code_lab.md` for details on the new
+    # Fiddle flags API.
+    logging.info(
+        'Using pax_fiddle_config from the command line: %s',
+        _FIDDLE_CONFIG.value,
+    )
+    experiment_config = pax_fiddle.build(_FIDDLE_CONFIG.value)
   else:
     raise app.UsageError(
-        'No experiment provided. '
-        'At least one of --exp, --fdl_config, or --fdl_config_file is required.'
+        'No experiment provided. At least one of --exp, --fdl,'
+        ' --fdl_config, or --fdl_config_file is required.'
     )
 
   experiment_config.validate()
