@@ -427,7 +427,7 @@ def evaluate(
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(jax_task, experiment_config)
-  prng_key = jax.random.key(jax_task.evaluate.random_seed)
+  prng_key = jax.random.PRNGKey(jax_task.evaluate.random_seed)
 
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
@@ -616,7 +616,7 @@ def decode(
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(jax_task, experiment_config)
-  prng_key = jax.random.key(jax_task.decode.random_seed)
+  prng_key = jax.random.PRNGKey(jax_task.decode.random_seed)
 
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
@@ -914,7 +914,7 @@ def infer_and_write(
   task = instantiate(task_p)
   model = task.model
   inputs_p = experiment_config.decode_datasets()
-  prng_key = jax.random.key(task.infer.random_seed)
+  prng_key = jax.random.PRNGKey(task.infer.random_seed)
   train_input_specs = _get_train_input_specs(task, experiment_config)
 
   maybe_use_persistence_checkpointing = False

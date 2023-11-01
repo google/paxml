@@ -77,7 +77,7 @@ class CheckpointsTest(parameterized.TestCase):
 
     m = Model()
 
-    model_vars = m.init(jax.random.key(0), jnp.zeros([4, 256]))
+    model_vars = m.init(jax.random.PRNGKey(0), jnp.zeros([4, 256]))
     optimizer = optax.sgd(0.1)
     opt_params = optimizer.init(model_vars['params'])
     extra_state = ()

@@ -127,7 +127,7 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
     partitioner = partitioning.PjitPartitioner(
         init_is_eval=False, reshard_inputs=True, task=self.task
     )
-    prng_key = jax.random.key(0)
+    prng_key = jax.random.PRNGKey(0)
     partitioner.setup(self.task, prng_key, inputs_shape_dtype)
     train_pg = programs.SingleTaskTrainProgram()
     train_pg.setup(

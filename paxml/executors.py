@@ -179,7 +179,7 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._exit_after_ondemand_checkpoint = exit_after_ondemand_checkpoint
 
     # Creates the root prng key and train input pipeline.
-    root_prng_key = jax.random.key(self._task.train.random_seed)
+    root_prng_key = jax.random.PRNGKey(self._task.train.random_seed)
     train_input_p = partitioner.preprocess_input_config(train_input_p)
     train_input, train_input_for_partitioner, train_input_for_checkpoint = (
         self._maybe_create_train_input(

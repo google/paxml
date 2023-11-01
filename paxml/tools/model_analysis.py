@@ -120,7 +120,7 @@ class ExperimentParser:
     self.exp = exp
 
     self.seed = seed
-    self.prng_key = jax.random.key(self.seed)
+    self.prng_key = jax.random.PRNGKey(self.seed)
     _, self.init_key = jax.random.split(self.prng_key)
 
   def _get_experiment(self, experiment_name: str):

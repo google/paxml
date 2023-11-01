@@ -1560,7 +1560,12 @@ def initialize_partitioned_model_states(
   )
 
   mesh_names = model.hparams.mesh_axis_names
+  prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
+  prng_key_shardings = jax.tree_map(
+      lambda p: jax.sharding.NamedSharding(global_mesh, p),
+      prng_key_partition_spec,
+  )
   train_state_shardings = jax.tree_map(
       lambda p: jax.sharding.NamedSharding(global_mesh, p),
       train_state_partition_specs,
@@ -1568,6 +1573,7 @@ def initialize_partitioned_model_states(
 
   init_fn = pjit.pjit(
       init_model_from_seed,
+      in_shardings=prng_key_shardings,
       out_shardings=train_state_shardings,
   )
   init_fn = bind_mesh(init_fn, global_mesh)
