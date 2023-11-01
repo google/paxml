@@ -69,7 +69,7 @@ class LayersTest(parameterized.TestCase):
     tf.random.set_seed(123)
 
   def _get_loss_fns(self, ghostnorm_layer, ref_layer, extract_outputs_fn=None):
-    noise_key = jax.random.PRNGKey(seed=12345)
+    noise_key = jax.random.key(seed=12345)
 
     def loss_fn(mdl_vars, *inputs_args, **inputs_kwargs):
       outputs = ghostnorm_layer.apply(
@@ -138,7 +138,7 @@ class LayersTest(parameterized.TestCase):
       **input_kwargs,
   ):
     extract_outputs_fn = input_kwargs.pop('extract_outputs_fn', None)
-    noise_key = jax.random.PRNGKey(seed=12345)
+    noise_key = jax.random.key(seed=12345)
 
     # make sure the layer behaves the same as the reference layer in forward
     ghostnorm_outputs = ghostnorm_layer.apply(
@@ -397,7 +397,7 @@ class LayersTest(parameterized.TestCase):
     ghostnorm_layer = instantiate(ghostnorm_layer_tpl)
     inputs = jnp.asarray(inputs_fn())
 
-    prng_key = jax.random.PRNGKey(seed=1234)
+    prng_key = jax.random.key(seed=1234)
     init_key, random_key = jax.random.split(prng_key)
     initial_vars = ghostnorm_layer.init(
         {PARAMS: init_key, RANDOM: random_key}, inputs
@@ -448,7 +448,7 @@ class LayersTest(parameterized.TestCase):
     ghostnorm_layer = instantiate(ghostnorm_layer_tpl)
     inputs = jnp.asarray(inputs_fn())
 
-    prng_key = jax.random.PRNGKey(seed=1234)
+    prng_key = jax.random.key(seed=1234)
     init_key, random_key = jax.random.split(prng_key)
     ghost_initial_vars = ghostnorm_layer.init(
         {PARAMS: init_key, RANDOM: random_key}, inputs
@@ -518,7 +518,7 @@ class LayersTest(parameterized.TestCase):
     )
 
     inputs = jax.random.randint(
-        jax.random.PRNGKey(1234), [batch_size, seq_len], 0, vocab_size
+        jax.random.key(1234), [batch_size, seq_len], 0, vocab_size
     )
     input_paddings = jnp.zeros([batch_size, seq_len])
     input_weights = jnp.ones([batch_size, seq_len])
@@ -538,7 +538,7 @@ class LayersTest(parameterized.TestCase):
     ghostnorm_layer = instantiate(ghostnorm_layer_tpl)
 
     ghost_initial_vars = ghostnorm_layer.init(
-        jax.random.PRNGKey(1234),
+        jax.random.key(1234),
         inputs,
         paddings=input_paddings,
         labels=labels,

@@ -294,7 +294,7 @@ class BaseTaskTest(test_utils.TestCase):
     # Create the mdl.
     jax_task = instantiate(task_p)
     jax_task.summary_verbosity = summary_verbosity
-    prng_key = jax.random.PRNGKey(12345)
+    prng_key = jax.random.key(12345)
     prng_key, init_key = jax.random.split(prng_key)
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
@@ -375,7 +375,7 @@ class BaseTaskTest(test_utils.TestCase):
 
     # Create the mdl.
     jax_task = instantiate(task_p)
-    prng_key = jax.random.PRNGKey(12345)
+    prng_key = jax.random.key(12345)
     prng_key, init_key = jax.random.split(prng_key)
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
@@ -439,7 +439,7 @@ class BaseTaskTest(test_utils.TestCase):
 
     # Create the mdl.
     jax_task = instantiate(task_p)
-    prng_key = jax.random.PRNGKey(12345)
+    prng_key = jax.random.key(12345)
     prng_key, init_key = jax.random.split(prng_key)
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
@@ -530,7 +530,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -603,7 +603,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Now initialize also includes warm start (loading from ckpt)
     train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs
+        task, jax.random.key(1), sample_inputs
     )
 
     self.assertAllClose(
@@ -672,7 +672,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -744,7 +744,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Now initialize also includes warm start (loading from ckpt)
     train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs)
+        task, jax.random.key(1), sample_inputs
+    )
 
     self.assertAllClose(ext_train_state.mdl_vars['params']['var01'],
                         train_state.mdl_vars['params']['var01'][0])
@@ -794,7 +795,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -836,7 +837,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         reshard_inputs=False,
         auto_sharding_mode=True,
     )
-    prng_key = jax.random.PRNGKey(1)
+    prng_key = jax.random.key(1)
     partitioner.setup(task, prng_key, sample_inputs)
     if load_from_cp_train_state:
       train_state = trainer_lib.initialize_replicate_model_state(
@@ -941,7 +942,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -985,9 +986,9 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         'values due to wrong pattern(s): {\'params/_(.*)\'}.')
     predicate = lambda err: error_message in str(err)
     with self.assertRaisesWithPredicateMatch(ValueError, predicate):
-      _ = trainer_lib.initialize_replicate_model_state(task,
-                                                       jax.random.PRNGKey(1),
-                                                       sample_inputs)
+      _ = trainer_lib.initialize_replicate_model_state(
+          task, jax.random.key(1), sample_inputs
+      )
 
   def test_lm_partial_load(self):
     model_dims = 128
@@ -1016,7 +1017,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = get_model_inputs()
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -1059,7 +1060,8 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Now initialize also includes warm start (loading from ckpt)
     train_state = trainer_lib.initialize_replicate_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs)
+        task, jax.random.key(1), sample_inputs
+    )
 
     ext_mdl_vars = tasks_lib._flatten_dict(
         flax.serialization.to_state_dict(ext_train_state.mdl_vars))
@@ -1124,7 +1126,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = get_model_inputs()
     ext_task = instantiate(ext_task_p)
     ext_train_state = trainer_lib.initialize_replicate_model_state(
-        ext_task, jax.random.PRNGKey(0), sample_inputs
+        ext_task, jax.random.key(0), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -1171,7 +1173,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
 
     # Now initialize also includes warm start (loading from ckpt)
     train_state, _ = trainer_lib.initialize_model_state(
-        task, jax.random.PRNGKey(1), sample_inputs
+        task, jax.random.key(1), sample_inputs
     )
 
     mdl_vars = tasks_lib._flatten_dict(
@@ -1230,7 +1232,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        ext_task, jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.key(1245), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -1278,7 +1280,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     train_state, _ = trainer_lib.initialize_model_state(
         task,
-        jax.random.PRNGKey(5678),
+        jax.random.key(5678),
         sample_inputs,
         checkpoint_type=checkpoints.CheckpointType.GDA,
     )
@@ -1332,7 +1334,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        ext_task, jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.key(1245), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -1381,7 +1383,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     )
     train_state, _ = trainer_lib.initialize_model_state(
         task,
-        jax.random.PRNGKey(5678),
+        jax.random.key(5678),
         sample_inputs,
         checkpoint_type=checkpoints.CheckpointType.GDA,
     )
@@ -1426,7 +1428,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     ext_task = instantiate(ext_task_p)
     ext_train_state, _ = trainer_lib.initialize_model_state(
-        ext_task, jax.random.PRNGKey(1245), sample_inputs
+        ext_task, jax.random.key(1245), sample_inputs
     )
     ext_train_state_metadata = trainer_lib.create_train_state_metadata(
         ext_task, sample_inputs
@@ -1475,7 +1477,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     train_state, _ = trainer_lib.initialize_model_state(
         task,
-        jax.random.PRNGKey(5678),
+        jax.random.key(5678),
         sample_inputs,
         checkpoint_type=checkpoints.CheckpointType.GDA,
     )
@@ -1516,13 +1518,13 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
     )
     train_state, _ = trainer_lib.initialize_model_state(
-        instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
+        instantiate(task_p), jax.random.key(1245), sample_inputs
     )
     train_state_exclusion, _ = trainer_lib.initialize_model_state(
-        instantiate(task_p_exclusion), jax.random.PRNGKey(1245), sample_inputs
+        instantiate(task_p_exclusion), jax.random.key(1245), sample_inputs
     )
     train_state_inclusion, _ = trainer_lib.initialize_model_state(
-        instantiate(task_p_inclusion), jax.random.PRNGKey(1245), sample_inputs
+        instantiate(task_p_inclusion), jax.random.key(1245), sample_inputs
     )
 
     self.assertFalse(
@@ -1567,7 +1569,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32))
     train_state, _ = trainer_lib.initialize_model_state(
-        instantiate(task_p), jax.random.PRNGKey(1245), sample_inputs
+        instantiate(task_p), jax.random.key(1245), sample_inputs
     )
 
     extracted = tasks_lib.extract_ema(train_state)

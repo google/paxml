@@ -246,6 +246,14 @@ class PartitionedStepFn(Protocol):
     ...
 
 
+def _normalize_prng_key(key: PRNGKey) -> PRNGKey:
+  """Ensure new-style, typed JAX PRNG keys."""
+  if jnp.issubdtype(key.dtype, jax.dtypes.prng_key):
+    return key
+  else:
+    return jax.random.wrap_key_data(key)
+
+
 class Partitioner(metaclass=abc.ABCMeta):
   """Interface for partitioning computations.
 
@@ -332,7 +340,7 @@ class Partitioner(metaclass=abc.ABCMeta):
 
     Args:
       jax_task: The task which is an instance of tasks.SingleTask.
-      init_key: PRNGKey for initializing the model variables.
+      init_key: JAX PRNG key for initializing the model variables.
       train_inputs_shape_dtype: Shape/dtype information of the training inputs
         to model.init, for use in getting params of model variables. If None,
         train_input_pipeline must be set.
@@ -347,8 +355,8 @@ class Partitioner(metaclass=abc.ABCMeta):
       them.
     """
     self._jax_task = jax_task
-    self._init_key = init_key
     self._job_log_dir = job_log_dir
+    self._init_key = _normalize_prng_key(init_key)
 
     if bool(train_inputs_shape_dtype) == bool(train_input_pipeline):
       raise ValueError(
@@ -1268,7 +1276,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # We provide input_partition_spec because Jax Array creation is specialized
     # to the input partition specs created here. If we use partition specs
     # returned by XLA, it errors out.
-    prng_key_partition_spec = PartitionSpec(None)
+    prng_key_partition_spec = PartitionSpec()
     fn_in_partition_specs = (
         pjit.AUTO(self.global_mesh),
         prng_key_partition_spec,

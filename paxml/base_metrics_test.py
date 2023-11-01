@@ -61,7 +61,7 @@ def _decode(feats, return_clu_loss_metrics=False):
 class BaseMetricsTest(test_utils.TestCase):
 
   def test_reshard_metrics(self):
-    feats = jax.random.uniform(jax.random.PRNGKey(1234), [8, 10, 100, 128])
+    feats = jax.random.uniform(jax.random.key(1234), [8, 10, 100, 128])
 
     mean_metrics_p = pax_fiddle.Config(
         base_metrics.MeanMetrics, metric_keys=['mean']
@@ -86,7 +86,7 @@ class BaseMetricsTest(test_utils.TestCase):
     self.assertArraysEqual(metrics['hist_coverage'][0], jnp.array(1.0))
 
   def test_aggregate_metrics(self):
-    feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
+    feats = jax.random.uniform(jax.random.key(1234), [1, 10, 100, 128])
 
     mean_metrics_p = pax_fiddle.Config(
         base_metrics.MeanMetrics, metric_keys=['mean']
@@ -113,7 +113,7 @@ class LossAggregatorTest(test_utils.TestCase):
 
   @parameterized.parameters(False, True)
   def test_loss_aggregate_metrics(self, use_clu_loss_metrics: bool):
-    feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
+    feats = jax.random.uniform(jax.random.key(1234), [1, 10, 100, 128])
 
     loss_metrics_p = pax_fiddle.Config(
         base_metrics.LossAggregator, name='basic_loss', loss_key='loss'
@@ -136,7 +136,7 @@ class LossAggregatorTest(test_utils.TestCase):
   # Note: this test isn't parameterized like the test above because
   # `metrics_aggregator` doesn't support aggregating `clu.Metrics`.
   def test_multiloss_aggregate_metrics(self):
-    feats = jax.random.uniform(jax.random.PRNGKey(1234), [1, 10, 100, 128])
+    feats = jax.random.uniform(jax.random.key(1234), [1, 10, 100, 128])
 
     loss_metrics_p = pax_fiddle.Config(
         base_metrics.MultiLossAggregator,
