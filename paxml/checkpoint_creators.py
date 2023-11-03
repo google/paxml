@@ -36,6 +36,7 @@ from praxis import py_utils
 from praxis import pytypes
 
 from paxml import checkpoints  # mapped to internal
+# Internal filesystem import
 
 CheckpointType = checkpoints.CheckpointType
 Checkpointer = checkpoints.Checkpointer
