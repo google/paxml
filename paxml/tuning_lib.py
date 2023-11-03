@@ -57,14 +57,17 @@ TrialFn = Callable[[
 SUB_EXPERIMENT_STEP_INTERVAL = 1000_000_000
 
 
-def _enable_dataset_tuning(
+def _search_param(
     experiment_config: base_experiment.BaseExperiment,
-) -> bool:
+    param_name: str,
+    default: Any = None,
+) -> Any:
+  """Returns the value for a search parameter."""
   try:
     search_hparams = experiment_config.search()
-    return search_hparams.enable_dataset_tuning
+    return getattr(search_hparams, param_name)
   except NotImplementedError:
-    return False
+    return default
 
 
 @py_utils.benchmark('[PAX STATUS]: ')
@@ -79,13 +82,21 @@ def get_search_space(
   # be included. We can improve this in the future if this turns out to be an
   # issue.
   def inspect_search_space() -> None:
+
+    # In theory, instantiating a partitioner during search space inspection
+    # should have no side effect. However, since there are many existing AutoML
+    # experiments today, we use `enable_partitioner_tuning` flag to guard
+    # them, which is set to False by default.
+    if _search_param(experiment_config, 'enable_partitioner_tuning', False):
+      _ = experiment_config.partitioner()
+
     _ = experiment_config.task()
 
     # For SeqIO data mixtures, we use a lambda function to create a search space
     # for mixture weights, however, the function will not be called until
     # the input is instantiated. Therefore we instantiate them when inspecting
     # the search space. Currently we only inspect datasets for training.
-    if _enable_dataset_tuning(experiment_config):
+    if _search_param(experiment_config, 'enable_dataset_tuning', False):
       for d in experiment_config.datasets():
         if d.is_training:
           _ = instantiate(d)

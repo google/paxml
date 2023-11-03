@@ -148,6 +148,7 @@ class TuningExperiment(base_experiment.BaseExperiment):
         ),
         max_num_trials=10,
         enable_dataset_tuning=True,
+        enable_partitioner_tuning=False,
     )
 
 

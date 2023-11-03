@@ -710,34 +710,28 @@ def parameter_sweep(
     *,
     metric: Metric | None = None,
     goal: str = 'maximize',
+    enable_dataset_tuning: bool = True,
+    enable_partitioner_tuning: bool = False,
 ) -> Callable[[Type[Any]], Type[Any]]:
   """Returns a decorator for enabling parameter sweeping on a PAX experiment.
 
   Args:
-    combinations: A list of tuples representing parameter combinations to
-      sweep. If None, the cartesian product from all `pg.oneof` will be swept.
-      When specified, the first row (`combinations[0]`) shall be a tuple of
-      strings, which are the names of the class attributes that will be swept.
-      Then it follows with one or multiple rows - each provides a combination
-      of parameter values for the header row, representing a single trial.
-
-      For example:
-
-        ```
-        @automl.parameter_sweep([
-            ('LEARNING_RATE', 'HIDDEN_DIMS'),
-            (0.1, 32),
-            (0.01, 64),
-            (0.001, 128),
-        ])
-        class MySweepingExperiment(MyExperiment):
-          pass
-        ```
-
-    metric: Metric to use as trial objective. If None, trial objective will be
-      a constant 0, and users will be able to see all metrics in Vizier
-      dashboard.
+    combinations: A list of tuples representing parameter combinations to sweep.
+      If None, the cartesian product from all `pg.oneof` will be swept. When
+      specified, the first row (`combinations[0]`) shall be a tuple of strings,
+      which are the names of the class attributes that will be swept. Then it
+      follows with one or multiple rows - each provides a combination of
+      parameter values for the header row, representing a single trial.  For
+      example:  ``` @automl.parameter_sweep([ ('LEARNING_RATE', 'HIDDEN_DIMS'),
+        (0.1, 32), (0.01, 64), (0.001, 128), ]) class
+        MySweepingExperiment(MyExperiment): pass ```
+    metric: Metric to use as trial objective. If None, trial objective will be a
+      constant 0, and users will be able to see all metrics in Vizier dashboard.
     goal: Goal for optimization. By default, it's to maximize the metric.
+    enable_dataset_tuning: If True, include the training data pipeline in search
+      space inspection.
+    enable_partitioner_tuning: If True, include the partitioner in search space
+      inspection.
 
   Returns:
     A new experiment class that is derived from the user class.
@@ -780,8 +774,8 @@ def parameter_sweep(
             search_reward=search_reward,
             treats_early_stopped_trials_as_done=True,
             train_to_end=True,
-            # Consider making toggleable b/285879603
-            enable_dataset_tuning=True,
+            enable_dataset_tuning=enable_dataset_tuning,
+            enable_partitioner_tuning=enable_partitioner_tuning,
         )
 
     new_cls = _ParameterSweeping

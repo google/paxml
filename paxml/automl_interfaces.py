@@ -142,8 +142,10 @@ class SearchHParams:
     train_to_end: If True, training will not be stopped until it reaches
       `num_train_steps`. If False, training will be stopped when there is no
       further eval/decode steps.
-    enable_dataset_tuning: If False, skip instantiating the dataset to look for
-      tunable variables.
+    enable_dataset_tuning: If True, include the training data pipeline in search
+      space inspection.
+    enable_partitioner_tuning: If True, include the partitioner in search space
+      inspection.
     vizier_service_endpoint: Vizier service endpoint. This is used for debugging
       only.
   """
@@ -163,6 +165,7 @@ class SearchHParams:
   treats_early_stopped_trials_as_done: bool = False
   train_to_end: bool = False
   enable_dataset_tuning: bool = False
+  enable_partitioner_tuning: bool = False
   vizier_service_endpoint: str | None = None
 
 
