@@ -57,6 +57,8 @@ Total #params (trainable): 4919360
 
 """
 
+import pprint
+
 from absl import app
 from absl import flags
 import jax
@@ -179,14 +181,7 @@ class ExperimentParser:
 
     if datum:
       print('\n==========input=========')
-      if 'src' in datum:
-        for key in datum['src']:
-          print(key, ':', jnp.shape(datum['src'][key]))
-      else:
-        for domain in datum.keys():
-          print(f'-- {domain} --')
-          for key in datum[domain]['src']:
-            print(key, ':', jnp.shape(datum[domain]['src'][key]))
+      pprint.pprint(jax.tree_map(jnp.shape, datum))
       print('=======================')
 
     return datum
