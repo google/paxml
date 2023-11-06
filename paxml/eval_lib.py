@@ -28,6 +28,7 @@ from typing import Any, Sequence
 from absl import logging
 from etils import epath
 import jax
+import jax.numpy as jnp
 import numpy as np
 from orbax.checkpoint import checkpoint_utils as orbax_checkpoint_utils
 from paxml import base_experiment
@@ -425,6 +426,7 @@ def evaluate(
 
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)
+  task_p.model.fprop_dtype = jnp.dtype(task_p.model.fprop_dtype)
   jax_task = instantiate(task_p)
   train_input_specs = _get_train_input_specs(jax_task, experiment_config)
   prng_key = jax.random.key(jax_task.evaluate.random_seed)
