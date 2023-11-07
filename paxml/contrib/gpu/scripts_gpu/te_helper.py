@@ -262,7 +262,7 @@ class TEInstalledHelper(TransformerEngineHelperBase):
     def update_fp8_metas_if_needed(mdl_vars, grads):
         FP8_COLLECTION_NAME = te.fp8.FP8Helper.FP8_COLLECTION_NAME
         if FP8_COLLECTION_NAME in grads:
-            mdl_vars[FP8_COLLECTION_NAME] = te.update_fp8_metas(grads)[FP8_COLLECTION_NAME]
+            mdl_vars[FP8_COLLECTION_NAME] = grads[FP8_COLLECTION_NAME]
         return mdl_vars
 
     @staticmethod
@@ -290,7 +290,9 @@ class TEInstalledHelper(TransformerEngineHelperBase):
         try:
             with te.fp8_autocast(enabled=enable_fp8,
                                  fp8_recipe=fp8_recipe,
-                                 sharding_resource=te.ShardingResource(dp_mesh_axis, tp_mesh_axis, fsdp_mesh_axis)):
+                                 mesh_resource=te.MeshResource(dp_resource=dp_mesh_axis,
+                                                               tp_resource=tp_mesh_axis,
+                                                               fsdp_resource=fsdp_mesh_axis)):
                 yield
         finally:
             pass
