@@ -122,10 +122,20 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     Non-private baseline: http://tb/4569190445426541226
     PercoreClippedGradient: http://tb/1885364525575923265
     MicrobatchDpSgdStochasticGradient: http://tb/2683981470965501622
+
+  Attributes:
+    l2_norm_clip: The L2 clipping bound used to clip per-core gradients.
+    noise_multiplier: The noise multiplier used to decide the noise scale. See
+      Section 5.3.2 of https://arxiv.org/pdf/2303.00654.pdf for more details.
+    normalize_gradients: Whether to apply Gradient Normalization as implemented
+      in eqn 3 of https://arxiv.org/abs/2204.13650 to reduce the dependence
+      between clipping value and learning rate. Note that normalization is only
+      applied post-clipping.
   """
 
   l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
+  normalize_gradients: bool = False
 
   def _clip_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
@@ -188,12 +198,17 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     )
     aux = self.process_aux_info(aux)
 
-    clipped, num_clipped, grad_norm = self._clip_gradients(
+    grads, num_clipped, grad_norm = self._clip_gradients(
         grads, aux.loss_weight * self.l2_norm_clip
     )
 
-    noise_stddev = self.noise_multiplier * self.l2_norm_clip
-    grads = self._add_noise(clipped, noise_stddev, aux.loss_weight, prng_key)
+    if self.normalize_gradients:
+      grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
+      noise_stddev = self.noise_multiplier
+    else:
+      noise_stddev = self.noise_multiplier * self.l2_norm_clip
+
+    grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
 
     return (
         values,
@@ -209,29 +224,30 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 
 
 class DpSgdStochasticGradient(BaseStochasticGradient):
-  """DP-SGD stochastic gradient function."""
+  """DP-SGD stochastic gradient function.
 
-  # Standard DP-SGD hyperparameters.
+  Attributes:
+    l2_norm_clip: The L2 clipping bound used to clip per-core gradients.
+    noise_multiplier: The noise multiplier used to decide the noise scale. See
+      Section 5.3.2 of https://arxiv.org/pdf/2303.00654.pdf for more details.
+    normalize_gradients: Whether to apply Gradient Normalization as implemented
+      in eqn 3 of https://arxiv.org/abs/2204.13650 to reduce the dependence
+      between clipping value and learning rate. Note that normalization is only
+      applied post-clipping.
+    inner_batch_size: Number of examples to process at one time. If set to
+      `None`, this will be set to batch size as determined by the 0th element of
+      the shape of the input. This may be useful if a large batch size is
+      desired (for example, for better privacy-utility tradeoffs), but we cannot
+      fit all of the per-example gradients in memory. When set, the code
+      computes `inner_batch_size` per-example gradients at a time, accumulating
+      the total clipped gradient as it goes. Note that the setting of
+      `inner_batch_size` has no effect on the value of the final gradients--it
+      affects only the feasibility and speed of the computation.
+  """
+
   l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
-
-  # Whether to apply Gradient Normalization as implemented in eqn 3 of
-  # https://arxiv.org/abs/2204.13650 to reduce the dependence between
-  # clipping value and learning rate. Note that normalization is only applied
-  # post-clipping.
   normalize_gradients: bool = False
-
-  # Number of examples to process at one time. If set to `None`,
-  # this will be set to batch size as determined by the 0th element of
-  # the shape of the input.
-  #
-  # This may be useful if a large batch size is desired (for example, for
-  # better privacy-utility tradeoffs), but we cannot fit all of the
-  # per-example gradients in memory. When set, the code computes
-  # `inner_batch_size` per-example gradients at a time, accumulating
-  # the total clipped gradient as it goes. Note that the setting of
-  # `inner_batch_size` has no effect on the value of the final gradients--
-  # it affects only the feasibility and speed of the computation.
   inner_batch_size: int | None = None
 
   def _clip_and_mean_gradients(
@@ -413,7 +429,12 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
 
 class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
-  """DP-SGD stochastic gradient function with microbatch."""
+  """DP-SGD stochastic gradient function with microbatch.
+
+  Attributes:
+    microbatch_size: The number of samples in one micro-batch. See Section 5.6
+      of https://arxiv.org/pdf/2303.00654.pdf for more details.
+  """
 
   microbatch_size: int = 1
 
