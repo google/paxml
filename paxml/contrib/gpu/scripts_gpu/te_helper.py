@@ -31,6 +31,7 @@ except ModuleNotFoundError as e:
 LayerTpl = pax_fiddle.Config[base_layer.BaseLayer]
 JTensor = pytypes.JTensor
 
+
 class StackedTransformer(transformers.StackedTransformer):
   """A mirror of StackedTransformer layers in Praxis."""
 
@@ -147,10 +148,90 @@ class StackedTransformer(transformers.StackedTransformer):
     return x_out
 
 
+class PipelinedTransformer(transformers.PipelinedTransformer):
+    """A mirror of PipelinedTransformer in Praxis"""
+
+    def __call__(
+        self,
+        inputs: JTensor,
+        paddings: JTensor,
+        segment_mask: JTensor | None = None,
+        cross_inputs: JTensor | None = None,
+        cross_paddings: JTensor | None = None,
+        cross_segment_mask: JTensor | None = None,
+        segment_pos: JTensor | None = None,
+    ) -> JTensor:
+
+        rules = te_flax.extend_logical_axis_rules(tuple())
+        batch_mapping = rules[0]
+        hidden_tp_mapping = rules[4]
+        # [Batch, Seqlen, Hidden]
+        bld_mapping = [batch_mapping, None, hidden_tp_mapping]
+
+        if not self.stream_io:
+            # Annotate the inputs before the pipeline to prevent unexpected
+            # propagation from earlier layers.
+            inputs = base_layer.maybe_shard(inputs, bld_mapping, self.mesh_axis_names)
+            if bld_mapping is not None:
+                # Annotate other broadcast inputs.
+                paddings = base_layer.maybe_shard(
+                    paddings, bld_mapping[:-1], self.mesh_axis_names
+                )
+
+                # For cross inputs, we only specify the batch dim sharding.
+                def _shard_batch_dim_only(x):
+                    return base_layer.maybe_shard(
+                        x,
+                        [bld_mapping[0]] + [-1] * (x.ndim - 1),
+                        self.mesh_axis_names,
+                        unconstrained_dims=range(1, x.ndim),
+                    )
+
+                if segment_mask is not None:
+                    segment_mask = _shard_batch_dim_only(segment_mask)
+                if cross_inputs is not None:
+                    cross_inputs = _shard_batch_dim_only(cross_inputs)
+                if cross_paddings is not None:
+                    cross_paddings = _shard_batch_dim_only(cross_paddings)
+                if cross_segment_mask is not None:
+                    cross_segment_mask = _shard_batch_dim_only(cross_segment_mask)
+
+                if segment_pos is not None:
+                    segment_pos = base_layer.maybe_shard(
+                        segment_pos, bld_mapping[:-1], self.mesh_axis_names
+                    )
+
+        outputs = self.pipeline(
+            inputs,
+            paddings,
+            segment_mask=segment_mask,
+            cross_inputs=cross_inputs,
+            cross_paddings=cross_paddings,
+            cross_segment_mask=cross_segment_mask,
+            segment_pos=segment_pos,
+        )
+
+        if not self.stream_io:
+            outputs = base_layer.maybe_shard(
+                outputs, bld_mapping, self.mesh_axis_names
+            )
+
+        outputs = base_layer.maybe_shard(
+            outputs,
+            self.activation_split_dims_mapping.final_out,
+            self.mesh_axis_names,
+        )
+        return outputs
+
+
 class TransformerEngineHelperBase:
 
     @staticmethod
     def get_stack_transformer(stacked_transformer_p, dtype):
+        raise NotImplementedError
+
+    @staticmethod
+    def get_pipeline_transformer(pipeline_transformer_p):
         raise NotImplementedError
 
     @staticmethod
@@ -176,6 +257,10 @@ class TENotInstalledHelper(TransformerEngineHelperBase):
     @staticmethod
     def get_stack_transformer(stacked_transformer_p, dtype):
         return stacked_transformer_p
+
+    @staticmethod
+    def get_pipeline_transformer(pipeline_transformer_p):
+        return pipeline_transformer_p
 
     @staticmethod
     def update_fp8_metas_if_needed(mdl_vars, grads):
@@ -259,6 +344,26 @@ class TEInstalledHelper(TransformerEngineHelperBase):
         return te_stacked_transformer_p
 
     @staticmethod
+    def get_pipeline_transformer(pipeline_transformer_p):
+
+        assert pipeline_transformer_p.cls == transformers.PipelinedTransformer
+
+        te_pipeline_transformer_p = pax_fiddle.Config(PipelinedTransformer,
+            pipeline_stage=pipeline_transformer_p.pipeline_stage,
+            circular_repeat=pipeline_transformer_p.circular_repeat,
+            num_pipeline_stages=pipeline_transformer_p.num_pipeline_stages,
+            num_pipeline_microbatches=pipeline_transformer_p.num_pipeline_microbatches,
+            pipeline_microbatch_size=pipeline_transformer_p.pipeline_microbatch_size,
+            stream_io=pipeline_transformer_p.stream_io,
+            pipeline_broadcast_inputs=pipeline_transformer_p.pipeline_broadcast_inputs,
+            checkpoint_policy=pipeline_transformer_p.checkpoint_policy,
+            enable_async_circular_transfer=pipeline_transformer_p.enable_async_circular_transfer,
+            bf16_accum_in_fp32=pipeline_transformer_p.bf16_accum_in_fp32
+        )
+
+        return te_pipeline_transformer_p
+
+    @staticmethod
     def update_fp8_metas_if_needed(mdl_vars, grads):
         FP8_COLLECTION_NAME = te.fp8.FP8Helper.FP8_COLLECTION_NAME
         if FP8_COLLECTION_NAME in grads:
@@ -314,6 +419,10 @@ class TransformerEngineHelper(TransformerEngineHelperBase):
     @staticmethod
     def get_stack_transformer(stacked_transformer_p, dtype):
         return TransformerEngineHelper.get_helper().get_stack_transformer(stacked_transformer_p, dtype)
+
+    @staticmethod
+    def get_pipeline_transformer(pipeline_transformer_p):
+        return TransformerEngineHelper.get_helper().get_pipeline_transformer(pipeline_transformer_p)
 
     @staticmethod
     def update_fp8_metas_if_needed(mdl_vars, grads):
