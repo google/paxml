@@ -995,16 +995,15 @@ def get_excluded_var_masks(
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
       var_weight_hparams, learner
   )
-  excluded_for_grad_but_fp8_meta = TransformerEngineHelper.include_fp8_for_grads_if_needed(excluded_for_grad.copy())
 
-  _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad_but_fp8_meta)
+  _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
 
   # Excluded for optimizer states.
   excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
       var_weight_hparams,
       learner,
   )
-  return excluded_for_grad, excluded_for_grad_but_fp8_meta, excluded_for_opt
+  return excluded_for_grad, excluded_for_opt
 
 
 def _prepare_tree_data_for_summary(tree):
@@ -1103,13 +1102,13 @@ def train_step_single_learner(
 
   _, subkey = jax.random.split(prng_key)
 
-  excluded_for_grad, excluded_for_grad_but_fp8_meta, excluded_for_opt = get_excluded_var_masks(
+  excluded_for_grad, excluded_for_opt = get_excluded_var_masks(
       var_weight_hparams, learner
   )
 
   # Construct and call the grad function.
   if not grad_fn:
-    grad_fn = _get_default_grad_fn(excluded_for_grad_but_fp8_meta, excluded_for_opt)
+    grad_fn = _get_default_grad_fn(excluded_for_grad, excluded_for_opt)
   (weighted_loss, aux_info), grads = grad_fn(
       loss_fn=_get_default_loss_fn(
           jax_task=jax_task,
@@ -1165,9 +1164,6 @@ def train_step_single_learner(
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         var_weight_hparams, excluded_for_learner
     )
-
-    mdl_vars = TransformerEngineHelper.update_fp8_metas_if_needed(mdl_vars, grads)
-    grads = TransformerEngineHelper.mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt)
 
     transformed_grads, new_opt_states = learner.update_states(
         grads, states.opt_states[0], vars_with_opt, wps_with_opt

@@ -2,7 +2,6 @@ import os
 from contextlib import contextmanager
 from typing import Optional, Sequence
 
-import jax
 import jax.numpy as jnp
 from jax.ad_checkpoint import checkpoint_name
 from praxis import base_layer
@@ -235,18 +234,6 @@ class TransformerEngineHelperBase:
         raise NotImplementedError
 
     @staticmethod
-    def update_fp8_metas_if_needed(mdl_vars, grads):
-        raise NotImplementedError
-
-    @staticmethod
-    def include_fp8_for_grads_if_needed(variables):
-        raise NotImplementedError
-
-    @staticmethod
-    def mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt):
-        raise NotImplementedError
-
-    @staticmethod
     @contextmanager
     def fp8_autocast(dp_mesh_axis="replica", tp_mesh_axis="mdl", fsdp_mesh_axis="data"):
         raise NotImplementedError
@@ -261,18 +248,6 @@ class TENotInstalledHelper(TransformerEngineHelperBase):
     @staticmethod
     def get_pipeline_transformer(pipeline_transformer_p):
         return pipeline_transformer_p
-
-    @staticmethod
-    def update_fp8_metas_if_needed(mdl_vars, grads):
-        return mdl_vars
-
-    @staticmethod
-    def include_fp8_for_grads_if_needed(variables):
-        return variables
-
-    @staticmethod
-    def mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt):
-        return grads
 
     @staticmethod
     @contextmanager
@@ -364,28 +339,6 @@ class TEInstalledHelper(TransformerEngineHelperBase):
         return te_pipeline_transformer_p
 
     @staticmethod
-    def update_fp8_metas_if_needed(mdl_vars, grads):
-        FP8_COLLECTION_NAME = te.fp8.FP8Helper.FP8_COLLECTION_NAME
-        if FP8_COLLECTION_NAME in grads:
-            mdl_vars[FP8_COLLECTION_NAME] = grads[FP8_COLLECTION_NAME]
-        return mdl_vars
-
-    @staticmethod
-    def include_fp8_for_grads_if_needed(variables):
-        FP8_COLLECTION_NAME = te.fp8.FP8Helper.FP8_COLLECTION_NAME
-        if FP8_COLLECTION_NAME in variables:
-            variables[FP8_COLLECTION_NAME] = \
-                jax.tree_util.tree_map(lambda x: False, variables[FP8_COLLECTION_NAME])
-        return variables
-
-    @staticmethod
-    def mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt):
-        FP8_COLLECTION_NAME = te.fp8.FP8Helper.FP8_COLLECTION_NAME
-        if FP8_COLLECTION_NAME in grads:
-            grads[FP8_COLLECTION_NAME] = vars_with_opt[FP8_COLLECTION_NAME].copy()
-        return grads
-
-    @staticmethod
     @contextmanager
     def fp8_autocast(dp_mesh_axis="replica", tp_mesh_axis="mdl", fsdp_mesh_axis="data"):
         fp8_recipe = recipe.DelayedScaling(margin=0, interval=1, fp8_format=recipe.Format.HYBRID,
@@ -423,18 +376,6 @@ class TransformerEngineHelper(TransformerEngineHelperBase):
     @staticmethod
     def get_pipeline_transformer(pipeline_transformer_p):
         return TransformerEngineHelper.get_helper().get_pipeline_transformer(pipeline_transformer_p)
-
-    @staticmethod
-    def update_fp8_metas_if_needed(mdl_vars, grads):
-        return TransformerEngineHelper.get_helper().update_fp8_metas_if_needed(mdl_vars, grads)
-
-    @staticmethod
-    def include_fp8_for_grads_if_needed(variables):
-        return TransformerEngineHelper.get_helper().include_fp8_for_grads_if_needed(variables)
-
-    @staticmethod
-    def mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt):
-        return TransformerEngineHelper.get_helper().mask_out_fp8_meta_grads_if_needed(grads, vars_with_opt)
 
     @staticmethod
     @contextmanager
