@@ -712,6 +712,7 @@ def parameter_sweep(
     goal: str = 'maximize',
     enable_dataset_tuning: bool = True,
     enable_partitioner_tuning: bool = False,
+    enable_train_programs_tuning: bool = False,
 ) -> Callable[[Type[Any]], Type[Any]]:
   """Returns a decorator for enabling parameter sweeping on a PAX experiment.
 
@@ -732,6 +733,8 @@ def parameter_sweep(
       space inspection.
     enable_partitioner_tuning: If True, include the partitioner in search space
       inspection.
+    enable_train_programs_tuning: If True, include the train programs in search
+      space inspection.
 
   Returns:
     A new experiment class that is derived from the user class.
@@ -776,6 +779,7 @@ def parameter_sweep(
             train_to_end=True,
             enable_dataset_tuning=enable_dataset_tuning,
             enable_partitioner_tuning=enable_partitioner_tuning,
+            enable_train_programs_tuning=enable_train_programs_tuning,
         )
 
     new_cls = _ParameterSweeping

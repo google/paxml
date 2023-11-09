@@ -146,6 +146,8 @@ class SearchHParams:
       space inspection.
     enable_partitioner_tuning: If True, include the partitioner in search space
       inspection.
+    enable_train_programs_tuning: If True, include the train programs in search
+      space inspection.
     vizier_service_endpoint: Vizier service endpoint. This is used for debugging
       only.
   """
@@ -166,6 +168,7 @@ class SearchHParams:
   train_to_end: bool = False
   enable_dataset_tuning: bool = False
   enable_partitioner_tuning: bool = False
+  enable_train_programs_tuning: bool = False
   vizier_service_endpoint: str | None = None
 
 

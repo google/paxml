@@ -83,12 +83,16 @@ def get_search_space(
   # issue.
   def inspect_search_space() -> None:
 
-    # In theory, instantiating a partitioner during search space inspection
-    # should have no side effect. However, since there are many existing AutoML
-    # experiments today, we use `enable_partitioner_tuning` flag to guard
-    # them, which is set to False by default.
+    # In theory, instantiating a partitioner/train programs during search space
+    # inspection should have no side effect. However, since there are many
+    # existing AutoML experiments today, we use `enable_partitioner_tuning` and
+    # `enable_train_programs_tuning` flag to guard them, which is set to False
+    # by default.
     if _search_param(experiment_config, 'enable_partitioner_tuning', False):
       _ = experiment_config.partitioner()
+
+    if _search_param(experiment_config, 'enable_train_programs_tuning', False):
+      _ = experiment_config.train_programs()
 
     _ = experiment_config.task()
 
