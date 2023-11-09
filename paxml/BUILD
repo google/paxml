@@ -416,6 +416,7 @@ pytype_strict_library(
     name = "sgf",
     srcs = ["sgf.py"],
     deps = [
+        # Implicit absl.logging dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
         # Implicit optax dependency.

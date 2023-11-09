@@ -1004,6 +1004,29 @@ def get_excluded_var_masks(
   return excluded_for_grad, excluded_for_opt
 
 
+def _prepare_tree_data_for_summary(tree):
+  """Converts a tree into a list of (key, value) pairs.
+
+  The intended use of this function is to convert a tree of metrics into
+  a format that is easy to read off for summaries.
+
+  Args:
+    tree: A pytree.
+
+  Returns:
+    A list of (key, value) pairs corresponding to the leaves of `tree`.
+    For each leaf, the key is the `/`-separated concatenation of the `key`s
+    of the path from the root, and the value is the leaf value.
+  """
+  flat_data = jax.tree_util.tree_flatten_with_path(tree)
+  output = []
+  for item in flat_data[0]:
+    node_keys = [node.key for node in item[0]]
+    s = '/'.join(node_keys) if node_keys else ''
+    output.append((s, item[1]))
+  return output
+
+
 # TODO(yonghui): refactor to pass in learner separately.
 def train_step_single_learner(
     jax_task: tasks_lib.SingleTask,
@@ -1185,29 +1208,28 @@ def train_step_single_learner(
       )
       for name, norm in var_summary_tensors.items():
         base_layer.add_global_summary(name, norm)
+
+    # Add summaries for DPGradAuxInfo, if appropriate.
     if isinstance(
         learner.stochastic_gradient,
         (sgf.DpSgdStochasticGradient, sgf.PercoreClippedDpSgdGradient),
     ):
-      if base_layer.is_running_under_pmap():
-        frac_clipped = jax.lax.pmean(
-            aux_info.dp_aux_info['frac_clipped'],
-            axis_name=PMAP_PARALLEL_AXIS_NAME,
-        )
-      else:
-        frac_clipped = aux_info.dp_aux_info['frac_clipped']
-      base_layer.add_global_summary('dp_metrics/frac_clipped', frac_clipped)
-    if isinstance(learner.stochastic_gradient, sgf.PercoreClippedDpSgdGradient):
-      if base_layer.is_running_under_pmap():
-        mean_per_core_grad_norm = jax.lax.psum(
-            aux_info.dp_aux_info['per_core_grad_norm'],
-            axis_name=PMAP_PARALLEL_AXIS_NAME,
-        )
-      else:
-        mean_per_core_grad_norm = aux_info.dp_aux_info['per_core_grad_norm']
-      base_layer.add_global_summary(
-          'dp_metrics/mean_per_core_grad_norm', mean_per_core_grad_norm
-      )
+      for key in aux_info.dp_aux_info:
+        if base_layer.is_running_under_pmap():
+          mean_value = jax.lax.pmean(
+              aux_info.dp_aux_info[key],
+              axis_name=PMAP_PARALLEL_AXIS_NAME,
+          )
+        else:
+          mean_value = aux_info.dp_aux_info[key]
+        summary_list = _prepare_tree_data_for_summary(mean_value)
+        if len(summary_list) == 1:
+          k, v = summary_list[0]
+          base_layer.add_global_summary('dp_metrics/' + key + k, v)
+        else:
+          for k, v in summary_list:
+            base_layer.add_global_summary('dp_metrics/' + key + '/' + k, v)
+
     bwd_summary_tensors = base_layer.all_global_summaries()
 
   summary_tensors = NestedMap()

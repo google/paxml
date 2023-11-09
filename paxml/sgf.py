@@ -22,6 +22,7 @@ from collections.abc import Callable
 import math
 from typing import Any
 
+from absl import logging
 from flax import struct
 import jax
 from jax import numpy as jnp
@@ -255,7 +256,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       grads: NestedMap,
       l2_norm_clip: float = 1.0,
       microbatch_size: int = 1,
-  ) -> tuple[NestedMap, float, int]:
+  ) -> tuple[NestedMap, GradAuxInfo, int]:
     def _reshape_and_mean(g):
       return jnp.mean(
           jnp.reshape(g, [-1, microbatch_size, *g.shape[1:]]), axis=1
@@ -272,8 +273,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     batch_size = grads_flat[0].shape[0]
     clipped_grads_mean = jax.tree_map(lambda x: x / batch_size, sum_grads)
     frac_clipped = num_clipped / batch_size
+    dp_aux_info = {'frac_clipped': frac_clipped}
 
-    return clipped_grads_mean, frac_clipped, batch_size  # pytype: disable=bad-return-type  # jax-types
+    return clipped_grads_mean, dp_aux_info, batch_size  # pytype: disable=bad-return-type  # jax-types
 
   def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
       self,
@@ -379,7 +381,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       )
 
       # Clip and aggregate gradients.
-      grads, frac_clipped, _ = self._clip_and_mean_gradients(
+      grads, dp_aux_info, _ = self._clip_and_mean_gradients(
           grads, aux.loss_weight[0] * self.l2_norm_clip, microbatch_splits
       )
       # Aggregate values and aux.
@@ -388,7 +390,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       return (
           values,
           DPGradAuxInfo(
-              dp_aux_info={'frac_clipped': frac_clipped},
+              dp_aux_info=dp_aux_info,
               aux_info=aux.aux_info,
               loss_weight=aux.loss_weight,
           ),
@@ -479,6 +481,65 @@ class AugMulDpSgdStochasticGradient(MicrobatchDpSgdStochasticGradient):
     return jnp.repeat(tensor, num_repeat, axis=0).reshape(
         (shape[0], num_repeat, *shape[1:])
     )
+
+
+class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
+  """DP-SGD stochastic gradient function with per-layer clipping.
+
+  Attributes:
+    use_uniform: If `True` uses the uniform variant of per-layer clipping.
+      Otherwise, uses the scaled variant.
+  """
+
+  use_uniform: bool = True
+
+  def _clip_and_mean_gradients(
+      self,
+      grads: NestedMap,
+      l2_norm_clip: float = 1.0,
+      microbatch_size: int = 1,
+  ) -> tuple[NestedMap, GradAuxInfo, int]:
+    def _reshape_and_mean(g):
+      return jnp.mean(
+          jnp.reshape(g, [-1, microbatch_size, *g.shape[1:]]), axis=1
+      )
+
+    grads = jax.tree_map(_reshape_and_mean, grads)
+    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    sum_grads_flat, num_clipped_flat = optax.per_example_layer_norm_clip(
+        grads=grads_flat,
+        global_l2_norm_clip=l2_norm_clip,
+        uniform=self.use_uniform,
+    )
+
+    sum_grads = jax.tree_unflatten(grads_treedef, sum_grads_flat)
+    num_clipped = jax.tree_unflatten(grads_treedef, num_clipped_flat)
+
+    # Compute per-layer grad norms.
+    def map_layer_norm(grads_list):
+      return [jnp.linalg.norm(g, ord=None, axis=None) for g in grads_list]
+
+    per_example_layer_grad_norms = jax.vmap(map_layer_norm)(grads_flat)
+    sum_layer_grad_norms = [
+        per_example_layer_grad_norms[i].sum(0)
+        for i in range(len(per_example_layer_grad_norms))
+    ]
+    sum_layer_grad_norms = jax.tree_unflatten(
+        grads_treedef, sum_layer_grad_norms
+    )
+
+    # Normalize gradients across all examples.
+    batch_size = grads_flat[0].shape[0]
+    mean_clipped_grads = jax.tree_map(lambda x: x / batch_size, sum_grads)
+    frac_clipped = jax.tree_map(lambda x: x / float(batch_size), num_clipped)
+    mean_layer_grad_norms = jax.tree_map(
+        lambda x: x / batch_size, sum_layer_grad_norms
+    )
+    dp_aux_info = {
+        'frac_clipped': frac_clipped,
+        'mean_layer_grad_norms': mean_layer_grad_norms,
+    }
+    return mean_clipped_grads, dp_aux_info, batch_size  # pytype: disable=bad-return-type  # jax-types
 
 
 class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
