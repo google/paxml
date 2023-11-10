@@ -842,7 +842,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
     eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
-    m = inp.compute_metrics_eval(eval_output)
+    m = inp.compute_metrics(eval_output, score_metrics=True)
     if metric_fns is None:
       self.assertEmpty(m)
     else:
@@ -906,7 +906,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
     eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
-    _ = inp.compute_metrics_eval(eval_output)
+    _ = inp.compute_metrics(eval_output, score_metrics=True)
     if log_preprocessed_targets:
       self.assertIn('seqio_preprocessed_targets', eval_output[0][1])
     else:

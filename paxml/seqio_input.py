@@ -312,8 +312,9 @@ def process_outputs(
 
   if metric_type is MetricType.SCORE:
     metric_name_prefix = EVAL_METRICS_PREFIX
-    seqio_metrics = inp.compute_metrics_eval(
-        model_outputs, verbose_entries=verbose_entries)
+    seqio_metrics = inp.compute_metrics(
+        model_outputs, score_metrics=True, verbose_entries=verbose_entries
+    )
     logging.info('Eval metrics from seqio: %s.', seqio_metrics)
 
   elif metric_type is MetricType.PREDICT:
@@ -1365,19 +1366,6 @@ class SeqIOInput(base_input.BaseInput):
       logging.info('Metrics: %s', metric_value)
 
     return metrics
-
-  # TODO(cschuldt): Remove this and use compute_metrics() instead.
-  def compute_metrics_eval(
-      self,
-      eval_outputs: Sequence[tuple[str | None, NestedMap]],
-      verbose_entries: int = 0,
-  ) -> Sequence[Mapping[str, seqio.metrics.MetricValue | float]]:
-    return self.compute_metrics(
-        decoder_outputs=eval_outputs,
-        score_metrics=True,
-        verbose_entries=verbose_entries,
-    )
-
 
 ###############################################################################
 # Pre-canned feature converters
