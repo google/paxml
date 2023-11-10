@@ -119,6 +119,10 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
   Differentially private stochastic gradient using per-core clipping, whose
   running time matches non-private baseline.
 
+  NOTE: this class assumes you are running under Pmap Partitioning
+  (ICI_MESH_SHAPE = None).  The behavior is undefined under Pjit Partitioning
+  (ICI_MESH_SHAPE != None).
+
   Experimental results with zero noise multiplier:
     Non-private baseline: http://tb/4569190445426541226
     PercoreClippedGradient: http://tb/1885364525575923265
@@ -192,6 +196,12 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
+    if not base_layer.is_running_under_pmap():
+      # TODO: b/308802506 - relax this constraint.
+      raise ValueError(
+          'PercoreClippedDpSgdGradient is only supported when running under'
+          ' Pmap Partitioning.  Please set ICI_MESH_SHAPE = None.'
+      )
     # Obtain the per-core mean gradient.
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True, allow_int=True)
     (values, aux), grads = grad_fn(
@@ -209,7 +219,9 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     else:
       noise_stddev = self.noise_multiplier * self.l2_norm_clip
 
-    grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
+    # Optimization if using this class only for clipping (e.g., with DP-MF)
+    if self.noise_multiplier > 0.0:
+      grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
 
     return (
         values,
@@ -226,6 +238,10 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 
 class DpSgdStochasticGradient(BaseStochasticGradient):
   """DP-SGD stochastic gradient function.
+
+  NOTE: this class assumes you are running under Pmap Partitioning
+  (ICI_MESH_SHAPE = None).  The behavior is undefined under Pjit Partitioning
+  (ICI_MESH_SHAPE != None).
 
   Attributes:
     l2_norm_clip: The L2 clipping bound used to clip per-core gradients.
@@ -322,6 +338,12 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> tuple[tuple[JTensor, DPGradAuxInfo], NestedJTensor]:
+    if not base_layer.is_running_under_pmap():
+      # TODO: b/308802506 - relax this constraint.
+      raise ValueError(
+          'DpSgdStochasticGradient is only supported when running under'
+          ' Pmap Partitioning.  Please set ICI_MESH_SHAPE = None.'
+      )
     assert (
         self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
@@ -426,7 +448,10 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       noise_stddev = self.noise_multiplier / batch_size
     else:
       noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
-    grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
+
+    # Optimization if using this class only for clipping (e.g., with DP-MF)
+    if self.noise_multiplier > 0.0:
+      grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
     return (values, aux), grads
 
 
@@ -643,10 +668,14 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # Note here noise stddev is divided by num_devices because in PAX the loss
     # is scaled by global batch size when pmap is used (see above)
-    noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
-    noised_grads = self._add_noise(
-        clipped_grads, noise_stddev, aux.loss_weight, prng_key
-    )
+    if self.noise_multiplier > 0.0:
+      noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+      noised_grads = self._add_noise(
+          clipped_grads, noise_stddev, aux.loss_weight, prng_key
+      )
+    else:
+      # Optimization if using this class only for clipping (e.g., with DP-MF)
+      noised_grads = clipped_grads
 
     aux = DPGradAuxInfo(
         dp_aux_info={'frac_clipped': frac_clipped},
