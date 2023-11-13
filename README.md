@@ -313,7 +313,7 @@ From Terminal 0, run training command for slice 0 as follows:
 ```bash
 export TPU_PREFIX=<your-prefix>
 export EXP_NAME=C4Spmd22BAdam2xv4_128
-export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\"
+export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\"
 gcloud compute tpus tpu-vm ssh $TPU_PREFIX-0 --zone=us-central2-b --worker=all \
 --command="LIBTPU_INIT_ARGS=$LIBTPU_INIT_ARGS JAX_USE_PJRT_C_API_ON_TPU=1 \
 python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py \
@@ -326,7 +326,7 @@ From Terminal 1, concurrently run training command for slice 1 as follows:
 ```bash
 export TPU_PREFIX=<your-prefix>
 export EXP_NAME=C4Spmd22BAdam2xv4_128
-export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\"
+export LIBTPU_INIT_ARGS=\"--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_enable_async_all_gather=true --jax_enable_async_collective_offload=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE\"
 gcloud compute tpus tpu-vm ssh $TPU_PREFIX-1 --zone=us-central2-b --worker=all \
 --command="LIBTPU_INIT_ARGS=$LIBTPU_INIT_ARGS JAX_USE_PJRT_C_API_ON_TPU=1 \
 python3 /home/yooh/.local/lib/python3.8/site-packages/paxml/main.py \
