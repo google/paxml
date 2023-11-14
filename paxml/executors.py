@@ -403,6 +403,10 @@ def _train_and_evaluate_common(
       )
       break
 
+    partitioned_train_state = train_program.update_state(
+        partitioned_train_state, step_i
+    )
+
     program_output = train_program.run(partitioned_train_state, step_i)
     partitioned_train_state = program_output.state
     train_weighted_scalars = program_output.weighted_scalars

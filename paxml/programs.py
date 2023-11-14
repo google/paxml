@@ -75,6 +75,7 @@ BaseStepFnStaticArgs = trainer_lib.BaseStepFnStaticArgs
 
 NestedMap = py_utils.NestedMap
 TrainState = train_states.TrainState
+TrainStateMetadata = trainer_lib.TrainStateMetadata
 instantiate = base_hyperparams.instantiate
 
 _INIT_TIME = time.time()
@@ -301,6 +302,10 @@ class BaseTrainProgram(Program):
       )
     else:
       self._report_progress = None
+
+  def update_state(self, state: TrainState, step: int) -> TrainState:
+    del step
+    return state
 
   def should_run(self, state: TrainState, step: int) -> bool:
     return step < self._task.train.num_train_steps
