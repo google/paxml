@@ -107,26 +107,58 @@ def make_index_lookup(
 
 
 class EmbeddingGhostNorm(layers.Embedding):
-  """Embedding layer with ghost norm support with custom vjp rule."""
+  """Embedding layer with ghost norm support with custom vjp rule.
+
+  Attributes:
+    use_softmax_shared_embedding_shape_weights: If set to True, use the same
+      parameter shape as SharedEmbeddingSoftmax which is (num_classes,
+      input_dims). This allows us to easily load weights from a pretrained model
+      which did not use a separate embedding layer. Else, use the usual
+      Embedding layer parameter shape = (input_dims, num_classes).
+  """
+  use_softmax_shared_embedding_shape_weights: bool = False
 
   def setup(self) -> None:
-    super().setup()
+    assert self.num_classes > 0
+    assert self.input_dims > 0
+
+    wp = self.weight_split_dims_mapping
+    weight_shape = (
+        [self.input_dims, self.num_classes]
+        if self.use_softmax_shared_embedding_shape_weights
+        else [self.num_classes, self.input_dims]
+    )
+    self.create_variable(
+        'emb_var',
+        base_layer.WeightHParams(
+            shape=weight_shape,
+            mesh_shape=self.mesh_shape,
+            tensor_split_dims_mapping=wp.wt,
+        ),
+    )
     if self.lookup_style == 'index':
       self._index_lookup = make_index_lookup(self.array_lookup, self.einsum)
     elif self.lookup_style == 'matmul':
       self._projector = ghostnorm_linears.make_last_dim_projector(self.einsum)
 
+  def _get_emb_var(self) -> JTensor | base.ParamWithAux:
+    if self.use_softmax_shared_embedding_shape_weights:
+      return self.theta.emb_var.transpose()
+    else:
+      return self.theta.emb_var
+
   def emb_lookup(self, ids: JTensor) -> JTensor:
+    emb_var = self._get_emb_var()
     ap = self.activation_split_dims_mapping
 
     if self.lookup_style == 'index':
-      embs = self._index_lookup(self.theta.emb_var, ids)
+      embs = self._index_lookup(emb_var, ids)
     elif self.lookup_style == 'matmul':
       # Explicit casting to fprop_dtype needed for bf16.
       one_hot_ids = jax.nn.one_hot(
           ids, self.num_classes, dtype=self.fprop_dtype
       )
-      embs = self._projector(one_hot_ids, self.theta.emb_var)
+      embs = self._projector(one_hot_ids, emb_var)
     else:
       raise ValueError('Unknown lookup style.')
 

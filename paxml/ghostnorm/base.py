@@ -96,6 +96,9 @@ class ParamWithAux:
       aux = self.aux.astype(dtype)
     return self.replace(param=self.param.astype(dtype), aux=aux)
 
+  def transpose(self):
+    return self.replace(param=self.param.transpose())
+
 
 def _get_param(param: ParamWithAux | JTensor) -> JTensor:
   if isinstance(param, ParamWithAux):
