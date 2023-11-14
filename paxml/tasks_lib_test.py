@@ -217,24 +217,24 @@ class TestModel04(base_model.BaseModel):
 
   def setup(self) -> None:
     self.create_variable(
-        'var01',
+        'var_normal',
         base_layer.WeightHParams(shape=[self.input_dims, self.output_dims]),
     )
     self.create_variable(
-        'var02',
+        'var_owg',
         base_layer.WeightHParams(
             shape=[1], collections=[OVERWRITE_WITH_GRADIENT]
         ),
     )
 
   def compute_predictions(self, input_batch: NestedMap) -> JTensor:
-    # Intentionaly multiply the var02 with inputs[0,0] to make sure that the
-    # gradient of it returns inputs[0,0]*B*O, where [B,O] is the output shape.
-    # Then, we can easily check if the new var02 is overwritten by its last-step
-    # gradient.
+    # We intentionally add `var_owg * inputs[0, 0]` to the matmul output. This
+    # deliberate addition allows us to predict the gradient of var_owg and
+    # determine whether it equals inputs[0, 0] * B * O, where (B, O) represents
+    # the output shape of the matmul operation.
     ret = (
-        jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var01)
-        + input_batch.inputs[0][0] * self.theta.var02[0]
+        jnp.einsum('bi,io->bo', input_batch.inputs, self.theta.var_normal)
+        + input_batch.inputs[0][0] * self.theta.var_owg[0]
     )
     return ret
 
@@ -422,7 +422,7 @@ class BaseTaskTest(test_utils.TestCase):
     # Set up the model.
     input_dims = 52
     output_dims = 32
-    decay = 0.9999
+    batch_size = 4
 
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
     task_p.model = pax_fiddle.Config(
@@ -435,8 +435,6 @@ class BaseTaskTest(test_utils.TestCase):
     lp.optimizer.learning_rate = 5.0
     lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
 
-    lp.optimizer.ema_decay = decay
-
     # Create the mdl.
     jax_task = instantiate(task_p)
     prng_key = jax.random.PRNGKey(12345)
@@ -444,8 +442,8 @@ class BaseTaskTest(test_utils.TestCase):
     sample_inputs = NestedMap(
         inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
     )
-    replicated_mdl_states = trainer_lib.initialize_replicate_model_state(
-        jax_task, init_key, sample_inputs
+    mdl_states, _ = trainer_lib.initialize_model_state(
+        jax_task, init_key, sample_inputs, False,
     )
 
     def train_step(states, prng_key, inputs):
@@ -453,28 +451,19 @@ class BaseTaskTest(test_utils.TestCase):
           jax_task, states, prng_key, inputs
       )
 
-    num_devices = jax.local_device_count()
-    batch_size = 4
-    prng_key, train_key = jax.random.split(prng_key, 2)
-    train_prng_key = jax.random.split(train_key, num=num_devices)
-
-    p_train_step = jax.pmap(
-        train_step, donate_argnums=(0,), axis_name=PMAP_PARALLEL_AXIS_NAME
-    )
-
     for step in range(10):
+      prng_key, train_key = jax.random.split(prng_key)
       mdl_inputs = NestedMap(
           inputs=np.random.normal(
-              size=[num_devices, batch_size, input_dims]
+              size=[batch_size, input_dims]
           ).astype(np.float32),
       )
 
-      replicated_mdl_states, _ = p_train_step(
-          replicated_mdl_states, train_prng_key, mdl_inputs
+      mdl_states, _ = train_step(
+          mdl_states, train_key, mdl_inputs
       )
-      new_overwrite_param = replicated_mdl_states.mdl_vars[PARAMS]['var02'][0]
-      expected = np.mean(mdl_inputs.inputs[:, 0, 0]) * batch_size * output_dims
-      # Check if the updated params equal to their gradients.
+      new_overwrite_param = mdl_states.mdl_vars[PARAMS]['var_owg'][0]
+      expected = mdl_inputs.inputs[0, 0] * batch_size * output_dims
       self.assertAllClose(new_overwrite_param, expected)
 
 
