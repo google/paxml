@@ -197,7 +197,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       prng_key: PRNGKey,
   ) -> tuple[tuple[JTensor, GradAuxInfo], NestedJTensor]:
     if not base_layer.is_running_under_pmap():
-      # TODO: b/308802506 - relax this constraint.
+      # TODO(b/310986925): Fix and test this implementation under jit.
       raise ValueError(
           'PercoreClippedDpSgdGradient is only supported when running under'
           ' Pmap Partitioning.  Please set ICI_MESH_SHAPE = None.'
@@ -239,9 +239,11 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 class DpSgdStochasticGradient(BaseStochasticGradient):
   """DP-SGD stochastic gradient function.
 
-  NOTE: this class assumes you are running under Pmap Partitioning
-  (ICI_MESH_SHAPE = None).  The behavior is undefined under Pjit Partitioning
-  (ICI_MESH_SHAPE != None).
+  If using this function with Pjit partitioning, since the implementation here
+  performs special processing across the batch dimension, inefficient code may
+  be generated if the model attempts to shard intermediate tensors across the
+  same resources as the batch. It is recommended to ensure that your model does
+  not explicitly lay out tensors in this manner if using this SGF.
 
   Attributes:
     l2_norm_clip: The L2 clipping bound used to clip per-core gradients.
@@ -259,7 +261,14 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       computes `inner_batch_size` per-example gradients at a time, accumulating
       the total clipped gradient as it goes. Note that the setting of
       `inner_batch_size` has no effect on the value of the final gradients--it
-      affects only the feasibility and speed of the computation.
+      affects only the feasibility and speed of the computation. NOTE: the
+      meaning of a non-None value for `inner_batch_size` _will change_ when
+      running under jit vs pmap. When running under pmap, inner_batch_size is
+      applied in a per-device manner, so inner_batch_size identical to the
+      per-device batch size is identical to the default behavior of None. When
+      running under jit, however, `inner_batch_size` is applied to the _global_
+      batch, so inner_batch_size identical to the global batch size matches the
+      default behavior, and a lower value introduces virtual batching.
   """
 
   l2_norm_clip: float = 0.0
@@ -338,12 +347,6 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       mdl_vars_nograd_and_inputs: tuple[NestedJTensor, NestedMap],
       prng_key: PRNGKey,
   ) -> tuple[tuple[JTensor, DPGradAuxInfo], NestedJTensor]:
-    if not base_layer.is_running_under_pmap():
-      # TODO: b/308802506 - relax this constraint.
-      raise ValueError(
-          'DpSgdStochasticGradient is only supported when running under'
-          ' Pmap Partitioning.  Please set ICI_MESH_SHAPE = None.'
-      )
     assert (
         self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {self.l2_norm_clip} is provided.'
