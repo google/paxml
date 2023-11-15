@@ -474,7 +474,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTree,
+      item: PyTree | None = None,
       save_args: PyTree | None = None,
       version: float | None = None,
   ) -> Any:
@@ -627,7 +627,7 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   async def async_save(
       self,
       directory: epath.Path,
-      item: PyTree,
+      item: PyTree | None = None,
       save_args: PyTree | None = None,
       version: float | None = None,
   ) -> Any:
