@@ -1251,7 +1251,7 @@ class SeqIOInput(base_input.BaseInput):
       targets.append(target[ex])
 
       if score_metrics:
-        if self.task_inst.postprocess_fn is not None:
+        if self.task_inst.postprocessor is not None:
           target_post = self.task_inst.postprocess_fn(
               target[ex]['targets'], example=target[ex], is_target=True
           )
@@ -1262,7 +1262,7 @@ class SeqIOInput(base_input.BaseInput):
           out['seqio_preprocessed_targets'] = _convert_bytes_to_str(target[ex])
       else:
         # Prediction metrics
-        if self.task_inst.postprocess_fn is not None:
+        if self.task_inst.postprocessor is not None:
           t = _get_targets_str(target[ex], self.mixture_or_task_inst)
           seqio_target = self.task_inst.postprocess_fn(
               t, example=target[ex], is_target=True
