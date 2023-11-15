@@ -1,13 +1,17 @@
 import os
 from contextlib import contextmanager
 
+from praxis import base_layer
+
 try:
   import transformer_engine.jax as te
   from transformer_engine.common import recipe
   _IS_TRANSFORMER_ENGINE_INSTALLED = True
+  DEFAULT_INIT_MUTABLE_LIST = base_layer.DEFAULT_INIT_MUTABLE_LIST + [te.fp8.FP8Helper.FP8_COLLECTION_NAME]
 
 except ModuleNotFoundError as e:
   _IS_TRANSFORMER_ENGINE_INSTALLED = False
+  DEFAULT_INIT_MUTABLE_LIST = base_layer.DEFAULT_INIT_MUTABLE_LIST
 
 
 class TransformerEngineHelperBase:
