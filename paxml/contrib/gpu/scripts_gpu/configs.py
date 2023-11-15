@@ -178,15 +178,6 @@ class GPT126MBase(TransformerLmSpmdAdam):
       transformer_layer_p = stacked_p.transformer_layer_params_tpl
       transformer_layer_p.ln_tpl.reductions_in_fp32 = True
       transformer_layer_p.tr_fflayer_tpl.ln_tpl.reductions_in_fp32 = True
-    else:
-      stacked_p = TransformerEngineHelper.get_stack_transformer(
-        stacked_p, jnp.dtype(self.FPROP_DTYPE))
-      if issubclass(fdl.get_callable(model_p.lm_tpl.stacked_transformer_tpl),
-                    transformers.StackedTransformerRepeated):
-        model_p.lm_tpl.stacked_transformer_tpl.block = stacked_p
-      else:
-        model_p.lm_tpl.stacked_transformer_tpl = stacked_p
-
 
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
     softmax_init = WeightInit.Gaussian(self.SOFTMAX_INIT_STD)
