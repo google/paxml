@@ -400,7 +400,7 @@ class SingleTaskDecodeProgram(programs.Program):
         # is not expected to be JIT friendly. Since we keep track of
         # its outputs, we also don't want on-device allocation as
         # would eventually lead to HBM OOM.
-        with jax.default_device(jax.devices('cpu')[0]):
+        with jax.default_device(jax.local_devices(backend='cpu')[0]):
           per_example_out = jax.tree_map(np.asarray, per_example_out)
           process_weighted_scalars, processed_out, processed_metric_updates = (
               self._task.model.process_decode_out(
