@@ -103,6 +103,13 @@ def _register_dummy_task(
 
 class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
+  def assertNestedSequenceEqual(self, sequence1, sequence2):
+    """Asserts that two nested sequences are equal."""
+    self.assertEqual(len(sequence1), len(sequence2))
+    for dict1, dict2 in zip(sequence1, sequence2):
+      for key in dict1.keys():
+        np.testing.assert_array_equal(dict1[key], dict2[key])
+
   @parameterized.parameters(
       dict(
           inputs1=[7, 8, 5, 6, 9, 4, 3],
@@ -711,6 +718,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.eval_metrics_targets_length = 3
     p.reset_for_eval = True
     p.shuffle = shuffle
+    p.eval_loop_num_batches = None
     inp = instantiate(p)
     # shuffle is disabled when is_training=False.
     self.assertEqual(inp.should_shuffle, False)
@@ -736,6 +744,70 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
       self.assertEqual(
           m[0]['accuracy'], targets + ['ex pred'] * len(inp.dataset)
       )
+
+  def test_input_take_first_k(self):
+    name = 'test_take_first_k'
+    x = [
+        {
+            'inputs': [27, 28, 29, 30],
+            'targets': [133, 134],
+        },
+        {
+            'inputs': [-32, -33, 34, 35],
+            'targets': [-145, -146, 147],
+        },
+        {
+            'inputs': [27, 28, 29, 30],
+            'targets': [133, 134],
+        },
+        {
+            'inputs': [-32, -33, 34, 35],
+            'targets': [-145, -146, 147],
+        },
+        {
+            'inputs': [27, 28, 29, 30],
+            'targets': [133, 134],
+        },
+        {
+            'inputs': [-32, -33, 34, 35],
+            'targets': [-145, -146, 147],
+        },
+    ]
+    ds = seqio.test_utils.create_default_dataset(x)
+    _register_task(name, ds)
+
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
+    p.mixture_name = name
+    p.split_name = 'validation'
+    p.task_feature_lengths = {'inputs': 5, 'targets': 4}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=False, weights_on_targets_only=None
+    )
+    p.batch_size = 2
+    p.is_training = False
+    p.eval_loop_num_batches = 2
+    p.reset_for_eval = True
+    inp = instantiate(p)
+    first_batches = []
+    counter = 0
+    while counter < 2:
+      try:
+        first_batches.append(inp.get_next())
+        counter += 1
+      except StopIteration:
+        break
+    self.assertLen(first_batches, 2)
+    inp.reset()
+    second_batches = []
+    counter = 0
+    while counter < 2:
+      try:
+        second_batches.append(inp.get_next())
+        counter += 1
+      except StopIteration:
+        break
+    self.assertLen(second_batches, 2)
+    self.assertNestedSequenceEqual(first_batches, second_batches)
 
   @parameterized.named_parameters(
       ('repeat', True, 10, 1),
@@ -839,6 +911,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.batch_size = 1
     p.is_training = False
     p.reset_for_eval = True
+    p.eval_loop_num_batches = None
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
     eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)

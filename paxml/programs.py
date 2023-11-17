@@ -767,11 +767,7 @@ class BaseEvalProgram(Program):
             self._eval_input_pipeline
         )
     )
-    self._eval_num_steps = (
-        -1
-        if self._input_p.reset_for_eval
-        else self._input_p.eval_loop_num_batches
-    )
+    self._eval_num_steps = self._input_p.eval_loop_num_batches or -1
 
     # Creates the eval summary writer.
     summary_base_dir = get_summary_base_dir(job_log_dir)
@@ -888,7 +884,6 @@ class BaseEvalProgram(Program):
         if self._eval_num_steps > 0:
           raise
         logging.info('Data exhausted (%s) after %d steps', self._name, step_num)
-        self.eval_input.reset()
         break
 
       step_num += 1
@@ -958,6 +953,8 @@ class BaseEvalProgram(Program):
       clu_metrics = metric_utils.merge_clu_metrics(
           clu_metrics, eval_step_clu_metrics_out
       )
+    if self.eval_input.reset_for_eval:
+      self.eval_input.reset()
 
     return (
         step_num,

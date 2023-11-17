@@ -721,14 +721,10 @@ class SeqIOInput(base_input.BaseInput):
   def _get_num_eval_examples(self) -> int:
     """Returns the number of eval examples.
 
-    Corresponds to`eval_loop_num_batches` when reset_for_eval=False;
-    otherwise eval runs on full dataset.
+    Corresponds to `eval_loop_num_batches` if set; otherwise eval runs on
+    full dataset.
     """
-    if (
-        not self.is_training
-        and self.eval_loop_num_batches
-        and not self.reset_for_eval
-    ):
+    if not self.is_training and self.eval_loop_num_batches:
       return (
           self.eval_loop_num_batches * self.batch_size * self.num_infeed_hosts
       )
@@ -905,6 +901,8 @@ class SeqIOInput(base_input.BaseInput):
 
   def reset(self) -> None:
     self._iter = self.dataset.as_numpy_iterator()
+    if self.is_targets_init:
+      self._gen_targets_iter()
 
   def _get_vocab(self, key) -> seqio.Vocabulary:
     if self.overridden_vocab is not None:
