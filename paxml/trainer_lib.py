@@ -1216,15 +1216,25 @@ def train_step_single_learner(
     ):
       for key in aux_info.dp_aux_info:
         if base_layer.is_running_under_pmap():
-          mean_value = jax.lax.pmean(
-              aux_info.dp_aux_info[key],
-              axis_name=PMAP_PARALLEL_AXIS_NAME,
-          )
+          # Gradients are scaled down by the number of TPU cores so using psum
+          # instead of pmean to get the average value.
+          if key in ['per_core_grad_norm']:
+            mean_value = jax.lax.psum(
+                aux_info.dp_aux_info[key],
+                axis_name=PMAP_PARALLEL_AXIS_NAME,
+            )
+          else:
+            mean_value = jax.lax.pmean(
+                aux_info.dp_aux_info[key],
+                axis_name=PMAP_PARALLEL_AXIS_NAME,
+            )
         else:
           mean_value = aux_info.dp_aux_info[key]
         summary_list = _prepare_tree_data_for_summary(mean_value)
         if len(summary_list) == 1:
           k, v = summary_list[0]
+          if key in ['per_core_grad_norm']:
+            key = 'mean_' + key
           base_layer.add_global_summary('dp_metrics/' + key + k, v)
         else:
           for k, v in summary_list:
