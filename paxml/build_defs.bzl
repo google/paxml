@@ -15,9 +15,10 @@
 
 """Starlark macros for Pax users."""
 
-load("//paxml:paxml.bzl", "py_strict_test")
 load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_binary")
+load("//paxml:paxml.bzl", "py_strict_test")
 # Internal fragmented binary bazel rule.
+# Placeholder: load PyInfo
 
 def _shell_quote(s):
     """Copy of bazel-skylib's shell.quote.
