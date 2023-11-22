@@ -22,7 +22,6 @@ from collections.abc import Callable
 import math
 from typing import Any
 
-from absl import logging
 from flax import struct
 import jax
 from jax import numpy as jnp
@@ -601,17 +600,6 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
         self.inner_batch_size is None
     ), 'inner_batch_size is not supported yet by GhostClipping.'
 
-    # Gradient Normalization needs to be implemented differently here and is
-    # not a supported operation yet.
-    if self.normalize_gradients:
-      # TODO(b/291615231): Raising error is necessary till normalization
-      # implemented in GhostClipping
-      raise ValueError(
-          'Expected a "False" value for normalize_gradients but got "True" as'
-          ' gradient normalization is currently not supported for ghost'
-          ' clipping.'
-      )
-
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
     batch_size = jax.tree_util.tree_flatten(mdl_vars_nograd_and_inputs[1])[0][
         0
@@ -655,6 +643,9 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     if self.l2_norm_clip is not None:
       scales = jnp.minimum(1.0, self.l2_norm_clip / grad_norms)
       frac_clipped = jnp.mean(scales < 1.0)
+      if self.normalize_gradients:
+        # Scale gradients to have norm at most 1 instead of l2_norm_clip.
+        scales = scales / self.l2_norm_clip
 
     # Pass 2: get average of clipped gradients
     params_with_sq_norms = jax.tree_map(
@@ -672,7 +663,12 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     # Note here noise stddev is divided by num_devices because in PAX the loss
     # is scaled by global batch size when pmap is used (see above)
     if self.noise_multiplier > 0.0:
-      noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+      if self.normalize_gradients:
+        # Each individual gradient has norm at most 1.
+        noise_stddev = self.noise_multiplier / batch_size
+      else:
+        # Each individual gradient has norm at most l2_norm_clip.
+        noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
       noised_grads = self._add_noise(
           clipped_grads, noise_stddev, aux.loss_weight, prng_key
       )
