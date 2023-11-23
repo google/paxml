@@ -291,7 +291,7 @@ def _extract_nested_prefix_names(
       right_separator=right_separator,
   )
   if state.opt_states is None:
-    opt_states = None
+    opt_states = []
   else:
     opt_states = py_utils.extract_prefixed_keys_from_nested_map(
         state.opt_states,
