@@ -38,6 +38,7 @@ NestedMap = py_utils.NestedMap
 PRNGKey = pytypes.PRNGKey
 PARAMS = base_layer.PARAMS
 ScalarFloat = pytypes.ScalarFloat
+PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
 
 @struct.dataclass
@@ -135,17 +136,22 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       in eqn 3 of https://arxiv.org/abs/2204.13650 to reduce the dependence
       between clipping value and learning rate. Note that normalization is only
       applied post-clipping.
+    adaptive_clipping_method: Choose an adaptive method to set the clipping
+      bound. Default to None when clipping bound is given by l2_norm_clip.
+      Currently supported method includes: 'min': use the minimum per-core
+      gradient as the clipping bound.
   """
 
   l2_norm_clip: float = 0.0
   noise_multiplier: float = 0.0
   normalize_gradients: bool = False
+  adaptive_clipping_method: str | None = None
 
   def _clip_gradients(
       self, grads: NestedMap, l2_norm_clip: float = 1.0
   ) -> tuple[NestedMap, jax.Array, Any]:
     assert (
-        self.l2_norm_clip > 0.0
+        self.adaptive_clipping_method is not None or self.l2_norm_clip > 0.0
     ), f'Clipping bound must be positive. {l2_norm_clip} is provided.'
 
     # Clip the per-core mean gradient.
@@ -207,6 +213,18 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
         mdl_vars_grad, mdl_vars_nograd_and_inputs, prng_key
     )
     aux = self.process_aux_info(aux)
+
+    if self.adaptive_clipping_method == 'min':
+      grads_norm = optax.global_norm(grads)
+      self.l2_norm_clip = (
+          jax.lax.pmin(grads_norm, axis_name=PMAP_PARALLEL_AXIS_NAME)
+          / aux.loss_weight
+      )
+    elif self.adaptive_clipping_method is not None:
+      raise ValueError(
+          'Unsupported adaptive clipping method:'
+          f' {self.adaptive_clipping_method}'
+      )
 
     grads, num_clipped, grad_norm = self._clip_gradients(
         grads, aux.loss_weight * self.l2_norm_clip
