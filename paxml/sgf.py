@@ -232,12 +232,12 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 
     if self.normalize_gradients:
       grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
-      noise_stddev = self.noise_multiplier
-    else:
-      noise_stddev = self.noise_multiplier * self.l2_norm_clip
 
     # Optimization if using this class only for clipping (e.g., with DP-MF)
     if self.noise_multiplier > 0.0:
+      noise_stddev = self.noise_multiplier * (
+          1.0 if self.normalize_gradients else self.l2_norm_clip
+      )
       grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
 
     return (
@@ -465,12 +465,14 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     # Add noise to normalized gradients.
     if self.normalize_gradients:
       grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
-      noise_stddev = self.noise_multiplier / batch_size
-    else:
-      noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
 
     # Optimization if using this class only for clipping (e.g., with DP-MF)
     if self.noise_multiplier > 0.0:
+      noise_stddev = (
+          self.noise_multiplier
+          / batch_size
+          * (1.0 if self.normalize_gradients else self.l2_norm_clip)
+      )
       grads = self._add_noise(grads, noise_stddev, aux.loss_weight, prng_key)
     return (values, aux), grads
 
@@ -681,12 +683,11 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     # Note here noise stddev is divided by num_devices because in PAX the loss
     # is scaled by global batch size when pmap is used (see above)
     if self.noise_multiplier > 0.0:
-      if self.normalize_gradients:
-        # Each individual gradient has norm at most 1.
-        noise_stddev = self.noise_multiplier / batch_size
-      else:
-        # Each individual gradient has norm at most l2_norm_clip.
-        noise_stddev = self.noise_multiplier * self.l2_norm_clip / batch_size
+      noise_stddev = (
+          self.noise_multiplier
+          / batch_size
+          * (1.0 if self.normalize_gradients else self.l2_norm_clip)
+      )
       noised_grads = self._add_noise(
           clipped_grads, noise_stddev, aux.loss_weight, prng_key
       )
