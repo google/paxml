@@ -42,6 +42,7 @@ _ArrayOrPSpec = TypeVar('_ArrayOrPSpec', jax.Array, jax.sharding.PartitionSpec)
 """Either a pspec (when tracing) or a Jax tensor."""
 ExtraStateType = NestedJTensorOrPartitionSpec | None
 
+
 # A helper class for managing various train states. This struct may contain the
 # actual Jax tensors, or simply PartitionSpecs for the corresponding tensor.
 # If the latter, this struct is used for specifying the PartitionSpecs for
@@ -85,7 +86,7 @@ class TensorProvenance:
       return f'"({self.checkpoint_path})"'
 
     checkpoint_step_repr = (
-        self.checkpoint_step if self.checkpoint_step else 'latest'
+        self.checkpoint_step if self.checkpoint_step is not None else 'latest'
     )
 
     return f'"({self.checkpoint_path}:{checkpoint_step_repr})"'
