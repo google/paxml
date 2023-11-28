@@ -669,7 +669,12 @@ def can_load_written_outputs(
       success[0] = len(outputs)
     except Exception:  # pylint: disable=broad-except
       pass
-  out = multihost_utils.broadcast_one_to_all(success)
+
+  if not py_utils.is_mock_tpu_backend():
+    out = multihost_utils.broadcast_one_to_all(success)
+  else:
+    out = success
+
   return out[0] > 0
 
 
