@@ -647,10 +647,10 @@ class SeqIOInput(base_input.BaseInput):
           'This would lead to an endless eval.'
       )
 
-  @property
+  @functools.cached_property
   def is_mock_tpu(self) -> bool:
     """Indicates whether running Mock TPU backend."""
-    return 'MOCK_TPU' in str(jax.devices()[0])
+    return py_utils.is_mock_tpu_backend()
 
   @property
   def is_deterministic(self) -> bool:
@@ -1036,7 +1036,7 @@ class SeqIOInput(base_input.BaseInput):
 
     # Previous allgather produces dummy values in mock TPU, so overwrite the
     # value to prevent assertion failure.
-    if py_utils.is_mock_tpu_backend():
+    if self.is_mock_tpu:
       num_batches = local_num_batches
 
     pad_num = num_batches * self.batch_size - local_num
