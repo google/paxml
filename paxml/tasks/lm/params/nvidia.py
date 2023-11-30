@@ -15,6 +15,7 @@
 
 """Language Model configurations on the T5/C4 dataset. Contributed by NVIDIA."""
 
+import fiddle as fdl
 import math
 from jax import numpy as jnp
 from paxml import experiment_registry
@@ -538,6 +539,20 @@ class Llama2_7B(NVIDIA1_3B):
 
     return task_p
 
+@experiment_registry.register
+class Llama2_13B(Llama2_7B):
+
+  NUM_LAYERS = 40
+  MODEL_DIMS = 5120
+  HIDDEN_DIMS = 13824
+  NUM_HEADS = 40
+  DIMS_PER_HEAD = 128
+  MAX_SEQ_LEN = 4096
+
+  NUM_KV_HEADS = NUM_HEADS
+
+  ICI_MESH_SHAPE = [1,16,1]
+  DCN_MESH_SHAPE = [1,1,1]
 
 @experiment_registry.register
 class Llama2_70B(Llama2_7B):
