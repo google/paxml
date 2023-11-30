@@ -482,8 +482,7 @@ class MoELarge(NVIDIA1_3B):
   NUM_EXPERTS = 16
   NUM_GROUPS = 16
 
-  ## train on 16 GPUs
-  ICI_MESH_SHAPE = [1,8,1]
+  ICI_MESH_SHAPE = [1,16,1]
   DCN_MESH_SHAPE = [1,2,1]
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
