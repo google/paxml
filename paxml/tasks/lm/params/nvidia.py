@@ -27,6 +27,8 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import gpu_fast_attention
+from praxis.layers import activations
+from praxis.layers import transformers
 
 
 WeightInit = base_layer.WeightInit
@@ -463,3 +465,92 @@ class NVIDIA175B_FSDP(NVIDIA1_3B):
   DIMS_PER_HEAD = 128
   MODEL_DIMS = 12288
   HIDDEN_DIMS = 4 * 12288
+
+
+@experiment_registry.register
+class Llama2_7B(NVIDIA1_3B):
+
+  NUM_LAYERS = 32
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 11008
+  NUM_HEADS = 32
+  DIMS_PER_HEAD = 128
+  MAX_SEQ_LEN = 4096
+
+  PERCORE_BATCH_SIZE = 1
+
+  DCN_MESH_SHAPE = [1,1,1]
+  ICI_MESH_SHAPE = [1,16,1]
+
+  NUM_KV_HEADS = 32
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
+      stacked_p = stacked_p.pipeline_stage
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
+      stacked_p = stacked_p.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
+
+    ## swiGLU activation
+    transformer_layer_p.tr_fflayer_tpl.use_gated_activation = True
+    transformer_layer_p.tr_fflayer_tpl.activation_tpl = pax_fiddle.Config(activations.Swish)
+
+    transformer_layer_p.tr_atten_tpl = pax_fiddle.Config(layers.grouped_query_attention.GroupedQueryAttention)
+    transformer_layer_p.tr_atten_tpl.num_kv_heads = self.NUM_KV_HEADS
+    transformer_layer_p.tr_atten_tpl.rope_min_max_timescales = [1, 10000]
+
+    model_p.lm_tpl.position_emb_tpl = None ## use RoPE rather than trainable position embeddings
+
+    ## RMSNorm
+    transformer_layer_p.ln_tpl = pax_fiddle.Config(layers.RmsNorm)
+    transformer_layer_p.tr_fflayer_tpl.ln_tpl = pax_fiddle.Config(layers.RmsNorm)
+    task_p.model.lm_tpl.final_ln_tpl = pax_fiddle.Config(layers.RmsNorm)
+    transformer_layer_p.ln_tpl.intermediate_dtype = jnp.float32
+    transformer_layer_p.tr_fflayer_tpl.ln_tpl.intermediate_dtype = jnp.float32
+    task_p.model.lm_tpl.final_ln_tpl.intermediate_dtype = jnp.float32
+
+    task_p.train.eval_skip_train = True
+
+    ## set sharding for GQA
+    atten_wp = transformer_layer_p.tr_atten_tpl.weight_split_dims_mapping
+
+    replica_axis = 'replica'
+    data_axis = 'data'
+    mdl_axis = 'mdl'
+    seq_axis = None
+    batch_axes = (replica_axis, data_axis)
+    a_blnh = [batch_axes, seq_axis, mdl_axis, None]
+    w_data_axes = data_axis
+    w_dnh = [w_data_axes, mdl_axis, None]
+
+    atten_wp.dnh = w_dnh
+
+    atten_ap = transformer_layer_p.tr_atten_tpl.activation_split_dims_mapping
+    atten_ap.btd = [a_blnh[0], a_blnh[1], a_blnh[3]]
+    atten_ap.btnh = a_blnh
+    atten_ap.bskh = a_blnh
+
+    return task_p
+
+
+@experiment_registry.register
+class Llama2_70B(Llama2_7B):
+
+  NUM_LAYERS = 80
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 28672
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  MAX_SEQ_LEN = 4096
+
+  NUM_KV_HEADS = 8
+
+  ICI_MESH_SHAPE = [1,16,1]
+  DCN_MESH_SHAPE = [1,8,1]
+
