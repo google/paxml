@@ -567,5 +567,5 @@ class Llama2_70B(Llama2_7B):
   NUM_KV_HEADS = 8
 
   ICI_MESH_SHAPE = [1,16,1]
-  DCN_MESH_SHAPE = [1,8,1]
+  DCN_MESH_SHAPE = [1,4,1]
 
