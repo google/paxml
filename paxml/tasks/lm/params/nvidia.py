@@ -16,9 +16,13 @@
 """Language Model configurations on the T5/C4 dataset. Contributed by NVIDIA."""
 
 import math
+from typing import Type, cast
+import fiddle as fdl
 from jax import numpy as jnp
+import numpy as np
 from paxml import experiment_registry
 from paxml import tasks_lib
+from paxml.tasks.lm.model_params import maybe_setup_moe_params
 from paxml.tasks.lm.params import c4
 from paxml.tasks.lm.params import lm_cloud
 from praxis import base_layer
@@ -26,8 +30,8 @@ from praxis import layers
 from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
+from praxis.layers import glam
 from praxis.layers import gpu_fast_attention
-
 
 WeightInit = base_layer.WeightInit
 
@@ -463,3 +467,97 @@ class NVIDIA175B_FSDP(NVIDIA1_3B):
   DIMS_PER_HEAD = 128
   MODEL_DIMS = 12288
   HIDDEN_DIMS = 4 * 12288
+
+
+## 26.8B params
+# fits on 16 A100-80G GPUs
+@experiment_registry.register
+class MoELarge(NVIDIA1_3B):
+  NUM_LAYERS = 12
+  NUM_HEADS = 32
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 16384
+  DIMS_PER_HEAD = 128
+
+  NUM_EXPERTS = 16
+  NUM_GROUPS = 16
+
+  ICI_MESH_SHAPE = [1, 16, 1]
+  DCN_MESH_SHAPE = [1, 2, 1]
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+
+    model_p = task_p.model
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    if self.USE_REPEATED_LAYER:
+      stacked_p = stacked_p.block
+
+    stacked_p.moe_layers = list(np.arange(self.NUM_LAYERS))
+    stacked_p.num_groups = self.NUM_GROUPS
+    stacked_p.num_experts = self.NUM_EXPERTS
+
+    maybe_setup_moe_params(stacked_p)
+
+    return task_p
+
+
+class GLaM64B64EProxy(NVIDIA1_3B):
+  """143B MoE config that works with 8x16 A100-40G"""
+
+  NUM_GPUS = 128
+
+  NUM_LAYERS = 8
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 32768
+
+  NUM_EXPERTS = 64
+  NUM_GROUPS = NUM_GPUS
+
+  ICI_MESH_SHAPE = [1, NUM_GPUS, 1]
+  DCN_MESH_SHAPE = None
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.model.lm_tpl = glam.GlamUniTransformerLmHParams(
+        name='glam_lm',
+        vocab_size=self.VOCAB_SIZE,
+        num_transformer_layers=self.NUM_LAYERS,
+        moe=True,
+        model_dim=self.MODEL_DIMS,
+        ff_dim=self.HIDDEN_DIMS,
+        moe_hidden_dim=self.HIDDEN_DIMS,
+        attention_num_heads=self.NUM_HEADS,
+        attention_key_value_dim=self.MODEL_DIMS // self.NUM_HEADS,
+        attention_extra_logit=0.0,
+        use_tgt_labels_size_as_loss_denominator=True,
+        moe_load_balance_loss_weight=0.01,
+        z_loss_weight=1e-4,
+        moe_gating_func='top2',
+        moe_gating_embedding_level='token',
+        c_dim=None,  ## determined automatically when capacity_factor is set
+        capacity_factor=2.0,
+        e_dim=self.NUM_EXPERTS,
+        num_groups=self.NUM_GROUPS,
+        use_gated_activation=True,
+    )
+
+    ## set sharding
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(task_p.model.lm_tpl)
+    )
+
+    task_p.model.lm_tpl = lm_cls.set_sharding_params_v1(
+        task_p.model.lm_tpl,
+        replica_axis='replica',
+        data_axis='data',
+        mdl_axis='mdl',
+        ici_mesh_shape=task_p.model.ici_mesh_shape,
+        dcn_mesh_shape=task_p.model.dcn_mesh_shape,
+        mesh_axis_names=['replica', 'data', 'mdl'],
+        training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+    )
+
+    return task_p
