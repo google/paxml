@@ -82,8 +82,10 @@ pytype_library(
         "//praxis:pax_fiddle",
         "//praxis:schedules",
         "//praxis/layers",
+        "//praxis/layers:activations",
         "//praxis/layers:glam",
         "//praxis/layers:gpu_fast_attention",
+        "//praxis/layers:transformers",
     ],
 )
 
