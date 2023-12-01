@@ -578,12 +578,21 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
     # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
     mean_clipped_grads = jax.tree_map(lambda x: x / batch_size, sum_grads)
-    frac_clipped = jax.tree_map(lambda x: x / float(batch_size), num_clipped)
     mean_layer_grad_norms = jax.tree_map(
         lambda x: x / batch_size, sum_layer_grad_norms
     )
+
+    # Compute frac clipped statistics across all layers
+    frac_clipped = jax.tree_map(lambda x: x / batch_size, num_clipped)
+    frac_clipped_flat, _ = jax.tree_util.tree_flatten(frac_clipped)
+    frac_clipped_flat = jnp.stack(frac_clipped_flat)
+    mean_frac_clipped = jnp.mean(frac_clipped_flat)
+    stdev_frac_clipped = jnp.std(frac_clipped_flat)
+
     dp_aux_info = {
         'frac_clipped': frac_clipped,
+        'mean_frac_clipped': mean_frac_clipped,
+        'stdev_frac_clipped': stdev_frac_clipped,
         'mean_layer_grad_norms': mean_layer_grad_norms,
     }
     return mean_clipped_grads, dp_aux_info, batch_size  # pytype: disable=bad-return-type  # jax-types
