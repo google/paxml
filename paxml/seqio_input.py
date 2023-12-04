@@ -1347,8 +1347,36 @@ class SeqIOInput(base_input.BaseInput):
             f'Metric {metric_obj} does not have any model_output_type'
         )
 
+      def _pad_if_inhomogeneous(model_outs: Sequence[Mapping[str, Any]]):
+        # Check if sequence can be directly converted to an nparray, or if
+        # padding is needed to make it homogeneous.
+        max_length = 0
+        for out in model_outs:
+          max_length = max(max_length, np.array(out).size)
+        model_outs = np.array([
+            np.pad(np.array(x), (0, max_length - np.array(x).size))
+            for x in model_outs
+        ])
+        return model_outs
+
+      # When model output type is PREDICTION_WITH_AUX or
+      # SCORE_WITH_INTERMEDIATES, model output is a tuple of two arrays/lists.
+      if isinstance(model_outs, tuple):
+        prediction_or_score, aux_value = model_outs
+        aux_value = jax.tree_map(
+            np.array,
+            aux_value,
+            is_leaf=lambda x: isinstance(x, list),
+        )
+        model_outs = (
+            _pad_if_inhomogeneous(prediction_or_score),
+            aux_value,
+        )
+      else:
+        model_outs = _pad_if_inhomogeneous(model_outs)
+
       metric_instance = metric_obj.from_model_output(
-          targets, np.array(model_outs), output_features
+          targets, model_outs, output_features
       )
       if isinstance(metric_instance, seqio.metrics.CollectingMetric):
         metric_value, _ = metric_instance.actual_compute(
