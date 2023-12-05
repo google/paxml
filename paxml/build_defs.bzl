@@ -154,6 +154,7 @@ def pax_targets(
         # Internal enable fragmented build argument.
         py_binary_rule = pytype_binary,
         deps = [
+            # proto dep
             "//paxml:main_lib",
             # Implicit tpu dependency.
         ] + extra_deps,
@@ -184,6 +185,7 @@ def pax_targets(
             # Internal enable fragmented build argument.
             py_binary_rule = pytype_binary,
             deps = [
+                # proto dep
                 "//paxml:main_lib",
                 # Implicit gpu dependency.
             ] + extra_deps,
@@ -239,6 +241,7 @@ def pax_targets(
         main = "//paxml/tools:dump_hparams.py",
         py_binary_rule = pytype_strict_binary,
         deps = [
+            # proto dep
             "//paxml/tools:dump_hparams_lib",
         ] + extra_deps,
         exp_sources = exp_sources,
@@ -257,6 +260,7 @@ def pax_targets(
         main = "//paxml/tools:dump_input_specs.py",
         py_binary_rule = pytype_strict_binary,
         deps = [
+            # proto dep
             # Implicit absl.app dependency.
             # Implicit absl.flags dependency.
             "//paxml:experiment_registry",
@@ -278,6 +282,7 @@ def pax_targets(
         main = "//paxml/tools:model_analysis.py",
         py_binary_rule = pytype_strict_binary,
         deps = [
+            # proto dep
             # Implicit absl.app dependency.
             # Implicit absl.flags dependency.
             # Implicit jax dependency.
@@ -302,6 +307,7 @@ def pax_targets(
         main = "//paxml/tools:validate_config.py",
         py_binary_rule = pytype_strict_binary,
         deps = [
+            # proto dep
             "//paxml/tools:validate_config_lib",
         ] + extra_deps,
         exp_sources = exp_sources,
