@@ -274,7 +274,7 @@ jupyter-http-over-ws==0.0.8
     # via lingvo
 jupyter-lsp==2.2.1
     # via jupyterlab
-jupyter-server==2.11.1
+jupyter-server==2.11.2
     # via
     #   jupyter-lsp
     #   jupyterlab
