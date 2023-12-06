@@ -338,6 +338,7 @@ def get_checkpoint_step(
     job_log_dir: epath.Path,
     restore_checkpoint_dir: epath.Path,
     mode: EvaluationMode,
+    checkpoint_type: Any | None = None,
 ) -> int:
   """Gets the latest checkpoint step to eval/decode on.
 
@@ -348,6 +349,7 @@ def get_checkpoint_step(
       Note that this may not necessarily be the same as job_log_dir.
     mode: a EvaluationMode enum type indicating the mode in which the model is
       being evaluated
+    checkpoint_type: checkpoints.CheckpointType enum.
 
   Returns:
     Returns the step with partially completed eval/decode if a job was preempted
@@ -357,12 +359,26 @@ def get_checkpoint_step(
   """
   progress_fname = (
       job_log_dir / _INTERNAL_ARTIFACTS_SUBDIR / mode.progress_filename)
+  checkpoint_type = checkpoint_type or checkpoints.CheckpointType.UNSPECIFIED
+  step = None
   if progress_fname.exists():
     with progress_fname.open() as f:
       progress_json = json.load(f)
-
     step = progress_json[_PROGRESS_CKPT_STEP_KEY]
-    logging.info('Resuming %s from step %d.', mode.value, step)
-    return step
+    if checkpoints.make_checkpoint_step_dir(
+        restore_checkpoint_dir, step, checkpoint_type
+    ).exists():
+      logging.info('Resuming %s from step %d.', mode.value, step)
+    else:
+      logging.info(
+          'Progress file for %s indicated restoration for step %d, which did'
+          ' not exist. Retrieving the latest checkpoint instead.',
+          mode.value,
+          step,
+      )
+      step = None
 
-  return checkpoints.retrieve_latest_checkpoint_step(restore_checkpoint_dir)
+  if step is None:
+    return checkpoints.retrieve_latest_checkpoint_step(restore_checkpoint_dir)
+  else:
+    return step

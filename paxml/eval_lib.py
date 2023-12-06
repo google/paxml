@@ -321,7 +321,7 @@ def _create_checkpointer(
 
   if restore_checkpoint_step is None and mode is not None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
-        job_log_dir, restore_checkpoint_dir, mode
+        job_log_dir, restore_checkpoint_dir, mode, checkpoint_type
     )
 
   checkpoints.reregister_type_handlers(
