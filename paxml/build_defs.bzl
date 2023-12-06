@@ -224,6 +224,7 @@ def pax_targets(
                 # Implicit absl.testing.absltest.absltest dependency.
                 "//paxml:experiment_imports_test_helper",
                 "//paxml:experiment_registry",
+                # proto dep
             ] + extra_deps,
             timeout = "long",
             py_test_rule = smoke_test_py_test_rule,
