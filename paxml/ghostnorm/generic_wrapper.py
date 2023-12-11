@@ -91,7 +91,8 @@ def _create_ghostnorm_fn(fn: Callable[..., JTensor]) -> Callable[..., JTensor]:
     scaled_g = jax.tree_map(
         lambda g_: jnp.einsum('i, i... -> i...', scales, g_), g
     )
-    vjp_params, *vjp_args = vjp_fun(scaled_g)
+    vjp_params, *_ = vjp_fun(scaled_g)
+    _, *vjp_args = vjp_fun(g)
 
     def vmappable_vjp(g_, *args_):
       _, vjp_fun = jax.vjp(fn, params, *args_)

@@ -63,6 +63,8 @@ def make_index_lookup(
       # scaled gradients for parameters to achieve per-eg grad clipping
       # scaled_g: (batch_size, ..., output_dim)
       scaled_g = einsum('i, i... -> i...', scales, g)
+
+      # We can use u_idx based on scaled_g because idx is non-differentiable.
       u_weights, u_idx = vjp_fun(scaled_g)
 
       # Compute per-example gradient square norms.

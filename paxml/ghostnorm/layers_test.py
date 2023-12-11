@@ -172,8 +172,7 @@ class LayersTest(parameterized.TestCase):
     np.testing.assert_allclose(
         ghostnorm_outputs,
         ref_outputs,
-        rtol=1e-5,
-        atol=1e-5,
+        rtol=1e-7,
         err_msg='outputs are different.',
     )
 
@@ -201,7 +200,6 @@ class LayersTest(parameterized.TestCase):
         per_eg_grad_norms,
         fast_per_eg_grad_norms,
         rtol=1e-5,
-        atol=1e-5,
         err_msg=(
             "computed per-example gradient norms don't match expected values."
         ),
@@ -237,7 +235,6 @@ class LayersTest(parameterized.TestCase):
     np.testing.assert_allclose(
         jax.tree_util.tree_flatten(grad_diffs)[0],
         0,
-        rtol=1e-5,
         atol=1e-5,
         err_msg='average gradients are different.',
     )
@@ -256,21 +253,23 @@ class LayersTest(parameterized.TestCase):
     )
 
     # second pass to compute norm-clipped gradients
-    l2_clip = 0.2
+    # clip at median to ensure at least some examples are clipped.
+    l2_clip = np.median(fast_per_eg_grad_norms)
+    l2_clip = max(l2_clip, 1e-4)
+
     scales = jnp.minimum(1.0, l2_clip / fast_per_eg_grad_norms)
     _, scaled_fast_per_eg_grad_norms = self._get_grad_and_norms(
         initial_vars, loss_fn, scales, *inputs_args, **inputs_kwargs
     )
 
     self.assertTrue(
-        np.all(scaled_fast_per_eg_grad_norms <= l2_clip + 1e-5),
+        np.all(scaled_fast_per_eg_grad_norms <= l2_clip * (1 + 1e-5)),
         msg='norm clipping conditions are not satisfied.',
     )
 
   def assertClippedGradEqualsScaledGrad(
       self, initial_vars, loss_fn, *inputs_args, **inputs_kwargs
   ):
-    l2_clip = 0.2
     batch_size = inputs_args[0].shape[0]
     # get expected per-example gradient norms by explicitly materialize
     per_eg_grad = self._get_per_eg_grad(
@@ -279,6 +278,10 @@ class LayersTest(parameterized.TestCase):
 
     # compute the expected average gradients from the clipped per-example grads
     grads_flat, grads_treedef = jax.tree_flatten(per_eg_grad[PARAMS])
+    # clip at median to ensure at least some examples are clipped.
+    l2_clip = np.median(jax.vmap(optax.global_norm)(grads_flat))
+    l2_clip = max(l2_clip, 1e-4)
+
     sum_clipped, _ = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_clip
     )
@@ -301,15 +304,14 @@ class LayersTest(parameterized.TestCase):
     obtained_grads = jax.tree_map(
         lambda x: x.param, grad_with_sq_norms, is_leaf=is_leaf
     )
-
     diffs = jax.tree_map(
         lambda x, y: np.mean(np.abs(x - y)), expected_grads, obtained_grads
     )
+
     np.testing.assert_allclose(
         jax.tree_util.tree_flatten(diffs)[0],
-        0,
-        rtol=1e-5,
-        atol=1e-2,
+        0.0,
+        atol=1e-5,
         err_msg='ghost norm clipping outputs incorrect average gradients.',
     )
 
@@ -340,7 +342,7 @@ class LayersTest(parameterized.TestCase):
           'reference_layer_cls': praxis_linears.Bias,
           'ghostnorm_layer_cls': linears.BiasGhostNorm,
           'configs': {'dims': 3},
-          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 24, 3)),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 4, 3)),
       },
       {
           'testcase_name': 'Embedding',
@@ -372,14 +374,14 @@ class LayersTest(parameterized.TestCase):
           'reference_layer_cls': praxis_embedding.Embedding,
           'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
           'configs': {'input_dims': 3, 'num_classes': 10},
-          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 24, 20)),
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 4, 4)),
       },
       {
           'testcase_name': 'EmbeddingMultiDimInputsOOB',
           'reference_layer_cls': praxis_embedding.Embedding,
           'ghostnorm_layer_cls': embedding.EmbeddingGhostNorm,
           'configs': {'input_dims': 3, 'num_classes': 2},
-          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 24, 3)),
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 4, 4)),
       },
       {
           'testcase_name': 'EmbeddingMatMul',
@@ -437,7 +439,7 @@ class LayersTest(parameterized.TestCase):
           'testcase_name': 'Embedding',
           'reference_layer_cls': praxis_embedding.Embedding,
           'configs': {'input_dims': 3, 'num_classes': 10},
-          'inputs_fn': lambda: np.random.randint(0, 10, size=(2, 1)),
+          'inputs_fn': lambda: np.random.randint(0, 10, size=(32, 1)),
       },
       {
           'testcase_name': 'Linear',
@@ -449,7 +451,7 @@ class LayersTest(parameterized.TestCase):
           'testcase_name': 'FeedForward',
           'reference_layer_cls': praxis_linears.FeedForward,
           'configs': {'input_dims': 3, 'output_dims': 4},
-          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(2, 3)),
+          'inputs_fn': lambda: np.random.normal(0, 0.1, size=(32, 3)),
       },
   )
   def test_calculate_grad_norms_generic(
@@ -500,7 +502,7 @@ class LayersTest(parameterized.TestCase):
       },
   )
   def test_calculate_grad_norms_transformer(self, model_type):
-    batch_size = 2
+    batch_size = 32
     seq_len = 10
     model_dim = 32
     vocab_size = 52
@@ -637,7 +639,7 @@ class LayersTest(parameterized.TestCase):
   ):
     """Test EmbeddingGhostNorm and SharedEmbeddingSoftmax equivalence."""
 
-    inputs_fn = lambda: np.random.randint(0, 10, size=(2, 1))
+    inputs_fn = lambda: np.random.randint(0, 10, size=(32, 1))
     configs = {
         'input_dims': 3,
         'num_classes': 10,
