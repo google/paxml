@@ -713,6 +713,9 @@ def parameter_sweep(
     enable_dataset_tuning: bool = True,
     enable_partitioner_tuning: bool = False,
     enable_train_programs_tuning: bool = False,
+    errors_to_skip: (
+        list[Type[Exception] | tuple[Type[Exception], str]] | None
+    ) = None,
 ) -> Callable[[Type[Any]], Type[Any]]:
   """Returns a decorator for enabling parameter sweeping on a PAX experiment.
 
@@ -722,8 +725,8 @@ def parameter_sweep(
       specified, the first row (`combinations[0]`) shall be a tuple of strings,
       which are the names of the class attributes that will be swept. Then it
       follows with one or multiple rows - each provides a combination of
-      parameter values for the header row, representing a single trial.  For
-      example:  ``` @automl.parameter_sweep([ ('LEARNING_RATE', 'HIDDEN_DIMS'),
+      parameter values for the header row, representing a single trial. For
+      example: ``` @automl.parameter_sweep([ ('LEARNING_RATE', 'HIDDEN_DIMS'),
         (0.1, 32), (0.01, 64), (0.001, 128), ]) class
         MySweepingExperiment(MyExperiment): pass ```
     metric: Metric to use as trial objective. If None, trial objective will be a
@@ -735,6 +738,12 @@ def parameter_sweep(
       inspection.
     enable_train_programs_tuning: If True, include the train programs in search
       space inspection.
+    errors_to_skip: An optional field to specify on what errors the trial should
+      be skipped. It's in the form of a list of (ExceptionType) or
+      (ExceptionType, regexForError). For example, if users specify:
+      `[RuntimeError, (Exception, 'XLACompilation.*')]`, the trails that
+      RuntimeError or errors that match 'XLACompilation.*' will be treated as to
+      skip.
 
   Returns:
     A new experiment class that is derived from the user class.
@@ -780,6 +789,7 @@ def parameter_sweep(
             enable_dataset_tuning=enable_dataset_tuning,
             enable_partitioner_tuning=enable_partitioner_tuning,
             enable_train_programs_tuning=enable_train_programs_tuning,
+            errors_to_skip=errors_to_skip,
         )
 
     new_cls = _ParameterSweeping
