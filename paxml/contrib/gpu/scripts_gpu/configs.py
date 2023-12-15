@@ -117,8 +117,6 @@ class GPT126M(TransformerLmSpmdAdam):
   DIMS_PER_HEAD = 64
 
   TRAINABLE_POSITION_EMB = True
-  TRAINABLE_PE_MAX_SEQ_LEN = MAX_SEQ_LEN
-
   USE_BIAS = True
   LAYERNORM_EPSILON = 1e-5
   ATTEN_LOGIT_CAP = -1.0
@@ -145,6 +143,8 @@ class GPT126M(TransformerLmSpmdAdam):
   LR_COS_MAX = 1.0
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    self.TRAINABLE_PE_MAX_SEQ_LEN = self.MAX_SEQ_LEN
+
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
     task_p.train.num_train_steps = self.MAX_STEPS
