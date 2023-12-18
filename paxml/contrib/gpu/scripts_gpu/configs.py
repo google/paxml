@@ -22,6 +22,7 @@ from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
+from paxml.tasks.lm.params.lm_cloud import SyntheticDataset
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -172,6 +173,11 @@ class GPT126M(TransformerLmSpmdAdam):
 
     return task_p
 
+@experiment_registry.register
+class Synthetic126M(GPT126M, SyntheticDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
 
 @experiment_registry.register
 class Pile126M(GPT126M, PileUnsupervisedDataset):
