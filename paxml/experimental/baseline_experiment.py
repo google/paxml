@@ -82,7 +82,7 @@ class BaselineExperiment(metaclass=abc.ABCMeta):
       **highlevel_settings: Settings which will be used when constructing an
         instance of this class.
     """
-    return pax_fiddle.Config(cls.make_experiment, **highlevel_settings)
+    return pax_fiddle.Config(cls.make_experiment, **highlevel_settings)  # pytype: disable=invalid-annotation  # use-fiddle-overlay
 
   @classmethod
   def lowlevel_config(cls, **highlevel_settings):

@@ -160,7 +160,7 @@ class GhostNormPaxConfig(pax_fiddle.Config):
 
   def __setattr__(self, name: str, value: Any):
     if name in _SPECIAL_ATTRS:
-      super().__setattr__(name, value)
+      super().__setattr__(name, value)  # pytype: disable=wrong-arg-types  # use-fiddle-overlay
     else:
       self.layer_tpl.__setattr__(name, value)
 

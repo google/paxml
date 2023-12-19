@@ -1886,7 +1886,7 @@ def get_eval_hparams_for_seqio(
     remaining_feature_lengths = dict(feature_lengths)
     del remaining_feature_lengths['inputs']
     del remaining_feature_lengths['targets']
-    p.task_feature_lengths.update(remaining_feature_lengths)
+    p.task_feature_lengths.update(remaining_feature_lengths)  # pytype: disable=attribute-error  # use-fiddle-overlay
 
   # Split hparams per tasks and filter by metric type.
   # First, the mixture_or_task itself may not be deepcopiable, so clear it

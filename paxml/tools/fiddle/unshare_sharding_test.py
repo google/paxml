@@ -41,7 +41,7 @@ def layer_config(sharding):
 
 def fake_config():
   shared = ["foo", "bar"]
-  return pax_fiddle.Config(
+  return pax_fiddle.Config(  # pytype: disable=wrong-arg-types  # use-fiddle-overlay
       TestWrapperLayer, sublayers=[layer_config(shared), layer_config(shared)]
   )
 
@@ -50,7 +50,7 @@ def fake_config_split_dims_cls_shared():
   sharding = pax_fiddle.Config(
       base_layer.BaseLayer.WeightSharding, wt=["foo", "bar"]
   )
-  return pax_fiddle.Config(
+  return pax_fiddle.Config(  # pytype: disable=wrong-arg-types  # use-fiddle-overlay
       TestWrapperLayer,
       sublayers=[
           pax_fiddle.Config(TestLayer, weight_split_dims_mapping=sharding),
