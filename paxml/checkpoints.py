@@ -723,20 +723,26 @@ class FlaxCheckpointer(ocp.Checkpointer):
       item: Any | None = None,
       **kwargs,
   ) -> Any:
-    if not isinstance(self._handler, FlaxCheckpointHandler):
-      raise ValueError('Unsupported handler for FlaxCheckpointer.')
-    self._handler = cast(FlaxCheckpointHandler, self._handler)
+    if 'LegacyCheckpointHandlerWrapper' in self._handler.__class__.__name__:
+      assert hasattr(self._handler, '_handler')
+      handler = self._handler._handler  # pylint: disable=protected-access
+    else:
+      handler = self._handler
+    if not isinstance(handler, FlaxCheckpointHandler):
+      raise ValueError(
+          f'Unsupported handler for FlaxCheckpointer of type {type(handler)}.'
+      )
     directory = epath.Path(directory)
-    original_aggregate_filename = self._handler._aggregate_filename  # pylint: disable=protected-access
+    original_aggregate_filename = handler._aggregate_filename  # pylint: disable=protected-access
     # If is_file, then the checkpoint is in legacy format, not saved with orbax.
     # Orbax checkpoints are directories containing a file called 'checkpoint'.
     if directory.is_file():
       # The msgpack file is actually the "directory".
-      self._handler._aggregate_filename = directory.name  # pylint: disable=protected-access
+      handler._aggregate_filename = directory.name  # pylint: disable=protected-access
       directory = directory.parent
     result = super().restore(directory, *args, item=item, **kwargs)
     # Reset aggregate_filename back to normal.
-    self._handler._aggregate_filename = (  # pylint: disable=protected-access
+    handler._aggregate_filename = (  # pylint: disable=protected-access
         original_aggregate_filename
     )
     return result
