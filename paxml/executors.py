@@ -413,6 +413,7 @@ def _train_and_evaluate_common(
     steps_per_sec = program_output.steps_per_sec
     eval_train_metrics = program_output.eval_train_metrics
 
+    num_steps_per_train_program = program_output.new_train_step - step_i
     # While the eval ones below are post-model weight updates, hence the step
     # counter is incremented in between.
     step_i = program_output.new_train_step
@@ -477,7 +478,10 @@ def _train_and_evaluate_common(
           elapsed_secs,
       )
     logging.log_first_n(
-        INFO, '[PAX STATUS]: Step `%d` completed.', 5, step_i - 1
+        INFO,
+        '[PAX STATUS]: Step `%d` completed.',
+        5,
+        step_i - num_steps_per_train_program,
     )
 
     # NOTE: By specifying the $checkpoint_path up to 'checkpoints' (instead of

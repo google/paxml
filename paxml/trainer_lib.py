@@ -1390,6 +1390,7 @@ def decode_step(
     inputs: JTensor | NestedMap,
     fprop_dtype: jnp.dtype = jnp.float32,
     apply_mutable_list: Sequence[str] = (DECODE_CACHE, SUMMARIES),
+    decode_method: str = 'decode',
 ) -> tuple[tuple[Any, Any, Any], NestedMap]:
   """Decodes a model for a single step.
 
@@ -1402,6 +1403,7 @@ def decode_step(
     fprop_dtype: fprop datatype, can be either jnp.float32 or jnp.bfloat16.
     apply_mutable_list: A list of allowed collections to be mutated during
       decode apply.
+    decode_method: the name of the decode method.
 
   Returns:
     A tuple of (weighted_scalars, results, eval_metrics) as computed
@@ -1430,7 +1432,7 @@ def decode_step(
     outputs, updated_vars = model.apply(
         mdl_vars,
         inputs,
-        method=model.decode,
+        method=getattr(model, decode_method),
         rngs=apply_rng_keys,
         mutable=apply_mutable_list,
     )
@@ -1449,7 +1451,8 @@ def decode_step(
 
     # merge back, if any, enum keys for eval matching
     per_example_out = outputs[1]
-    per_example_out.update(enum_keys)
+    if decode_method == 'decode':
+      per_example_out.update(enum_keys)
 
     summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
     if summary_tensors:
