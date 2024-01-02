@@ -1369,9 +1369,23 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         static_args: BaseStepFnStaticArgs | None = None,
     ):
       if static_args:
-        logging.warning('static_args is not supported for auto-sharding')
+        logging.warning(
+            'static_args is not supported for auto-sharding. Got static'
+            ' args: %s',
+            static_args,
+        )
         del static_args
-      return partitioned_step_fn(state, prng_key, inputs)
+      # AOT compilation forces us to _exactly_ match the structure for which we
+      # were compiled, not have a superset. Our superclass'es check_input_spec
+      # performs the subset / superset check, and many users expect this
+      # behavior (e.g. seqio injects private values to be read from data later).
+      # Thus we filter down to our expected subset here.
+      subset_extracted_inputs = (
+          trees.extract_elements_matching_subset_structure(
+              subset=self._auto_sharding_input_spec, superset=inputs
+          )
+      )
+      return partitioned_step_fn(state, prng_key, subset_extracted_inputs)
 
     self._auto_sharding_result = (
         AutoShardingPjitPartitioner._AutoShardingResult(
@@ -1403,7 +1417,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     if not self._auto_sharding_result:
       self.get_train_state_metadata(discard_opt_states=is_eval)
     if step_fn is self._auto_sharding_info.step_fn:
-      if inputs_shape_dtype == self._auto_sharding_result.inputs_shape_dtype:
+      if trees.is_subset(
+          self._auto_sharding_result.inputs_shape_dtype, inputs_shape_dtype
+      ):
         logging.info('Reusing auto-sharding partitioned function.')
         return (
             self._auto_sharding_result.partitioned_step_fn,
