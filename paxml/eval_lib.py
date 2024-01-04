@@ -141,6 +141,7 @@ class _EvalCheckpointer(metaclass=abc.ABCMeta):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
+      batch_size: typing.Optional[int] = None,
   ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Restore the train state from checkpoint or initialize it.
 
@@ -185,10 +186,12 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
+      batch_size: typing.Optional[int] = None,
   ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     """Gets a partitioned model states and the step function."""
     train_state_metadata = self._partitioner.get_train_state_metadata(
-        discard_opt_states=not self.use_ema
+        discard_opt_states=not self.use_ema,
+        unpadded_global_batch_size=batch_size,
     )
     partition_specs = train_state_metadata.partition_specs
     assert partition_specs is not None, 'must be in pjit mode'
@@ -259,6 +262,7 @@ class _PmapEvalCheckpointer(_EvalCheckpointer):
   def get_model_states(
       self,
       root_prng_key: PRNGKey,
+      batch_size: typing.Optional[int] = None,
   ) -> tuple[TrainState, trainer_lib.TrainStateMetadata, PRNGKey]:
     # Note: `discard_opt_states` is not supported when restoring pmap flax ckpt.
     # We must restore the entire checkpoint and then trim the opt states.
@@ -444,11 +448,11 @@ def evaluate(
       init_is_eval=True,
   )
   input_for_shape = None
+  input_p = partitioner.preprocess_input_config(eval_input_p[0])
   if not jax_task.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_config(eval_input_p[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
@@ -469,7 +473,9 @@ def evaluate(
   )
 
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key)
+      checkpointer.get_model_states(
+          prng_key, batch_size=input_p.cls.get_global_batch_size(input_p)
+      )
   )
   eval_programs = experiment_config.eval_programs()
   eval_runner = _EvalRunner(
@@ -633,6 +639,7 @@ def decode(
       init_is_eval=True,
   )
   input_for_shape = None
+  input_p = partitioner.preprocess_input_config(combined_input_ps[0])
   if not jax_task.train.always_use_train_for_model_init:
     assert train_input_specs is None
     # We assume that either eval_input or decoder_input can be used to retrieve
@@ -644,7 +651,6 @@ def decode(
 
     # TODO(pax-dev): Investigate if we can use model input specs
     # instead of instantiating this input pipeline.
-    input_p = partitioner.preprocess_input_config(combined_input_ps[0])
     input_for_shape = instantiate(input_p)
   partitioner.setup(
       jax_task, prng_key, train_input_specs, input_for_shape, job_log_dir
@@ -676,7 +682,9 @@ def decode(
   eval_programs = experiment_config.eval_programs() if run_eval else []
   decode_programs = experiment_config.decode_programs()
   partitioned_train_state, train_state_metadata, prng_key = (
-      checkpointer.get_model_states(prng_key)
+      checkpointer.get_model_states(
+          prng_key, batch_size=input_p.cls.get_global_batch_size(input_p)
+      )
   )
 
   eval_runner = _EvalRunner(

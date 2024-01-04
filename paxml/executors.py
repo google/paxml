@@ -206,7 +206,14 @@ class DefaultExecutor(base_executor.BaseExecutor):
         job_log_dir=job_log_dir,
     )
     logging.info('[PAX STATUS]: Getting train state metadata.')
-    train_state_metadata = partitioner.get_train_state_metadata()
+    train_unpadded_global_batch_size = None
+    if hasattr(train_input_p.cls, 'get_global_batch_size'):
+      train_unpadded_global_batch_size = (
+          train_input_p.cls.get_global_batch_size(train_input_p)
+      )
+    train_state_metadata = partitioner.get_train_state_metadata(
+        unpadded_global_batch_size=train_unpadded_global_batch_size,
+    )
 
     # JaxContext needed for shared layer lookup from global scope.
     logging.info('[PAX STATUS]: Writing post init model hparams.')

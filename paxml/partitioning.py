@@ -95,6 +95,7 @@ def compile_for_auto_sharding(
     train_state: TrainState,
     step_key: PRNGKey,
     inputs_shape_dtype: NestedShapeDtypeLike,
+    static_args: BaseStepFnStaticArgs | None = None,
 ):
   """Compiles step_fn ahead of time to extract the shardings.
 
@@ -121,7 +122,9 @@ def compile_for_auto_sharding(
     return core.ShapedArray(x.shape, dtype)
 
   inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
-  compiled = step_fn.lower(train_state, step_key, inputs_shape_dtype).compile()
+  compiled = step_fn.lower(
+      train_state, step_key, inputs_shape_dtype, static_args
+  ).compile()
   return compiled, compiled.input_shardings[0]
 
 
@@ -133,6 +136,7 @@ def _remove_input_padding(
 ):
   """Removes input padding on the batch dimension."""
   padded_global_batch_size = jax.tree_util.tree_leaves(inputs)[0].shape[0]
+
   if padded_global_batch_size == unpadded_global_batch_size:
     return inputs
 
@@ -496,6 +500,7 @@ class Partitioner(metaclass=abc.ABCMeta):
   def get_train_state_metadata(
       self,
       discard_opt_states: bool = False,
+      unpadded_global_batch_size: int | None = None,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
@@ -672,6 +677,7 @@ class PmapPartitioner(Partitioner):
   def get_train_state_metadata(
       self,
       discard_opt_states: bool = False,
+      unpadded_global_batch_size: int | None = None,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning."""
 
@@ -894,6 +900,7 @@ class PjitPartitioner(Partitioner):
   def get_train_state_metadata(
       self,
       discard_opt_states: bool = False,
+      unpadded_global_batch_size: int | None = None,
   ) -> TrainStateMetadata:
     """Gets the TrainStateMetadata used for partitioning.
 
@@ -935,7 +942,10 @@ class PjitPartitioner(Partitioner):
     logging.info('step_fn inputs_partition_spec=%s', input_partition_spec)
     # Step function to be pjit-ed.
     wrapped_step_fn = self._get_step_fn(
-        step_fn, is_eval, metadata, input_partition_spec
+        step_fn,
+        is_eval,
+        metadata,
+        input_partition_spec,
     )
     with self.global_mesh:
       return (
@@ -951,6 +961,7 @@ class PjitPartitioner(Partitioner):
       is_eval: bool,
       metadata: TrainStateMetadata,
       input_partition_spec: NestedPartitionSpec,
+      unpadded_global_batch_size: int | None = None,
       use_padding: bool = True,
   ) -> PartitionedStepFn:
     """Returns a step function to apply the SPMD partition (pjit)."""
@@ -985,20 +996,19 @@ class PjitPartitioner(Partitioner):
         state = self._unpad_states(metadata, state)
         inputs = self._unpad_inputs(
             inputs,
-            static_args.unpadded_global_batch_size if static_args else None,
+            static_args.unpadded_global_batch_size
+            if static_args
+            else unpadded_global_batch_size,
             input_partition_spec,
         )
 
       # Reshard inputs.
-      # TODO(pax): when xla auto-sharding is enabled, it'll automatically figure
-      # out the proper sharding of intermediate nodes, we can get rid of this
-      # manual sharding now?
+      # When xla auto-sharding is enabled, it is likely that we still
+      # need to keep this resharding, because the resharding is related to the
+      # locations of the real data (inputs_split_mapping) and is not visible
+      # from HLOs.
       inputs = jax.tree_map(reshard_inputs_fn, inputs)
 
-      # When auto sharding is enabled, uneven sharding is not supported. This is
-      # because the way padding is added is dependent on the provided train
-      # state partition specs. This is not available during auto-sharding until
-      # after the compilation is done.
       fn_out = step_fn(
           self._jax_task,
           state,
@@ -1259,6 +1269,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
       inputs_shape_dtype: NestedShapeDtypeLike,
       input_partition_spec: NestedPartitionSpec,
       metadata: TrainStateMetadata,
+      static_args: BaseStepFnStaticArgs | None = None,
   ) -> tuple[PartitionedStepFn, NestedPartitionSpec, TrainState]:
     """Generates and returns the train state partition spec automatically."""
     # Workflow: create abstract train state and ahead of time compile the
@@ -1272,8 +1283,11 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     fn_in_partition_specs = (
         pjit.AUTO(self.global_mesh),
         prng_key_partition_spec,
+        # Auto sharding does not change input data sharding specs.
+        # So it does not interfere with PAX's input padding.
         input_partition_spec,
     )
+
     fn_out_partition_specs = (
         PartitionSpec()
         if self._auto_sharding_info.replicate_output
@@ -1291,14 +1305,13 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     logging.info(
         (
             'Lowering auto sharded function with input shapes:'
-            ' train_state_metadata=%s, prng_key=%s, inputs=%s'
+            ' train_state_metadata=%s, prng_key=%s, inputs=%s static_args=%s'
         ),
         metadata.unpadded_global_shapes,
         jax.tree_map(jnp.shape, self._init_key),
         jax.tree_map(jnp.shape, inputs_shape_dtype),
+        static_args,
     )
-    # NOTE(pax-dev): The following is currently incompatible with variable
-    # uneven-sharding padding.
     (
         auto_sharded_step_fn,
         input_shardings,
@@ -1307,14 +1320,21 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         metadata.unpadded_global_shapes,
         self._init_key,
         inputs_shape_dtype,
+        static_args,
     )
     new_train_state_pspec = jax.tree_map(lambda x: x.spec, input_shardings[0])
     new_input_pspec = jax.tree_map(lambda x: x.spec, input_shardings[2])
     return auto_sharded_step_fn, new_input_pspec, new_train_state_pspec
 
   def get_train_state_metadata(
-      self, discard_opt_states: bool = False
+      self,
+      discard_opt_states: bool = False,
+      unpadded_global_batch_size: int | None = None,
   ) -> TrainStateMetadata:
+    """The caller has to pass unpadded_global_batch_size if the step_fn is
+
+    called with static_args.
+    """
     if self._train_state_metadata:
       return self._maybe_discard_opt_states(
           self._train_state_metadata, discard_opt_states
@@ -1342,13 +1362,12 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         self._auto_sharding_info.is_eval,
         train_state_metadata,
         input_partition_spec=input_partition_spec,
-        # When auto-sharding is enabled, we can't pad the variables whose input
-        # sharding may get changed by auto-sharding.
-        # TODO(pax-dev): Add support for padding and unpadding inputs when auto
-        # sharding is enabled.
-        use_padding=False,
+        # This arg is necessary to correctly unpad inputs for auto sharding
+        # step_fn when per_core_batch_size < 1.
+        unpadded_global_batch_size=unpadded_global_batch_size,
     )
 
+    # This is where step_fn with auto sharding is AOT-ed.
     with self.global_mesh:
       partitioned_step_fn, input_pspec, train_state_pspec = (
           self._partition_auto_shard(
@@ -1357,11 +1376,16 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
               self._auto_sharding_input_spec,
               input_partition_spec,
               train_state_metadata,
+              BaseStepFnStaticArgs(
+                  unpadded_global_batch_size=unpadded_global_batch_size
+              ),
           )
       )
 
-    # unpadded_global_batch_size is not used for AOT-compiled functions, so we
-    # always pass None to avoid recompilation.
+    # This is the second invocation of AOT-compiled functions and static_args
+    # (unpadded_global_batch_size) were passed in the first invocation in
+    # _partition_auto_shard. We add an assertion here to make sure static_args
+    # is the same as unpadded_global_batch_size to avoid recompilation.
     def _wrapped_partitioned_step(
         state,
         prng_key,
@@ -1369,11 +1393,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         static_args: BaseStepFnStaticArgs | None = None,
     ):
       if static_args:
-        logging.warning(
-            'static_args is not supported for auto-sharding. Got static'
-            ' args: %s',
-            static_args,
-        )
+        # Do not pass static args for AOT-ed functions.
+        logging.info('static_args has been passed when AOT for auto sharding.')
         del static_args
       # AOT compilation forces us to _exactly_ match the structure for which we
       # were compiled, not have a superset. Our superclass'es check_input_spec
