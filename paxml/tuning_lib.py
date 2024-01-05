@@ -15,8 +15,10 @@
 
 """Tuning loop for PAX."""
 
+import base64
 import copy
 import inspect
+import lzma
 import math
 import os
 import re
@@ -362,33 +364,53 @@ def _record_experiment_config(
     feedback: pg.tuning.Feedback,
 ) -> None:
   """Record experiment config as trial metadata."""
-  exp_configs = {}
+  exp_configs = {
+      'datasets': {},
+      'decode_datasets': {},
+      'task': {},
+  }
   for subexp_id, subexp_cls in sub_experiments.items():
     subexp = subexp_cls()  # pytype: disable=not-instantiable
-    exp_configs[subexp_id] = {
-        # TODO(daiyip): We shall have more machine parse-able format such as
-        # JSON or Fiddle config. But we start with raw texts to collect data
-        # as early as possible.
-        'datasets': [
-            base_hyperparams.nested_struct_to_text(ds)
-            for ds in subexp.datasets()
-        ],
-        'decode_datasets': [
-            base_hyperparams.nested_struct_to_text(ds)
-            for ds in subexp.decode_datasets()
-        ],
-        'task': base_hyperparams.nested_struct_to_text(subexp.task()),
-    }
+    # TODO(daiyip): We shall have more machine parse-able format such as
+    # JSON or Fiddle config. But we start with raw texts to collect data
+    # as early as possible.
 
-  feedback.set_metadata(
-      'experiment_config', {
-          # We might change the format of serialized configurations in future.
-          # It will be easy for us to filter out metadata of old format based
-          # on this format version.
-          'format_version': 1.0,
-          'source': 'pax',
-          'config': exp_configs
-      }, per_trial=True)
+    exp_configs['datasets'][subexp_id] = [
+        base_hyperparams.nested_struct_to_text(ds) for ds in subexp.datasets()
+    ]
+    exp_configs['decode_datasets'][subexp_id] = [
+        base_hyperparams.nested_struct_to_text(ds)
+        for ds in subexp.decode_datasets()
+    ]
+    exp_configs['task'][subexp_id] = base_hyperparams.nested_struct_to_text(
+        subexp.task()
+    )
+
+  for key, value in exp_configs.items():
+    feedback.set_metadata(
+        f'experiment_config:{key}',
+        {
+            # We might change the format of serialized configurations in future.
+            # It will be easy for us to filter out metadata of old format based
+            # on this format version.
+            'format_version': 2.0,
+            'source': 'pax',
+            'config': compressed(value),
+        },
+        per_trial=True,
+    )
+
+
+def compressed(value: Any) -> str:
+  """Returns compressed string for a JSON convertible value."""
+  return base64.b64encode(
+      lzma.compress(pg.to_json_str(value).encode('utf-8'))
+  ).decode('ascii')
+
+
+def uncompressed(str_compressed: str) -> str:
+  """Returns the uncompressed string from a compressed string."""
+  return lzma.decompress(base64.b64decode(str_compressed)).decode('utf-8')
 
 
 def _run_dedicated_controller(

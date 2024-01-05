@@ -495,23 +495,25 @@ class TuneTest(absltest.TestCase):
     self.assertEqual([t.final_measurement.step for t in result.trials],
                      [0, 21, 21, 21, 21])
     # Make sure experiment config is saved as trial metadata.
-    actual = result.trials[0].metadata.get('experiment_config')
-    actual['config']['']['datasets'][0] = 'MOCK_DATASET_CONFIG'
-    actual['config']['']['decode_datasets'][0] = 'MOCK_DATASET_CONFIG'
-    actual['config']['']['task'] = 'MOCK_TASK_CONFIG'
-    self.assertEqual(
-        actual,
-        {
-            'format_version': 1.0,
-            'source': 'pax',
-            'config': {
-                '': pg.Dict(
-                    datasets=['MOCK_DATASET_CONFIG'],
-                    decode_datasets=['MOCK_DATASET_CONFIG'],
-                    task='MOCK_TASK_CONFIG',
-                )
-            },
-        },
+    self.assertIn(
+        'MockDataset',
+        tuning_lib.uncompressed(
+            result.trials[0].metadata['experiment_config:datasets']['config']
+        ),
+    )
+    self.assertIn(
+        'MockDataset',
+        tuning_lib.uncompressed(
+            result.trials[0].metadata['experiment_config:decode_datasets'][
+                'config'
+            ]
+        ),
+    )
+    self.assertIn(
+        'learning_rate',
+        tuning_lib.uncompressed(
+            result.trials[0].metadata['experiment_config:task']['config']
+        ),
     )
 
   def test_parameter_sweep_with_catesian_product(self):
