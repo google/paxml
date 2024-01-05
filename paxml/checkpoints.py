@@ -128,7 +128,9 @@ def save_checkpoint(
   del state_specs
 
   checkpoint_dir = epath.Path(checkpoint_dir)
-  step = int(py_utils.maybe_unreplicate_for_fully_replicated(train_state.step))
+  step = py_utils.maybe_unreplicate_for_fully_replicated(
+      train_state.step
+  ).item()
 
   checkpointer = get_checkpointer(
       checkpoint_type,
