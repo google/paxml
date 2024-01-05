@@ -497,14 +497,15 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     def _replace_param_info_name(info, name):
       return dataclasses.replace(info, name=name, path=info.path.parent / name)
 
-    directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
-    # Hack to replace parameter names.
-    if not ocp.type_handlers.is_ocdbt_checkpoint(directory):
-      param_infos = jax.tree_util.tree_map(
-          _replace_param_info_name,
-          param_infos,
-          self._param_names,
-      )
+    if param_infos:
+      directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
+      # Hack to replace parameter names.
+      if not ocp.type_handlers.is_ocdbt_checkpoint(directory):
+        param_infos = jax.tree_util.tree_map(
+            _replace_param_info_name,
+            param_infos,
+            self._param_names,
+        )
     return await super()._maybe_deserialize(
         structure, param_infos, restore_args
     )
