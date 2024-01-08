@@ -162,7 +162,8 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     MicrobatchDpSgdStochasticGradient: http://tb/2683981470965501622
 
   Attributes:
-    l2_norm_clip: The L2 clipping bound used to clip per-core gradients.
+    l2_norm_clip: The L2 clipping bound used to clip per-core gradients. If set
+      to None, no clipping is applied.
     noise_multiplier: The noise multiplier used to decide the noise scale. See
       Section 5.3.2 of https://arxiv.org/pdf/2303.00654.pdf for more details.
     use_loss_weight_scaling: Whether to use aux.loss_weight to scale the
@@ -182,7 +183,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       gradient as the clipping bound.
   """
 
-  l2_norm_clip: float = 0.0
+  l2_norm_clip: float | None = 0.0
   noise_multiplier: float = 0.0
   use_loss_weight_scaling: bool = False
   normalize_gradients: bool = False
@@ -278,9 +279,10 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
           f' {self.adaptive_clipping_method}'
       )
 
-    grads, num_clipped, grad_norm = self._clip_gradients(
-        grads, clipping_bound_scaling * self.l2_norm_clip
-    )
+    if self.l2_norm_clip is not None:
+      grads, num_clipped, grad_norm = self._clip_gradients(
+          grads, clipping_bound_scaling * self.l2_norm_clip
+      )
 
     if self.normalize_gradients:
       grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
