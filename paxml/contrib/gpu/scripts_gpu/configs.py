@@ -95,10 +95,9 @@ def configure_gpt3_task(
 
   return task_p
 
-
 ## 8 node
 @experiment_registry.register
-class GPT126M(TransformerLmSpmdAdam):
+class GPT126MBase(TransformerLmSpmdAdam):
 
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [8, 1, 1]
@@ -173,35 +172,9 @@ class GPT126M(TransformerLmSpmdAdam):
 
     return task_p
 
-@experiment_registry.register
-class Synthetic126M(GPT126M, SyntheticDataset):
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-    task_p = super().task()
-    return task_p
-
-@experiment_registry.register
-class Pile126M(GPT126M, PileUnsupervisedDataset):
-
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-    task_p = super().task()
-    return task_p
-
-
-@experiment_registry.register
-class Lambada126M(GPT126M, LambadaDataset):
-
-  ICI_MESH_SHAPE = [8,1,1]
-
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-    task_p = super().task()
-    task_p.train.always_use_train_for_model_init=False
-    task_p.model.report_strict_acc=True
-    return task_p
-
-
 ## 32 node
 @experiment_registry.register
-class GPT5B(Pile126M):
+class GPT5BBase(GPT126MBase):
 
   USE_REPEATED_LAYER = True
   ICI_MESH_SHAPE = [1, 8, 1]
@@ -247,7 +220,7 @@ class GPT5B(Pile126M):
 
 ## 96 node
 @experiment_registry.register
-class GPT175B(Pile126M):
+class GPT175BBase(GPT126MBase):
 
   NUM_LAYERS = 96
   NUM_HEADS = 96
@@ -300,3 +273,57 @@ class GPT175B(Pile126M):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     return task_p
+
+### synthetic configs
+@experiment_registry.register
+class Synthetic126M(GPT126MBase, SyntheticDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+class Synthetic5B(GPT5BBase, SyntheticDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+class Synthetic175B(GPT175BBase, SyntheticDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+### configs with the Pile dataset
+@experiment_registry.register
+class Pile126M(GPT126MBase, PileUnsupervisedDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+@experiment_registry.register
+class Pile5B(GPT5BBase, PileUnsupervisedDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+@experiment_registry.register
+class Pile175B(GPT175BBase, PileUnsupervisedDataset):
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+### example of a config that runs evaluation on the lambada dataset
+@experiment_registry.register
+class Lambada126M(GPT126MBase, LambadaDataset):
+
+  ICI_MESH_SHAPE = [8,1,1]
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.always_use_train_for_model_init=False
+    task_p.model.report_strict_acc=True
+    return task_p
+
+
+### legacy aliases
+GPT5B = Pile5B
+GPT175B = Pile175B
