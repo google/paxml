@@ -17,10 +17,11 @@
 # Assumes you are using a SLURM cluster. Edit flags under --multiprocess_gpu below to suit your setup
 set -u
 
-PREC=${1:-"bfloat16"}        # Precision (float32, bfloat16)
-NUM_GPUS=${2:-8}      # Number of GPUs (1, 2, 4, 8)
-PERCORE_BATCH_SIZE=${3:-4}
-LOG_DIR=${4:-"test_logdir"}
+CONFIG=${1:-"Synthetic126M"}
+PREC=${2:-"bfloat16"}        # Precision (float32, bfloat16)
+NUM_GPUS=${3:-8}      # Number of GPUs (1, 2, 4, 8)
+PERCORE_BATCH_SIZE=${4:-4}
+LOG_DIR=${5:-"test_logdir"}
 
 export VOCAB_PATH=None
 export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.85}
@@ -32,11 +33,10 @@ BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"--xla_gpu_enable_latency_hiding_scheduler=true
 export XLA_FLAGS="$BASE_XLA_FLAGS ${XLA_FLAGS:-}"
 
 
-## NOTE: 126M trained with pure data parallel
 mkdir -p $LOG_DIR
 python3 -u -m paxml.main \
     --job_log_dir=$LOG_DIR \
-    --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.Synthetic126M \
+    --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.${CONFIG} \
     --fdl.FPROP_DTYPE=\"${PREC}\" \
     --fdl.PERCORE_BATCH_SIZE=$PERCORE_BATCH_SIZE \
     --multiprocess_gpu \
