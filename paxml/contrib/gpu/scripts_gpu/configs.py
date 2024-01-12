@@ -96,7 +96,6 @@ def configure_gpt3_task(
   return task_p
 
 ## 8 node
-@experiment_registry.register
 class GPT126MBase(TransformerLmSpmdAdam):
 
   USE_REPEATED_LAYER = False
@@ -173,7 +172,6 @@ class GPT126MBase(TransformerLmSpmdAdam):
     return task_p
 
 ## 32 node
-@experiment_registry.register
 class GPT5BBase(GPT126MBase):
 
   USE_REPEATED_LAYER = True
@@ -219,7 +217,6 @@ class GPT5BBase(GPT126MBase):
 
 
 ## 96 node
-@experiment_registry.register
 class GPT175BBase(GPT126MBase):
 
   NUM_LAYERS = 96
@@ -281,11 +278,13 @@ class Synthetic126M(GPT126MBase, SyntheticDataset):
     task_p = super().task()
     return task_p
 
+@experiment_registry.register
 class Synthetic5B(GPT5BBase, SyntheticDataset):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     return task_p
 
+@experiment_registry.register
 class Synthetic175B(GPT175BBase, SyntheticDataset):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()

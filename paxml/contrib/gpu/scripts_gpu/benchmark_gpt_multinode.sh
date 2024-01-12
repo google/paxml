@@ -43,5 +43,7 @@ python3 -u -m paxml.main \
     --server_addr=${SLURM_LAUNCH_NODE_IPADDR}:12345 \
     --num_hosts=$SLURM_NTASKS \
     --host_idx=$SLURM_PROCID \
+    --enable_checkpoint_saving=False \
+    --fdl.MAX_STEPS=100 \
     --alsologtostderr
 
