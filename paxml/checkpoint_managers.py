@@ -18,11 +18,10 @@
 import dataclasses
 import os
 import typing
-from typing import Any, Sequence
+from typing import Any, Sequence, Union
 
 from absl import logging
 from etils import epath
-import jax
 import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
@@ -31,7 +30,6 @@ from paxml import checkpoint_version
 from paxml import train_states
 from praxis import base_input
 from praxis import pytypes
-import tensorflow.compat.v2 as tf
 
 
 Nested = pytypes.Nested
@@ -151,6 +149,128 @@ class CheckpointManagerOptions(ocp.CheckpointManagerOptions):
   cleanup_tmp_directories: bool = False
 
 
+class _CompositeCheckpointHandlerWrapper(ocp.CompositeCheckpointHandler):
+  """Wrapper for CompositeCheckpointHandler support version < 1."""
+
+  def _get_state_handler(self) -> ocp.CheckpointHandler:
+    for item_name, handler in self._known_handlers.items():
+      if item_name == STATE_ITEM_NAME:
+        if handler is None:
+          raise ValueError(f'Handler for {STATE_ITEM_NAME} was not configured.')
+        return handler
+    raise ValueError(f'Handler for {STATE_ITEM_NAME} not found.')
+
+  async def async_save(
+      self, directory: epath.Path, args: ocp.args.Composite
+  ) -> list[ocp.future.Future] | None:
+    handler = self._get_state_handler()
+    if not isinstance(handler, ocp.AsyncCheckpointHandler):
+      raise TypeError(
+          f'Handler for {STATE_ITEM_NAME} does not support async save.'
+      )
+    return await handler.async_save(directory, args=args[STATE_ITEM_NAME])
+
+  def save(self, directory: epath.Path, args: ocp.args.Composite):
+    return self._get_state_handler().save(directory, args=args[STATE_ITEM_NAME])
+
+  def restore(
+      self,
+      directory: epath.Path,
+      args: ocp.args.Composite | None = None,
+  ) -> ocp.args.Composite:
+    result = self._get_state_handler().restore(
+        directory, args=args[STATE_ITEM_NAME]
+    )
+    return ocp.args.Composite(**{STATE_ITEM_NAME: result})
+
+  def metadata(self, directory: epath.Path):
+    raise NotImplementedError()
+
+  def finalize(self, directory: epath.Path):
+    self._get_state_handler().finalize(directory)
+
+  def close(self):
+    self._get_state_handler().close()
+
+
+# pylint: disable=protected-access
+# pytype: disable=attribute-error
+
+
+def _restore_legacy_flax(directory, handler, restore_fn, *args, **kwargs):
+  """Restores legacy Flax checkpoint."""
+  handler = typing.cast(
+      _CompositeCheckpointHandlerWrapper, handler
+  )._known_handlers[STATE_ITEM_NAME]
+  if 'LegacyCheckpointHandlerWrapper' in handler.__class__.__name__:
+    assert hasattr(handler, '_handler')
+    handler = handler._handler
+  if handler.__class__.__name__ != 'FlaxCheckpointHandler':
+    raise ValueError(
+        f'Unsupported handler for Flax restoration of type {type(handler)}.'
+    )
+  directory = epath.Path(directory)
+  original_aggregate_filename = handler._aggregate_filename
+  # If is_file, then the checkpoint is in legacy format, not saved with
+  # orbax. Orbax checkpoints are directories containing a file\
+  # called 'checkpoint'.
+  if directory.is_file():
+    # The msgpack file is actually the "directory".
+    handler._aggregate_filename = directory.name
+    directory = directory.parent
+  result = restore_fn(directory, *args, **kwargs)
+  # Reset aggregate_filename back to normal.
+  handler._aggregate_filename = original_aggregate_filename
+  return result
+
+
+# pylint: enable=protected-access
+# pytype: enable=attribute-error
+
+
+class _Checkpointer(ocp.Checkpointer):
+  """Override supporting restoring legacy Flax checkpoints."""
+
+  def __init__(self, *args, is_legacy_flax_checkpoint: bool = False, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._is_legacy_flax_checkpoint = is_legacy_flax_checkpoint
+
+  def restore(
+      self, directory: epath.PathLike, *args: Any, **kwargs: Any
+  ) -> ocp.args.Composite:
+    if self._is_legacy_flax_checkpoint:
+      return _restore_legacy_flax(
+          directory, self._handler, super().restore, *args, **kwargs
+      )
+    else:
+      return super().restore(directory, *args, **kwargs)
+
+
+class _AsyncCheckpointer(ocp.AsyncCheckpointer):
+  """Override supporting restoring legacy Flax checkpoints."""
+
+  def __init__(self, *args, is_legacy_flax_checkpoint: bool = False, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._is_legacy_flax_checkpoint = is_legacy_flax_checkpoint
+
+  def restore(
+      self, directory: epath.PathLike, *args: Any, **kwargs: Any
+  ) -> ocp.args.Composite:
+    if self._is_legacy_flax_checkpoint:
+      return _restore_legacy_flax(
+          directory, self._handler, super().restore, *args, **kwargs
+      )
+    else:
+      return super().restore(directory, *args, **kwargs)
+
+
+@ocp.args.register_with_handler(
+    _CompositeCheckpointHandlerWrapper, for_save=True, for_restore=True
+)
+class _CompositeWrapperArgs(ocp.args.Composite):
+  pass
+
+
 class _CheckpointManagerImpl(ocp.CheckpointManager):
   """Provides Pax-specific logic for ocp.CheckpointManager.
 
@@ -168,10 +288,13 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
   def __init__(
       self,
       directory: epath.PathLike,
-      *args,
+      checkpointers: (
+          Union[ocp.AbstractCheckpointer, dict[str, ocp.AbstractCheckpointer]]
+          | None
+      ) = None,
+      options: CheckpointManagerOptions | None = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       tensorstore_use_ocdbt: bool | None = None,
-      **kwargs,
   ):
     if checkpoint_type == CheckpointType.UNSPECIFIED:
       raise ValueError('Must specify checkpoint type.')
@@ -211,7 +334,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           )
           self._version = version
 
-    super().__init__(directory, *args, **kwargs)
+    super().__init__(directory, checkpointers=checkpointers, options=options)
     # Set to 1 if not provided or set to 0.
     self._options.save_interval_steps = self._options.save_interval_steps or 1
     self._options.step_prefix = checkpoint_paths.checkpoint_prefix(
@@ -220,6 +343,31 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
     self._options.step_format_fixed_length = (
         checkpoint_paths.checkpoint_name_fixed_length(self._checkpoint_type)
     )
+
+    if self.version < 1:
+      composite_handler = typing.cast(
+          ocp.CompositeCheckpointHandler, self._checkpointer._handler  # pylint: disable=protected-access
+      )
+      original_state_handler = composite_handler._known_handlers[  # pylint: disable=protected-access
+          STATE_ITEM_NAME
+      ]
+      handler = _CompositeCheckpointHandlerWrapper(
+          **{STATE_ITEM_NAME: original_state_handler}
+      )
+      is_legacy_flax_checkpoint = (
+          checkpointers[STATE_ITEM_NAME].__class__.__name__
+          == 'FlaxCheckpointer'
+      )
+      if ocp.checkpoint_manager.is_async_checkpointer(self._checkpointer):
+        self._checkpointer = _AsyncCheckpointer(
+            handler=handler,
+            is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
+        )
+      else:
+        self._checkpointer = _Checkpointer(
+            handler=handler,
+            is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
+        )
 
   @property
   def version(self) -> float:
@@ -299,47 +447,14 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       self,
       step: int,
       directory: epath.Path,
-      key_name: str | None = None,
-      tmp_directory: epath.Path | None = None,
   ) -> epath.Path:
     """Returns the standardized path to a save directory for a single item."""
-    if tmp_directory is None:
-      step_dir = checkpoint_paths.make_checkpoint_step_dir(
-          directory,
-          step,
-          checkpoint_type=self._checkpoint_type,
-          use_digit_step_subdirectory=self._use_digit_step_subdirectory,
-      )
-    else:
-      step_dir = tmp_directory
-    if self._version < 1 or key_name is None:
-      return step_dir
-    return step_dir / key_name
-
-  def _create_tmp_directory(self, directory: epath.Path) -> epath.Path:
-    if self._version < 1:
-      # Construct the path without returning. This is because Checkpointer must
-      # be allowed to create the path. Only needed for legacy compatibility.
-      return ocp.utils.get_tmp_directory(directory)
-    return super()._create_tmp_directory(directory)
-
-  def _delete_directory(self, step: int):
-    if jax.process_index() != 0:
-      return
-    options = typing.cast(CheckpointManagerOptions, self._options)
-    todelete_subdir = options.todelete_subdir
-    checkpoint_name = self._checkpoint_name(step)
-
-    if todelete_subdir:
-      rename_dir = self.directory / todelete_subdir
-      if not rename_dir.exists():
-        rename_dir.mkdir(parents=True)
-      src = self.directory / checkpoint_name
-      dst = rename_dir / checkpoint_name
-      # TODO(pax-team): Check if dst already exists?
-      tf.io.gfile.rename(src, dst)
-    else:
-      super()._delete_directory(step)
+    return checkpoint_paths.make_checkpoint_step_dir(
+        directory,
+        step,
+        checkpoint_type=self._checkpoint_type,
+        use_digit_step_subdirectory=self._use_digit_step_subdirectory,
+    )
 
 
 class OrbaxCheckpointManager:
@@ -355,6 +470,7 @@ class OrbaxCheckpointManager:
       tensorstore_use_ocdbt: bool | None = None,
       aux_checkpointers: dict[str, ocp.AbstractCheckpointer] | None = None,
   ):
+    self._checkpoint_type = checkpoint_type
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
     checkpointers = {
         STATE_ITEM_NAME: checkpointer,
@@ -403,10 +519,13 @@ class OrbaxCheckpointManager:
     return self._manager.should_save(step)
 
   def _train_checkpoint_exists(self, step: int) -> bool:
-    path = self._manager._get_save_directory(  # pylint: disable=protected-access
-        step, self.directory, INPUT_ITEM_NAME
+    step_dir = checkpoint_paths.make_checkpoint_step_dir(
+        self.directory,
+        step,
+        checkpoint_type=self._checkpoint_type,
+        use_digit_step_subdirectory=self._manager._use_digit_step_subdirectory,  # pylint: disable=protected-access
     )
-    return path.exists()
+    return (step_dir / INPUT_ITEM_NAME).exists()
 
   def save(
       self,

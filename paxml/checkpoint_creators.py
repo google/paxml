@@ -619,7 +619,9 @@ def _create_checkpointer(
           ' (will be checkpointed independently). Please set'
           ' enable_input_checkpointing=False.'
       )
-    train_input_checkpointer = checkpoints.BaseInputCheckpointHandler()
+    train_input_checkpointer = ocp.Checkpointer(
+        checkpoints.BaseInputCheckpointHandler()
+    )
 
   if task_p.train.enable_input_checkpointing:
     train_input_p.input_checkpointing_enabled = True

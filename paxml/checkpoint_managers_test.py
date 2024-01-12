@@ -309,6 +309,7 @@ class CheckpointManagerTest(parameterized.TestCase):
             self.train_state_unpadded_shape_dtype_struct
         ),
     )
+    ocp.test_utils.print_directory(checkpoint_manager.directory)
     if use_train_input:
       train_input_pipeline.reset()
     expected = self.train_state
@@ -854,15 +855,12 @@ class CheckpointManagerTest(parameterized.TestCase):
           assert f.name == 'checkpoint'
           f.copy(step_dir / f.name)
       (step_dir / 'state').rmtree()
-      checkpoint_manager._manager._version = 0.0
-      checkpoint_manager._manager._options.enable_descriptor = False
     elif legacy_version == 1.0:
       # Transform metadata to what we would expect in a version 1 checkpoint
       metadata = json.loads(fp_metadata.read_text())
       metadata['version'] = 1.0
       del metadata['train_state_metadata']
       fp_metadata.write_text(json.dumps(metadata))
-      checkpoint_manager._manager._version = 1.0
 
     expected = self.train_state
     if checkpoint_type == CheckpointType.FLAX:
@@ -875,6 +873,12 @@ class CheckpointManagerTest(parameterized.TestCase):
         lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
         train_state_global_shapes,
     )
+
+    checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+    )
+    self.assertEqual(legacy_version, checkpoint_manager._manager._version)
     # restoring old checkpoint using old checkpoint_manager
     restored = self.restore(
         checkpoint_manager,

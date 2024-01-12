@@ -82,11 +82,9 @@ pytype_strict_library(
         ":train_states",
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
-        # Implicit jax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:base_input",
         "//praxis:pytypes",
-        # Implicit tensorflow_no_contrib dependency.
     ],
 )
 
