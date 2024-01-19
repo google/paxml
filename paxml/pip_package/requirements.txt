@@ -283,7 +283,7 @@ jupyter-server==2.12.2
     #   notebook-shim
 jupyter-server-terminals==0.5.1
     # via jupyter-server
-jupyterlab==4.0.10
+jupyterlab==4.0.11
     # via notebook
 jupyterlab-pygments==0.3.0
     # via nbconvert
