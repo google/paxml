@@ -22,6 +22,7 @@ from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
+from paxml.tasks.lm.params.lm_cloud import SyntheticDataset
 from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
@@ -96,8 +97,7 @@ def configure_gpt3_task(
 
 
 ## 8 node
-@experiment_registry.register
-class GPT126M(TransformerLmSpmdAdam):
+class GPT126MBase(TransformerLmSpmdAdam):
 
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [8, 1, 1]
@@ -117,8 +117,6 @@ class GPT126M(TransformerLmSpmdAdam):
   DIMS_PER_HEAD = 64
 
   TRAINABLE_POSITION_EMB = True
-  TRAINABLE_PE_MAX_SEQ_LEN = MAX_SEQ_LEN
-
   USE_BIAS = True
   LAYERNORM_EPSILON = 1e-5
   ATTEN_LOGIT_CAP = -1.0
@@ -145,6 +143,8 @@ class GPT126M(TransformerLmSpmdAdam):
   LR_COS_MAX = 1.0
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    self.TRAINABLE_PE_MAX_SEQ_LEN = self.MAX_SEQ_LEN
+
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
     task_p.train.num_train_steps = self.MAX_STEPS
@@ -173,29 +173,8 @@ class GPT126M(TransformerLmSpmdAdam):
     return task_p
 
 
-@experiment_registry.register
-class Pile126M(GPT126M, PileUnsupervisedDataset):
-
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-    task_p = super().task()
-    return task_p
-
-
-@experiment_registry.register
-class Lambada126M(GPT126M, LambadaDataset):
-
-  ICI_MESH_SHAPE = [8,1,1]
-
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-    task_p = super().task()
-    task_p.train.always_use_train_for_model_init=False
-    task_p.model.report_strict_acc=True
-    return task_p
-
-
 ## 32 node
-@experiment_registry.register
-class GPT5B(Pile126M):
+class GPT5BBase(GPT126MBase):
 
   USE_REPEATED_LAYER = True
   ICI_MESH_SHAPE = [1, 8, 1]
@@ -240,8 +219,7 @@ class GPT5B(Pile126M):
 
 
 ## 96 node
-@experiment_registry.register
-class GPT175B(Pile126M):
+class GPT175BBase(GPT126MBase):
 
   NUM_LAYERS = 96
   NUM_HEADS = 96
@@ -294,3 +272,71 @@ class GPT175B(Pile126M):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     return task_p
+
+
+### synthetic configs
+@experiment_registry.register
+class Synthetic126M(GPT126MBase, SyntheticDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+@experiment_registry.register
+class Synthetic5B(GPT5BBase, SyntheticDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+@experiment_registry.register
+class Synthetic175B(GPT175BBase, SyntheticDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+### configs with the Pile dataset
+@experiment_registry.register
+class Pile126M(GPT126MBase, PileUnsupervisedDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+@experiment_registry.register
+class Pile5B(GPT5BBase, PileUnsupervisedDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+@experiment_registry.register
+class Pile175B(GPT175BBase, PileUnsupervisedDataset):
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    return task_p
+
+
+### example of a config that runs evaluation on the lambada dataset
+@experiment_registry.register
+class Lambada126M(GPT126MBase, LambadaDataset):
+
+  ICI_MESH_SHAPE = [8, 1, 1]
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.always_use_train_for_model_init = False
+    task_p.model.report_strict_acc = True
+    return task_p
+
+
+### legacy aliases
+GPT5B = Pile5B
+GPT175B = Pile175B

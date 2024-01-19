@@ -77,8 +77,6 @@ except ImportError:
     parser = json.Parser()
 
 
-_CITATION = """
-"""
 _DATASET_MODES = ["lm"]
 
 _URLS = {
