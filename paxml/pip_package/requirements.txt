@@ -368,7 +368,7 @@ nltk==3.8.1
     # via
     #   rouge-score
     #   t5
-notebook==7.0.6
+notebook==7.0.7
     # via
     #   jupyter
     #   jupyter-http-over-ws
