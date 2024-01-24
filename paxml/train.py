@@ -109,6 +109,7 @@ def train_and_evaluate(
     tensorstore_use_ocdbt: bool = False,
     exit_after_ondemand_checkpoint: bool = False,
     override_num_train_steps: int | None = None,
+    enable_summary_writer: bool = True,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -141,6 +142,8 @@ def train_and_evaluate(
       on-demand checkpoint due to preemption.
     override_num_train_steps: If not None, it will override the num_train_steps
       defined in the train task.
+    enable_summary_writer: If false, a noop summary writer will be used by the
+      program. Therefore, it will not generate summary files.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -274,5 +277,6 @@ def train_and_evaluate(
         decode_programs,
         early_stopping_fn,
         exit_after_ondemand_checkpoint=exit_after_ondemand_checkpoint,
+        enable_summary_writer=enable_summary_writer,
     )
     executor.start()
