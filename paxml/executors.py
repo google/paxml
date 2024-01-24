@@ -167,7 +167,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
       decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
       early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
       exit_after_ondemand_checkpoint: bool = False,
-      enable_summary_writer: bool = True,
   ):
     self._task = jax_task
     self._job_log_dir = job_log_dir
@@ -178,7 +177,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
     self._decode_programs = decode_programs
     self._early_stopping_fn = early_stopping_fn
     self._exit_after_ondemand_checkpoint = exit_after_ondemand_checkpoint
-    self._enable_summary_writer = enable_summary_writer
 
     # Creates the root prng key and train input pipeline.
     root_prng_key = jax.random.PRNGKey(self._task.train.random_seed)
@@ -293,7 +291,6 @@ class DefaultExecutor(base_executor.BaseExecutor):
         exit_after_ondemand_checkpoint=self._exit_after_ondemand_checkpoint,
         is_vars_replicated=is_vars_replicated,
         train_prng_seed=self._train_prng_seed,
-        enable_summary_writer=self._enable_summary_writer,
     )
 
     # Shutdown the programs and run necessary cleanup.
@@ -326,7 +323,6 @@ def _train_and_evaluate_common(
     is_vars_replicated,
     train_prng_seed,
     exit_after_ondemand_checkpoint,
-    enable_summary_writer: bool = True,
 ):
   """Training loop code common to both pmap and spmd."""
   train_p = task.train
@@ -358,16 +354,11 @@ def _train_and_evaluate_common(
       train_prng_seed,
       eval_prng_seed,
       step_i,
-      enable_summary_writer,
   )
   for program in eval_programs:
-    program.setup(
-        task, partitioner, job_log_dir, eval_prng_seed, enable_summary_writer
-    )
+    program.setup(task, partitioner, job_log_dir, eval_prng_seed)
   for program in decode_programs:
-    program.setup(
-        task, partitioner, job_log_dir, decode_prng_seed, enable_summary_writer
-    )
+    program.setup(task, partitioner, job_log_dir, decode_prng_seed)
   trainer_lib.check_unique_names([p.eval_input for p in eval_programs])
   trainer_lib.check_unique_names([p.decode_input for p in decode_programs])
 

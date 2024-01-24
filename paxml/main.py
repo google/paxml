@@ -231,13 +231,6 @@ _FIDDLE_CONFIG = absl_flags.DEFINE_fiddle_config(
     default_module=sys.modules[__name__],
 )
 
-flags.DEFINE_bool(
-    'enable_summary_writer',
-    True,
-    'Whether to enable the summary writer. If false, PAX will use a noop '
-    'summary writer to prevent the job from generating summary files.',
-)
-
 
 @py_utils.benchmark('[PAX STATUS]: ')
 def get_experiment(experiment_name: str) -> base_experiment.BaseExperimentT:
@@ -321,7 +314,6 @@ def run_experiment(
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
         exit_after_ondemand_checkpoint=FLAGS.exit_after_ondemand_checkpoint,
         override_num_train_steps=override_num_train_steps,
-        enable_summary_writer=FLAGS.enable_summary_writer,
     )
 
   elif FLAGS.mode == 'eval':
@@ -335,7 +327,6 @@ def run_experiment(
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-        enable_summary_write=FLAGS.enable_summary_writer,
     )
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
@@ -352,7 +343,6 @@ def run_experiment(
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-        enable_summary_write=FLAGS.enable_summary_writer,
     )
   elif FLAGS.mode == 'decode_once':
     if (restore_checkpoint_steps := FLAGS.restore_checkpoint_step) is None:
@@ -376,7 +366,6 @@ def run_experiment(
           output_pickle=FLAGS.decode_output_pickle,
           enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
           tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-          enable_summary_write=FLAGS.enable_summary_writer,
       )
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')

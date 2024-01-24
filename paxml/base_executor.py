@@ -47,7 +47,6 @@ class BaseExecutor(metaclass=abc.ABCMeta):
       # a dedicated executor for auto-tuning and get rid of this instead.
       early_stopping_fn: trainer_lib.EarlyStoppingFn | None,
       exit_after_ondemand_checkpoint: bool = False,
-      enable_summary_writer: bool = True,
   ) -> None:
     """Sets up the programs and the executor."""
 

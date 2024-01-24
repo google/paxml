@@ -119,7 +119,6 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: epath.Path,
       decode_prng_seed: PRNGKey,
       output_pickle: bool = True,
-      enable_summary_writer: bool = True,
   ) -> None:
     """Sets up the program.
 
@@ -129,7 +128,6 @@ class SingleTaskDecodeProgram(programs.Program):
       job_log_dir: Directory for the job logs.
       decode_prng_seed: The prng key used for decoding.
       output_pickle: Whether to write decoding results to a pickle file.
-      enable_summary_writer: Whether to write summary results to a file.
     """
     self._task = task
     self._partitioner = partitioner
@@ -163,7 +161,7 @@ class SingleTaskDecodeProgram(programs.Program):
     summary_base_dir = programs.get_summary_base_dir(job_log_dir)
     summary_dir = summary_base_dir / f'decode_test_{self._input.name}'
     self._summary_writer = self._exitstack.enter_context(
-        summary_utils.get_summary_writer(summary_dir, enable_summary_writer)
+        summary_utils.get_summary_writer(summary_dir)
     )
 
   def should_run(self, state: TrainState, train_step: int) -> bool:

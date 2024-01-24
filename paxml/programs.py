@@ -244,7 +244,6 @@ class BaseTrainProgram(Program):
       train_prng_seed: PRNGKey,
       eval_prng_seed: PRNGKey,
       init_step: int,
-      enable_summary_writer: bool = True,
   ) -> None:
     logging.info('[PAX STATUS]: Setting up BaseTrainProgram.')
     self._task = task
@@ -258,9 +257,7 @@ class BaseTrainProgram(Program):
     summary_base_dir = get_summary_base_dir(job_log_dir)
     summary_train_dir = summary_base_dir / 'train'
     self._train_summary_writer = self._exitstack.enter_context(
-        summary_utils.get_summary_writer(
-            summary_train_dir, enable_summary_writer
-        )
+        summary_utils.get_summary_writer(summary_train_dir)
     )
     train_p = self._task.train
     self._train_summary_handler = summary_utils.SummaryHandler(
@@ -276,9 +273,7 @@ class BaseTrainProgram(Program):
     if not train_p.eval_skip_train:
       summary_eval_train_dir = summary_base_dir / 'eval_train'
       eval_train_summary_writer = self._exitstack.enter_context(
-          summary_utils.get_summary_writer(
-              summary_eval_train_dir, enable_summary_writer
-          )
+          summary_utils.get_summary_writer(summary_eval_train_dir)
       )
       self._eval_train_summary_handler = summary_utils.SummaryHandler(
           eval_train_summary_writer,
@@ -759,7 +754,6 @@ class BaseEvalProgram(Program):
       partitioner: partitioning.Partitioner,
       job_log_dir: epath.Path,
       eval_prng_seed: PRNGKey,
-      enable_summary_writer: bool = True,
   ) -> None:
     self._task = task
     self._partitioner = partitioner
@@ -784,7 +778,7 @@ class BaseEvalProgram(Program):
     summary_base_dir = get_summary_base_dir(job_log_dir)
     summary_dir = summary_base_dir / f'eval_test_{self.eval_input.name}'
     self._eval_summary_writer = self._exitstack.enter_context(
-        summary_utils.get_summary_writer(summary_dir, enable_summary_writer)
+        summary_utils.get_summary_writer(summary_dir)
     )
 
   def should_run(self, state: TrainState, step: int) -> bool:

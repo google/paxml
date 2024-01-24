@@ -401,7 +401,6 @@ def evaluate(
     enable_auto_sharding: bool = False,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
-    enable_summary_writer: bool = True,
 ) -> None:
   """Runs the evaluation loop on the entire eval data set.
 
@@ -486,7 +485,6 @@ def evaluate(
       decode_programs=[],
       job_log_dir=job_log_dir,
       prng_key=prng_key,
-      enable_summary_writer=enable_summary_writer,
   )
 
   _common_eval_or_decode_loop(
@@ -515,14 +513,12 @@ class _EvalRunner:
       decode_programs: Sequence[decode_programs_lib.SingleTaskDecodeProgram],
       job_log_dir: epath.Path,
       prng_key: PRNGKey,
-      enable_summary_writer: bool = True,
   ):
     self._jax_task = jax_task
     self._partitioner = partitioner
     self._job_log_dir = job_log_dir
     self._eval_programs = eval_programs
     self._decode_programs = decode_programs
-    self._enable_summary_writer = enable_summary_writer
 
     decode_key, eval_key = jax.random.split(prng_key)
     logging.info('eval prng_key: %s', eval_key)
@@ -540,11 +536,7 @@ class _EvalRunner:
   def setup_eval_programs(self):
     for program in self._eval_programs:
       program.setup(
-          self._jax_task,
-          self._partitioner,
-          self._job_log_dir,
-          self._eval_key,
-          self._enable_summary_writer,
+          self._jax_task, self._partitioner, self._job_log_dir, self._eval_key
       )
     trainer_lib.check_unique_names(
         [program.eval_input for program in self._eval_programs]
@@ -558,7 +550,6 @@ class _EvalRunner:
           self._job_log_dir,
           self._decode_key,
           output_pickle=output_pickle,
-          enable_summary_writer=self._enable_summary_writer,
       )
     trainer_lib.check_unique_names(
         [p.decode_input for p in self._decode_programs]
@@ -587,7 +578,6 @@ def decode(
     output_pickle: bool = True,
     enforce_restore_shape_check: bool = False,
     tensorstore_use_ocdbt: bool = False,
-    enable_summary_writer: bool = True,
 ) -> None:
   """Runs decoding on the decoder datasets.
 
@@ -704,7 +694,6 @@ def decode(
       decode_programs=decode_programs,
       job_log_dir=job_log_dir,
       prng_key=prng_key,
-      enable_summary_writer=enable_summary_writer,
   )
 
   trainer_lib.write_post_init_model_hparams_file(
@@ -822,7 +811,6 @@ def _common_eval_or_decode_loop(
     partitioner: partitioning.Partitioner,
     decode_output_pickle: bool = True,
     checkpoint_path: epath.Path | None = None,
-    enable_summary_writer: bool = True,
 ):
   step_prefix = checkpoint_paths.checkpoint_prefix(checkpointer.checkpoint_type)
   step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(

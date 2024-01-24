@@ -438,11 +438,9 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
 
 
 @contextlib.contextmanager
-def get_summary_writer(
-    summary_dir: epath.Path, enable_summary_writer: bool = True
-) -> Iterator[SummaryWriter]:
+def get_summary_writer(summary_dir: epath.Path) -> Iterator[SummaryWriter]:
   """Context manager around Tensorflow's SummaryWriter."""
-  if jax.process_index() == 0 and enable_summary_writer:
+  if jax.process_index() == 0:
     logging.info('Opening SummaryWriter `%s`...', summary_dir)
     summary_writer = tf_summary.create_file_writer(str(summary_dir))
   else:
@@ -455,7 +453,7 @@ def get_summary_writer(
     yield summary_writer
   finally:
     summary_writer.close()
-    if jax.process_index() == 0 and enable_summary_writer:
+    if jax.process_index() == 0:
       logging.info('Closed SummaryWriter `%s`.', summary_dir)
     else:
       logging.info('Closed a mock-like SummaryWriter.')
