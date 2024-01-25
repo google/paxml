@@ -470,19 +470,22 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       return jnp.reshape(
           x,
           [
-              -1,
+              # We leave the batch-dimension as the zeroth axis to give the
+              # compiler the best chance at finding an effective sharding for
+              # processing the inner batches in the global jit programming
+              # paradigm.
               inner_batch_size,
+              -1,
               microbatch_size // microbatch_splits,
               *x.shape[2:],
           ],
       )
 
-    # Reshape input so that inner batches are stacked on axis 0.
     inputs = jax.tree_map(reshape_batch, inputs)
 
     def _process_inner_batch(index: int) -> Any:
       """Computes mean clipped gradient for inner batch specified by index."""
-      new_inputs = jax.tree_map(lambda x: x[index], inputs)
+      new_inputs = jax.tree_map(lambda x: x[:, index, ...], inputs)
 
       # Compute loss and gradients.
       (values, aux), grads = grad_fn(
