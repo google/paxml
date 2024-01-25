@@ -335,7 +335,7 @@ def run_experiment(
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-        enable_summary_write=FLAGS.enable_summary_writer,
+        enable_summary_writer=FLAGS.enable_summary_writer,
     )
   elif FLAGS.mode == 'decode':
     work_unit.set_task_status(f'Decode experiment {FLAGS.exp} at'
@@ -352,7 +352,7 @@ def run_experiment(
         enable_auto_sharding=FLAGS.enable_auto_sharding,
         enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
         tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-        enable_summary_write=FLAGS.enable_summary_writer,
+        enable_summary_writer=FLAGS.enable_summary_writer,
     )
   elif FLAGS.mode == 'decode_once':
     if (restore_checkpoint_steps := FLAGS.restore_checkpoint_step) is None:
@@ -376,7 +376,7 @@ def run_experiment(
           output_pickle=FLAGS.decode_output_pickle,
           enforce_restore_shape_check=FLAGS.enforce_restore_shape_check,
           tensorstore_use_ocdbt=FLAGS.tensorstore_use_ocdbt,
-          enable_summary_write=FLAGS.enable_summary_writer,
+          enable_summary_writer=FLAGS.enable_summary_writer,
       )
   elif FLAGS.mode == 'infer':
     work_unit.set_task_status(f'infer experiment {FLAGS.exp} at {job_log_dir}')
