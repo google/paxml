@@ -150,7 +150,7 @@ gin-config==0.5.0
     # via
     #   mesh-tensorflow
     #   t5
-google-auth==2.26.2
+google-auth==2.27.0
     # via
     #   google-auth-oauthlib
     #   tensorboard
@@ -280,7 +280,7 @@ jupyter-server==2.12.5
     #   jupyterlab-server
     #   notebook
     #   notebook-shim
-jupyter-server-terminals==0.5.1
+jupyter-server-terminals==0.5.2
     # via jupyter-server
 jupyterlab==4.0.11
     # via notebook
@@ -421,11 +421,11 @@ optax==0.1.8
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax-checkpoint==0.5.0
+orbax-checkpoint==0.5.2
     # via
     #   -r paxml-requirements.in
     #   flax
-overrides==7.6.0
+overrides==7.7.0
     # via jupyter-server
 packaging==23.2
     # via
@@ -521,7 +521,7 @@ python-dateutil==2.8.2
     #   pandas
 python-json-logger==2.0.7
     # via jupyter-events
-pytz==2023.3.post1
+pytz==2023.4
     # via pandas
 pyyaml==6.0.1
     # via
@@ -543,7 +543,7 @@ qtconsole==5.5.1
     # via jupyter
 qtpy==2.4.1
     # via qtconsole
-referencing==0.32.1
+referencing==0.33.0
     # via
     #   jsonschema
     #   jsonschema-specifications
@@ -584,7 +584,7 @@ rsa==4.9
     # via google-auth
 sacrebleu==2.4.0
     # via t5
-safetensors==0.4.1
+safetensors==0.4.2
     # via transformers
 scikit-learn==1.4.0
     # via
@@ -706,7 +706,7 @@ toml==0.10.2
     #   tfds-nightly
 tomli==2.0.1
     # via jupyterlab
-toolz==0.12.0
+toolz==0.12.1
     # via chex
 tornado==6.4
     # via
@@ -741,7 +741,7 @@ traitlets==5.14.1
     #   nbconvert
     #   nbformat
     #   qtconsole
-transformers==4.37.0
+transformers==4.37.2
     # via t5
 typeguard==2.13.3
     # via
