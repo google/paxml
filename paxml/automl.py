@@ -67,12 +67,15 @@ def hyperparameter_tuning(
     goal: str = 'maximize',
     *,
     enable_dataset_tuning: bool = False,
-    errors_to_skip: list[Type[Exception] | tuple[Type[Exception], str]]
-    | None = None,
-    cross_step_metric_aggregator: pax_fiddle.Config[CrossStepMetricAggregator]
-    | None = None,
+    errors_to_skip: (
+        list[Type[Exception] | tuple[Type[Exception], str]] | None
+    ) = None,
+    cross_step_metric_aggregator: (
+        pax_fiddle.Config[CrossStepMetricAggregator] | None
+    ) = None,
     early_stopping: pax_fiddle.Config[BaseEarlyStoppingPolicy] | None = None,
     reward_for_nan: float | None = None,
+    enable_train_programs_tuning: bool = False,
 ) -> SearchHParams:
   """Returns a common search config for hyper-parameter tuning.
 
@@ -97,6 +100,7 @@ def hyperparameter_tuning(
     reward_for_nan: An optional float used as the reward when metric value is
       NaN. If not specified, the reward will remain NaN so the trial will be
       skipped by the search algorithm.
+    enable_train_programs_tuning: Whether to enable train programs tuning.
 
   Returns:
     A search config object.
@@ -116,6 +120,7 @@ def hyperparameter_tuning(
       cross_step_metric_aggregator=cross_step_metric_aggregator,
       treats_early_stopped_trials_as_done=True,
       enable_dataset_tuning=enable_dataset_tuning,
+      enable_train_programs_tuning=enable_train_programs_tuning,
   )
 
 
