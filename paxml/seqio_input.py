@@ -847,25 +847,16 @@ class SeqIOInput(base_input.BaseInput):
     self._gen_targets_iter()
     self.is_targets_init = True
 
-  def save(self, checkpoint_path: epath.PathLike):
-    try:
-      self._ckpt = tf.train.Checkpoint(it=self._iter)
-      self._ckpt.write(checkpoint_path)
-    except tf.errors.UnimplementedError as e:
-      raise NotImplementedError(
-          'Checkpointing is not supported for this SeqIO input') from e
+  def _get_state_internal(self) -> bytes:
+    if not hasattr(self._iter, 'save'):
+      raise NotImplementedError('Input checkpointing not supported in OSS')
+    return self._iter.save().numpy()  # pylint: disable=protected-access
 
-  def restore(self, checkpoint_path: epath.PathLike):
+  def _set_state_internal(self, state: bytes) -> None:
+    if not hasattr(self._iter, 'restore'):
+      raise NotImplementedError('Input checkpointing not supported in OSS')
     self._peek = None
-    self._ckpt = tf.train.Checkpoint(it=self._iter)
-    self._ckpt.read(checkpoint_path).assert_consumed()
-
-  def get_state(self) -> bytes:
-    return self._iter._save().numpy()  # pylint: disable=protected-access
-
-  def set_state(self, state: bytes) -> None:
-    self._peek = None
-    self._iter._restore(state)  # pylint: disable=protected-access
+    self._iter.restore(state)  # pylint: disable=protected-access
 
   def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
     element = next(self._iter)
