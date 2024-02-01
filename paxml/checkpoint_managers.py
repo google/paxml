@@ -362,6 +362,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
         self._checkpointer = _AsyncCheckpointer(
             handler=handler,
             is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
+            timeout_secs=self._checkpointer._async_manager._timeout_secs,  # pylint: disable=protected-access
         )
       else:
         self._checkpointer = _Checkpointer(
