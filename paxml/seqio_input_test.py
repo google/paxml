@@ -390,7 +390,9 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ds = seqio.test_utils.create_default_dataset(x, ['targets'])
     _register_task(name, ds, output_feature_names=['targets'])
 
-    p = pax_fiddle.Config(seqio_input.SeqIOInput)
+    p = pax_fiddle.Config(
+        seqio_input.SeqIOInput, input_checkpointing_enabled=True
+    )
     p.mixture_name = name
     p.split_name = 'train'
     p.task_feature_lengths = {'targets': 6}
@@ -472,6 +474,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     ckpt_path = ckpt_dir + '/checkpoint'
     p = pax_fiddle.Config(
         seqio_input.SeqIOInput,
+        input_checkpointing_enabled=True,
         mixture_name=name,
         split_name='train',
         task_feature_lengths={'targets': 6},
