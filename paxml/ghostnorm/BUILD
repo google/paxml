@@ -65,6 +65,7 @@ pytype_strict_library(
         ":base",
         ":embedding",
         ":linears",
+        # Implicit flax.core dependency.
         # Implicit jax dependency.
         "//praxis:base_layer",
         "//praxis:pax_fiddle",
