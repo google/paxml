@@ -101,16 +101,6 @@ def _register_dummy_task(
   )
 
 
-def skip_test(
-    test: flax_test_utils.TestCase | seqio.test_utils.FakeTaskTest, message: str
-):
-  it = tf.data.Dataset.range(1).as_numpy_iterator()
-  if not hasattr(it, '_save'):
-    # TODO(b/323208102): enable after the next lingvo (and subsequent) TF OSS
-    # release.
-    test.skipTest(message)
-
-
 class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
   def assertNestedSequenceEqual(self, sequence1, sequence2):
@@ -419,7 +409,10 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
 
   def test_byte_array_based_checkpointing(self):
-    skip_test(self, 'byte-based iterator checkpointing is not supported')
+    it = tf.data.Dataset.range(1).as_numpy_iterator()
+    if not hasattr(it, '_save'):
+      # TODO(b/272314337): enable after the next TF OSS release.
+      self.skipTest('byte-based iterator checkpointing is not supported')
     name = 'checkpointing_bytes'
     x = [{
         'targets': [7, 8, 5, 6, 9],
@@ -456,40 +449,6 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     self.assertArraysEqual(
         batch.ids,
         np.array([[0, 21, 22, 23, 1, 0]], dtype=np.int32))
-
-  def test_peek_padded_checkpointing(self):
-    skip_test(self, 'Input checkpointing not supported in OSS.')
-    name = 'peek_padded_checkpointing'
-    x = [
-        {
-            'targets': np.arange(5),
-        },
-        {'targets': np.arange(5, 10)},
-        {'targets': np.arange(10, 15)},
-        {'targets': np.arange(15, 20)},
-    ]
-    ds = seqio.test_utils.create_default_dataset(x, ['targets'])
-    _register_task(name, ds, output_feature_names=['targets'])
-    ckpt_dir = self.create_tempdir(name='checkpointing_test').full_path
-    ckpt_path = ckpt_dir + '/checkpoint'
-    p = pax_fiddle.Config(
-        seqio_input.SeqIOInput,
-        input_checkpointing_enabled=True,
-        mixture_name=name,
-        split_name='train',
-        task_feature_lengths={'targets': 6},
-        batch_size=1,
-        feature_converter=seqio_input.LanguageModelFeatures(pack=False),
-    )
-    inp = instantiate(p)
-    _ = inp.get_next_padded()
-    batch_b = inp.peek_padded()
-    inp.save(ckpt_path)
-    batch_c = inp.get_next_padded()
-    self.assertArraysEqual(batch_b.ids, batch_c.ids)
-    inp.restore(ckpt_path)
-    batch_d = inp.get_next_padded()
-    self.assertArraysEqual(batch_b.ids, batch_d.ids)
 
   def test_input_targets_only_pack(self):
     name = 'target_only_pack'
