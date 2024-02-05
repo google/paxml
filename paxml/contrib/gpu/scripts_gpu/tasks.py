@@ -174,6 +174,7 @@ class LambadaDataset(base_experiment.BaseExperiment):
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
         shuffle=False,
+        eval_loop_num_batches=-1,
     )
     return p
 
