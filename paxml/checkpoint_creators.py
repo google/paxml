@@ -551,6 +551,7 @@ def _create_checkpointer(
     enforce_restore_shape_check: bool = False,
     maybe_use_persistence_checkpointing: bool = False,
     tensorstore_use_ocdbt: bool = False,
+    async_timeout_secs: int | None = None,
 ) -> checkpoints.TrainingCheckpointer:
   """Creates a checkpoint manager."""
   logging.info('[PAX STATUS]: Creating checkpointer.')
@@ -560,6 +561,8 @@ def _create_checkpointer(
   save_interval_steps = train_p.save_interval_steps
   keep_interval_timedelta = _parse_duration(train_p.save_keep_interval_duration)
   restore_transformations = train_p.restore_transformations
+  # Indefinite wait time is not actually allowed, so just use a long timeout.
+  async_timeout_secs = async_timeout_secs or 6 * 60 * 60
 
   checkpoints.reregister_type_handlers(
       tensorstore_metadata_key=train_p.tensorstore_metadata_key,
@@ -593,7 +596,7 @@ def _create_checkpointer(
               enforce_restore_shape_check=enforce_restore_shape_check,
               use_ocdbt=tensorstore_use_ocdbt,
           ),
-          timeout_secs=600,
+          timeout_secs=async_timeout_secs,
       )
   else:
     if checkpoint_type == CheckpointType.GDA:

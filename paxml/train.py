@@ -110,6 +110,7 @@ def train_and_evaluate(
     exit_after_ondemand_checkpoint: bool = False,
     override_num_train_steps: int | None = None,
     enable_summary_writer: bool = True,
+    async_timeout_secs: int | None = None,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -144,6 +145,8 @@ def train_and_evaluate(
       defined in the train task.
     enable_summary_writer: If false, a noop summary writer will be used by the
       program. Therefore, it will not generate summary files.
+    async_timeout_secs: Timeout in seconds for asynchronous save operations.
+      `None` indicates that no timeout is set.
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -198,6 +201,7 @@ def train_and_evaluate(
       enforce_restore_shape_check=enforce_restore_shape_check,
       maybe_use_persistence_checkpointing=maybe_use_persistence_checkpointing,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+      async_timeout_secs=async_timeout_secs,
   )
   if not enable_checkpoint_saving:
     logging.info(

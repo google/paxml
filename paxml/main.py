@@ -124,6 +124,12 @@ flags.DEFINE_bool(
     False,
     'If True, uses OCDBT format when saving with Tensorstore.',
 )
+flags.DEFINE_integer(
+    'async_timeout_secs',
+    600,
+    'Timeout in seconds for asynchronous save operations. `None` indicates that'
+    ' no timeout is set.',
+)
 flags.DEFINE_string(
     'jax_traceback_filtering_option', 'auto',
     'Controls how JAX filters internal frames out of tracebacks: '
@@ -175,12 +181,15 @@ flags.DEFINE_string(
     'Study name for current tuning. If None, the program will be running in '
     'standard training/evaluation mode. Otherwise, it will run in tuning mode.')
 flags.DEFINE_enum(
-    'controller_mode', 'auto', ['primary', 'secondary', 'auto'],
-    'Mode for tuning controller. If primary, current processs will only work '
+    'controller_mode',
+    'auto',
+    ['primary', 'secondary', 'auto'],
+    'Mode for tuning controller. If primary, current process will only work '
     'as the controller, without running tuning workload. If secondary, current '
     'process will only run tuning workload. Otherwise, current process may '
     'elect controller role in a background thread, and run the tuning workload '
-    'in the main thread.')
+    'in the main thread.',
+)
 flags.DEFINE_string(
     'tuner_group', None,
     'The identifier for the tuner group that current process belongs to. '
@@ -322,6 +331,7 @@ def run_experiment(
         exit_after_ondemand_checkpoint=FLAGS.exit_after_ondemand_checkpoint,
         override_num_train_steps=override_num_train_steps,
         enable_summary_writer=FLAGS.enable_summary_writer,
+        async_timeout_secs=FLAGS.async_timeout_secs,
     )
 
   elif FLAGS.mode == 'eval':
