@@ -1340,6 +1340,7 @@ class SingleTask(base_task.BaseTask):
         number of hosts.
       apply_mutable_list: A list of allowed collections to be mutated during
         decode apply.
+      metrics_prefix: Prefix to add in front of all produced summary names.
     """
 
     prng_key_fold_with_batch_index: bool = False
@@ -1351,6 +1352,7 @@ class SingleTask(base_task.BaseTask):
     apply_mutable_list: Sequence[str] = pax_fiddle.instance_field(
         default_factory=lambda: DECODE_DEFAULT_MUTABLE_LIST[:]
     )
+    metrics_prefix: str = 'Metrics/'
 
   DecodeHParams = base_hyperparams.FiddleHParamsClassStub(Decode)  # pylint: disable=invalid-name
 

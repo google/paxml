@@ -270,6 +270,7 @@ class BaseTrainProgram(Program):
         log_interval_steps=_train_log_interval_steps(train_p),
         is_async=train_p.async_summary_writing,
         name='training',
+        metrics_prefix=task.decode.metrics_prefix,
     )
 
     # Creates the summary writer and handler for eval on train input.
@@ -285,6 +286,7 @@ class BaseTrainProgram(Program):
           train_p.summary_interval_steps,
           accumulate_interval_steps=train_p.summary_accumulate_interval_steps,
           name='eval',
+          metrics_prefix=task.decode.metrics_prefix,
       )
 
     # Initializes other states.
@@ -863,10 +865,20 @@ class BaseEvalProgram(Program):
           '  %s=%f (weight=%f)', key, weighted_average, sum_metric_weights
       )
     summary_utils.write_summary_entry(
-        self._eval_summary_writer, step, loss, metrics, {}, summary_tensors
+        self._eval_summary_writer,
+        step,
+        loss,
+        metrics,
+        {},
+        summary_tensors,
+        metrics_prefix=self._task.decode.metrics_prefix,
     )
 
-    summary_utils.compute_and_write_clu_metric_summaries(clu_metrics, step)
+    summary_utils.compute_and_write_clu_metric_summaries(
+        clu_metrics,
+        step,
+        metrics_prefix=self._task.decode.metrics_prefix,
+    )
 
     maybe_write_eval_outputs(
         EvaluationMode.EVAL, output_dir, step, flat_scoring_outputs

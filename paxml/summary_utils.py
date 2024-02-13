@@ -101,7 +101,9 @@ def _get_summary_type(
 
 
 def write_clu_metric_summaries(
-    metric_values: dict[str, SummaryValueTypes], step_i: int
+    metric_values: dict[str, SummaryValueTypes],
+    step_i: int,
+    metrics_prefix: str = 'Metrics/',
 ) -> None:
   """Given a dict of metric values, writes them out as summaries.
 
@@ -111,6 +113,7 @@ def write_clu_metric_summaries(
     metric_values: A dict[str, Any] objects with metric values. These values are
       one of the various clu_values.Value subtypes.
     step_i: An int representing the current step of decoding.
+    metrics_prefix: Prefix to add in front of all produced summary names.
   """
   if not metric_values:
     return
@@ -119,11 +122,12 @@ def write_clu_metric_summaries(
   for metric_name, metric_value in metric_values.items():
     logging.info('Summarizing metric %s', metric_name)
     summary_type = _get_summary_type(metric_value)
+    full_metric_name = metrics_prefix + metric_name
     # Pass both value and metadata to write_summary_tensor for video summary.
     if isinstance(metric_value, clu_values.Summary):
       write_summary_tensor(
           step_i,
-          f'Metrics/{metric_name}',
+          full_metric_name,
           metric_value.value,
           summary_type,
           metric_value.metadata,
@@ -131,19 +135,21 @@ def write_clu_metric_summaries(
     elif isinstance(metric_value, clu_values.Audio):
       write_summary_tensor(
           step_i,
-          f'Metrics/{metric_name}',
+          full_metric_name,
           metric_value.value,
           summary_type,
           sample_rate=metric_value.sample_rate,
       )
     else:
       write_summary_tensor(
-          step_i, f'Metrics/{metric_name}', metric_value.value, summary_type
+          step_i, full_metric_name, metric_value.value, summary_type
       )
 
 
 def compute_and_write_clu_metric_summaries(
-    metrics: CluMetrics, step: int
+    metrics: CluMetrics,
+    step: int,
+    metrics_prefix: str = 'Metrics/',
 ) -> None:
   """Compute clu_metrics.Metric objects values and write them out as summaries.
 
@@ -153,11 +159,14 @@ def compute_and_write_clu_metric_summaries(
       Dict[str, clu_values.Value] objects, a Dict[str, List[clu_values.Value]]
       objects, or a List[clu_values.Value].
     step: An int representing the current step of decoding.
+    metrics_prefix: Prefix to add in front of all produced summary names.
   """
   if metrics:
     # Convert metrics to Dict[str, clu_values.Value] for summary writing.
     clu_metric_values = metric_utils.compute_metric_values(metrics)
-    write_clu_metric_summaries(clu_metric_values, step)
+    write_clu_metric_summaries(
+        clu_metric_values, step, metrics_prefix=metrics_prefix
+    )
 
 
 def write_seqio_metric_summaries(
@@ -573,6 +582,7 @@ def write_summary_entry(
     clu_metrics: CluMetrics,
     summary_tensors: NestedJTensor,
     steps_per_sec: float | None = None,
+    metrics_prefix: str = 'Metrics/',
 ) -> None:
   """Writes a summary entry into the provided SummaryWriter."""
   work_unit = platform.work_unit()
@@ -612,12 +622,20 @@ def write_summary_entry(
       logging.info('  %s=%f (weight=%f)', key, weighted_average,
                    sum_metric_weights)
       status_msg += f', {key}={weighted_average}'
-      write_summary_tensor(step_i, f'Metrics/{key}', weighted_average,
-                           SummaryType.AGGREGATE_SCALAR)
-      write_summary_tensor(step_i, f'Metrics/{key}-weight', sum_metric_weights,
-                           SummaryType.AGGREGATE_SCALAR)
+      metric_name = metrics_prefix + key
+      write_summary_tensor(
+          step_i, metric_name, weighted_average, SummaryType.AGGREGATE_SCALAR
+      )
+      write_summary_tensor(
+          step_i,
+          f'{metric_name}-weight',
+          sum_metric_weights,
+          SummaryType.AGGREGATE_SCALAR,
+      )
 
-    compute_and_write_clu_metric_summaries(clu_metrics, step_i)
+    compute_and_write_clu_metric_summaries(
+        clu_metrics, step_i, metrics_prefix=metrics_prefix
+    )
 
     work_unit.set_task_status(status_msg)
     summaries = flatten_summary_dict(summary_tensors)
@@ -702,6 +720,7 @@ class SummaryHandler:
       log_interval_steps: int | None = None,
       is_async: bool = False,
       name: str = '',
+      metrics_prefix: str = 'Metrics/',
   ) -> None:
     """Constructor.
 
@@ -716,12 +735,14 @@ class SummaryHandler:
         log.
       is_async: Whether to process summaries asynchronously.
       name: Name of the handler.
+      metrics_prefix: Prefix to add in front of all produced summary names.
     """
     self._summary_writer = summary_writer
     self._write_interval_steps = write_interval_steps
     self._accumulate_interval_steps = accumulate_interval_steps
     self._log_interval_steps = log_interval_steps
     self._name = name
+    self._metrics_prefix = metrics_prefix
     # When is_async is true, only update the following fields in the
     # SummaryHandler thread to make sure that they are thread safe.
     self._latest_step = -1
@@ -970,4 +991,5 @@ class SummaryHandler:
         self._clu_metrics,
         self._summary_tensors,
         steps_per_sec,
+        metrics_prefix=self._metrics_prefix,
     )
