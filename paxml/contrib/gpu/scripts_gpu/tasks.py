@@ -101,7 +101,7 @@ def concatenate_passage_and_question(dataset):
 
 
 TaskRegistry.add_versioned_tfds_task(
-    'boolq_eval',
+    'boolq',
     versions=['1.0.2'],
     pinned_version='1.0.2',
     tfds_name='super_glue/boolq',
@@ -112,7 +112,7 @@ TaskRegistry.add_versioned_tfds_task(
     ],
     output_features=BOOLQ_OUTPUT_FEATURES,
     metric_fns=[],
-    shuffle_buffer_size=None,
+    shuffle_buffer_size=100000,
 )
 
 class PileUnsupervisedDataset(base_experiment.BaseExperiment):
@@ -225,6 +225,7 @@ class BoolQDataset(base_experiment.BaseExperiment):
   MAX_SEQ_LEN: int = 4096
   BOS_ID: int = 1
   EOS_ID: int = 2
+  TRAIN_INPUT_RANDOM_SEED = None
 
   s = seqio.SentencePieceVocabulary(vocab_path)
   TRUE_TOKEN: int = s.encode('yes')
@@ -246,9 +247,9 @@ class BoolQDataset(base_experiment.BaseExperiment):
       num_infeed_hosts = global_batch_size // batch_size_per_process
     p = pax_fiddle.Config(
         seqio_input.SeqIOInput,
-        name='BoolQValidation',
-        mixture_name='boolq_eval',
-        split_name='validation',
+        name='BoolQ',
+        mixture_name='boolq',
+        split_name='train' if is_training else 'validation',
         ## 'targets' is only one word
         task_feature_lengths={'targets': 64, 'inputs': self.MAX_SEQ_LEN - 64},
         use_cached=False,
@@ -261,15 +262,17 @@ class BoolQDataset(base_experiment.BaseExperiment):
             eos_id=self.EOS_ID,
         ),
         is_training=is_training,
-        input_random_seed=4321,
+        input_random_seed=(
+            self.TRAIN_INPUT_RANDOM_SEED if is_training else 4321
+        ),
         batch_size=batch_size_per_process,
         num_infeed_hosts=num_infeed_hosts,
         reset_for_eval=False if is_training else True,
-        shuffle=False,
+        shuffle=True,
         eval_loop_num_batches=-1,
     )
     return p
 
   def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset parameters."""
-    return [self._dataset_common(is_training=False)]
+    return [self._dataset_common(is_training=True), self._dataset_common(is_training=False)]

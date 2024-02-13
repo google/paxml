@@ -157,7 +157,17 @@ class BaseLLaMA(TransformerLmSpmdAdam):
         self.USE_GATED_ACTIVATION
     )
 
-    model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
+    if self.USE_REPEATED_LAYER:
+        model_p.lm_tpl.stacked_transformer_tpl = pax_fiddle.Config(
+            layers.StackedTransformerRepeated
+        )
+        stacked_transformer_tpl.num_layers = 1
+        model_p.lm_tpl.stacked_transformer_tpl.block = stacked_transformer_tpl
+        model_p.lm_tpl.stacked_transformer_tpl.x_times = self.NUM_LAYERS
+        model_p.lm_tpl.stacked_transformer_tpl.checkpoint_policy = (
+            self.CHECKPOINT_POLICY)
+    else:
+        model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
 
     model_p.fprop_dtype = self.FPROP_DTYPE
     ## for training, we want model dtype to be fp32
