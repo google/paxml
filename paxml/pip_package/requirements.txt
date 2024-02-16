@@ -68,7 +68,6 @@ charset-normalizer==3.3.2
     # via requests
 chex==0.1.85
     # via
-    #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   optax
 click==8.1.7
@@ -111,7 +110,7 @@ editdistance==0.8.1
     #   t5
 einops==0.7.0
     # via -r praxis-requirements.in
-etils[enp,epath,epy]==1.6.0
+etils[enp,epath,epy]==1.7.0
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -142,7 +141,7 @@ flax @ git+https://github.com/google/flax
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   clu
-fonttools==4.48.1
+fonttools==4.49.0
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
@@ -158,7 +157,7 @@ gin-config==0.5.0
     # via
     #   mesh-tensorflow
     #   t5
-google-auth==2.27.0
+google-auth==2.28.0
     # via
     #   google-auth-oauthlib
     #   tensorboard
@@ -332,7 +331,7 @@ markupsafe==2.1.5
     #   jinja2
     #   nbconvert
     #   werkzeug
-matplotlib==3.8.2
+matplotlib==3.8.3
     # via lingvo
 matplotlib-inline==0.1.6
     # via
@@ -341,9 +340,7 @@ matplotlib-inline==0.1.6
 mdurl==0.1.2
     # via markdown-it-py
 mesh-tensorflow[transformer]==0.1.21
-    # via
-    #   mesh-tensorflow
-    #   t5
+    # via t5
 mistune==3.0.2
     # via nbconvert
 ml-collections==0.1.1
@@ -601,7 +598,7 @@ sacrebleu==2.4.0
     # via t5
 safetensors==0.4.2
     # via transformers
-scikit-learn==1.4.0
+scikit-learn==1.4.1.post1
     # via
     #   lingvo
     #   t5
