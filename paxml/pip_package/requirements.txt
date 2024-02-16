@@ -227,7 +227,7 @@ jax @ git+https://github.com/google/jax
     #   seqio-nightly
 jax-bitempered-loss==0.0.2
     # via -r praxis-requirements.in
-jaxlib==0.4.24
+jaxlib==0.4.23
     # via
     #   chex
     #   clu
