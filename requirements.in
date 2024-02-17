@@ -2,14 +2,14 @@
 # bash ./compile_requirements.sh
 
 absl-py
-clu @ git+https://github.com/google/CommonLoopUtils
+clu
 etils
-flax @ git+https://github.com/google/flax
+flax==0.8.1
 graphviz
-jax @ git+https://github.com/google/jax
+jax==0.4.24
 lingvo
 numpy
-orbax-checkpoint
+orbax-checkpoint==0.5.3
 praxis
 protobuf==3.19.6
 pyglove
