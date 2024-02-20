@@ -1240,6 +1240,8 @@ class SingleTask(base_task.BaseTask):
       decode_start_after_n_steps: Starts decoder after N steps.
       decode_use_ema_states: If True, use ema states to run decode during train,
         note that in this case ema MUST be enabled in the learner.
+      compute_steps_per_sec_interval_steps: number of steps to average over when
+        computing steps/sec.
       profiler_num_steps: The number of steps to be captured by the profiler
         based on the step time estimate.
       profiler_min_duration_sec: The minimum duration to be captured by the
@@ -1302,6 +1304,7 @@ class SingleTask(base_task.BaseTask):
     decode_start_after_n_steps: int = 0
     # TODO(zhishuai): verify this for a pjit model.
     decode_use_ema_states: bool = False
+    compute_steps_per_sec_interval_steps: int = 10
     profiler_num_steps: int = 2
     profiler_min_duration_sec: float = 1.0
     profiler_capture_step: int | None = None

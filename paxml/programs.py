@@ -378,7 +378,12 @@ class BaseTrainProgram(Program):
     logging.log_first_n(
         logging.INFO, '[PAX STATUS]:  Writing summaries (attempt).', 5
     )
-    steps_per_sec = self._maybe_write_summaries(step, new_step, train_outputs)
+    steps_per_sec = self._maybe_write_summaries(
+        step,
+        new_step,
+        train_outputs,
+        train_p.compute_steps_per_sec_interval_steps,
+    )
 
     # Run eval at regular step interval.
     # While the eval ones below are post-model weight updates, hence we use the
@@ -458,11 +463,12 @@ class BaseTrainProgram(Program):
     """Returns the partition spec for the model training inputs."""
 
   def _maybe_write_summaries(
-      self, step: int, new_step: int, train_outputs: StepFnOutput
+      self,
+      step: int,
+      new_step: int,
+      train_outputs: StepFnOutput,
+      compute_steps_per_sec_interval_steps: int = 10,
   ) -> float | None:
-    # Compute steps/sec every this many steps, revisit when necessary.
-    compute_steps_per_sec_interval_steps = 10
-
     steps_per_sec = None
     should_compute_steps_per_sec = (
         new_step % compute_steps_per_sec_interval_steps == 0
