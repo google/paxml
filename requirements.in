@@ -2,18 +2,18 @@
 # bash ./compile_requirements.sh
 
 absl-py
-clu @ git+https://github.com/google/CommonLoopUtils
+clu==0.0.11
 etils
-flax @ git+https://github.com/google/flax
+flax==0.8.1
 graphviz
-jax @ git+https://github.com/google/jax
+jax==0.4.24
 lingvo
 numpy
-orbax-checkpoint
-praxis
+orbax-checkpoint==0.5.3
+praxis==1.3.1
 protobuf==3.19.6
 pyglove
-seqio-nightly
+seqio-nightly==0.0.17.dev20231010
 t5
 tensorflow~=2.9.2
 tensorflow-text~=2.9.0
