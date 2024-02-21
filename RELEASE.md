@@ -1,3 +1,13 @@
+# Version: 1.3.1
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 1.3.1
+*   Build Date: 20240220
+*   Paxml commit: f11a938628cf78d6df5a9956a9b0930cd62668d7
+*   Praxis version: 1.3.1
+*   Praxis commit: a935384da88ec739d48696c2d0a55657a183de00
 # Version: 1.3.0
 ## Major Features and Improvements
 ## Breaking changes
