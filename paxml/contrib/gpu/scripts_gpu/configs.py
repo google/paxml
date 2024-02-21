@@ -148,6 +148,7 @@ class GPT126MBase(TransformerLmSpmdAdam):
     task_p = super().task()
     task_p = configure_gpt3_task(self, task_p)
     task_p.train.num_train_steps = self.MAX_STEPS
+    task_p.train.compute_steps_per_sec_interval_steps = self.SUMMARY_INTERVAL_STEPS
 
     model_p = task_p.model
 
