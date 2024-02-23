@@ -21,6 +21,7 @@ import dataclasses
 import functools
 import gc
 import itertools
+import os
 import time
 import typing
 from typing import Any, Sequence
@@ -824,10 +825,16 @@ def _common_eval_or_decode_loop(
     checkpoint_path: epath.Path | None = None,
     enable_summary_writer: bool = True,
 ):
-  step_prefix = checkpoint_paths.checkpoint_prefix(checkpointer.checkpoint_type)
-  step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
-      checkpointer.checkpoint_type
-  )
+  if checkpoint_paths.is_tfhub_dir(checkpointer.restore_checkpoint_dir):
+    step_prefix = None
+    step_format_fixed_length = None
+  else:
+    step_prefix = checkpoint_paths.checkpoint_prefix(
+        checkpointer.checkpoint_type
+    )
+    step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
+        checkpointer.checkpoint_type
+    )
   # If preemption happened during evaluation, some checkpoints may be locked.
   orbax_checkpoint_utils.unlock_existing_checkpoints(
       checkpointer.restore_checkpoint_dir,

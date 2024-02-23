@@ -123,7 +123,7 @@ def _is_legacy_flax_checkpoint(path: epath.Path) -> bool:
 
 def _has_digit_step_subdirectory(directory) -> bool:
   """Indicates whether the checkpoints have digit-like step subdirectories."""
-  return False  # mapped to internal digit step impl.
+  return checkpoint_paths.is_tfhub_dir(directory)
 
 
 @dataclasses.dataclass

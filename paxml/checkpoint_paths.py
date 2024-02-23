@@ -15,6 +15,7 @@
 
 """Shared checkpointing utility functions."""
 
+import os
 import re
 from typing import Any
 
@@ -251,6 +252,11 @@ def retrieve_latest_checkpoint_step(
   if step is None:
     _raise_checkpoint_missing_error(checkpoint_dir)
   return step
+
+
+def is_tfhub_dir(directory: epath.Path) -> bool:
+  """Returns whether the given directory is a TFHub directory."""
+  return False  # mapped to internal impl.
 
 
 def _raise_checkpoint_missing_error(checkpoint_dir: epath.Path):
