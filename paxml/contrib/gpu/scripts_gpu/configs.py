@@ -30,7 +30,7 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import transformers
-from praxis.contrib.gpu.models import CustomMetricsLM
+from praxis.contrib.gpu.scripts_gpu.models import CustomMetricsLM
 
 WeightInit = base_layer.WeightInit
 

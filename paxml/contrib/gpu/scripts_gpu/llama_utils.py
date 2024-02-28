@@ -15,7 +15,7 @@ from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import activations
 from praxis.layers import multi_query_attention
-from praxis.contrib.gpu.models import CustomMetricsLM
+from praxis.contrib.gpu.scripts_gpu.models import CustomMetricsLM
 
 LLaMARotaryEmbedding = saxml_layers.LLaMARotaryEmbedding
 
