@@ -23,7 +23,9 @@ NUM_GPUS=${3:-8}      # Number of GPUs (1, 2, 4, 8)
 PERCORE_BATCH_SIZE=${4:-4}
 LOG_DIR=${5:-"test_logdir"}
 
-export VOCAB_PATH=None
+### vocab path is unused. Just set to avoid assertion error
+export VOCAB_PATH=gs://t5-data/vocabs/cc_all.32000.100extra/sentencepiece.model
+
 export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.85}
 BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_triton_gemm=false
                        --xla_gpu_simplify_all_fp_conversions --xla_gpu_enable_async_all_gather=true
