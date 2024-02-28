@@ -30,7 +30,7 @@ from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import transformers
-
+from praxis.contrib.gpu.models import CustomMetricsLM
 
 WeightInit = base_layer.WeightInit
 
@@ -99,6 +99,8 @@ def configure_gpt3_task(
 
 ## 8 node
 class GPT126MBase(TransformerLmSpmdAdam):
+
+  MODEL_CLASS = CustomMetricsLM
 
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [8, 1, 1]

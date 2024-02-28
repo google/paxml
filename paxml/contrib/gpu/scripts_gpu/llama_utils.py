@@ -15,12 +15,15 @@ from praxis import pax_fiddle
 from praxis import schedules
 from praxis.layers import activations
 from praxis.layers import multi_query_attention
+from praxis.contrib.gpu.models import CustomMetricsLM
 
 LLaMARotaryEmbedding = saxml_layers.LLaMARotaryEmbedding
 
 @experiment_registry.register
 class BaseLLaMA(TransformerLmSpmdAdam, BoolQDataset):
   """Base LLaMA Transformer LM configuration."""
+
+  MODEL_CLASS = CustomMetricsLM
 
   BOS_ID = 1
   EOS_ID = 2
