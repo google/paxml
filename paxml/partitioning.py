@@ -65,6 +65,11 @@ TrainStateMetadata = trainer_lib.TrainStateMetadata
 RunningMode = trainer_lib.RunningMode
 
 
+def _identity(x):
+  """A helper identity function, defined globally so it is JIT-compiled once."""
+  return x
+
+
 def filter_nestedmap(full_specs, partial_specs):
   """Project full_specs into partial_specs."""
   if isinstance(full_specs, dict):
@@ -870,9 +875,6 @@ class PjitPartitioner(Partitioner):
       # broadcast it with an identity pjit function to avoid doing it in the
       # loop where a multi-slice program could be generated.
       def _broadcast_key(k):
-        def _identity(x):
-          return x
-
         rep_sharding = jax.sharding.NamedSharding(
             self._global_mesh, jax.sharding.PartitionSpec()
         )
