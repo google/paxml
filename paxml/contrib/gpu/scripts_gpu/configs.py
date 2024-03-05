@@ -22,6 +22,7 @@ from paxml import tasks_lib
 from paxml.contrib.gpu.scripts_gpu.llama_utils import BaseLLaMA
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
+from paxml.contrib.gpu.scripts_gpu.tasks import BoolQDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
 from paxml.tasks.lm.params.lm_cloud import SyntheticDataset
 from praxis import base_layer
@@ -345,7 +346,7 @@ GPT5B = Pile5B
 GPT175B = Pile175B
 
 @experiment_registry.register
-class LLaMA7B(BaseLLaMA):
+class LLaMA7B(BaseLLaMA, BoolQDataset):
   """7B model on a A100-40GB.
 
   Checkpoint:
@@ -367,8 +368,19 @@ class LLaMA7B(BaseLLaMA):
   ICI_MESH_SHAPE = [1, 8, 1]
   DCN_MESH_SHAPE = [1, 1, 1]
 
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+
+    task_p = super().task()
+    task_p.train.always_use_train_for_model_init = False
+    task_p.model.apply_eval_sample_weights = True
+    task_p.model.eval_task = 'boolq'
+    task_p.model.boolq_yn_tokens = jnp.array([self.TRUE_TOKEN, self.FALSE_TOKEN])
+
+    return task_p
+
+
 @experiment_registry.register
-class LLaMA13B(BaseLLaMA):
+class LLaMA13B(LLaMA7B):
   """13B model on a A100-40GB.
 
   April 12, 2023
@@ -388,7 +400,7 @@ class LLaMA13B(BaseLLaMA):
   DCN_MESH_SHAPE = [1, 1, 1]
 
 @experiment_registry.register
-class LLaMA70B(BaseLLaMA):
+class LLaMA70B(LLaMA7B):
   """LlaMA-2 70B model on TPUv5-16."""
 
   NUM_LAYERS = 80

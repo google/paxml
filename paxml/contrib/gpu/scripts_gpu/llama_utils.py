@@ -21,7 +21,6 @@ import jax.numpy as jnp
 from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
-from paxml.contrib.gpu.scripts_gpu.tasks import BoolQDataset
 from paxml.contrib.gpu.scripts_gpu import saxml_layers
 from praxis import base_input
 from praxis import layers
@@ -35,7 +34,7 @@ from praxis.contrib.gpu.scripts_gpu.models import CustomMetricsLM
 LLaMARotaryEmbedding = saxml_layers.LLaMARotaryEmbedding
 
 @experiment_registry.register
-class BaseLLaMA(TransformerLmSpmdAdam, BoolQDataset):
+class BaseLLaMA(TransformerLmSpmdAdam):
   """Base LLaMA Transformer LM configuration."""
 
   MODEL_CLASS = CustomMetricsLM
@@ -66,7 +65,6 @@ class BaseLLaMA(TransformerLmSpmdAdam, BoolQDataset):
   DCN_MESH_SHAPE = None
 
   TRAINING_OPTIMIZED_SHARDING = True
-  PERCORE_BATCH_SIZE = 8
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
@@ -184,10 +182,4 @@ class BaseLLaMA(TransformerLmSpmdAdam, BoolQDataset):
         training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
     )
 
-    task_p.train.always_use_train_for_model_init = False
-    task_p.model.apply_eval_sample_weights = True
-    task_p.model.eval_task = 'boolq'
-    task_p.model.boolq_yn_tokens = jnp.array([self.TRUE_TOKEN, self.FALSE_TOKEN])
-
     return task_p
-
