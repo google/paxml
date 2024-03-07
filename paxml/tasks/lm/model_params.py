@@ -564,6 +564,8 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   DCN_MESH_SHAPE = [1, 1, 1]
   TRAINING_OPTIMIZED_SHARDING = True
 
+  MODEL_CLASS = models.LanguageModel
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
@@ -578,7 +580,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
       num_heads = self.NUM_HEADS
 
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
-    task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
+    task_p.model = pax_fiddle.Config(self.MODEL_CLASS, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
@@ -754,6 +756,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
   # for DCN.
   STREAM_IO = False
 
+  MODEL_CLASS = models.LanguageModel
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
@@ -775,7 +779,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     assert self.ICI_MESH_SHAPE[0] * self.DCN_MESH_SHAPE[0] == self.NUM_STAGES
 
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
-    task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
+    task_p.model = pax_fiddle.Config(self.MODEL_CLASS, name='xformer_lm')
     model_p = task_p.model
     model_p.lm_tpl.packed_input = True
     model_p.lm_tpl.model_dims = self.MODEL_DIMS

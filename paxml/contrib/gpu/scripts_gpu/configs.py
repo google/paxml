@@ -19,6 +19,8 @@ import fiddle as fdl
 import jax.numpy as jnp
 from paxml import experiment_registry
 from paxml import tasks_lib
+from paxml.contrib.gpu.scripts_gpu.llama_utils import BaseLLaMA
+from paxml.contrib.gpu.scripts_gpu.tasks import BoolQDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
 from paxml.tasks.lm.params.c4 import TransformerLmSpmdAdam
@@ -28,8 +30,8 @@ from praxis import layers
 from praxis import optimizers
 from praxis import pax_fiddle
 from praxis import schedules
+from praxis.contrib.gpu.scripts_gpu.models import CustomMetricsLM
 from praxis.layers import transformers
-
 
 WeightInit = base_layer.WeightInit
 
@@ -98,6 +100,8 @@ def configure_gpt3_task(
 
 ## 8 node
 class GPT126MBase(TransformerLmSpmdAdam):
+
+  MODEL_CLASS = CustomMetricsLM
 
   USE_REPEATED_LAYER = False
   ICI_MESH_SHAPE = [8, 1, 1]
@@ -336,10 +340,86 @@ class Lambada126M(GPT126MBase, LambadaDataset):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.always_use_train_for_model_init = False
-    task_p.model.report_strict_acc = True
+    task_p.model.eval_task = 'lambada'
     return task_p
 
 
 ### legacy aliases
 GPT5B = Pile5B
 GPT175B = Pile175B
+
+
+@experiment_registry.register
+class LLaMA7B(BaseLLaMA, BoolQDataset):
+  """7B model on a A100-40GB.
+
+  Checkpoint:
+  gs://sax-data/pax-llama/7B/checkpoint_00000000/
+
+  April 14, 2023
+  Latency = 3.619s with 128 decoded tokens. 27ms per output token
+  """
+
+  NUM_LAYERS = 32
+  VOCAB_SIZE = 32000
+  DIMS_PER_HEAD = 128
+  NUM_HEADS = 32
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 11008
+
+  PERCORE_BATCH_SIZE = 16
+
+  ICI_MESH_SHAPE = [1, 8, 1]
+  DCN_MESH_SHAPE = [1, 1, 1]
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+
+    task_p = super().task()
+    task_p.train.always_use_train_for_model_init = False
+    task_p.model.apply_eval_sample_weights = True
+    task_p.model.eval_task = 'boolq'
+    task_p.model.boolq_yn_tokens = jnp.array(
+        [self.TRUE_TOKEN, self.FALSE_TOKEN]
+    )
+
+    return task_p
+
+
+@experiment_registry.register
+class LLaMA13B(LLaMA7B):
+  """13B model on a A100-40GB.
+
+  April 12, 2023
+  Latency = 5.06s with 128 decoded tokens. 38ms per output token.
+  """
+
+  NUM_LAYERS = 40
+  VOCAB_SIZE = 32000
+  DIMS_PER_HEAD = 128
+  NUM_HEADS = 40
+  MODEL_DIMS = 5120
+  HIDDEN_DIMS = 13824
+
+  PERCORE_BATCH_SIZE = 8
+
+  ICI_MESH_SHAPE = [1, 8, 1]
+  DCN_MESH_SHAPE = [1, 1, 1]
+
+
+@experiment_registry.register
+class LLaMA70B(LLaMA7B):
+  """LlaMA-2 70B model on TPUv5-16."""
+
+  NUM_LAYERS = 80
+  VOCAB_SIZE = 32000
+  DIMS_PER_HEAD = 128
+  NUM_HEADS = 64
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 28672
+  USE_MQA = True
+  NUM_KV_HEADS = 8
+
+  PERCORE_BATCH_SIZE = 4
+
+  ICI_MESH_SHAPE = [1, 8, 1]
+  DCN_MESH_SHAPE = [1, 2, 1]
