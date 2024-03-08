@@ -118,10 +118,10 @@ class LayersTest(parameterized.TestCase):
     grad_fn = jax.grad(loss_fn)
     grad_fn_with_vars = functools.partial(grad_fn, initial_vars)
     per_eg_grad_fn = jax.vmap(grad_fn_with_vars)
-    vmap_inputs_args = jax.tree_map(
+    vmap_inputs_args = jax.tree.map(
         lambda x: jnp.expand_dims(x, axis=1), inputs_args
     )
-    vmap_inputs_kwargs = jax.tree_map(
+    vmap_inputs_kwargs = jax.tree.map(
         lambda x: jnp.expand_dims(x, axis=1), inputs_kwargs
     )
     per_eg_grad = per_eg_grad_fn(*vmap_inputs_args, **vmap_inputs_kwargs)
@@ -131,7 +131,7 @@ class LayersTest(parameterized.TestCase):
       self, initial_vars, loss_fn, scales, *inputs_args, **inputs_kwargs
   ):
     grad_fn = jax.grad(loss_fn)
-    params_with_sq_norms = jax.tree_map(
+    params_with_sq_norms = jax.tree.map(
         lambda x: base.ParamWithAux(x, scales), initial_vars[PARAMS]
     )
     params_with_sq_norms = {**initial_vars, PARAMS: params_with_sq_norms}
@@ -242,7 +242,7 @@ class LayersTest(parameterized.TestCase):
     # test if the computed gradient matches the grad of the reference layer
     grad_fn_ref = jax.grad(loss_fn_ref)
     grad_ref = grad_fn_ref(initial_vars, *inputs_args, **inputs_kwargs)[PARAMS]
-    grad_diffs = jax.tree_map(
+    grad_diffs = jax.tree.map(
         lambda x, y: np.mean(np.abs(x - y.param)), grad_ref, grad_with_sq_norms
     )
     np.testing.assert_allclose(
@@ -299,7 +299,7 @@ class LayersTest(parameterized.TestCase):
         grads=grads_flat, l2_norm_clip=l2_clip
     )
     sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
-    expected_grads = jax.tree_map(lambda x: x / batch_size, sum_grads)
+    expected_grads = jax.tree.map(lambda x: x / batch_size, sum_grads)
 
     _, fast_per_eg_grad_norms = self._get_grad_and_norms(
         initial_vars,
@@ -314,10 +314,10 @@ class LayersTest(parameterized.TestCase):
     )
 
     is_leaf = lambda x: isinstance(x, base.ParamWithAux)
-    obtained_grads = jax.tree_map(
+    obtained_grads = jax.tree.map(
         lambda x: x.param, grad_with_sq_norms, is_leaf=is_leaf
     )
-    diffs = jax.tree_map(
+    diffs = jax.tree.map(
         lambda x, y: np.mean(np.abs(x - y)), expected_grads, obtained_grads
     )
 
@@ -502,7 +502,7 @@ class LayersTest(parameterized.TestCase):
     if inputs_fn is not None:
       inputs = jnp.asarray(inputs_fn())
     if inputs_kwargs_fn is not None:
-      inputs_kwargs = jax.tree_map(jnp.asarray, inputs_kwargs_fn())
+      inputs_kwargs = jax.tree.map(jnp.asarray, inputs_kwargs_fn())
 
     prng_key = jax.random.key(seed=1234)
     init_key, random_key = jax.random.split(prng_key)

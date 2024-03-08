@@ -208,7 +208,7 @@ def write_key_value_pairs(
   filename = epath.Path(filename)
 
   if cast_to_ndarray:
-    key_value_pairs = jax.tree_map(_to_ndarray, key_value_pairs)
+    key_value_pairs = jax.tree.map(_to_ndarray, key_value_pairs)
 
   if write_pickle:
     with filename.with_suffix('.pickle').open('wb') as pkl_f:

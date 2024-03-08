@@ -236,7 +236,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     def _add_noise_to_array(x, prng):
       return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
 
-    final_grads = jax.tree_map(_add_noise_to_array, grads, prng_tree)
+    final_grads = jax.tree.map(_add_noise_to_array, grads, prng_tree)
     return final_grads
 
   def grad_fn(
@@ -285,7 +285,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       )
 
     if self.normalize_gradients:
-      grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
+      grads = jax.tree.map(lambda x: x / self.l2_norm_clip, grads)
 
     # Optimization if using this class only for clipping (e.g., with DP-MF)
     if self.noise_multiplier > 0.0:
@@ -368,7 +368,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
           jnp.reshape(g, [-1, microbatch_size, *g.shape[1:]]), axis=1
       )
 
-    grads = jax.tree_map(_reshape_and_mean, grads)
+    grads = jax.tree.map(_reshape_and_mean, grads)
     grads_flat, grads_treedef = jax.tree_util.tree_flatten(grads)
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_norm_clip
@@ -377,7 +377,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
 
     # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
-    clipped_grads_mean = jax.tree_map(lambda x: x / batch_size, sum_grads)
+    clipped_grads_mean = jax.tree.map(lambda x: x / batch_size, sum_grads)
     frac_clipped = num_clipped / batch_size
     dp_aux_info = {'frac_clipped': frac_clipped}
 
@@ -410,15 +410,15 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     def _add_noise_to_array(x, prng):
       return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
 
-    final_grads = jax.tree_map(_add_noise_to_array, grads, prng_tree)
+    final_grads = jax.tree.map(_add_noise_to_array, grads, prng_tree)
     return final_grads
 
   def _prepare_inputs(self, inputs):
     """Reshape inputs to prepare for vmap to find per-example gradients."""
-    return jax.tree_map(jax.tree_util.Partial(jnp.expand_dims, axis=1), inputs)
+    return jax.tree.map(jax.tree_util.Partial(jnp.expand_dims, axis=1), inputs)
 
   def process_aux_info(self, aux_info: GradAuxInfo) -> GradAuxInfo:
-    aux_info = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), aux_info)
+    aux_info = jax.tree.map(jax.tree_util.Partial(jnp.mean, axis=0), aux_info)
     return aux_info
 
   def grad_fn(
@@ -481,11 +481,11 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
           ],
       )
 
-    inputs = jax.tree_map(reshape_batch, inputs)
+    inputs = jax.tree.map(reshape_batch, inputs)
 
     def _process_inner_batch(index: int) -> Any:
       """Computes mean clipped gradient for inner batch specified by index."""
-      new_inputs = jax.tree_map(lambda x: x[:, index, ...], inputs)
+      new_inputs = jax.tree.map(lambda x: x[:, index, ...], inputs)
 
       # Compute loss and gradients.
       (values, aux), grads = grad_fn(
@@ -502,7 +502,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
           microbatch_splits,
       )
       # Aggregate values and aux.
-      values = jax.tree_map(jax.tree_util.Partial(jnp.mean, axis=0), values)
+      values = jax.tree.map(jax.tree_util.Partial(jnp.mean, axis=0), values)
       aux = self.process_aux_info(aux)
       return (
           values,
@@ -519,9 +519,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       cur_values, cur_aux, cur_grads = val
       values, aux, grads = _process_inner_batch(index)
 
-      new_values = jax.tree_map(jnp.add, cur_values, values)
-      new_aux = jax.tree_map(jnp.add, cur_aux, aux)
-      new_grads = jax.tree_map(jnp.add, cur_grads, grads)
+      new_values = jax.tree.map(jnp.add, cur_values, values)
+      new_aux = jax.tree.map(jnp.add, cur_aux, aux)
+      new_grads = jax.tree.map(jnp.add, cur_grads, grads)
       return (new_values, new_aux, new_grads)
 
     # Loop over inner batches, summing the results together.
@@ -532,14 +532,14 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     )
 
     # Normalize results by number of inner batches.
-    values, aux, grads = jax.tree_map(
+    values, aux, grads = jax.tree.map(
         jax.tree_util.Partial(jnp.multiply, 1.0 / num_iters),
         (values, aux, grads),
     )
 
     # Add noise to normalized gradients.
     if self.normalize_gradients:
-      grads = jax.tree_map(lambda x: x / self.l2_norm_clip, grads)
+      grads = jax.tree.map(lambda x: x / self.l2_norm_clip, grads)
 
     # Optimization if using this class only for clipping (e.g., with DP-MF)
     if self.noise_multiplier > 0.0:
@@ -568,7 +568,7 @@ class MicrobatchDpSgdStochasticGradient(DpSgdStochasticGradient):
   microbatch_size: int = 1
 
   def _prepare_inputs(self, inputs):
-    return jax.tree_map(self._prepare_for_microbatching, inputs)
+    return jax.tree.map(self._prepare_for_microbatching, inputs)
 
   def _prepare_for_microbatching(self, tensor: JTensor) -> JTensor:
     """Reshapes tensor for vmap with microbatch size support.
@@ -631,7 +631,7 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
           jnp.reshape(g, [-1, microbatch_size, *g.shape[1:]]), axis=1
       )
 
-    grads = jax.tree_map(_reshape_and_mean, grads)
+    grads = jax.tree.map(_reshape_and_mean, grads)
     grads_flat, grads_treedef = jax.tree_flatten(grads)
     sum_grads_flat, num_clipped_flat = optax.per_example_layer_norm_clip(
         grads=grads_flat,
@@ -657,13 +657,13 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
-    mean_clipped_grads = jax.tree_map(lambda x: x / batch_size, sum_grads)
-    mean_layer_grad_norms = jax.tree_map(
+    mean_clipped_grads = jax.tree.map(lambda x: x / batch_size, sum_grads)
+    mean_layer_grad_norms = jax.tree.map(
         lambda x: x / batch_size, sum_layer_grad_norms
     )
 
     # Compute frac clipped statistics across all layers
-    frac_clipped = jax.tree_map(lambda x: x / batch_size, num_clipped)
+    frac_clipped = jax.tree.map(lambda x: x / batch_size, num_clipped)
     frac_clipped_flat, _ = jax.tree_util.tree_flatten(frac_clipped)
     frac_clipped_flat = jnp.stack(frac_clipped_flat)
     mean_frac_clipped = jnp.mean(frac_clipped_flat)
@@ -716,7 +716,7 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # Pass 1: get per-example gradient norms
     scales = jnp.ones(batch_size)
-    params_with_sq_norms = jax.tree_map(
+    params_with_sq_norms = jax.tree.map(
         lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
     )
     (_, aux), grad_with_sq_norms = grad_fn(
@@ -757,7 +757,7 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
         scales = scales / self.l2_norm_clip
 
     # Pass 2: get average of clipped gradients
-    params_with_sq_norms = jax.tree_map(
+    params_with_sq_norms = jax.tree.map(
         lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
     )
     (loss, aux), clipped_grads = grad_fn(
@@ -765,7 +765,7 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
         mdl_vars_nograd_and_inputs,
         prng_key,
     )
-    clipped_grads[PARAMS] = jax.tree_map(
+    clipped_grads[PARAMS] = jax.tree.map(
         lambda x: x.param, clipped_grads[PARAMS], is_leaf=is_leaf
     )
 

@@ -975,7 +975,7 @@ class BaseEvalProgram(Program):
       # py_utils.tree_unstack() on XLA-backed numpy arrays is inefficient
       # (b/284371615).
       per_example_scores.append(
-          jax.tree_map(lambda x: x.copy(), jax.device_get(per_example_out))
+          jax.tree.map(lambda x: x.copy(), jax.device_get(per_example_out))
       )
 
       # Merge clu.metrics to update for each minibatch.

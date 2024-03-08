@@ -286,7 +286,7 @@ def pretty_repr_shapes(
       x_sda = x
       return 'x'.join(str(e) for e in x_sda.shape) + maybe_dtype_str(x)
 
-  out = jax.tree_map(pps, replicated_vars)
+  out = jax.tree.map(pps, replicated_vars)
   out = pretty_repr(out)
   return pretty_format_iters(out)
 
@@ -335,7 +335,7 @@ def l2_mean(
     x = x / a
     return jnp.array([x.size, (a**2) * jnp.sum(x**2)])
 
-  squares = jax.tree_map(_sq, tree)
+  squares = jax.tree.map(_sq, tree)
   names, squares = zip(*_yield_subtrees(squares, max_level=max_level))
   names = [sep.join(name) for name in names]
   if prefix:
@@ -416,23 +416,28 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   scalar_summaries = jax.lax.pmean(
       scalar_summaries, axis_name=PMAP_PARALLEL_AXIS_NAME)
   # Gather per-replica image results.
-  image_summaries = jax.tree_map(
+  image_summaries = jax.tree.map(
       lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
-      image_summaries)
+      image_summaries,
+  )
   max_entries = MAX_IMAGES_PER_SUMMARY
-  image_summaries = jax.tree_map(
+  image_summaries = jax.tree.map(
       lambda x: jnp.reshape(x, [-1] + list(x.shape)[-3:])[:max_entries],
-      image_summaries)
-  audio_summaries = jax.tree_map(
+      image_summaries,
+  )
+  audio_summaries = jax.tree.map(
       lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
-      audio_summaries)
+      audio_summaries,
+  )
   max_entries = MAX_AUDIOS_PER_SUMMARY
-  audio_summaries = jax.tree_map(
+  audio_summaries = jax.tree.map(
       lambda x: jnp.reshape(x, [-1] + list(x.shape[-2:]))[:max_entries],
-      audio_summaries)
-  video_summaries = jax.tree_map(
+      audio_summaries,
+  )
+  video_summaries = jax.tree.map(
       lambda x: jax.lax.all_gather(x, axis_name=PMAP_PARALLEL_AXIS_NAME),
-      video_summaries)
+      video_summaries,
+  )
 
   summary_tensors = summary_tensors.copy()  # pytype: disable=attribute-error  # jax-ndarray
   for summary_dict in (

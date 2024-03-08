@@ -80,8 +80,9 @@ class ExperimentImportsTestHelper(absltest.TestCase):
       # (and check for dcn_mesh_shape too).
       if (hasattr(model, 'ici_mesh_shape') and
           model.ici_mesh_shape is not None):
-        input_specs = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                   input_specs)
+        input_specs = jax.tree.map(
+            py_utils.get_global_input_shape_dtype, input_specs
+        )
       model.abstract_init_with_metadata(input_specs)
 
   @classmethod

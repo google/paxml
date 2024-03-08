@@ -393,13 +393,13 @@ def initialize_model_state(
         summary_verbosity=jax_task.summary_verbosity,
     )
     with base_layer.JaxContext.new_context(hparams=context_p):
-      inputs = jax.tree_map(jnp.zeros_like, inputs_shape_dtype)
+      inputs = jax.tree.map(jnp.zeros_like, inputs_shape_dtype)
       if model.hparams.fprop_dtype == jnp.bfloat16:
-        inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
+        inputs = jax.tree.map(_maybe_to_bfloat16, inputs)
       return model.init(init_key, inputs)
 
   initial_vars = init_fn(init_key)
-  logging.info('initial_vars: %s', jax.tree_map(jnp.shape, initial_vars))
+  logging.info('initial_vars: %s', jax.tree.map(jnp.shape, initial_vars))
 
   # In case jax_task.model wraps a t5x model, let's remove the params_axes
   # variable collection.
@@ -446,7 +446,7 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
     else:
       return jax.device_put_replicated(state, jax.local_devices())
 
-  return jax.tree_map(_replicate, model_states)
+  return jax.tree.map(_replicate, model_states)
 
 
 # TODO(laigd): remove this since it's used only by tests.
@@ -829,7 +829,7 @@ def _get_default_loss_fn(
       pass
     elif fprop_dtype == jnp.bfloat16:
       mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
-      inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
+      inputs = jax.tree.map(_maybe_to_bfloat16, inputs)
     else:
       assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
@@ -936,7 +936,7 @@ def _get_default_grad_fn(
     with_grad = tasks_lib.filter_vars_for_grad_or_opt(
         mdl_vars, excluded_for_grad
     )
-    no_grad = jax.tree_map(
+    no_grad = jax.tree.map(
         lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
     )
 
@@ -946,7 +946,7 @@ def _get_default_grad_fn(
         prng_key: PRNGKey,
     ):
       mdl_vars_nograd, inputs = mdl_vars_nograd_and_inputs
-      merged_vars = jax.tree_map(
+      merged_vars = jax.tree.map(
           lambda e, x, y: y if e else x,
           excluded_for_grad,
           mdl_vars_grad,
@@ -959,7 +959,7 @@ def _get_default_grad_fn(
     else:
       g = functools.partial(learner.stochastic_gradient.grad_fn, _loss)
     values, grads = g(with_grad, (no_grad, inputs), prng_key)
-    grads = jax.tree_map(
+    grads = jax.tree.map(
         lambda eo, eg, m, g: jnp.zeros_like(m) if eg and not eo else g,
         excluded_for_opt,
         excluded_for_grad,
@@ -1153,7 +1153,7 @@ def train_step_single_learner(
     ):
       # Make updated non-trainable vars visible to EMA.
       mdl_vars[NON_TRAINABLE] = fwd_updated_vars[NON_TRAINABLE]
-    excluded_for_learner = jax.tree_map(
+    excluded_for_learner = jax.tree.map(
         lambda eo, eg: eo and eg, excluded_for_opt, excluded_for_grad
     )
     vars_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
@@ -1168,7 +1168,7 @@ def train_step_single_learner(
     vars_with_opt = learner.apply_gradient(
         vars_with_opt, transformed_grads, wps_with_opt
     )
-    mdl_vars = jax.tree_map(
+    mdl_vars = jax.tree.map(
         lambda e, old, new: old if e else new,
         excluded_for_grad,
         mdl_vars,
@@ -1188,7 +1188,7 @@ def train_step_single_learner(
         )
 
     # We may have updated non-trainable vars that have been explicitly excluded.
-    mdl_vars = jax.tree_map(
+    mdl_vars = jax.tree.map(
         lambda e, old, new: old if e else new,
         # Filter out only the explicitly masked non-trainables.
         tasks_lib.get_excluded_var_mask_for_grad_or_opt(
@@ -1306,7 +1306,7 @@ def eval_step_single_learner(
     pass
   elif fprop_dtype == jnp.bfloat16:
     mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
-    inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
+    inputs = jax.tree.map(_maybe_to_bfloat16, inputs)
   else:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
@@ -1362,7 +1362,7 @@ def eval_step_single_learner(
         per_example_out,
         aggregated_summaries,
         aggregated_clu_metrics,
-    ) = jax.tree_map(
+    ) = jax.tree.map(
         _maybe_to_float32,
         (
             mean_loss,
@@ -1419,7 +1419,7 @@ def decode_step(
 
   if fprop_dtype == jnp.bfloat16:
     mdl_vars = _maybe_to_bfloat16_vars(mdl_vars, var_weight_hparams)
-    inputs = jax.tree_map(_maybe_to_bfloat16, inputs)
+    inputs = jax.tree.map(_maybe_to_bfloat16, inputs)
   elif fprop_dtype != jnp.float32:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
@@ -1456,7 +1456,7 @@ def decode_step(
 
     summary_tensors = updated_vars.get(base_layer.SUMMARIES, {})
     if summary_tensors:
-      summary_tensors = jax.tree_map(_maybe_to_float32, summary_tensors)
+      summary_tensors = jax.tree.map(_maybe_to_float32, summary_tensors)
       updated_vars[base_layer.SUMMARIES] = summary_tensors
 
     return outputs, updated_vars
@@ -1560,7 +1560,7 @@ def initialize_partitioned_model_states(
   train_state_partition_specs = (
       state_specs.to_eval_state() if discard_opt_states else state_specs
   )
-  train_state_unpadded_shapes = jax.tree_map(
+  train_state_unpadded_shapes = jax.tree.map(
       jnp.shape,
       jax_task.create_train_state_unpadded_shapes(
           var_weight_hparams, discard_opt_states
@@ -1597,11 +1597,11 @@ def initialize_partitioned_model_states(
   mesh_names = model.hparams.mesh_axis_names
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
-  prng_key_shardings = jax.tree_map(
+  prng_key_shardings = jax.tree.map(
       lambda p: jax.sharding.NamedSharding(global_mesh, p),
       prng_key_partition_spec,
   )
-  train_state_shardings = jax.tree_map(
+  train_state_shardings = jax.tree.map(
       lambda p: jax.sharding.NamedSharding(global_mesh, p),
       train_state_partition_specs,
   )
@@ -1702,11 +1702,11 @@ def get_inputs_shape_dtype(
   """
   sample_inputs = instantiate(input_config).get_next_padded()
 
-  perhost_inputs_shape_dtype = jax.tree_map(
+  perhost_inputs_shape_dtype = jax.tree.map(
       lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
       sample_inputs,
   )
-  global_inputs_shape_dtype = jax.tree_map(
+  global_inputs_shape_dtype = jax.tree.map(
       py_utils.get_global_input_shape_dtype, sample_inputs
   )
   return perhost_inputs_shape_dtype, global_inputs_shape_dtype
@@ -1776,7 +1776,7 @@ def get_train_input_specs_for_model_init(
 
   # All pjit models specify at least the ICI mesh shape.
   if task.model.mesh_shape is not None:
-    train_input_specs = jax.tree_map(
+    train_input_specs = jax.tree.map(
         py_utils.get_global_input_shape_dtype, train_input_specs
     )
 

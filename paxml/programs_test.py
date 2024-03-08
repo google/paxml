@@ -120,7 +120,7 @@ class ProgramTestBase(test_utils.TestCase):
 class SingleTaskPjitTrainProgramTest(ProgramTestBase):
 
   def test_train_program(self):
-    inputs_shape_dtype = jax.tree_map(
+    inputs_shape_dtype = jax.tree.map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape, dtype=x.dtype),
         self.train_input.get_next(),
     )

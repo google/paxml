@@ -88,8 +88,9 @@ class LMInputSpecsProvider(base_input.BaseInputSpecsProvider):
   """Class to provide input specs for model initialization."""
 
   def get_input_specs(self):
-    return jax.tree_map(lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
-                        get_model_inputs())
+    return jax.tree.map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), get_model_inputs()
+    )
 
 
 class TestModel01(base_model.BaseModel):

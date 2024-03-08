@@ -78,7 +78,7 @@ class BaseInferenceRunnerTest(test_utils.TestCase):
     features_dict = tfds.features.FeaturesDict(dummy_schema)
     for serialized, expected in zip(serialized_outputs, expected_outputs):
       output = features_dict.deserialize_example(serialized)
-      output_np = jax.tree_map(lambda x: x.numpy(), output)
+      output_np = jax.tree.map(lambda x: x.numpy(), output)
 
       for output_leaf, expected_leaf in zip(
           jax.tree_util.tree_leaves(output_np),

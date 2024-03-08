@@ -397,7 +397,7 @@ class SingleTaskDecodeProgram(programs.Program):
         # Copy the tensor from device memory to ram, since accumulating such
         # tensor on devices may cause HBM OOM, when
         # task_p.train.summary_accumulate_interval_steps is set.
-        weighted_scalars = jax.tree_map(np.array, weighted_scalars)
+        weighted_scalars = jax.tree.map(np.array, weighted_scalars)
         decode_metrics.store(weighted_scalars)
 
         xla_passthrough.merge_back_xla_unsupported_batch(
@@ -409,7 +409,7 @@ class SingleTaskDecodeProgram(programs.Program):
         # its outputs, we also don't want on-device allocation as
         # would eventually lead to HBM OOM.
         with jax.default_device(jax.local_devices(backend='cpu')[0]):
-          per_example_out = jax.tree_map(np.asarray, per_example_out)
+          per_example_out = jax.tree.map(np.asarray, per_example_out)
           process_weighted_scalars, processed_out, processed_metric_updates = (
               self._task.model.process_decode_out(
                   self.decode_input, per_example_out

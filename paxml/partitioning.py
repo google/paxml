@@ -126,7 +126,7 @@ def compile_for_auto_sharding(
     dtype = jax.dtypes.canonicalize_dtype(x.dtype)
     return core.ShapedArray(x.shape, dtype)
 
-  inputs_shape_dtype = jax.tree_map(_create_aval, inputs_shape_dtype)
+  inputs_shape_dtype = jax.tree.map(_create_aval, inputs_shape_dtype)
   compiled = step_fn.lower(
       train_state, step_key, inputs_shape_dtype, static_args
   ).compile()
@@ -149,7 +149,7 @@ def _remove_input_padding(
     x = x[:unpadded_global_batch_size]
     return base_layer.maybe_shard(x, pspec, mesh_names)
 
-  return jax.tree_map(_remove_padding, inputs, input_partition_spec)
+  return jax.tree.map(_remove_padding, inputs, input_partition_spec)
 
 
 def _write_input_specs(
@@ -603,7 +603,7 @@ class PmapPartitioner(Partitioner):
     sample_inputs = self.preprocess_inputs(
         train_input_pipeline, sample_inputs, partition_specs=None
     )
-    per_device_shape_dtype = jax.tree_map(
+    per_device_shape_dtype = jax.tree.map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype),
         sample_inputs,
     )
@@ -619,8 +619,8 @@ class PmapPartitioner(Partitioner):
 
     # Strip out the batch dimension from the batch and from the spec.
     fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype)
-    nested_shape_dtype = jax.tree_map(fn, batch)
-    spec = jax.tree_map(fn, self.train_inputs_shape_dtype)
+    nested_shape_dtype = jax.tree.map(fn, batch)
+    spec = jax.tree.map(fn, self.train_inputs_shape_dtype)
 
     if not trees.is_subset(spec, nested_shape_dtype):
       _spec_mismatch_error(nested_shape_dtype, spec)
@@ -648,13 +648,13 @@ class PmapPartitioner(Partitioner):
           var_weight_hparams=metadata.var_weight_hparams,
       )
 
-    logging.info('train state shapes: %s', jax.tree_map(jnp.shape, train_state))
+    logging.info('train state shapes: %s', jax.tree.map(jnp.shape, train_state))
     replicated_train_state = trainer_lib.replicate_model_state(train_state)
     # Unreplicated model states are not needed anymore at that point.
     del train_state
     logging.info(
         'replicated train state shapes: %s',
-        jax.tree_map(jnp.shape, replicated_train_state),
+        jax.tree.map(jnp.shape, replicated_train_state),
     )
 
     # From now on, different replicas should use different random seeds.
@@ -791,7 +791,7 @@ class PjitPartitioner(Partitioner):
       self, train_input_pipeline: base_input.BaseInput
   ) -> NestedShapeDtypeLike:
     sample_inputs = train_input_pipeline.peek_padded()
-    global_shape_dtype = jax.tree_map(
+    global_shape_dtype = jax.tree.map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
     perhost_inputs_shape_dtype = trees.get_shape_dtype(sample_inputs)
@@ -817,8 +817,8 @@ class PjitPartitioner(Partitioner):
     logging.info('Checking input spec [pjit partitioner]')
 
     fn = lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype)
-    spec = jax.tree_map(fn, self.train_inputs_shape_dtype)
-    input_batch_spec = jax.tree_map(fn, batch)
+    spec = jax.tree.map(fn, self.train_inputs_shape_dtype)
+    input_batch_spec = jax.tree.map(fn, batch)
 
     if not trees.is_subset(spec, input_batch_spec):
       _spec_mismatch_error(input_batch_spec, spec)
@@ -859,7 +859,7 @@ class PjitPartitioner(Partitioner):
       )
     logging.info(
         'partitioned train state shapes (global shape): %s',
-        jax.tree_map(jnp.shape, partitioned_train_state),
+        jax.tree.map(jnp.shape, partitioned_train_state),
     )
 
     # We do not fold in jax.process_index in contrast to the pmap version and
@@ -985,7 +985,7 @@ class PjitPartitioner(Partitioner):
         # When there are input padding on multi-host, we use a different device
         # order in the program's input sharding. We now make sure they are
         # resharded back to the device order consistent with the global mesh.
-        inputs = jax.tree_map(
+        inputs = jax.tree.map(
             lambda x, s: base_layer.maybe_shard(x, s, self._mesh_names),
             inputs,
             input_partition_spec,
@@ -1009,7 +1009,7 @@ class PjitPartitioner(Partitioner):
       # need to keep this resharding, because the resharding is related to the
       # locations of the real data (inputs_split_mapping) and is not visible
       # from HLOs.
-      inputs = jax.tree_map(reshard_inputs_fn, inputs)
+      inputs = jax.tree.map(reshard_inputs_fn, inputs)
 
       fn_out = step_fn(
           self._jax_task,
@@ -1043,13 +1043,13 @@ class PjitPartitioner(Partitioner):
     logging.info('step_fn fn_in_partition_specs=%s', fn_in_partition_specs)
     logging.info('step_fn fn_out_partition_specs=%s', fn_out_partition_specs)
 
-    fn_in_shardings = jax.tree_map(
+    fn_in_shardings = jax.tree.map(
         lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
         if not isinstance(p, pjit.AUTO)
         else p,
         fn_in_partition_specs,
     )
-    fn_out_shardings = jax.tree_map(
+    fn_out_shardings = jax.tree.map(
         lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
         if not isinstance(p, pjit.AUTO)
         else p,
@@ -1070,7 +1070,7 @@ class PjitPartitioner(Partitioner):
     return trainer_lib.bind_mesh(pjitted_fn, self.global_mesh)
 
   def _get_state_unpadded_shapes(self, metadata: TrainStateMetadata):
-    return jax.tree_map(jnp.shape, metadata.unpadded_global_shapes)
+    return jax.tree.map(jnp.shape, metadata.unpadded_global_shapes)
 
   def _pad_states(
       self, metadata: TrainStateMetadata, unpadded_state: TrainState
@@ -1310,8 +1310,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
             ' train_state_metadata=%s, prng_key=%s, inputs=%s static_args=%s'
         ),
         metadata.unpadded_global_shapes,
-        jax.tree_map(jnp.shape, self._init_key),
-        jax.tree_map(jnp.shape, inputs_shape_dtype),
+        jax.tree.map(jnp.shape, self._init_key),
+        jax.tree.map(jnp.shape, inputs_shape_dtype),
         static_args,
     )
     (
@@ -1324,8 +1324,8 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         inputs_shape_dtype,
         static_args,
     )
-    new_train_state_pspec = jax.tree_map(lambda x: x.spec, input_shardings[0])
-    new_input_pspec = jax.tree_map(lambda x: x.spec, input_shardings[2])
+    new_train_state_pspec = jax.tree.map(lambda x: x.spec, input_shardings[0])
+    new_input_pspec = jax.tree.map(lambda x: x.spec, input_shardings[2])
     return auto_sharded_step_fn, new_input_pspec, new_train_state_pspec
 
   def get_train_state_metadata(

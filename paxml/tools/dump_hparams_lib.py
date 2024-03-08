@@ -82,7 +82,7 @@ def _write_post_init_model_hparams_file(
   # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
   # (and check for dcn_mesh_shape too).
   if hasattr(model, 'ici_mesh_shape') and model.ici_mesh_shape is not None:
-    input_specs = jax.tree_map(
+    input_specs = jax.tree.map(
         py_utils.get_global_input_shape_dtype, input_specs
     )
 

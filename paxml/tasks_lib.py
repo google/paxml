@@ -170,7 +170,7 @@ def extract_ema(
             if extracted is None:
               extracted = v.ema
             else:
-              extracted = jax.tree_map(
+              extracted = jax.tree.map(
                   lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
                   extracted,
                   v.ema,
@@ -180,7 +180,7 @@ def extract_ema(
     raise ValueError(
         'Could not find EMA states in `%r`.' % model_states.opt_states
     )
-  extracted = jax.tree_map(
+  extracted = jax.tree.map(
       lambda x: None if py_utils.is_optax_masked_node(x) else x,
       extracted,
       is_leaf=py_utils.is_optax_masked_node,
@@ -424,7 +424,7 @@ def _make_train_state(
     # included to be used as the EMA of a bprop-excluded var.
     prefix = py_utils.extract_prefixed_keys_from_nested_map(
         # extract_prefixed_keys_from_nested_map doesn't work with mask nodes.
-        jax.tree_map(
+        jax.tree.map(
             lambda x: True if is_masked(x) else x, variables, is_leaf=is_masked
         ),
         key_separator='.',
@@ -472,7 +472,7 @@ def _make_train_state(
     new_states_pspecs = []
     vectorized = is_vectorized(ckpt_train_state)
 
-    missing_in_ema = jax.tree_map(
+    missing_in_ema = jax.tree.map(
         lambda _: True, ckpt_train_state.mdl_vars, is_leaf=is_masked
     )
 
@@ -485,7 +485,7 @@ def _make_train_state(
         else:
           filtered_ema, ema_pspecs = _filter_vars_and_get_pspecs(v)
           # is_bprop_masked_node means matched but excluded.
-          missing_in_ema = jax.tree_map(
+          missing_in_ema = jax.tree.map(
               lambda x, y: x and py_utils.is_bprop_masked_node(y),
               missing_in_ema,
               filtered_ema['ema'],
@@ -528,7 +528,7 @@ def _make_train_state(
           for v in new_states0[key]:
             if isinstance(v, dict) and 'ema' in v:
               # is_bprop_masked_node means matched but excluded.
-              missing_in_ema = jax.tree_map(
+              missing_in_ema = jax.tree.map(
                   lambda x, y: x and py_utils.is_bprop_masked_node(y),
                   missing_in_ema,
                   v['ema'],
@@ -683,7 +683,7 @@ def restore_pmap_from_tensorstore(
     else:
       return jax.sharding.PartitionSpec()
 
-  fully_replicated_state_specs = jax.tree_map(_get_spec, global_shapes)
+  fully_replicated_state_specs = jax.tree.map(_get_spec, global_shapes)
   with restore_global_mesh:
     fully_replicated_gda_model_states = checkpoints.restore_checkpoint(
         global_shapes,
@@ -699,13 +699,13 @@ def restore_pmap_from_tensorstore(
   if global_mesh is not None:
     return fully_replicated_gda_model_states
   if checkpoint_type == CheckpointType.PERSISTENCE:
-    return jax.tree_map(
+    return jax.tree.map(
         py_utils.convert_fully_replicated_array_to_pmap_array,
         fully_replicated_gda_model_states,
     )
   # model_states is jax.Array; we convert back to DA or jax.Array with
   # single device sharding for pmap.
-  return jax.tree_map(
+  return jax.tree.map(
       lambda x: x.addressable_data(0), fully_replicated_gda_model_states
   )
 
@@ -809,13 +809,13 @@ def get_excluded_var_mask_for_grad_or_opt(
     included_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_inclusion
     )
-    excluded_for_grad = jax.tree_map(lambda x: not x, included_for_grad)
+    excluded_for_grad = jax.tree.map(lambda x: not x, included_for_grad)
   else:
     excluded_for_grad = py_utils.match_variable_names(
         var_weight_hparams, learner.bprop_variable_exclusion
     )
   if mask_all_overwrite_with_gradient:
-    excluded_for_grad = jax.tree_map(
+    excluded_for_grad = jax.tree.map(
         lambda x, e: base_layer.var_overwrite_with_gradient(x) or e,
         var_weight_hparams,
         excluded_for_grad,
@@ -835,7 +835,7 @@ def get_excluded_var_mask_for_opt(
 ) -> NestedMap:
   """Returns whether each var should be excluded for optimizer."""
   if learner.keep_optimizer_state_for_excluded_vars:
-    return jax.tree_map(lambda _: False, var_weight_hparams)
+    return jax.tree.map(lambda _: False, var_weight_hparams)
   return get_excluded_var_mask_for_grad_or_opt(
       var_weight_hparams,
       learner,
@@ -858,7 +858,7 @@ def filter_vars_for_grad_or_opt(
     mdl_vars: NestedMap, excluded_for_grad: NestedMap
 ) -> NestedMap:
   """Filters out vars that should be excluded for grad or optimizer."""
-  return jax.tree_map(
+  return jax.tree.map(
       lambda v, e: py_utils.BpropMaskedNode() if e else v,
       mdl_vars,
       excluded_for_grad,
@@ -939,10 +939,11 @@ def create_state_partition_specs(
         return x.inner_state
       return x
 
-    opt_var_partition_specs = jax.tree_map(
+    opt_var_partition_specs = jax.tree.map(
         _maybe_unmask_outer_masked_state,
         opt_var_partition_specs,
-        is_leaf=_is_instance_masked_state)
+        is_leaf=_is_instance_masked_state,
+    )
   return TrainState(
       step=step_partition_spec,
       mdl_vars=var_partition_specs,
@@ -1050,7 +1051,7 @@ def create_state_unpadded_shapes(
     shape = tuple(var_param.repeat_prefix or ()) + tuple(var_param.shape)
     return jax.ShapeDtypeStruct(shape, var_param.dtype)
 
-  var_shapes = jax.tree_map(_get_shape, var_weight_hparams)
+  var_shapes = jax.tree.map(_get_shape, var_weight_hparams)
 
   def _create_train_state_from_shape(mdl_vars):
     return create_state(
@@ -1111,7 +1112,7 @@ def create_state_padded_shapes(
     padded_shape = [s + p for (s, p) in zip(unpadded_shape, paddings)]
     return jax.ShapeDtypeStruct(padded_shape, shape_dtype.dtype)
 
-  padded_shapes = jax.tree_map(
+  padded_shapes = jax.tree.map(
       _maybe_pad,
       unpadded_shapes,
       model_state_partition_specs,
@@ -1650,7 +1651,7 @@ class SingleTask(base_task.BaseTask):
 
       # This is the mask of variational noise
       # True: apply vn; False: without vn
-      vn_mask = jax.tree_map(lambda x: bool(regexp.match(x) is not None), names)
+      vn_mask = jax.tree.map(lambda x: bool(regexp.match(x) is not None), names)
 
       # Check if any variables match the rule
       # If vn_scale > 0.0 but none of variables match, throw error
@@ -1677,8 +1678,8 @@ class SingleTask(base_task.BaseTask):
           return params
 
       # VN only updates trainable part and copy non-trainable
-      ret = jax.tree_map(add_vn, mdl_vars, rng_tree, vn_mask)
-      return jax.tree_map(
+      ret = jax.tree.map(add_vn, mdl_vars, rng_tree, vn_mask)
+      return jax.tree.map(
           lambda x, y: jnp.where(step >= self.vn.vn_start_step, x, y),
           ret,
           mdl_vars,
@@ -1780,8 +1781,9 @@ class SingleTask(base_task.BaseTask):
     # (and check for dcn_mesh_shape too).
     if (hasattr(ckpt_task.model, 'ici_mesh_shape') and
         ckpt_task.model.ici_mesh_shape is not None):
-      inputs_shape_dtype = jax.tree_map(py_utils.get_global_input_shape_dtype,
-                                        inputs_shape_dtype)
+      inputs_shape_dtype = jax.tree.map(
+          py_utils.get_global_input_shape_dtype, inputs_shape_dtype
+      )
     # Initialize with a dummy seed
     var_weight_hparams = ckpt_task.model.abstract_init_with_metadata(
         inputs_shape_dtype)

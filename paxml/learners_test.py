@@ -116,8 +116,9 @@ class LearnersTest(test_utils.TestCase):
         np.random.normal(1.2, 4.0, [1, 2]).astype('float32'))
     old_vars.ffn = jnp.asarray(
         np.random.normal(1.6, 2.0, [1, 2]).astype('float32'))
-    var_weight_hparams = jax.tree_map(
-        lambda v: base_layer.WeightHParams(v.shape), old_vars)
+    var_weight_hparams = jax.tree.map(
+        lambda v: base_layer.WeightHParams(v.shape), old_vars
+    )
 
     grad_tx = learner_instance.get_grad_tx(var_weight_hparams)
 
@@ -145,11 +146,12 @@ class LearnersTest(test_utils.TestCase):
 
     # Similar to tf.nest.assert_same_structure(opt_states_pspec, opt_states),
     # but takes is_leaf arg to treat WeightHParams as a leaf.
-    _ = jax.tree_map(
+    _ = jax.tree.map(
         lambda x, y: True,
         opt_states_pspec,
         opt_states,
-        is_leaf=lambda x: isinstance(x, base_layer.WeightHParams))
+        is_leaf=lambda x: isinstance(x, base_layer.WeightHParams),
+    )
 
     with base_layer.JaxContext.new_context():
       transformed_grads, updated_opt_states = learner_instance.update_states(
@@ -168,7 +170,7 @@ class LearnersTest(test_utils.TestCase):
     #     ScaleByScheduleState(count=DeviceArray(0, dtype=int32)),
     # )
     updated_grads, updated_state = sgd.update(grads, opt_states[2])
-    updated_grads = jax.tree_map(
+    updated_grads = jax.tree.map(
         lambda g, p: g - lr * decoupled_weight_decay * p,
         updated_grads,
         old_vars,
@@ -232,7 +234,7 @@ class LearnersTest(test_utils.TestCase):
     old_vars.ffn = jnp.asarray(
         np.random.normal(1.6, 2.0, [1, 2]).astype('float32')
     )
-    var_weight_hparams = jax.tree_map(
+    var_weight_hparams = jax.tree.map(
         lambda v: base_layer.WeightHParams(
             v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
         ),
@@ -252,7 +254,7 @@ class LearnersTest(test_utils.TestCase):
     logging.info('opt_states_pspec=%s', opt_states_pspec)
     # Similar to tf.nest.assert_same_structure(opt_states_pspec, opt_states),
     # but takes is_leaf arg to treat WeightHParams as a leaf.
-    jax.tree_map(
+    jax.tree.map(
         lambda x, y: True,
         opt_states_pspec,
         opt_states,
@@ -343,8 +345,9 @@ class LearnersTest(test_utils.TestCase):
         k=jnp.asarray(np.random.normal(1.6, 2.0, [4, 4]).astype('float32')))
     old_vars.lm.ffn = NestedMap(
         k=jnp.asarray(np.random.normal(1.3, 2.0, [4, 4]).astype('float32')))
-    var_weight_hparams = jax.tree_map(
-        lambda v: base_layer.WeightHParams(v.shape), old_vars)
+    var_weight_hparams = jax.tree.map(
+        lambda v: base_layer.WeightHParams(v.shape), old_vars
+    )
     grad_tx = learner_instance.get_grad_tx(var_weight_hparams)
     opt_states = grad_tx.init(old_vars)
     with base_layer.JaxContext.new_context():
@@ -487,7 +490,7 @@ class LearnersTest(test_utils.TestCase):
         k=jnp.asarray(np.random.normal(1.3, 2.0, [4, 4]).astype('float32'))
     )
 
-    var_weight_hparams = jax.tree_map(
+    var_weight_hparams = jax.tree.map(
         lambda v: base_layer.WeightHParams(
             v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
         ),
@@ -522,7 +525,7 @@ class LearnersTest(test_utils.TestCase):
     # MaskedState has inner_state representing the single optimizer state
     # and the masked states are chained for optimizer and auziliary optimizers.
     for p in partition_spec:
-      jax.tree_map(
+      jax.tree.map(
           asserts.assert_same_structure,
           partition_spec_single,
           p.inner_state,
@@ -607,8 +610,9 @@ class LearnersTest(test_utils.TestCase):
         k=jnp.asarray(np.random.normal(1.6, 2.0, [4, 4]).astype('float32')))
     old_vars.lm.ffn = NestedMap(
         k=jnp.asarray(np.random.normal(1.3, 2.0, [4, 4]).astype('float32')))
-    var_weight_hparams = jax.tree_map(
-        lambda v: base_layer.WeightHParams(v.shape), old_vars)
+    var_weight_hparams = jax.tree.map(
+        lambda v: base_layer.WeightHParams(v.shape), old_vars
+    )
     grad_tx = learner_instance.get_grad_tx(var_weight_hparams)
     opt_states = grad_tx.init(old_vars)
     logging.info('opt_states: %s', opt_states)
@@ -660,8 +664,9 @@ class LearnersTest(test_utils.TestCase):
         k=jnp.asarray(np.random.normal(1.6, 2.0, [4, 4]).astype('float32')))
     old_vars.lm.ffn = NestedMap(
         k=jnp.asarray(np.random.normal(1.3, 2.0, [4, 4]).astype('float32')))
-    var_weight_hparams = jax.tree_map(
-        lambda v: base_layer.WeightHParams(v.shape), old_vars)
+    var_weight_hparams = jax.tree.map(
+        lambda v: base_layer.WeightHParams(v.shape), old_vars
+    )
     with self.assertRaises(ValueError):
       learner_instance.get_grad_tx(var_weight_hparams)
 
@@ -773,11 +778,11 @@ class LearnersTest(test_utils.TestCase):
     def _opt_init(params):
       # Reduction over each variable. Behavior will depend on vectorization.
       logging.info(f'Init called with params {params}')
-      return jax.tree_map(jnp.sum, params)
+      return jax.tree.map(jnp.sum, params)
 
     def _opt_update(updates, state, params):
       del params
-      return jax.tree_map(lambda u, s: u + s, updates, state), state
+      return jax.tree.map(lambda u, s: u + s, updates, state), state
 
     def _init_partition_spec(var_hparams):
 
@@ -785,7 +790,7 @@ class LearnersTest(test_utils.TestCase):
         assert not p.repeat_prefix
         return p
 
-      return jax.tree_map(_init_one, var_hparams)
+      return jax.tree.map(_init_one, var_hparams)
 
     class TestOptimizer(optimizers.BaseOptimizer):
 
@@ -850,7 +855,8 @@ class LearnersTest(test_utils.TestCase):
     logging.info(state)
     # Computed update is 0 + state, and state is sum of each variable.
     update, state = grad_tx.update(
-        jax.tree_map(jnp.zeros_like, variables), state, variables)
+        jax.tree.map(jnp.zeros_like, variables), state, variables
+    )
     # Variables a and c are scalars excluding the prefix, so the update must be
     # equal to the initial variable values.
     self.assertAllClose(update.a, variables.a)
@@ -867,11 +873,11 @@ class LearnersTest(test_utils.TestCase):
     def _opt_init(params):
       # Reduction over each variable. Behavior will depend on vectorization.
       logging.info(f'Init called with params {params}')
-      return jax.tree_map(jnp.sum, params)
+      return jax.tree.map(jnp.sum, params)
 
     def _opt_update(updates, state, params):
       del params
-      return jax.tree_map(lambda u, s: u + s, updates, state), state
+      return jax.tree.map(lambda u, s: u + s, updates, state), state
 
     learner_p = pax_fiddle.Config(
         learners.Learner,
@@ -935,7 +941,7 @@ class LearnersTest(test_utils.TestCase):
     logging.info('Prefix vectorization state after init .. ')
     # Computed update is 0 + state, and state is sum of each variable.
     update, state = grad_tx.update(
-        jax.tree_map(jnp.zeros_like, variables), state, variables
+        jax.tree.map(jnp.zeros_like, variables), state, variables
     )
     # Variables a and c are scalars excluding the prefix, so the update must be
     # equal to the initial variable values.
@@ -953,18 +959,18 @@ class LearnersTest(test_utils.TestCase):
   def test_scale_update_by_var_norm(self):
     def _opt_init(params):
       # Reduction over each variable. Behavior will depend on vectorization.
-      return jax.tree_map(jnp.sum, params)
+      return jax.tree.map(jnp.sum, params)
 
     def _opt_update(updates, state, params):
       del params
-      return jax.tree_map(lambda u, s: u + s, updates, state), state
+      return jax.tree.map(lambda u, s: u + s, updates, state), state
 
     def _init_partition_spec(var_hparams):
       def _init_one(p):
         assert not p.repeat_prefix
         return p
 
-      return jax.tree_map(_init_one, var_hparams)
+      return jax.tree.map(_init_one, var_hparams)
 
     class TestOptimizer(optimizers.BaseOptimizer):
 
@@ -1011,7 +1017,7 @@ class LearnersTest(test_utils.TestCase):
 
     def _opt_init(params):
       # Reduction over each variable. Behavior will depend on vectorization.
-      return jax.tree_map(jnp.sum, params)
+      return jax.tree.map(jnp.sum, params)
 
     def _opt_update(updates, state, params):
       del params
@@ -1021,8 +1027,10 @@ class LearnersTest(test_utils.TestCase):
         base_layer.add_global_summary('s', s.sum())
         return u + s
 
-      return jax.tree_map(_opt_update_with_global_summary, updates,
-                          state), state
+      return (
+          jax.tree.map(_opt_update_with_global_summary, updates, state),
+          state,
+      )
 
     def _init_partition_spec(var_hparams):
 
@@ -1030,7 +1038,7 @@ class LearnersTest(test_utils.TestCase):
         assert not p.repeat_prefix
         return p
 
-      return jax.tree_map(_init_one, var_hparams)
+      return jax.tree.map(_init_one, var_hparams)
 
     class TestOptimizer(optimizers.BaseOptimizer):
 
@@ -1091,7 +1099,8 @@ class LearnersTest(test_utils.TestCase):
       state = grad_tx.init(variables)
       # Computed update is 0 + state, and state is sum of each variable.
       update, state = grad_tx.update(
-          jax.tree_map(jnp.zeros_like, variables), state, variables)
+          jax.tree.map(jnp.zeros_like, variables), state, variables
+      )
       # Variables a and c are scalars excluding the prefix, so the update must
       # be equal to the initial variable values.
       self.assertAllClose(update.a, variables.a)

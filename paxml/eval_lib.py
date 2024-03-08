@@ -1083,7 +1083,7 @@ def infer_and_write_pmap(
       )
       # Get first device's output since it's been replicated by all-gather
       outputs = py_utils.maybe_unreplicate_for_fully_replicated(outputs)
-      outputs_cpu = jax.tree_map(np.asarray, outputs)
+      outputs_cpu = jax.tree.map(np.asarray, outputs)
 
       if jax.process_index() == 0:
         serialized_outputs = task.inference_runner.serialize_outputs(

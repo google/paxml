@@ -155,7 +155,7 @@ class ExperimentParser:
   def _generate_datum(self):
     if not self.debug_file_pattern:
       input_specs = self._extract_input_specs()
-      datum = jax.tree_map(
+      datum = jax.tree.map(
           lambda x: jnp.zeros(shape=x.shape, dtype=x.dtype), input_specs
       )
     else:
@@ -181,7 +181,7 @@ class ExperimentParser:
 
     if datum:
       print('\n==========input=========')
-      pprint.pprint(jax.tree_map(jnp.shape, datum))
+      pprint.pprint(jax.tree.map(jnp.shape, datum))
       print('=======================')
 
     return datum
@@ -251,7 +251,7 @@ class ExperimentParser:
     excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
         var_weight_hparams, learner
     )
-    included_for_grad = jax.tree_map(lambda x: not x, excluded_for_grad)
+    included_for_grad = jax.tree.map(lambda x: not x, excluded_for_grad)
     trainable_variables = py_utils.NestedMap.FromNestedDict(included_for_grad)
 
     prefixes = py_utils.extract_prefixed_keys_from_nested_map(
@@ -284,7 +284,7 @@ class ExperimentParser:
       params_list.append(leaf)
       return leaf
 
-    jax.tree_map(
+    jax.tree.map(
         collect_params,
         prefixes,
         trainable_variables,

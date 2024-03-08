@@ -359,7 +359,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
       global_mesh = jax.sharding.Mesh(
           np.array(jax.devices()), axis_names=('x',)
       )
-      fully_replicated_state_specs = jax.tree_map(
+      fully_replicated_state_specs = jax.tree.map(
           _get_spec, train_state_global_shapes
       )
       restore_args = {
@@ -376,13 +376,13 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     if not py_utils.pmap_use_tensorstore():
       return restored_state
     if self._checkpoint_type == CheckpointType.PERSISTENCE:
-      return jax.tree_map(
+      return jax.tree.map(
           py_utils.convert_fully_replicated_array_to_pmap_array,
           restored_state,
       )
     # model_states is jax.Array; we convert back to DA or jax.Array with
     # single device sharding for pmap.
-    return jax.tree_map(lambda x: x.addressable_data(0), restored_state)
+    return jax.tree.map(lambda x: x.addressable_data(0), restored_state)
 
   # TODO(laigd): merge this with _PmapEvalCheckpointer.get_model_states().
   def get_model_states(
@@ -467,7 +467,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
         logging.info(
             'Saving a ckpt at %sstep: %d', 'final ' if is_final else '', step_i
         )
-        fully_replicated_gda_train_state = jax.tree_map(
+        fully_replicated_gda_train_state = jax.tree.map(
             py_utils.convert_host_local_array_to_global_array,
             partitioned_train_state,
         )
@@ -481,7 +481,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
             force=is_final,
         )
       else:
-        unreplicated_train_state = jax.tree_map(
+        unreplicated_train_state = jax.tree.map(
             lambda x: x[0], partitioned_train_state
         )
         self._save_with_args(

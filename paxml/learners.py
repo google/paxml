@@ -61,7 +61,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   learner = base_hyperparams.instantiate(p)
 
   mdl_vars = ...
-  var_weight_hparams = jax.tree_map(
+  var_weight_hparams = jax.tree.map(
     lambda v: base_layer.WeightHParams(v.shape), mdl_vars)
 
   grad_tx = learner.get_grad_tx(var_weight_hparams)
@@ -191,7 +191,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   def summarize_norms(
       self, summary_prefix: str, tensors: pytypes.NestedJTensor
   ) -> None:
-    norms = jax.tree_map(lambda x: jnp.sqrt(jnp.sum(x * x)), tensors)
+    norms = jax.tree.map(lambda x: jnp.sqrt(jnp.sum(x * x)), tensors)
     keys = py_utils.extract_prefixed_keys_from_nested_map(tensors)
 
     def add_grad_norm_summary(key, value):
@@ -201,7 +201,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           SummaryType.AGGREGATE_SCALAR,
       )
 
-    jax.tree_map(add_grad_norm_summary, keys, norms)
+    jax.tree.map(add_grad_norm_summary, keys, norms)
 
   def scale_gradients(
       self,
@@ -278,10 +278,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
             jnp.array(1, grad_norm.dtype),
             jnp.array(clip_gradient_norm_to_value, grad_norm.dtype) / grad_norm,
         )
-        grads = jax.tree_map(lambda g: g * grad_scale, grads)
+        grads = jax.tree.map(lambda g: g * grad_scale, grads)
       elif clip_gradient_single_norm_to_value:
         assert clip_gradient_norm_to_value == 0.0
-        grad_single_norm = jax.tree_map(
+        grad_single_norm = jax.tree.map(
             lambda x: jnp.sqrt(jnp.sum(x * x)), grads
         )
 
@@ -291,7 +291,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
               jnp.array(clip_gradient_single_norm_to_value, norm.dtype) / norm,
           )
 
-        grads = jax.tree_map(scale_gradient, grads, grad_single_norm)
+        grads = jax.tree.map(scale_gradient, grads, grad_single_norm)
         grad_scale = jnp.array(1.0)
       else:
         # no clipping is needed.
@@ -350,7 +350,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
     # the optimizer state update. Gradient overwriting takes place at the very
     # end of the function to update the transformed gradients.
     def _filter_owg(original):
-      return jax.tree_map(
+      return jax.tree.map(
           lambda o, h: (
               py_utils.BpropMaskedNode()
               if base_layer.var_overwrite_with_gradient(h)
@@ -371,7 +371,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     if self.enable_skip_step_on_gradient_anomalies:
       # Set grads to 0 if the step is invalid.
-      transformed_grad = jax.tree_map(
+      transformed_grad = jax.tree.map(
           lambda x: jnp.where(valid_step, x, jnp.zeros_like(x)),
           transformed_grad,
       )
@@ -382,7 +382,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           return updated
         return jnp.where(valid_step, updated, original)
 
-      new_states = jax.tree_map(
+      new_states = jax.tree.map(
           _update, new_states, states, is_leaf=py_utils.is_optax_masked_node
       )
 
@@ -395,7 +395,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           SummaryType.AGGREGATE_SCALAR,
       )
 
-    transformed_grad = jax.tree_map(
+    transformed_grad = jax.tree.map(
         lambda h, g, t_g: (
             g if base_layer.var_overwrite_with_gradient(h) else t_g
         ),
@@ -566,7 +566,7 @@ class MultiOptimizerLearner(Learner):
           var_weight_hparams
       )
       optimizer_mask.append(
-          jax.tree_map(
+          jax.tree.map(
               lambda x, regexp=regexp: regexp.match(x) is not None, prefix
           )
       )
@@ -586,8 +586,8 @@ class MultiOptimizerLearner(Learner):
           r = True
       return r
 
-    default_mask = jax.tree_map(check_var_in_auxiliary_regex, *optimizer_mask)
-    default_mask = jax.tree_map(lambda mask: not mask, default_mask)
+    default_mask = jax.tree.map(check_var_in_auxiliary_regex, *optimizer_mask)
+    default_mask = jax.tree.map(lambda mask: not mask, default_mask)
 
     return optimizer_mask, default_mask
 
@@ -650,7 +650,7 @@ class MultiOptimizerLearner(Learner):
     optimizer_mask, default_mask = self.get_masks(var_weight_hparams)
 
     all_grads, all_valid_step = self.scale_gradients(
-        jax.tree_map(lambda x, y: x * y, raw_grads, default_mask),
+        jax.tree.map(lambda x, y: x * y, raw_grads, default_mask),
         optimizer_name='main',
     )
 
@@ -662,12 +662,12 @@ class MultiOptimizerLearner(Learner):
       assert optimizer.clip_gradient_norm_to_value is not None
       assert optimizer.clip_gradient_single_norm_to_value is not None
       grads, valid_step = self.scale_gradients(
-          jax.tree_map(lambda x, y: x * y, raw_grads, mask),
+          jax.tree.map(lambda x, y: x * y, raw_grads, mask),
           optimizer_name=name,
           clip_gradient_norm_to_value=optimizer.clip_gradient_norm_to_value,
           clip_gradient_single_norm_to_value=optimizer.clip_gradient_single_norm_to_value,
       )
-      all_grads = jax.tree_map(lambda x, y: x + y, all_grads, grads)
+      all_grads = jax.tree.map(lambda x, y: x + y, all_grads, grads)
       all_valid_step = jnp.logical_and(all_valid_step, valid_step)
     return all_grads, all_valid_step
 
@@ -699,7 +699,7 @@ class MultiOptimizerLearner(Learner):
     transformed_grad, new_states = grad_tx.update(grads, states, old_vars)
     if self.enable_skip_step_on_gradient_anomalies:
       # Set grads to 0 if the step is invalid.
-      transformed_grad = jax.tree_map(
+      transformed_grad = jax.tree.map(
           lambda x: jnp.where(valid_step, x, jnp.zeros_like(x)),
           transformed_grad,
       )
@@ -712,7 +712,7 @@ class MultiOptimizerLearner(Learner):
           return jnp.where(valid_step, x, y)
         return x
 
-      new_states = jax.tree_map(
+      new_states = jax.tree.map(
           _update, new_states, states, is_leaf=py_utils.is_optax_masked_node
       )
     return transformed_grad, new_states

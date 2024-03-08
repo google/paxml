@@ -357,14 +357,14 @@ def _tensorstore_prepare(
       instances have been filtered out.
   """
   # This replaces MaskedNode instances by None values ...
-  train_state_none = jax.tree_map(
+  train_state_none = jax.tree.map(
       _masked_node_to_none,
       train_state,
       train_state,
       is_leaf=py_utils.is_optax_masked_node,
   )
   if state_specs is not None:
-    state_specs_none = jax.tree_map(
+    state_specs_none = jax.tree.map(
         _masked_node_to_none,
         train_state,
         state_specs,
@@ -579,7 +579,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
           _create_restore_args, reference_train_state
       )
     else:
-      restore_args = jax.tree_map(
+      restore_args = jax.tree.map(
           _create_sharded_restore_args,
           reference_train_state,
           reference_state_specs,

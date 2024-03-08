@@ -127,7 +127,7 @@ def _convert_bytes_to_str(tree: Any) -> Any:
 
     return leaf.decode('utf-8')
 
-  return jax.tree_map(_convert_fn, tree)
+  return jax.tree.map(_convert_fn, tree)
 
 
 def select_split(
@@ -1364,7 +1364,7 @@ class SeqIOInput(base_input.BaseInput):
       # SCORE_WITH_INTERMEDIATES, model output is a tuple of two arrays/lists.
       if isinstance(model_outs, tuple):
         prediction_or_score, aux_value = model_outs
-        aux_value = jax.tree_map(
+        aux_value = jax.tree.map(
             np.array,
             aux_value,
             is_leaf=lambda x: isinstance(x, list),

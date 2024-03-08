@@ -94,7 +94,7 @@ def _create_ghostnorm_fn(
 
     # scaled gradients for parameters to achieve per-eg grad clipping
     # scaled_g: (batch_size, ..., output_dim)
-    scaled_g = jax.tree_map(
+    scaled_g = jax.tree.map(
         lambda g_: jnp.einsum('i, i... -> i...', scales, g_), g
     )
     vjp_params, *_ = vjp_fun(scaled_g)
@@ -111,13 +111,13 @@ def _create_ghostnorm_fn(
     # The batch_size factor is needed when the loss is *averaged* over the
     # mini-batch of examples (instead of summed over).
     batch_size = args[0].shape[0]
-    batch_scaled_per_example_grad = jax.tree_map(
+    batch_scaled_per_example_grad = jax.tree.map(
         lambda x: x * batch_size, per_example_grad
     )
-    per_example_grad_sq_norms = jax.tree_map(
+    per_example_grad_sq_norms = jax.tree.map(
         jax.vmap(lambda x: (x**2).sum()), batch_scaled_per_example_grad
     )
-    vjp_params = jax.tree_map(
+    vjp_params = jax.tree.map(
         base.ParamWithAux, vjp_params, per_example_grad_sq_norms
     )
     return vjp_params, *vjp_args

@@ -121,7 +121,7 @@ def build_train_state_provenance(
     )
   return TrainStateProvenance(
       step=provenance,
-      mdl_vars=jax.tree_map(lambda x: provenance, train_state.mdl_vars),
-      opt_states=jax.tree_map(lambda x: provenance, train_state.opt_states),
-      extra_state=jax.tree_map(lambda x: provenance, train_state.extra_state),
+      mdl_vars=jax.tree.map(lambda x: provenance, train_state.mdl_vars),
+      opt_states=jax.tree.map(lambda x: provenance, train_state.opt_states),
+      extra_state=jax.tree.map(lambda x: provenance, train_state.extra_state),
   )
