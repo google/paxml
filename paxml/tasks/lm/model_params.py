@@ -663,6 +663,12 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
           self.CHECKPOINT_POLICY)
     else:
       model_p.lm_tpl.stacked_transformer_tpl = stacked_transformer_tpl
+      if (self.CHECKPOINT_POLICY ==
+          layers.AutodiffCheckpointType.OFFLOAD_DOT_WITH_NO_BATCH_DIM):
+        model_p.lm_tpl.stacked_transformer_tpl.checkpoint_policy = (
+            self.CHECKPOINT_POLICY)
+        model_p.lm_tpl.stacked_transformer_tpl.remat = True
+
 
     # Enable bf16.
     model_p.fprop_dtype = self.FPROP_DTYPE
