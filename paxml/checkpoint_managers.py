@@ -334,15 +334,17 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           )
           self._version = version
 
-    super().__init__(directory, checkpointers=checkpointers, options=options)
+    options = options or CheckpointManagerOptions()
     # Set to 1 if not provided or set to 0.
-    self._options.save_interval_steps = self._options.save_interval_steps or 1
-    self._options.step_prefix = checkpoint_paths.checkpoint_prefix(
+    options.save_interval_steps = options.save_interval_steps or 1
+    options.step_prefix = checkpoint_paths.checkpoint_prefix(
         self._checkpoint_type
     )
-    self._options.step_format_fixed_length = (
+    options.step_format_fixed_length = (
         checkpoint_paths.checkpoint_name_fixed_length(self._checkpoint_type)
     )
+
+    super().__init__(directory, checkpointers=checkpointers, options=options)
 
     if self.version < 1:
       composite_handler = typing.cast(
