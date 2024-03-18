@@ -320,6 +320,7 @@ pytype_strict_library(
         ":base_experiment",
         ":eval_lib",
         ":experiment_registry",
+        ":first_result_metric_callback",
         ":setup_jax",
         ":tasks_lib",
         ":tf_data_service_lib",
@@ -344,6 +345,11 @@ pytype_strict_library(
             # Implicit internal tf.data service dependency.  # BC internal suffix.
         ],
     }),
+)
+
+pytype_strict_library(
+    name = "first_result_metric_callback",
+    srcs = ["first_result_metric_callback.py"],
 )
 
 pytype_strict_library(

@@ -17,7 +17,7 @@
 
 import contextlib
 import typing
-from typing import Type
+from typing import Callable, Type
 
 from absl import logging
 from etils import epath
@@ -93,6 +93,10 @@ def write_experiment_class_vars_file(
     exp_summary_fpath.write_text(cls_vars_summary)
 
 
+def _no_op() -> None:
+  return
+
+
 @py_utils.benchmark('[PAX STATUS]: ')
 def train_and_evaluate(
     experiment_config: base_experiment.BaseExperiment,
@@ -111,6 +115,7 @@ def train_and_evaluate(
     override_num_train_steps: int | None = None,
     enable_summary_writer: bool = True,
     async_timeout_secs: int | None = None,
+    train_first_result_callback_fn: Callable[[], None] = _no_op,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
@@ -147,6 +152,8 @@ def train_and_evaluate(
       program. Therefore, it will not generate summary files.
     async_timeout_secs: Timeout in seconds for asynchronous save operations.
       `None` indicates that no timeout is set.
+    train_first_result_callback_fn: An optional callable function for reporting
+      the time of the first step
   """
   jax.monitoring.record_event('/jax/pax/train_and_evaluate/beacon')
   task_p = experiment_config.task()
@@ -237,6 +244,10 @@ def train_and_evaluate(
   # Creates the train/eval/decode programs.
   logging.info('[PAX STATUS]: Initializing train program.')
   train_program = experiment_config.train_programs()[0]
+  if train_first_result_callback_fn:
+    train_program.register_first_result_callback_fn(
+        train_first_result_callback_fn
+    )
 
   logging.info('[PAX STATUS]: Initializing eval programs.')
   eval_programs = []

@@ -17,11 +17,12 @@
 
 import abc
 import collections
+import concurrent
 import contextlib
 import dataclasses
 import queue
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from absl import flags
 from absl import logging
@@ -223,6 +224,18 @@ class BaseTrainProgram(Program):
 
     # Used to enter context of various summary writer at .setup().
     self._exitstack = contextlib.ExitStack()
+    self._first_result_callback_pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix='FirstResultCallback'
+    )
+    self._train_first_result_callback_fn = lambda: None
+
+  def register_first_result_callback_fn(
+      self, train_first_result_callback_fn: Callable[[], None]
+  ) -> None:
+    self._train_first_result_callback_fn = train_first_result_callback_fn
+
+  def first_result_callback_fn(self) -> None:
+    self._train_first_result_callback_fn()
 
   @property
   def train_input(self) -> base_input.BaseInput:
@@ -372,6 +385,7 @@ class BaseTrainProgram(Program):
     self._pending_train_losses.add_computation(train_outputs.loss)
     if step == self._initial_step:
       self._first_step_completion_time = time.time()
+      self._first_result_callback_pool.submit(self.first_result_callback_fn)
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
@@ -577,6 +591,7 @@ class BaseTrainProgram(Program):
 
   def shutdown(self) -> None:
     self._pending_train_losses.wait_for_all()
+    self._first_result_callback_pool.shutdown(wait=True)
     self._train_summary_handler.close()
     if self._eval_train_summary_handler:
       self._eval_train_summary_handler.close()

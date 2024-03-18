@@ -44,6 +44,7 @@ import jax
 from paxml import base_experiment
 from paxml import eval_lib
 from paxml import experiment_registry
+from paxml import first_result_metric_callback
 from paxml import setup_jax
 from paxml import tasks_lib
 from paxml import tf_data_service_lib
@@ -332,6 +333,7 @@ def run_experiment(
         override_num_train_steps=override_num_train_steps,
         enable_summary_writer=FLAGS.enable_summary_writer,
         async_timeout_secs=FLAGS.async_timeout_secs,
+        train_first_result_callback_fn=first_result_metric_callback.train_first_result_callback_fn,
     )
 
   elif FLAGS.mode == 'eval':
