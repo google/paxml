@@ -16,7 +16,6 @@
 """Module to manage checkpoint metadata and automatic checkpoint deletion."""
 
 import dataclasses
-import os
 import typing
 from typing import Any, Sequence, Union
 
@@ -98,27 +97,6 @@ def _create_items_dict_with_metadata(
     items.update({METADATA_ITEM_NAME: metadata})
 
   return items
-
-
-def _is_legacy_flax_checkpoint(path: epath.Path) -> bool:
-  """Returns whether the checkpoint is a legacy Flax checkpoint format.
-
-  Old-format Flax checkpoint conforming to
-  'path/to/dir/checkpoints/checkpoint_100'.
-  Contrast with 'standard' old-format Flax checkpoint conforming to
-  'path/to/dir/checkpoints/checkpoint_100/checkpoint'.
-  The former is not considered a valid checkpoint by Orbax because it is not a
-  directory. It thus requires special handling.
-
-  Args:
-    path: the checkpoint path.
-
-  Returns:
-    Boolean indicating whether the path is legacy Flax checkpoint or not.
-  """
-  return checkpoint_paths.is_checkpoint_asset(path) and (
-      not checkpoint_paths.is_tmp_checkpoint_asset(path) and path.is_file()
-  )
 
 
 def _has_digit_step_subdirectory(directory) -> bool:
@@ -337,11 +315,9 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
     options = options or CheckpointManagerOptions()
     # Set to 1 if not provided or set to 0.
     options.save_interval_steps = options.save_interval_steps or 1
-    options.step_prefix = checkpoint_paths.checkpoint_prefix(
-        self._checkpoint_type
-    )
-    options.step_format_fixed_length = (
-        checkpoint_paths.checkpoint_name_fixed_length(self._checkpoint_type)
+    options.step_name_format = checkpoint_paths.PaxStepNameFormat(
+        checkpoint_type=self._checkpoint_type,
+        use_digit_step_subdirectory=self._use_digit_step_subdirectory,
     )
 
     super().__init__(directory, checkpointers=checkpointers, options=options)
@@ -361,6 +337,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           == 'FlaxCheckpointer'
       )
       if ocp.checkpoint_manager.is_async_checkpointer(self._checkpointer):
+        assert hasattr(self._checkpointer, '_async_manager')  # Hint for pytype
         self._checkpointer = _AsyncCheckpointer(
             handler=handler,
             is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
@@ -380,7 +357,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
     steps = list(super().all_steps(read=read))
     if read:
       for path in self.directory.iterdir():
-        if _is_legacy_flax_checkpoint(path):
+        if checkpoint_paths.is_legacy_flax_checkpoint(path):
           steps.append(checkpoint_paths.get_step_from_checkpoint_asset(path))
     return steps
 
@@ -395,16 +372,13 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       return any_step
 
     for path in self.directory.iterdir():
-      if _is_legacy_flax_checkpoint(path):
+      if checkpoint_paths.is_legacy_flax_checkpoint(path):
         return checkpoint_paths.get_step_from_checkpoint_asset(path)
     return None
 
   def _checkpoint_name(self, step: int) -> str:
-    return checkpoint_paths.checkpoint_name(
-        step,
-        checkpoint_type=self._checkpoint_type,
-        use_digit_step_subdirectory=self._use_digit_step_subdirectory,
-    )
+    assert self._options.step_name_format is not None  # Hint for pytype
+    return self._options.step_name_format.build_name(step)
 
   def should_save(self, step: int) -> bool:
     """Indicates whether there is a need to save a checkpoint."""
@@ -445,19 +419,6 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           'saving mode.'
       )
     return super().save(*args, **kwargs)
-
-  def _get_save_directory(
-      self,
-      step: int,
-      directory: epath.Path,
-  ) -> epath.Path:
-    """Returns the standardized path to a save directory for a single item."""
-    return checkpoint_paths.make_checkpoint_step_dir(
-        directory,
-        step,
-        checkpoint_type=self._checkpoint_type,
-        use_digit_step_subdirectory=self._use_digit_step_subdirectory,
-    )
 
 
 class OrbaxCheckpointManager:

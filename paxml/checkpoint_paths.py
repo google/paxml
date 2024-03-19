@@ -15,9 +15,10 @@
 
 """Shared checkpointing utility functions."""
 
+import dataclasses
 import os
 import re
-from typing import Any
+from typing import Any, Iterator
 
 from absl import logging
 from etils import epath
@@ -153,7 +154,7 @@ def latest_checkpoint_if_exists(
   """
   checkpoint_dir = epath.Path(checkpoint_dir)
   if not checkpoint_dir.exists():
-    logging.info('Checkpoint dir \'%s\' does not exist.', checkpoint_dir)
+    logging.info("Checkpoint dir '%s' does not exist.", checkpoint_dir)
     return None
   checkpoint_assets = [
       v
@@ -162,7 +163,8 @@ def latest_checkpoint_if_exists(
   ]
   if not checkpoint_assets:
     logging.info(
-        'No non-temporary checkpoints found in dir: \'%s\'', checkpoint_dir)
+        "No non-temporary checkpoints found in dir: '%s'", checkpoint_dir
+    )
     return None
   checkpoint_assets = sorted(
       checkpoint_assets, key=get_step_from_checkpoint_asset
@@ -210,7 +212,7 @@ def retrieve_latest_checkpoint_step_if_exists(
     The latest checkpoint step as an integer or None if no checkpoint is found.
   """
   if not checkpoint_dir.exists():
-    logging.info('Checkpoint dir \'%s\' does not exist.', checkpoint_dir)
+    logging.info("Checkpoint dir '%s' does not exist.", checkpoint_dir)
     checkpoint_step = -1
   else:
     latest_checkpoint_path = latest_checkpoint_if_exists(checkpoint_dir)
@@ -266,3 +268,85 @@ def _raise_checkpoint_missing_error(checkpoint_dir: epath.Path):
   raise ValueError(
       f'No checkpoints were found in directory {checkpoint_dir=!r}'
   )
+
+
+def is_legacy_flax_checkpoint(path: epath.Path) -> bool:
+  """Returns whether the checkpoint is a legacy Flax checkpoint format.
+
+  Old-format Flax checkpoint conforming to
+  'path/to/dir/checkpoints/checkpoint_100'.
+  Contrast with 'standard' old-format Flax checkpoint conforming to
+  'path/to/dir/checkpoints/checkpoint_100/checkpoint'.
+  The former is not considered a valid checkpoint by Orbax because it is not a
+  directory. It thus requires special handling.
+
+  Args:
+    path: the checkpoint path.
+
+  Returns:
+    Boolean indicating whether the path is legacy Flax checkpoint or not.
+  """
+  return is_checkpoint_asset(path) and (
+      not is_tmp_checkpoint_asset(path) and path.is_file()
+  )
+
+
+@dataclasses.dataclass(frozen=True)
+class PaxStepNameFormat(ocp.step.NameFormat):
+  """Name format for Pax checkpoints.
+
+  Example names:
+
+  - use_digit_step_subdirectory=T  step=7  => 7
+
+  For use_digit_step_subdirectory=F:
+  - checkpoint_type=`FLAX` step=7 => `checkpoint_7`
+
+  - checkpoint_type != `FLAX` step=1234 => `checkpoint_00001234`
+
+  Attributes:
+    checkpoint_type: Enum `CheckpointType` for the type of checkpoint format.
+    use_digit_step_subdirectory: If True, then step number itself is used as a
+      name. Otherwise, the name is built with a fixed string prefix and optional
+      zero padding.
+  """
+
+  checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED
+  use_digit_step_subdirectory: bool = False
+
+  def build_name(self, step: int) -> str:
+    """Returns `step` name using NameFormat attributes."""
+    return checkpoint_name(
+        step,
+        checkpoint_type=self.checkpoint_type,
+        use_digit_step_subdirectory=self.use_digit_step_subdirectory,
+    )
+
+  def build_metadata(
+      self, step_path: epath.Path, step: int | None = None
+  ) -> ocp.step.Metadata | None:
+    """Returns metadata for given `step_path` if it is valid or None."""
+    if is_tmp_checkpoint_asset(step_path):
+      return None
+
+    if not is_checkpoint_asset(step_path):
+      return None
+
+    if step is not None:
+      if not step_path.exists():
+        return None
+
+    step = step or get_step_from_checkpoint_asset(step_path)
+    return ocp.step.Metadata(step=step, path=step_path)
+
+  def find_metadata(
+      self, base_path: epath.PathLike, step: int
+  ) -> ocp.step.Metadata | None:
+    """Returns metadata for given `base_path` and `step` or None."""
+    step_path = ocp.step.build_step_path(base_path, self, step)
+    return self.build_metadata(step_path, step=step)
+
+  def find_all(self, base_path: epath.PathLike) -> Iterator[ocp.step.Metadata]:
+    """Returns metadata of all steps (ignores current NameFormat attributes)."""
+    step_paths = epath.Path(base_path).iterdir()
+    return ocp.step.build_step_metadatas(step_paths, self.build_metadata)
