@@ -35,6 +35,7 @@ from paxml import learners as learners_lib
 from paxml import sgf
 from paxml import tasks_lib
 from paxml import train_states
+from paxml.contrib.gpu.scripts_gpu.te_helper import TransformerEngineHelper, DEFAULT_INIT_MUTABLE_LIST
 from praxis import asserts
 from praxis import base_hyperparams
 from praxis import base_input
@@ -167,8 +168,7 @@ def create_train_state_metadata(
     A TrainStateMetadata instance.
   """
   var_weight_hparams = jax_task.model.abstract_init_with_metadata(
-      train_shape_dtype, do_eval=do_eval
-  )
+      train_shape_dtype, do_eval=do_eval, extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST)
   padded_global_shapes = jax_task.create_train_state_padded_shapes(
       var_weight_hparams, discard_opt_states=discard_opt_states
   )
@@ -217,7 +217,8 @@ def write_post_init_model_hparams_file(
     logging.info('post_init_model_params: %s', params_fpath)
     job_log_dir.mkdir(parents=True, exist_ok=True)
     hyper_params = model.abstract_init_with_mdl_config(
-        train_state_metadata.input_shape_dtype, do_eval=do_eval
+        train_state_metadata.input_shape_dtype, do_eval=do_eval,
+        extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST
     )
     with params_fpath.open('w') as params_file:
       hyper_params_dump = base_hyperparams.nested_struct_to_text(hyper_params)
@@ -379,7 +380,8 @@ def initialize_model_state(
     is_eval_for_init = is_eval
   if not var_weight_hparams:
     var_weight_hparams = model.abstract_init_with_metadata(
-        inputs_shape_dtype, do_eval=is_eval_for_init
+        inputs_shape_dtype, do_eval=is_eval_for_init,
+        extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST
     )
   logging.info('init_var prng_seed: %s', init_key)
   logging.info('var_weight_hparams: %s', var_weight_hparams)
@@ -396,7 +398,7 @@ def initialize_model_state(
       inputs = jax.tree.map(jnp.zeros_like, inputs_shape_dtype)
       if model.hparams.fprop_dtype == jnp.bfloat16:
         inputs = jax.tree.map(_maybe_to_bfloat16, inputs)
-      return model.init(init_key, inputs)
+      return model.init(init_key, inputs, mutable=DEFAULT_INIT_MUTABLE_LIST)
 
   initial_vars = init_fn(init_key)
   logging.info('initial_vars: %s', jax.tree.map(jnp.shape, initial_vars))
@@ -809,7 +811,6 @@ class LossFnProtocol(Protocol):
   ) -> tuple[JTensor, sgf.GradAuxInfo]:
     """Produces losses and grad info by passing the inputs through a model."""
 
-
 def _get_default_loss_fn(
     jax_task: tasks_lib.SingleTask,
     context_p: base_layer.JaxContext.HParams,
@@ -994,6 +995,7 @@ def get_excluded_var_masks(
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
       var_weight_hparams, learner
   )
+
   _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
 
   # Excluded for optimizer states.
@@ -1090,7 +1092,7 @@ def train_step_single_learner(
 
   if not var_weight_hparams:
     with base_layer.JaxContext.new_context(hparams=context_p):
-      var_weight_hparams = model.abstract_init_with_metadata(inputs)
+      var_weight_hparams = model.abstract_init_with_metadata(inputs, extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST)
   updated_model_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
       step=states.step,
       mdl_vars=states.mdl_vars,
@@ -1162,6 +1164,7 @@ def train_step_single_learner(
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
         var_weight_hparams, excluded_for_learner
     )
+
     transformed_grads, new_opt_states = learner.update_states(
         grads, states.opt_states[0], vars_with_opt, wps_with_opt
     )
@@ -1197,6 +1200,7 @@ def train_step_single_learner(
         states.mdl_vars,
         mdl_vars,
     )
+
     new_states = states.new_state(
         mdl_vars=mdl_vars, opt_states=[new_opt_states], extra_state=()
     )
@@ -1300,7 +1304,7 @@ def eval_step_single_learner(
     var_weight_hparams = model.abstract_init_with_metadata(
         inputs,
         do_eval=not jax_task.hparams.train.always_use_train_for_model_init,
-    )
+        extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST)
 
   if fprop_dtype == jnp.float32:
     pass
@@ -1554,7 +1558,7 @@ def initialize_partitioned_model_states(
   model = jax_task.model
   if not var_weight_hparams:
     var_weight_hparams = model.abstract_init_with_metadata(
-        global_input_shapes, do_eval=is_eval
+        global_input_shapes, do_eval=is_eval, extra_mutable_list=DEFAULT_INIT_MUTABLE_LIST
     )
 
   train_state_partition_specs = (
