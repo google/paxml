@@ -63,6 +63,19 @@ def _register_task(
       metric_fns=[])
 
 
+def _register_mixture(
+    mixture_name: str,
+    task_name: str,
+) -> None:
+  """Register a dummy task."""
+  seqio.MixtureRegistry.add(
+      mixture_name,
+      [
+          (task_name, 1),
+      ],
+  )
+
+
 # A score metric function. It must two args: `targets` and `predictions`. See:
 # https://github.com/google/seqio/blob/90c76914ed13fcce53f00966b824e45fb266b973/seqio/dataset_providers.py#L817-L821
 def _dummy_metric(targets: Sequence[str],
@@ -344,6 +357,44 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     )
     p = pax_fiddle.Config(seqio_input.SeqIOInput)
     p.mixture_name = name
+    p.split_name = 'train'
+    p.task_feature_lengths = {'inputs': 3, 'targets': 3, 'passthrough': 3}
+    p.feature_converter = seqio_input.LanguageModelFeatures(
+        pack=False, passthrough_features=passthrough_features
+    )
+    p.batch_size = 1
+    p.is_training = True
+    p.input_random_seed = 137
+    inp = instantiate(p)
+    batch = inp.get_next()
+    self.assertArraysEqual(
+        batch.passthrough,
+        np.array([[5, 6, 1]], dtype=np.int32),
+    )
+
+  def test_passthrough_features_mixture(self):
+    """test passthrough features mixture."""
+    name = 'passthrough_features'
+    mix_name = 'mix'
+    passthrough_features = {
+        'passthrough': seqio.feature_converters.FeatureConverter.FeatureSpec(
+            dtype=tf.int32
+        ),
+    }
+    x = [{
+        'inputs': [1, 2],
+        'targets': [3, 4],
+        'passthrough': [5, 6],
+    }]
+    ds = seqio.test_utils.create_default_dataset(
+        x, feature_names=['inputs', 'targets', 'passthrough']
+    )
+    _register_task(
+        name, ds, output_feature_names=['inputs', 'targets', 'passthrough']
+    )
+    _register_mixture(mix_name, name)
+    p = pax_fiddle.Config(seqio_input.SeqIOInput)
+    p.mixture_name = mix_name
     p.split_name = 'train'
     p.task_feature_lengths = {'inputs': 3, 'targets': 3, 'passthrough': 3}
     p.feature_converter = seqio_input.LanguageModelFeatures(

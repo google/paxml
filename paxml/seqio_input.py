@@ -949,6 +949,14 @@ class SeqIOInput(base_input.BaseInput):
         trim_output_features=self.trim_output_features,
         try_in_mem_cache=self.try_in_mem_cache,
     )
+    if (
+        isinstance(self.mixture_or_task_inst, seqio.Mixture)
+        and self.feature_converter
+        and hasattr(self.feature_converter, '_passthrough_features')
+    ):
+      kwargs.update(
+          passthrough_features=self.feature_converter._passthrough_features  #  pylint:disable=protected-access
+      )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
     assert self.feature_converter
     ds = self.feature_converter(
