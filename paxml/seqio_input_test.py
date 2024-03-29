@@ -78,8 +78,7 @@ def _register_mixture(
 
 # A score metric function. It must two args: `targets` and `predictions`. See:
 # https://github.com/google/seqio/blob/90c76914ed13fcce53f00966b824e45fb266b973/seqio/dataset_providers.py#L817-L821
-def _dummy_metric(targets: Sequence[str],
-                  predictions: Sequence[str]) -> Mapping[str, float]:
+def _dummy_metric(targets: float, predictions: float) -> Mapping[str, float]:
   return {'accuracy': targets + predictions}
 
 
@@ -1146,6 +1145,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
         pass_entire_feature_lengths=True,
     )
     inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
+    assert inp.task_feature_lengths is not None
     self.assertSameElements(inp.task_feature_lengths.keys(),
                             ['inputs', 'targets', 'weights', 'embeddings'])
 
@@ -1161,6 +1161,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     )
     inp: seqio_input.SeqIOInput = instantiate(score_hparams[0])
     inp.get_next()
+    assert inp.task_feature_lengths is not None
     self.assertSameElements(
         inp.task_feature_lengths.keys(),
         ['inputs', 'targets', 'weights', 'embeddings'],

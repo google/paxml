@@ -16,13 +16,16 @@
 """Tests for metric_utils."""
 
 import os
-from typing import Any
+from typing import Any, Sequence
 # Internal unittest mock import
 
 from absl.testing import absltest
 import clu.metrics as clu_metrics
 import clu.values as clu_values
+from etils import epath
 import flax
+import jax
+import jax.numpy as jnp
 import numpy as np
 import numpy.testing as npt
 from paxml import metric_utils
@@ -44,10 +47,10 @@ class MockMetric(clu_metrics.Metric):
   def merge(self, other: clu_metrics.Metric) -> clu_metrics.Metric:
     return MockMetric()
 
-  def compute(self) -> None:
-    return None
+  def compute(self) -> jax.Array:
+    return jnp.array([])
 
-  def compute_value(self) -> clu_values.Value:
+  def compute_value(self) -> Any:
     raise NotImplementedError('Other mock metrics should define this.')
 
 
@@ -79,7 +82,7 @@ def _mock_seqio_audio(batch_size=None) -> seqio.metrics.Audio:
   return seqio.metrics.Audio(np.ones(base_shape), sample_rate=44_100)
 
 
-def _mock_clu_video(batch_size=None) -> clu_values.Summary:
+def _mock_clu_video(batch_size=None) -> list[clu_values.Summary]:
   class Metadata(object):
     message: str = 'dummy metadata'
 
@@ -108,7 +111,7 @@ class MetricUtilsTest(absltest.TestCase):
         return clu_values.Scalar(5)
 
     metrics = {'test': ScalarMetric()}
-    test_dir = self._test_dir()
+    test_dir = epath.Path(self._test_dir())
 
     metric_values = metric_utils.compute_metric_values(metrics)
     self.assertIn('test', metric_values)
@@ -152,7 +155,7 @@ class MetricUtilsTest(absltest.TestCase):
     @flax.struct.dataclass
     class ScalarTupleMetric(MockMetric):
 
-      def compute_value(self) -> tuple[Any]:
+      def compute_value(self) -> tuple[clu_values.Value, clu_values.Value]:
         return (clu_values.Scalar(5), clu_values.Text('hi'))
 
     metrics = {'test': ScalarTupleMetric()}
@@ -250,7 +253,7 @@ class MetricUtilsTest(absltest.TestCase):
 
     metrics = {'test': MixedDictMetric()}
     metric_values = metric_utils.compute_metric_values(metrics)
-    test_dir = self._test_dir()
+    test_dir = epath.Path(self._test_dir())
     with summary_utils.get_summary_writer(test_dir):
       summary_utils.write_clu_metric_summaries(metric_values, step_i=0)
 
@@ -274,7 +277,7 @@ class MetricUtilsTest(absltest.TestCase):
 
     metrics = {'test': MixedDictMetric()}
     metric_values = metric_utils.compute_metric_values(metrics)
-    test_dir = self._test_dir()
+    test_dir = epath.Path(self._test_dir())
     with summary_utils.get_summary_writer(test_dir):
       summary_utils.write_seqio_metric_summaries(
           [metric_values], step=0, metric_name_prefix='test_prefix'
@@ -296,7 +299,7 @@ class MetricUtilsTest(absltest.TestCase):
     self.assertFalse(metric_utils.is_float_convertible(clu_values.Text('abc')))
     self.assertFalse(
         metric_utils.is_float_convertible(
-            clu_values.Histogram(np.array([1, 2, 3]))
+            clu_values.Histogram(np.array([1, 2, 3]), num_buckets=2)
         )
     )
 

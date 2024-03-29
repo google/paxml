@@ -53,6 +53,7 @@ class StopWithLowerMetric(automl.BaseReward):
     return 0.0
 
   def __call__(self, metrics_dict: dict[str, float], global_step: int) -> float:
+    assert self.metric is not None
     reward = self.metric.get_value(metrics_dict)
     if reward < self.get_threshold(global_step):
       if self.skip:
@@ -905,6 +906,7 @@ class ShouldEarlyStopTest(parameterized.TestCase):
   ):
     mock_early_stop_fn = mock.Mock()
 
+    checkpoint_path = epath.Path('/foo')
     with mock.patch.dict(
         os.environ,
         {
@@ -923,7 +925,7 @@ class ShouldEarlyStopTest(parameterized.TestCase):
           is_last_ckpt=False,
           eval_metrics=None,
           decode_metrics=None,
-          checkpoint_path='/foo',
+          checkpoint_path=checkpoint_path,
       )
 
     mock_early_stop_fn.assert_called_once_with(
@@ -931,7 +933,7 @@ class ShouldEarlyStopTest(parameterized.TestCase):
         trainer_lib.RunningMode.TRAIN,
         10,
         False,
-        '/foo',
+        checkpoint_path,
     )
     self.assertEqual(
         set(mock_early_stop_fn.call_args.args[0].keys()),

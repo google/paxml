@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -49,6 +50,9 @@ NestedMap = py_utils.NestedMap
 WeightHParams = base_layer.WeightHParams
 JTensor = pytypes.JTensor
 WeightInit = base_layer.WeightInit
+Metrics = pytypes.Metrics
+WeightedScalars = pytypes.WeightedScalars
+Predictions = JTensor | NestedMap | dict[str, Any] | dict[int, Any]
 
 PMAP_PARALLEL_AXIS_NAME = base_layer.PMAP_PARALLEL_AXIS_NAME
 
@@ -116,8 +120,8 @@ class TestModel01(base_model.BaseModel):
     return ret
 
   def compute_loss(
-      self, predictions: JTensor, input_batch: NestedMap
-  ) -> tuple[NestedMap, NestedMap]:
+      self, predictions: Predictions, input_batch: NestedMap
+  ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
     loss = jnp.sum(predictions)
     loss02 = jnp.max(jnp.abs(self.theta.var01))
@@ -155,8 +159,8 @@ class TestModel02(base_model.BaseModel):
     return self.repeated_ffn(input_batch.inputs)
 
   def compute_loss(
-      self, predictions: JTensor, input_batch: NestedMap
-  ) -> tuple[NestedMap, NestedMap]:
+      self, predictions: Predictions, input_batch: NestedMap
+  ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
     loss = jnp.sum(predictions)
     per_example_out = NestedMap()
@@ -188,8 +192,8 @@ class TestModel03(base_model.BaseModel):
     return jnp.einsum('bo,oi->bi', x, self.theta.var02)
 
   def compute_loss(
-      self, predictions: JTensor, input_batch: NestedMap
-  ) -> tuple[NestedMap, NestedMap]:
+      self, predictions: Predictions, input_batch: NestedMap
+  ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
     loss = jnp.sum(predictions)
     loss02 = jnp.max(jnp.abs(self.theta.var01))
@@ -240,8 +244,8 @@ class TestModel04(base_model.BaseModel):
     return ret
 
   def compute_loss(
-      self, predictions: JTensor, input_batch: NestedMap
-  ) -> tuple[NestedMap, NestedMap]:
+      self, predictions: Predictions, input_batch: NestedMap
+  ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     loss = jnp.sum(predictions)
     per_example_out = NestedMap()
     return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
@@ -825,7 +829,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
     partitioner = partitioning.create_partitioner(
         task,
         reshard_inputs=False,
-        auto_sharding_mode=True,
+        auto_sharding_mode=trainer_lib.RunningMode.DECODE,
     )
     prng_key = jax.random.PRNGKey(1)
     partitioner.setup(task, prng_key, sample_inputs)
@@ -849,6 +853,7 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
       self.assertIsNone(train_state_provenance)
       return
 
+    assert train_state_provenance is not None
     var_provenance_serialized = flax.serialization.to_state_dict(
         train_state_provenance.mdl_vars
     )

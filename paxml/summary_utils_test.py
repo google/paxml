@@ -65,7 +65,7 @@ class SummaryUtilsTest(parameterized.TestCase):
       weights_1: jnp.ndarray,
       values_2: jnp.ndarray,
       weights_2: jnp.ndarray,
-  ) -> tuple[dict[str, Any], dict[str, Any]]:
+  ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     clu_metrics = None
     weighted_scalars = None
     if use_clu_metrics_instead_of_weighted_scalars:
@@ -86,7 +86,7 @@ class SummaryUtilsTest(parameterized.TestCase):
 
   def _get_weighted_scalars_and_clu_metrics_1(
       self, use_clu_metrics_instead_of_weighted_scalars: bool
-  ) -> tuple[dict[str, Any], dict[str, Any]]:
+  ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     values_1 = jnp.array([5.0, 6.0])
     weights_1 = jnp.array([3, 2])
     values_2 = jnp.array([4.0, 7.0, 8.0])
@@ -101,7 +101,7 @@ class SummaryUtilsTest(parameterized.TestCase):
 
   def _get_weighted_scalars_and_clu_metrics_2(
       self, use_clu_metrics_instead_of_weighted_scalars: bool
-  ) -> tuple[dict[str, Any], dict[str, Any]]:
+  ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     values_3 = jnp.array([15.0, 16.0])
     weights_3 = jnp.array([13, 12])
     values_4 = jnp.array([14.0, 17.0, 18.0])
@@ -203,32 +203,32 @@ class SummaryUtilsTest(parameterized.TestCase):
               )
             summary_handler.close()
     # In this test all summaries use the latest values from step 2.
-    expected_loss = jnp.mean(loss_2)
+    expected_loss = np.mean(loss_2).item()
     mock_tf_summary_scalar.assert_any_call('loss',
                                            MatcherAlmostEqual(expected_loss), 2)
     mock_tf_summary_scalar.assert_any_call('Steps/sec', steps_per_sec_2, 2)
     if use_clu_metrics_instead_of_weighted_scalars:
-      expected_metrics_output_0 = clu_metrics_2['output_0'].compute()
+      expected_metrics_output_0 = clu_metrics_2['output_0'].compute().item()
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_0',
           MatcherAlmostEqual(expected_metrics_output_0, 1e-6),
           2,
       )
-      expected_metrics_output_1 = clu_metrics_2['output_1'].compute()
+      expected_metrics_output_1 = clu_metrics_2['output_1'].compute().item()
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_1',
           MatcherAlmostEqual(expected_metrics_output_1, 1e-6),
           2,
       )
     else:
-      expected_metrics_output_0_weight = jnp.sum(
+      expected_metrics_output_0_weight = np.sum(
           weighted_scalars_2['output_0'][1]
-      )
+      ).item()
       expected_metrics_output_0 = (
-          jnp.sum(
+          np.sum(
               weighted_scalars_2['output_0'][0]
               * weighted_scalars_2['output_0'][1]
-          )
+          ).item()
           / expected_metrics_output_0_weight
       )
       mock_tf_summary_scalar.assert_any_call(
@@ -241,14 +241,14 @@ class SummaryUtilsTest(parameterized.TestCase):
           MatcherAlmostEqual(expected_metrics_output_0_weight),
           2,
       )
-      expected_metrics_output_1_weight = jnp.sum(
+      expected_metrics_output_1_weight = np.sum(
           weighted_scalars_2['output_1'][1]
-      )
+      ).item()
       expected_metrics_output_1 = (
-          jnp.sum(
+          np.sum(
               weighted_scalars_2['output_1'][0]
               * weighted_scalars_2['output_1'][1]
-          )
+          ).item()
           / expected_metrics_output_1_weight
       )
       mock_tf_summary_scalar.assert_any_call(
@@ -264,7 +264,11 @@ class SummaryUtilsTest(parameterized.TestCase):
 
     mock_tf_summary_scalar.assert_any_call(
         'summary_a_scalar',
-        MatcherAlmostEqual(jnp.mean(summary_tensors_2['summary_a_scalar'])), 2)
+        MatcherAlmostEqual(
+            np.mean(summary_tensors_2['summary_a_scalar']).item()
+        ),
+        2,
+    )
     mock_tf_summary_image.assert_any_call(
         'summary_b_image/0',
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_b_image'])),
@@ -388,16 +392,16 @@ class SummaryUtilsTest(parameterized.TestCase):
           2,
       )
     else:
-      expected_metrics_output_0_weight = jnp.sum(
+      expected_metrics_output_0_weight = np.sum(
           weighted_scalars_1['output_0'][1] + weighted_scalars_2['output_0'][1]
-      )
+      ).item()
       expected_metrics_output_0 = (
-          jnp.sum(
+          np.sum(
               weighted_scalars_1['output_0'][0]
               * weighted_scalars_1['output_0'][1]
               + weighted_scalars_2['output_0'][0]
               * weighted_scalars_2['output_0'][1]
-          )
+          ).item()
           / expected_metrics_output_0_weight
       )
       mock_tf_summary_scalar.assert_any_call(
@@ -410,16 +414,16 @@ class SummaryUtilsTest(parameterized.TestCase):
           MatcherAlmostEqual(expected_metrics_output_0_weight),
           2,
       )
-      expected_metrics_output_1_weight = jnp.sum(
+      expected_metrics_output_1_weight = np.sum(
           weighted_scalars_1['output_1'][1] + weighted_scalars_2['output_1'][1]
-      )
+      ).item()
       expected_metrics_output_1 = (
           jnp.sum(
               weighted_scalars_1['output_1'][0]
               * weighted_scalars_1['output_1'][1]
               + weighted_scalars_2['output_1'][0]
               * weighted_scalars_2['output_1'][1]
-          )
+          ).item()
           / expected_metrics_output_1_weight
       )
       mock_tf_summary_scalar.assert_any_call(
@@ -438,7 +442,8 @@ class SummaryUtilsTest(parameterized.TestCase):
         summary_tensors_2['summary_a_scalar'],
     ]
     expected_summary_a_scalar = np.mean(
-        [np.array(s) for s in summary_a_scalars])
+        [np.array(s) for s in summary_a_scalars]
+    ).item()
     mock_tf_summary_scalar.assert_any_call(
         'summary_a_scalar', MatcherAlmostEqual(expected_summary_a_scalar), 2)
     mock_tf_summary_image.assert_any_call(

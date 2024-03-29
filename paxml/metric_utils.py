@@ -115,7 +115,9 @@ def is_weighted_scalar(v: Any) -> bool:
 
 
 def is_float_convertible(
-    metric_value: numbers.Number | clu_values.Value | seqio.metrics.MetricValue,
+    metric_value: (
+        numbers.Number | clu_values.Value | seqio.metrics.MetricValue | Any
+    ),
 ):
   """Returns True if a metricv value is float convertible."""
   return (
@@ -131,11 +133,16 @@ def is_float_convertible(
 
 
 def as_float(
-    metric_value: numbers.Number
-    | clu_values.Scalar
-    | seqio.metrics.Scalar
-    | WeightedScalar
-    | Sequence[WeightedScalar],
+    metric_value: (
+        numbers.Number
+        | clu_values.Scalar
+        | seqio.metrics.Scalar
+        | WeightedScalar
+        | Sequence[WeightedScalar]
+        | float
+        | np.ndarray
+        | Any
+    ),
 ) -> float:
   """Returns the aggregated float value from heterogeneous metric value."""
   if is_weighted_scalar(metric_value):

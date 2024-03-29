@@ -15,6 +15,8 @@
 
 """Tests for Learners."""
 
+import typing
+
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -528,7 +530,7 @@ class LearnersTest(test_utils.TestCase):
       jax.tree.map(
           asserts.assert_same_structure,
           partition_spec_single,
-          p.inner_state,
+          p.inner_state,  # pytype:disable=attribute-error
       )
     with base_layer.JaxContext.new_context():
       transformed_grads, _ = learner_instance.update_states(
@@ -917,24 +919,30 @@ class LearnersTest(test_utils.TestCase):
 
     logging.info('opt_states_pspec=%s', opt_states_pspec)
 
-    self.assertIn(opt_vec.NO_PREFIX_KEY, opt_states_pspec.keys())
-    self.assertIn('p#2.2#tsdata,smdl.', opt_states_pspec.keys())
-    self.assertIn('p#2#i-1', opt_states_pspec.keys())
+    opt_states_pspec_dict = typing.cast(
+        NestedMap, opt_states_pspec
+    ).ToNestedDict()
+    self.assertIn(opt_vec.NO_PREFIX_KEY, opt_states_pspec_dict.keys())
+    self.assertIn('p#2.2#tsdata,smdl.', opt_states_pspec_dict.keys())
+    self.assertIn('p#2#i-1', opt_states_pspec_dict.keys())
 
     pspec_1 = opt_states_pspec['p#2#i-1']
     pspec_2 = opt_states_pspec[opt_vec.NO_PREFIX_KEY]
     pspec_3 = opt_states_pspec['p#2.2#tsdata,smdl.']
 
     opt_idx = 2
-    self.assertEqual(pspec_1[opt_idx].a.shape, ())
-    self.assertEqual(pspec_1[opt_idx].a.repeat_prefix, [2])
-    self.assertEqual(pspec_1[opt_idx].a.repeat_prefix_split_dims_mapping, [-1])
-    self.assertEqual(pspec_2[opt_idx].b.shape, (2,))
-    self.assertEmpty(pspec_2[opt_idx].b.repeat_prefix or [])
-    self.assertEqual(pspec_3[opt_idx].c.shape, ())
-    self.assertEqual(pspec_3[opt_idx].c.repeat_prefix, [2, 2])
+    pspec_1_opt_idx = typing.cast(NestedMap, pspec_1[opt_idx])
+    pspec_2_opt_idx = typing.cast(NestedMap, pspec_2[opt_idx])
+    pspec_3_opt_idx = typing.cast(NestedMap, pspec_3[opt_idx])
+    self.assertEqual(pspec_1_opt_idx.a.shape, ())
+    self.assertEqual(pspec_1_opt_idx.a.repeat_prefix, [2])
+    self.assertEqual(pspec_1_opt_idx.a.repeat_prefix_split_dims_mapping, [-1])
+    self.assertEqual(pspec_2_opt_idx.b.shape, (2,))
+    self.assertEmpty(pspec_2_opt_idx.b.repeat_prefix or [])
+    self.assertEqual(pspec_3_opt_idx.c.shape, ())
+    self.assertEqual(pspec_3_opt_idx.c.repeat_prefix, [2, 2])
     self.assertEqual(
-        pspec_3[opt_idx].c.repeat_prefix_split_dims_mapping,
+        pspec_3_opt_idx.c.repeat_prefix_split_dims_mapping,
         [('data', 'mdl'), None],
     )
 
@@ -1119,24 +1127,28 @@ class LearnersTest(test_utils.TestCase):
         self.assertCountEqual(expected_summary_keys, sorted(summaries))
       self.assertEqual(summaries['s.[2, 2]_scalar'].shape, (2, 2))
       self.assertEqual(summaries['s.[2, 2]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['s.[2, 2]_scalar']._value.tolist(),
-                       [[1.0, 2.0], [3.0, 4.0]])
+      self.assertEqual(
+          np.array(summaries['s.[2, 2]_scalar']).tolist(),
+          [[1.0, 2.0], [3.0, 4.0]],
+      )
       self.assertEqual(summaries['s.[2]_scalar'].shape, (2,))
       self.assertEqual(summaries['s.[2]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['s.[2]_scalar']._value.tolist(), [1.0, 2.0])
+      self.assertEqual(np.array(summaries['s.[2]_scalar']).tolist(), [1.0, 2.0])
       self.assertEqual(summaries['s.[]_scalar'].shape, ())
       self.assertEqual(summaries['s.[]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['s.[]_scalar']._value.tolist(), 3.0)
+      self.assertEqual(np.array(summaries['s.[]_scalar']).tolist(), 3.0)
       self.assertEqual(summaries['u.[2, 2]_scalar'].shape, (2, 2))
       self.assertEqual(summaries['u.[2, 2]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['u.[2, 2]_scalar']._value.tolist(),
-                       [[0.0, 0.0], [0.0, 0.0]])
+      self.assertEqual(
+          np.array(summaries['u.[2, 2]_scalar']).tolist(),
+          [[0.0, 0.0], [0.0, 0.0]],
+      )
       self.assertEqual(summaries['u.[2]_scalar'].shape, (2,))
       self.assertEqual(summaries['u.[2]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['u.[2]_scalar']._value.tolist(), [0.0, 0.0])
+      self.assertEqual(np.array(summaries['u.[2]_scalar']).tolist(), [0.0, 0.0])
       self.assertEqual(summaries['u.[]_scalar'].shape, ())
       self.assertEqual(summaries['u.[]_scalar'].dtype, np.float32)
-      self.assertEqual(summaries['u.[]_scalar']._value.tolist(), 0.0)
+      self.assertEqual(np.array(summaries['u.[]_scalar']).tolist(), 0.0)
 
 
 if __name__ == '__main__':

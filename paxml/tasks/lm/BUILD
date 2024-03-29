@@ -16,8 +16,7 @@
 # Description:
 #   Language modeling-specific libraries and model configurations
 
-load("//paxml:paxml.bzl", "pytype_strict_library")
-load("//paxml:paxml.bzl", "py_strict_test")
+load("//paxml:paxml.bzl", "pytype_strict_library", "pytype_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
 package(default_visibility = JAX_VISIBILITY)
@@ -68,7 +67,7 @@ filegroup(
     srcs = glob(["testdata/*"]),
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "input_generator_test",
     srcs = ["input_generator_test.py"],
     data = [":testdata"],

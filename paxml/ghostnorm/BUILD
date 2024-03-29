@@ -15,8 +15,7 @@
 
 # Description:
 #   Library of layers that implement ghost norm protocol
-load("//paxml:paxml.bzl", "py_strict_test")
-load("//paxml:paxml.bzl", "pytype_strict_library")
+load("//paxml:paxml.bzl", "pytype_strict_library", "pytype_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
 package(default_visibility = JAX_VISIBILITY)
@@ -78,7 +77,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "layers_test",
     srcs = ["layers_test.py"],
     deps = [

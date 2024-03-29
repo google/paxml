@@ -278,6 +278,8 @@ class SearchHParamsTest(absltest.TestCase):
 
   def test_hyperparameter_tuning(self):
     p = automl.hyperparameter_tuning(automl.Metric.eval('accuracy'))
+    assert p.search_algorithm is not None
+    assert p.search_reward is not None
     # Check algorithm cls for hyperparameter tuning.
     self.assertIs(p.search_algorithm.cls, automl.Sweeping)
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
@@ -289,6 +291,8 @@ class SearchHParamsTest(absltest.TestCase):
 
   def test_neural_architecture_search_single_objective(self):
     p = automl.neural_architecture_search(automl.Metric.eval('accuracy'))
+    assert p.search_algorithm is not None
+    assert p.search_reward is not None
     self.assertIs(p.search_algorithm.cls, automl.RegularizedEvolution)
     self.assertIs(p.search_reward.cls, automl.SingleObjective)
     self.assertEqual(p.search_reward.metric, automl.Metric.eval('accuracy'))
@@ -303,6 +307,8 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           max_num_trials=6000)
+    assert p.search_algorithm is not None
+    assert p.search_reward is not None
     self.assertIs(p.search_algorithm.cls, automl.RegularizedEvolution)
     self.assertIs(p.search_reward.cls, automl.MultiObjective)
     self.assertEqual(p.search_reward.metrics, [
@@ -319,6 +325,7 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           reward_type='tunas').search_reward
+    assert p is not None
     self.assertTrue(
         issubclass(fdl.get_callable(p.aggregator_tpl), automl.TunasAbsolute))
     p = automl.neural_architecture_search([
@@ -327,6 +334,7 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           reward_type='mnas_hard').search_reward
+    assert p is not None
     self.assertTrue(
         issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasHard))
     p = automl.neural_architecture_search([
@@ -335,6 +343,7 @@ class SearchHParamsTest(absltest.TestCase):
     ],
                                           150,
                                           reward_type='mnas_soft').search_reward
+    assert p is not None
     self.assertTrue(
         issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasSoft))
     with self.assertRaisesRegex(ValueError, 'Unsupported reward type'):

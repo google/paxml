@@ -16,6 +16,7 @@
 """Tests for trainer_lib."""
 
 import itertools
+from typing import Any
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -35,6 +36,9 @@ from praxis import schedules
 
 NestedMap = py_utils.NestedMap
 JTensor = pytypes.JTensor
+Metrics = pytypes.Metrics
+WeightedScalars = pytypes.WeightedScalars
+Predictions = JTensor | NestedMap | dict[str, Any] | dict[int, Any]
 
 
 class RunningModeTest(parameterized.TestCase):
@@ -96,8 +100,8 @@ class TestModel(base_model.BaseModel):
     return ret
 
   def compute_loss(
-      self, predictions: JTensor, input_batch: NestedMap
-  ) -> tuple[NestedMap, NestedMap]:
+      self, predictions: Predictions, input_batch: NestedMap
+  ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
     prediction_loss = jnp.sum(predictions)
     theta_loss = jnp.max(jnp.abs(self.theta.weights))

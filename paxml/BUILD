@@ -16,10 +16,10 @@
 # Description:
 #   Paxml: a library for training machine learning models in Jax.
 
-load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_library", "pytype_strict_test")
-load("//paxml:paxml.bzl", "py_strict_test")
-load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_library", "pytype_strict_test")
+load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
+# Internal license-related bzl load
 
 package(default_visibility = JAX_VISIBILITY)
 
@@ -551,7 +551,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "programs_test",
     srcs = ["programs_test.py"],
     deps = [
@@ -643,7 +643,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "trainer_lib_test",
     srcs = ["trainer_lib_test.py"],
     deps = [
@@ -729,7 +729,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "partitioning_test",
     srcs = ["partitioning_test.py"],
     deps = [
@@ -874,7 +874,7 @@ pytype_strict_library(
     srcs = ["host_callback.py"],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "host_callback_test",
     srcs = ["host_callback_test.py"],
     deps = [
@@ -883,7 +883,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "automl_test",
     srcs = ["automl_test.py"],
     deps = [
@@ -898,7 +898,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "base_inference_runner_test",
     srcs = ["base_inference_runner_test.py"],
     deps = [
@@ -919,7 +919,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "base_metrics_test",
     srcs = ["base_metrics_test.py"],
     deps = [
@@ -934,7 +934,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "checkpoint_managers_test",
     srcs = ["checkpoint_managers_test.py"],
     deps = [
@@ -958,7 +958,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "experiment_registry_test",
     srcs = ["experiment_registry_test.py"],
     deps = [
@@ -996,7 +996,7 @@ pytype_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "learners_test",
     srcs = ["learners_test.py"],
     deps = [
@@ -1019,7 +1019,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "metric_utils_test",
     srcs = ["metric_utils_test.py"],
     deps = [
@@ -1028,7 +1028,9 @@ py_strict_test(
         # Implicit absl.testing.absltest.absltest dependency.
         # Implicit clu.metrics dependency.
         # Implicit clu.values dependency.
+        # Implicit etils dependency.
         # Implicit flax dependency.
+        # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit internal platform check dependency.
         # Implicit seqio dependency.
@@ -1040,7 +1042,7 @@ py_strict_test(
     }),
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "seqio_input_test",
     srcs = ["seqio_input_test.py"],
     shard_count = 8,
@@ -1058,7 +1060,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "summary_utils_test",
     srcs = ["summary_utils_test.py"],
     deps = [
@@ -1073,14 +1075,13 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "tasks_lib_test",
     srcs = ["tasks_lib_test.py"],
     deps = [
         ":checkpoints",
         ":learners",
         ":partitioning",
-        ":summary_utils",
         ":tasks_lib",
         ":trainer_lib",
         # Implicit absl.testing.absltest.absltest dependency.
@@ -1103,7 +1104,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "tuning_lib_test",
     srcs = ["tuning_lib_test.py"],
     deps = [
@@ -1122,7 +1123,7 @@ py_strict_test(
     ],
 )
 
-py_strict_test(
+pytype_strict_test(
     name = "main_test",
     srcs = ["main_test.py"],
     deps = [

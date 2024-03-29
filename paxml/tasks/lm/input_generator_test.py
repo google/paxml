@@ -74,10 +74,10 @@ class InputTest(test_utils.TestCase):
     p.input_file = test_helper.test_src_dir_path('tasks/lm/testdata/tfrecords')
     p.batch_size = 4
     p.eval_data_size = 10 if provide_data_size else 0
-    sharded_inputs = [None] * 4
+    sharded_inputs = []
     for i in range(4):
       local_p = p.clone().set(infeed_host_index=i, num_infeed_hosts=4)
-      sharded_inputs[i] = instantiate(local_p)
+      sharded_inputs.append(instantiate(local_p))
 
     # This is the same as in test_full() above.
     expected_ids = np.array(

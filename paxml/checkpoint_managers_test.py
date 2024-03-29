@@ -30,6 +30,7 @@ from absl.testing import parameterized
 from etils import epath
 import jax
 from jax.experimental import multihost_utils
+import jax.numpy as jnp
 from jax.sharding import Mesh
 import numpy as np
 import optax
@@ -71,7 +72,7 @@ def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
 
 def _expected_checkpoint_filenames(
     steps: list[int], checkpoint_type: CheckpointType = CheckpointType.GDA
-):
+) -> list[epath.Path]:
   """Returns checkpoint basenames corresponding to all the `steps`."""
   results = []
   for step in steps:
@@ -79,16 +80,14 @@ def _expected_checkpoint_filenames(
       name = f'{CHECKPOINT_PREFIX}{step}'
     else:
       name = f'{CHECKPOINT_PREFIX}{step:08d}'
-    results.append(name)
+    results.append(epath.Path(name))
   return results
 
 
-def _actual_checkpoint_filenames(directory: str) -> list[str]:
+def _actual_checkpoint_filenames(directory: epath.Path) -> list[epath.Path]:
   return [
-      os.path.basename(v)
-      for v in tf.io.gfile.glob(
-          os.path.join(directory, f'{CHECKPOINT_PREFIX}*')
-      )
+      epath.Path(os.path.basename(v))
+      for v in tf.io.gfile.glob(str(directory / f'{CHECKPOINT_PREFIX}*'))
   ]
 
 
@@ -109,7 +108,7 @@ def create_train_state(step: int = 0):
   opt_states = [mdl_vars]
   extra_state = [mdl_vars]
   train_state = TrainState(
-      step=step,
+      step=jnp.array(step),
       mdl_vars=mdl_vars,
       opt_states=opt_states,
       extra_state=extra_state,
@@ -174,7 +173,9 @@ class CheckpointManagerTest(parameterized.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.directory = self.create_tempdir(name='checkpointing_test').full_path
+    self.directory = epath.Path(
+        self.create_tempdir(name='checkpointing_test').full_path
+    )
     (
         self.global_mesh,
         self.state_specs,
@@ -311,6 +312,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
     ocp.test_utils.print_directory(checkpoint_manager.directory)
     if use_train_input:
+      assert train_input_pipeline is not None
       train_input_pipeline.reset()
     expected = self.train_state
     if checkpoint_type == CheckpointType.FLAX:
@@ -766,11 +768,11 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     self.assertSameElements(
         _expected_checkpoint_filenames([0, 1], checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(os.path.join(self.directory, 'archive')),
+        _actual_checkpoint_filenames(self.directory / 'archive'),
     )
     self.assertSameElements(
         _expected_checkpoint_filenames([2, 3], checkpoint_type=checkpoint_type),
-        _actual_checkpoint_filenames(os.path.join(self.directory)),
+        _actual_checkpoint_filenames(self.directory),
     )
     self.assertIn('archive', tf.io.gfile.listdir(self.directory))
     self.assertSameElements([2, 3], checkpoint_manager.all_steps())
@@ -1030,10 +1032,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         ),
     )
     if remove_checkpoint_prefix:
-      os.rename(
-          os.path.join(self.directory, 'checkpoint_00000000'),
-          os.path.join(self.directory, '0'),
-      )
+      (self.directory / 'checkpoint_00000000').rename(self.directory / '0'),
     expected = self.train_state
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
     with mock.patch.object(
