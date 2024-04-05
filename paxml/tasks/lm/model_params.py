@@ -41,6 +41,52 @@ NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
 
 
+def set_sharding_annotations_with_expert_parallelism(
+    task_p: pax_fiddle.Config[tasks_lib.SingleTask],
+    training_optimized: bool,
+    ici_mesh_shape: Sequence[int],
+    dcn_mesh_shape: Sequence[int] | None = None,
+) -> None:
+  """Sets the sharding annotations in the task config for the given mesh.
+
+  Args:
+    task_p: The task parameters to update with sharding annotations.
+    training_optimized: A bool indicating whether sharding is optimized for
+      training by saving activation memory between forward and backward passes.
+    ici_mesh_shape: a 4D sequence representing the mesh shape for a slice.
+    dcn_mesh_shape: a 4D sequence representing the mesh across slices, or None.
+  """
+  model_p = task_p.model
+  asserts.eq(len(ici_mesh_shape), 4)
+  model_p.ici_mesh_shape = ici_mesh_shape
+  if dcn_mesh_shape is not None:
+    asserts.eq(len(dcn_mesh_shape), 4)
+    model_p.dcn_mesh_shape = dcn_mesh_shape
+  replica_axis = 'replica'
+  data_axis = 'data'
+  data_expert_axis = 'data_expert'
+  mdl_axis = 'mdl'
+  mesh_axis_names = [replica_axis, data_axis, data_expert_axis, mdl_axis]
+  task_p.train.inputs_split_mapping = NestedMap(
+      map_1d=((replica_axis, data_axis, data_expert_axis),),
+      map_2d=((replica_axis, data_axis, data_expert_axis), None))
+  model_p.mesh_axis_names = mesh_axis_names
+  if hasattr(model_p, 'lm_tpl'):
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(model_p.lm_tpl)
+    )
+    model_p.lm_tpl = lm_cls.set_sharding_params_with_expert_parallelism(
+        model_p.lm_tpl,
+        replica_axis=replica_axis,
+        data_axis=data_axis,
+        data_expert_axis=data_expert_axis,
+        mdl_axis=mdl_axis,
+        ici_mesh_shape=model_p.ici_mesh_shape,
+        dcn_mesh_shape=model_p.dcn_mesh_shape,
+        mesh_axis_names=mesh_axis_names,
+        training_optimized=training_optimized,
+    )
+
 def set_sharding_annotations_v1(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
     training_optimized: bool,
@@ -536,6 +582,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   USE_GATED_ACTIVATION = False
   DECAY_END = 100000
   USE_FP8 = False
+  USE_EXPERT_PARALLEL = False
 
   # optimizer related
   DROPOUT_PROB = 0.0
@@ -683,8 +730,13 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     task_p.train.profiler_capture_step = self.PROFILER_CAPTURE_STEP
 
     if self.ICI_MESH_SHAPE is not None:
-      set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
+      if self.USE_EXPERT_PARALLEL:
+        set_sharding_annotations_with_expert_parallelism(task_p, self.TRAINING_OPTIMIZED_SHARDING,
                                   self.ICI_MESH_SHAPE, self.DCN_MESH_SHAPE)
+      else:
+        set_sharding_annotations_v1(task_p, self.TRAINING_OPTIMIZED_SHARDING,
+                                  self.ICI_MESH_SHAPE, self.DCN_MESH_SHAPE)
+    
     maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
 
     return task_p

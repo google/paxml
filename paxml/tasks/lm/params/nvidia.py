@@ -672,3 +672,65 @@ class GLaM64B64EProxy(NVIDIA1_3B):
     )
 
     return task_p
+
+
+class GLaM64B64EProxy_EP(NVIDIA1_3B):
+  """143B MoE config that works with 8x16 A100-40G"""
+
+  NUM_GPUS = 128
+
+  NUM_LAYERS = 8
+  NUM_HEADS = 64
+  DIMS_PER_HEAD = 128
+  MODEL_DIMS = 8192
+  HIDDEN_DIMS = 32768
+
+  NUM_EXPERTS = 8
+  NUM_GROUPS = NUM_GPUS
+
+  ICI_MESH_SHAPE = [1, 16, 8, 1]
+  DCN_MESH_SHAPE = None
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.model.lm_tpl = glam.GlamUniTransformerLmHParams(
+        name='glam_lm',
+        vocab_size=self.VOCAB_SIZE,
+        num_transformer_layers=self.NUM_LAYERS,
+        moe=True,
+        model_dim=self.MODEL_DIMS,
+        ff_dim=self.HIDDEN_DIMS,
+        moe_hidden_dim=self.HIDDEN_DIMS,
+        attention_num_heads=self.NUM_HEADS,
+        attention_key_value_dim=self.MODEL_DIMS // self.NUM_HEADS,
+        attention_extra_logit=0.0,
+        use_tgt_labels_size_as_loss_denominator=True,
+        moe_load_balance_loss_weight=0.01,
+        z_loss_weight=1e-4,
+        moe_gating_func='top2',
+        moe_gating_embedding_level='token',
+        c_dim=None,  ## determined automatically when capacity_factor is set
+        capacity_factor=2.0,
+        e_dim=self.NUM_EXPERTS,
+        num_groups=self.NUM_GROUPS,
+        use_gated_activation=True,
+    )
+
+    ## set sharding
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(task_p.model.lm_tpl)
+    )
+
+    task_p.model.lm_tpl = lm_cls.set_sharding_params_with_expert_parallelism(
+        task_p.model.lm_tpl,
+        replica_axis='replica',
+        data_axis='data',
+        data_expert_axis='data_expert',
+        mdl_axis='mdl',
+        ici_mesh_shape=task_p.model.ici_mesh_shape,
+        dcn_mesh_shape=task_p.model.dcn_mesh_shape,
+        mesh_axis_names=['replica', 'data', 'data_expert', 'mdl'],
+        training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+    )
+
+    return task_p
