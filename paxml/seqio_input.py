@@ -1290,9 +1290,9 @@ class SeqIOInput(base_input.BaseInput):
           logging.info(
               'inputs_pretokenized=%s\ntargets_pretokenized=%s\n'
               'is_correct=%s\nscore=%s\n\n',
-              target.get('inputs_pretokenized', 'None'),
-              target.get('targets_pretokenized', 'None'),
-              target.get('is_correct', 'N/A'),
+              target[ex].get('inputs_pretokenized', 'None'),
+              target[ex].get('targets_pretokenized', 'None'),
+              target[ex].get('is_correct', 'N/A'),
               out[key],
           )
         else:
