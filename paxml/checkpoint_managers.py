@@ -599,3 +599,6 @@ class OrbaxCheckpointManager:
       return restored
     else:
       return restored[STATE_ITEM_NAME]
+
+  def close(self):
+    self._manager.close()

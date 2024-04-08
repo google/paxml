@@ -307,6 +307,10 @@ class _OrbaxPjitTrainingCheckpointer(checkpoints.TrainingCheckpointer):
   def checkpoint_type(self) -> CheckpointType:
     return self._checkpoint_type
 
+  def close(self):
+    self.checkpoint_manager.wait_until_finished()
+    self.checkpoint_manager.close()
+
 
 class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
 
@@ -538,6 +542,10 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
   def checkpoint_type(self) -> CheckpointType:
     return self._checkpoint_type
 
+  def close(self):
+    self.checkpoint_manager.wait_until_finished()
+    self.checkpoint_manager.close()
+
 
 @py_utils.benchmark('[PAX STATUS]: ', first_n=2)
 def _create_checkpointer(
@@ -573,6 +581,7 @@ def _create_checkpointer(
       keep_time_interval=keep_interval_timedelta,
       todelete_subdir=todelete_subdir,
       cleanup_tmp_directories=True,
+      enable_background_delete=True,
   )
 
   if checkpoint_type == CheckpointType.FLAX:
