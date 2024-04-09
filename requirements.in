@@ -1,23 +1,23 @@
 # To update requirements.txt for praxis and paxml, run:
 # bash ./compile_requirements.sh
 
-absl-py
-clu @ git+https://github.com/google/CommonLoopUtils
-etils
-flax @ git+https://github.com/google/flax
-graphviz
-jax @ git+https://github.com/google/jax
-lingvo
-numpy
-orbax-checkpoint
-praxis
+absl-py==1.4.0
+clu==0.0.11
+etils==1.7.0
+flax==0.8.2
+graphviz==0.20.1
+jax==0.4.26
+lingvo==0.12.7
+numpy==1.26.4
+orbax-checkpoint==0.5.9
+praxis==1.4.0
 protobuf==3.19.6
-pyglove
-seqio-nightly
-t5
+pyglove==0.4.4
+seqio-nightly==0.0.17.dev20231010
+t5==0.9.4
 tensorflow~=2.9.2
 tensorflow-text~=2.9.0
-tensorstore
+tensorstore==0.1.55
 tensorflow-datasets==4.8.3
 tfds-nightly==4.8.3.dev202303280045
 tensorflow-metadata==1.12.0

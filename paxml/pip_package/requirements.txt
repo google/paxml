@@ -75,7 +75,7 @@ click==8.1.7
     #   nltk
     #   tensorflow-datasets
     #   tfds-nightly
-clu @ git+https://github.com/google/CommonLoopUtils
+clu==0.0.11
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -128,7 +128,7 @@ executing==2.0.1
     # via stack-data
 fastjsonschema==2.19.1
     # via nbformat
-fiddle @ git+https://github.com/google/fiddle
+fiddle==0.3.0
     # via -r praxis-requirements.in
 filelock==3.13.1
     # via
@@ -136,7 +136,7 @@ filelock==3.13.1
     #   transformers
 flatbuffers==1.12
     # via tensorflow
-flax @ git+https://github.com/google/flax
+flax==0.8.2
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -215,7 +215,7 @@ ipywidgets==8.1.2
     # via jupyter
 isoduration==20.11.0
     # via jsonschema
-jax @ git+https://github.com/google/jax
+jax==0.4.26
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -433,7 +433,7 @@ optax==0.2.1
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax-checkpoint==0.5.6
+orbax-checkpoint==0.5.9
     # via
     #   -r paxml-requirements.in
     #   flax
