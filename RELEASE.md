@@ -1,3 +1,13 @@
+# Version: 1.4.0
+## Major Features and Improvements
+## Breaking changes
+## Deprecations
+## Note
+*   Version: 1.4.0
+*   Build Date: 20240408
+*   Paxml commit: 5cf7b086d10eecfd379013304e5fa6334e9dd94d
+*   Praxis version: 1.4.0
+*   Praxis commit: 794623a65934cac98aaa962afcbf9d40a51c02f8
 # Version: 1.3.1
 ## Major Features and Improvements
 ## Breaking changes

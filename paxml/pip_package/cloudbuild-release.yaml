@@ -17,8 +17,8 @@ steps:
 
 substitutions:
     _PYTHON_VERSION: '3.10'
-    _RELEASE_VERSION: '1.3.1'  # or rX.Y
-    _PRAXIS_VERSION: '1.3.1'  # or rX.Y
+    _RELEASE_VERSION: '1.4.0'  # or rX.Y
+    _PRAXIS_VERSION: '1.4.0'  # or rX.Y
     _IMAGE_NAME: 'paxml_${_RELEASE_VERSION}_${_PYTHON_VERSION}'
     _WHEEL_FOLDER: '/tmp/wheels'
 options:
