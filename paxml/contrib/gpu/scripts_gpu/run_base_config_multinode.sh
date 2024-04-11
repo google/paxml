@@ -17,20 +17,24 @@
 # Assumes you are using a SLURM cluster. Edit flags under --multiprocess_gpu below to suit your setup
 set -u
 
-CONFIG=${1:-"Synthetic126M"}
+CONFIG=$1
 PREC=${2:-"bfloat16"}        # Precision (float32, bfloat16)
 NUM_GPUS=${3:-8}      # Number of GPUs (1, 2, 4, 8)
-PERCORE_BATCH_SIZE=${4:-4}
-LOG_DIR=${5:-"test_logdir"}
+LOG_DIR=${4:-"test_logdir"}
+TFDS_DATA_DIR=${5:-'None'}
+VOCAB_PATH=${6:-'gs://t5-data/vocabs/cc_all.32000.100extra/sentencepiece.model'}
+ADDITIONAL_ARGS=${7:-""}
 
-### vocab path is unused. Just set to avoid assertion error
-export VOCAB_PATH=gs://t5-data/vocabs/cc_all.32000.100extra/sentencepiece.model
+export VOCAB_PATH=$VOCAB_PATH
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.85}
-BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_triton_gemm=false
-                       --xla_gpu_enable_highest_priority_async_stream=true
-                       --xla_gpu_enable_triton_softmax_fusion=false  --xla_gpu_all_reduce_combine_threshold_bytes=51200
-                       --xla_gpu_graph_level=0"}
+export XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}
+BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"\
+	--xla_gpu_enable_latency_hiding_scheduler=true \
+	--xla_gpu_enable_triton_gemm=false \
+	--xla_gpu_enable_highest_priority_async_stream=true \
+	--xla_gpu_enable_triton_softmax_fusion=false \
+	--xla_gpu_all_reduce_combine_threshold_bytes=51200 \
+	--xla_gpu_graph_level=0"}
 export XLA_FLAGS="$BASE_XLA_FLAGS ${XLA_FLAGS:-}"
 
 
@@ -39,12 +43,11 @@ python3 -u -m paxml.main \
     --job_log_dir=$LOG_DIR \
     --fdl_config=paxml.contrib.gpu.scripts_gpu.configs.${CONFIG} \
     --fdl.FPROP_DTYPE=\"${PREC}\" \
-    --fdl.PERCORE_BATCH_SIZE=$PERCORE_BATCH_SIZE \
     --multiprocess_gpu \
     --server_addr=${SLURM_LAUNCH_NODE_IPADDR}:12345 \
     --num_hosts=$SLURM_NTASKS \
     --host_idx=$SLURM_PROCID \
-    --enable_checkpoint_saving=False \
-    --fdl.MAX_STEPS=100 \
-    --alsologtostderr
+    --alsologtostderr \
+    $([[ $TFDS_DATA_DIR != "None" ]] && echo --tfds_data_dir=$TFDS_DATA_DIR) \
+    ${ADDITIONAL_ARGS}
 
