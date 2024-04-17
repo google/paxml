@@ -851,6 +851,24 @@ class LearnersTest(test_utils.TestCase):
     self.assertEqual(pspec_3[opt_idx].c.repeat_prefix, [2, 2])
     self.assertEqual(pspec_3[opt_idx].c.repeat_prefix_split_dims_mapping,
                      [('data', 'mdl'), None])
+
+    for idx in [0, 1, 3]:
+      pspec_1_count = typing.cast(NestedMap, pspec_1[idx]).count
+      pspec_2_count = typing.cast(NestedMap, pspec_2[idx]).count
+      pspec_3_count = typing.cast(NestedMap, pspec_3[idx]).count
+      self.assertEqual(pspec_1_count.shape, [])
+      self.assertEqual(pspec_1_count.repeat_prefix, [2])
+      self.assertEqual(pspec_1_count.repeat_prefix_split_dims_mapping, [-1])
+      self.assertEqual(pspec_2_count.shape, [])
+      self.assertEqual(pspec_2_count.repeat_prefix, [])
+      self.assertEqual(pspec_2_count.repeat_prefix_split_dims_mapping, [])
+      self.assertEqual(pspec_3_count.shape, [])
+      self.assertEqual(pspec_3_count.repeat_prefix, [2, 2])
+      self.assertEqual(
+          pspec_3_count.repeat_prefix_split_dims_mapping,
+          [('data', 'mdl'), None],
+      )
+
     logging.info(f'Prefix vectorization partition spec .. {partition_spec} ')
     state = grad_tx.init(variables)
     logging.info('Prefix vectorization state after init .. ')
@@ -945,6 +963,14 @@ class LearnersTest(test_utils.TestCase):
         pspec_3_opt_idx.c.repeat_prefix_split_dims_mapping,
         [('data', 'mdl'), None],
     )
+
+    for idx in [0, 1, 3]:
+      pspec_1_count = typing.cast(NestedMap, pspec_1[idx]).count
+      pspec_2_count = typing.cast(NestedMap, pspec_2[idx]).count
+      pspec_3_count = typing.cast(NestedMap, pspec_3[idx]).count
+      self.assertEqual(pspec_1_count.shape, (2,))
+      self.assertEqual(pspec_2_count.shape, ())
+      self.assertEqual(pspec_3_count.shape, (2, 2))
 
     logging.info('Prefix vectorization state after init .. ')
     # Computed update is 0 + state, and state is sum of each variable.

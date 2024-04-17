@@ -405,7 +405,7 @@ def _train_and_evaluate_common(
     if exit_after_ondemand_checkpoint and checkpointer.reached_preemption(
         step_i
     ):
-      checkpointer.wait_until_finished()
+      checkpointer.close()
       exit(1)
 
     if not train_program.should_run(partitioned_train_state, step_i):
@@ -550,5 +550,5 @@ def _train_and_evaluate_common(
       train_input_pipeline=train_input_for_checkpoint,
   )
 
-  checkpointer.wait_until_finished()
+  checkpointer.close()
   logging.info('[PAX STATUS]: Final checkpoint saved.')

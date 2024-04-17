@@ -52,22 +52,27 @@ CHECKPOINT_PREFIX = checkpoint_paths.CHECKPOINT_PREFIX
 TrainState = train_states.TrainState
 
 
-@contextlib.contextmanager
-def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
-  """Use OCDBT driver within context."""
-  original_registry = list(
-      ocp.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
-  )
-  if use_ocdbt:
-    ocp.type_handlers.register_standard_handlers_with_options(
-        use_ocdbt=use_ocdbt, ts_context=ts_context
+# TODO(b/330585279): remove the polyfill when releases have stabilized.
+if hasattr(ocp.test_utils, 'ocdbt_checkpoint_context'):
+  ocdbt_checkpoint_context = ocp.test_utils.ocdbt_checkpoint_context
+else:
+
+  @contextlib.contextmanager
+  def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
+    """Use OCDBT driver within context."""
+    original_registry = list(
+        ocp.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
     )
-  try:
-    yield
-  finally:
-    ocp.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
-        original_registry
-    )
+    if use_ocdbt:
+      ocp.type_handlers.register_standard_handlers_with_options(
+          use_ocdbt=use_ocdbt, ts_context=ts_context
+      )
+    try:
+      yield
+    finally:
+      ocp.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
+          original_registry
+      )
 
 
 def _expected_checkpoint_filenames(

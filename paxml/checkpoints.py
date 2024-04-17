@@ -860,3 +860,7 @@ class TrainingCheckpointer(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def reached_preemption(self, step: int) -> bool:
     """Returns True if a preemption sync point has been reached."""
+
+  @abc.abstractmethod
+  def close(self):
+    """Closes the checkpointer and free all resources."""

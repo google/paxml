@@ -673,6 +673,7 @@ class GLaM64B64EProxy(NVIDIA1_3B):
 
     return task_p
 
+  
 @experiment_registry.register
 class GLaM64B64EProxy_EP(NVIDIA1_3B):
   """143B MoE config that works with 8x16 A100-40G"""
