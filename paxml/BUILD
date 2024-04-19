@@ -250,8 +250,24 @@ pytype_strict_library(
 pytype_strict_library(
     name = "experiment_utils",
     srcs = ["experiment_utils.py"],
+    deps = [":base_experiment"],
+)
+
+pytype_strict_library(
+    name = "experiment_vars_summary_parser",
+    srcs = ["experiment_vars_summary_parser.py"],
+    deps = [
+        # Implicit absl.logging dependency.  # Force separate line for copybara.
+    ],
+)
+
+pytype_strict_test(
+    name = "experiment_vars_summary_test",
+    srcs = ["experiment_vars_summary_test.py"],
     deps = [
         ":base_experiment",
+        ":experiment_utils",
+        ":experiment_vars_summary_parser",
     ],
 )
 

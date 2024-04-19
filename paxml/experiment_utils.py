@@ -60,9 +60,13 @@ def _get_cls_vars(cls: Type[BaseExperiment]) -> dict[str, Any]:
   def fn(clazz):
     res = {}
     for k, v in clazz.__dict__.items():
-      if (callable(v) or isinstance(v, property) or
+      if (
+          callable(v)
+          or isinstance(v, property)
+          or
           # This is not correct strictly speaking, but a reasonable assumption.
-          (k.startswith('__') and k.endswith('__'))):
+          (k.startswith('__') and k.endswith('__'))
+      ):
         continue
       res[k] = v
     return res
@@ -111,6 +115,10 @@ def _summarize_cls_vars(cls: Type[BaseExperiment]) -> dict[str, dict[str, Any]]:
   return res
 
 
+# Note: This function is tested to work correctly with
+# experiment_vars_summary_parser in experiment_vars_summary_test. When making
+# updates to this function, experiment_vars_summary_parser and the unit test
+# should be updated accordingly.
 def get_cls_vars_summary(cls: Type[BaseExperiment]) -> str:
   r"""Returns cls's class variables summary.
 
