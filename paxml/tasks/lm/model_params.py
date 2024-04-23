@@ -105,10 +105,8 @@ def set_sharding_annotations_v1(
     dcn_mesh_shape: a 3D sequence representing the mesh across slices, or None.
   """
   model_p = task_p.model
-  asserts.eq(len(ici_mesh_shape), 3)
   model_p.ici_mesh_shape = ici_mesh_shape
   if dcn_mesh_shape is not None:
-    asserts.eq(len(dcn_mesh_shape), 3)
     model_p.dcn_mesh_shape = dcn_mesh_shape
   replica_axis = 'replica'
   data_axis = 'data'

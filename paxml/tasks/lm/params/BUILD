@@ -85,6 +85,7 @@ pytype_library(
         "//praxis/layers:activations",
         "//praxis/layers:glam",
         "//praxis/layers:gpu_fast_attention",
+        "//praxis/layers:grok",
         "//praxis/layers:transformers",
     ],
 )
