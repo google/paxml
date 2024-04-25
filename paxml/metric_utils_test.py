@@ -17,7 +17,6 @@
 
 import os
 from typing import Any, Sequence
-# Internal unittest mock import
 
 from absl.testing import absltest
 import clu.metrics as clu_metrics
@@ -30,10 +29,7 @@ import numpy as np
 import numpy.testing as npt
 from paxml import metric_utils
 from paxml import summary_utils
-# Internal platform import
 import seqio
-
-# internal runtime import
 
 
 @flax.struct.dataclass
@@ -344,8 +340,6 @@ class MetricUtilsTest(absltest.TestCase):
             'b': 2,
             'x/a': 2
         })
-
-    # Internal scalar types test
 
 
 if __name__ == '__main__':

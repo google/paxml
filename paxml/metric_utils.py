@@ -25,12 +25,9 @@ import clu.values as clu_values
 import jax
 from jax import numpy as jnp
 import numpy as np
-# Internal platform import
 from praxis import py_utils
 from praxis import pytypes
 import seqio
-
-# internal runtime import
 
 
 Metrics = pytypes.Metrics
@@ -100,7 +97,6 @@ def is_scalar(v: Any) -> bool:
       jnp.ndarray,
       jax.Array,
   ]
-  # Internal scalar types
   return isinstance(v, tuple(scalar_types))
 
 

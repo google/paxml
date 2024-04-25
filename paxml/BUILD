@@ -377,7 +377,6 @@ pytype_strict_library(
         # Implicit clu.values dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        # Implicit internal platform check dependency.
         "//praxis:base_input",
         "//praxis:py_utils",
         "//praxis:pytypes",
@@ -1048,14 +1047,8 @@ pytype_strict_test(
         # Implicit flax dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        # Implicit internal platform check dependency.
         # Implicit seqio dependency.
-    ] + select({
-        # Internal empty GCE platform
-        "//conditions:default": [
-            # Implicit internal Jax runtime dependency.
-        ],
-    }),
+    ],
 )
 
 pytype_strict_test(
