@@ -209,6 +209,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       checkpoint_type: CheckpointType = CheckpointType.GDA,
       train_input_pipeline: base_input.BaseInput | None = None,
       tensorstore_use_ocdbt: bool = False,
+      version_step_hint: int | None = None,
   ) -> checkpoint_managers.OrbaxCheckpointManager:
     checkpointer = self.create_checkpointer(
         checkpoint_type, tensorstore_use_ocdbt=tensorstore_use_ocdbt
@@ -225,6 +226,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_type=checkpoint_type,
         options=options,
         tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+        version_step_hint=version_step_hint,
     )
 
   def save(
@@ -1066,6 +1068,52 @@ class CheckpointManagerTest(parameterized.TestCase):
     )
 
     ocp.test_utils.assert_tree_equal(self, expected, restored)
+
+  @parameterized.parameters(
+      (CheckpointType.GDA, True),
+      (CheckpointType.GDA, False),
+      (CheckpointType.FLAX, True),
+      (CheckpointType.FLAX, False),
+  )
+  def test_restore_with_version_step_hint(
+      self, checkpoint_type, use_version_step_hint
+  ):
+    train_input_pipeline = TestInput(
+        batch_size=2,
+    )
+    train_input_pipeline.reset()
+
+    save_checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+        train_input_pipeline=train_input_pipeline,
+    )
+    save_checkpoint_manager._manager._version = 1.1
+    self.save(
+        save_checkpoint_manager,
+        0,
+        self.train_state,
+        None,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
+    save_checkpoint_manager._manager._version = 1.2
+    self.save(
+        save_checkpoint_manager,
+        1,
+        self.train_state,
+        None,
+        train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
+    )
+
+    restore_checkpoint_manager = self.create_checkpoint_manager(
+        checkpoint_managers.CheckpointManagerOptions(),
+        checkpoint_type=checkpoint_type,
+        train_input_pipeline=train_input_pipeline,
+        version_step_hint=1 if use_version_step_hint else None,
+    )
+
+    expected_version = 1.2 if use_version_step_hint else 1.1
+    self.assertEqual(restore_checkpoint_manager.version, expected_version)
 
 
 if __name__ == '__main__':

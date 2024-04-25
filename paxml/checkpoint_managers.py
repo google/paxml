@@ -273,6 +273,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       options: CheckpointManagerOptions | None = None,
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       tensorstore_use_ocdbt: bool | None = None,
+      version_step_hint: int | None = None,
   ):
     if checkpoint_type == CheckpointType.UNSPECIFIED:
       raise ValueError('Must specify checkpoint type.')
@@ -287,7 +288,9 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
         self._directory
     )
     if self._directory.exists():
-      step = self.any_step()
+      step = version_step_hint
+      if step is None:
+        step = self.any_step()
       if step is not None:
         version = _get_checkpoint_version(
             self._checkpoint_type,
@@ -422,7 +425,13 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
 
 
 class OrbaxCheckpointManager:
-  """Wrapper class for overridden _CheckpointManagerImpl."""
+  """Wrapper class for overridden _CheckpointManagerImpl.
+
+  An optional step hint can be passed to the internal checkpoint manager for
+  determining version, instead of using an arbitrary step, as some checkpoint
+  steps may be under different permissions compared to the current checkpoint
+  step being loaded.
+  """
 
   def __init__(
       self,
@@ -433,6 +442,7 @@ class OrbaxCheckpointManager:
       checkpoint_type: CheckpointType = CheckpointType.UNSPECIFIED,
       tensorstore_use_ocdbt: bool | None = None,
       aux_checkpointers: dict[str, ocp.AbstractCheckpointer] | None = None,
+      version_step_hint: int | None = None,
   ):
     self._checkpoint_type = checkpoint_type
     self._tensorstore_use_ocdbt = tensorstore_use_ocdbt
@@ -454,6 +464,7 @@ class OrbaxCheckpointManager:
         options=options,
         checkpoint_type=checkpoint_type,
         tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+        version_step_hint=version_step_hint,
     )
 
   @property

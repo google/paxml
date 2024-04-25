@@ -229,6 +229,7 @@ def restore_checkpoint(
       checkpointer,
       checkpoint_type=checkpoint_type,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
+      version_step_hint=step,
   )
   if step is None:
     step = checkpoint_manager.latest_step()
