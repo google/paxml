@@ -449,7 +449,28 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   ):
     self._enforce_restore_shape_check = enforce_restore_shape_check
     super().__init__(use_ocdbt=use_ocdbt, *args, **kwargs)
-    self._write_tree_metadata = self._use_ocdbt
+
+  def _write_metadata_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      save_args: PyTree,
+      use_zarr3: bool = False,
+  ):
+    if self._use_ocdbt:
+      super()._write_metadata_file(directory, item, save_args, use_zarr3)
+
+  def _read_metadata_file(
+      self, directory: epath.Path, keep_empty_nodes: bool = False
+  ) -> tuple[PyTree, bool]:
+    if self._use_ocdbt:
+      return super()._read_metadata_file(
+          directory, keep_empty_nodes=keep_empty_nodes
+      )
+    else:
+      # Explicitly ignore metadata with non-OCDBT, otherwise we will get the
+      # wrong tree structure.
+      raise FileNotFoundError('Metadata file is ignored for Pax.')
 
   def _set_param_names(self, param_names: PyTree):
     self._param_names = param_names
@@ -623,9 +644,14 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   Should only be used in conjunction with FlaxCheckpointer.
   """
 
-  def __init__(self, use_ocdbt: bool = False, *args, **kwargs):
-    super().__init__(use_ocdbt=use_ocdbt, *args, **kwargs)
-    self._write_tree_metadata = self._use_ocdbt
+  def _write_metadata_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      save_args: PyTree,
+      use_zarr3: bool = False,
+  ):
+    pass
 
   async def async_save(
       self,
