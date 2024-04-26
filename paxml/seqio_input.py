@@ -1149,19 +1149,6 @@ class SeqIOInput(base_input.BaseInput):
     This method is called only on process=0 after aggregating all outputs as
     seqio task's metric_obj take in a global view of examples.
 
-    This function basically does the following (for self.use_enumeration=False):
-      1. Iterate through SeqIO task's dataset to construct both (a) the
-        input prefix-based key, and (b) the task.postprocess_fn(ex['targets']),
-        which is the target that is used to compute metrics.
-      2. Iterate through the keys generated in (1) to "left-join" with the
-        decoder_outputs mapping.
-      3. Feed the prefix-key mapped list of decoder_outputs and targets through
-        all task.metric_objs.
-      4. Optionally log a couple entries for inspection.
-      5. Optionally log all entries in text format for inspection.
-
-    When self.use_enumeration=True, we'll match based on enumeration IDs.
-
     Arguments:
       decoder_outputs: a sequence of (str, dict) where the 0-th arg of the tuple
         is the "prefix key", which is what is used to map between decoder
