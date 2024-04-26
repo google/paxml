@@ -440,6 +440,14 @@ def evaluate(
   checkpoint_type = checkpoints.retrieve_checkpoint_type(
       maybe_use_persistence_checkpointing, jax_task.hparams
   )
+  if jax_task.early_stopping_fn is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = jax_task.early_stopping_fn
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and '
+          'evaluate function parameter.'
+      )
   partitioner = partitioning.create_experiment_or_default_partitioner(
       experiment_config=experiment_config,
       jax_task=jax_task,
@@ -689,6 +697,14 @@ def decode(
       'continuous_decode' if continuous_decode else 'decode_once',
       checkpointer.restore_checkpoint_dir,
   )
+
+  if jax_task.early_stopping_fn is not None:
+    if early_stopping_fn is None:
+      early_stopping_fn = jax_task.early_stopping_fn
+    else:
+      raise ValueError(
+          'early_stopping_fn is set in both task and decode function parameter.'
+      )
 
   eval_programs = experiment_config.eval_programs() if run_eval else []
   decode_programs = experiment_config.decode_programs()

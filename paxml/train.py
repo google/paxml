@@ -221,7 +221,7 @@ def train_and_evaluate(
     else:
       raise ValueError(
           'early_stopping_fn is set in both task and '
-          'train_and_evel function parameter.'
+          'train_and_eval function parameter.'
       )
 
   logging.info('[PAX STATUS]: Initializing partitioner')
