@@ -128,7 +128,7 @@ The workflow to use the Profile Guided Latency Estimator workflow in XLA/GPU is:
 You could do so by setting:
 
 ```bash
-export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
+export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_async_all_gather=true --xla_gpu_enable_async_reduce_scatter=true"
 ```
 
 - 2. Collect and post process a profile by using JAX profiler, saving the extracted instruction latencies into a binary protobuf file.
@@ -172,7 +172,7 @@ After this step, you will get a `profile.pb` file under the `rundir` printed in 
 You need to pass the `profile.pb` file to the `--xla_gpu_pgle_profile_file_or_directory_path` flag.
 
 ```bash
- export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_pgle_profile_file_or_directory_path=/path/to/profile/profile.pb"
+ export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_async_all_gather=true --xla_gpu_enable_async_reduce_scatter=true --xla_gpu_pgle_profile_file_or_directory_path=/path/to/profile/profile.pb"
 ```
 
 To enable logging in the XLA and check if the profile is good, set the logging level to include `INFO`:
