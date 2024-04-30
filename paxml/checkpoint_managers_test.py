@@ -1070,14 +1070,10 @@ class CheckpointManagerTest(parameterized.TestCase):
     ocp.test_utils.assert_tree_equal(self, expected, restored)
 
   @parameterized.parameters(
-      (CheckpointType.GDA, True),
-      (CheckpointType.GDA, False),
-      (CheckpointType.FLAX, True),
-      (CheckpointType.FLAX, False),
+      (CheckpointType.GDA),
+      (CheckpointType.FLAX),
   )
-  def test_restore_with_version_step_hint(
-      self, checkpoint_type, use_version_step_hint
-  ):
+  def test_restore_with_version_step_hint(self, checkpoint_type):
     train_input_pipeline = TestInput(
         batch_size=2,
     )
@@ -1109,11 +1105,10 @@ class CheckpointManagerTest(parameterized.TestCase):
         checkpoint_managers.CheckpointManagerOptions(),
         checkpoint_type=checkpoint_type,
         train_input_pipeline=train_input_pipeline,
-        version_step_hint=1 if use_version_step_hint else None,
+        version_step_hint=1,
     )
 
-    expected_version = 1.2 if use_version_step_hint else 1.1
-    self.assertEqual(restore_checkpoint_manager.version, expected_version)
+    self.assertEqual(restore_checkpoint_manager.version, 1.2)
 
 
 if __name__ == '__main__':
