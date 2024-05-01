@@ -406,7 +406,6 @@ class LossAggregator(base_hyperparams.FiddleBaseParameterizable):
     """
     loss_key = self.loss_key
 
-    assert loss_key in batch_metrics
     loss, loss_weight = _get_loss_weight_and_value(batch_metrics[loss_key])
     loss_weight = jax.lax.stop_gradient(loss_weight)
 
