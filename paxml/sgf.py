@@ -349,6 +349,11 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       running under jit, however, `inner_batch_size` is applied to the _global_
       batch, so inner_batch_size identical to the global batch size matches the
       default behavior, and a lower value introduces virtual batching.
+    spmd_axis_name: Argument to be passed to vmap to ensure that the computation
+      is appropriately sharded across the replica axis.  If running under pmap,
+      this should be set to None.  If running under pjit, this should be set to
+      the name of the mesh axis (or axes) along which the (micro)batch dimension
+      is sharded.
   """
 
   l2_norm_clip: float = 0.0
@@ -356,6 +361,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
   use_loss_weight_scaling: bool = False
   normalize_gradients: bool = False
   inner_batch_size: int | None = None
+  spmd_axis_name: str | tuple[str, ...] | None = None
 
   def _clip_and_mean_gradients(
       self,
@@ -464,6 +470,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
         jax.value_and_grad(loss_fn, has_aux=True, allow_int=True),
         in_axes=(None, (None, 0), None),
         out_axes=0,
+        spmd_axis_name=self.spmd_axis_name,
     )
 
     def reshape_batch(x):
