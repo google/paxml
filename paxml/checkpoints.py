@@ -462,12 +462,10 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       super()._write_metadata_file(directory, item, save_args, use_zarr3)
 
   def _read_metadata_file(
-      self, directory: epath.Path, keep_empty_nodes: bool = False
-  ) -> tuple[PyTree, bool]:
+      self, directory: epath.Path
+  ) -> ocp.metadata.TreeMetadata:
     if self._use_ocdbt:
-      return super()._read_metadata_file(
-          directory, keep_empty_nodes=keep_empty_nodes
-      )
+      return super()._read_metadata_file(directory)
     else:
       # Explicitly ignore metadata with non-OCDBT, otherwise we will get the
       # wrong tree structure.
