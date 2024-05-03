@@ -189,7 +189,7 @@ huggingface-hub==0.22.2
     # via
     #   tokenizers
     #   transformers
-idna==3.6
+idna==3.7
     # via
     #   anyio
     #   httpx
@@ -655,7 +655,7 @@ tensorboard-data-server==0.6.1
     # via tensorboard
 tensorboard-plugin-wit==1.8.1
     # via tensorboard
-tensorflow==2.9.3
+tensorflow==2.11.1
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
@@ -732,7 +732,7 @@ tornado==6.4
     #   jupyterlab
     #   notebook
     #   terminado
-tqdm==4.66.2
+tqdm==4.66.3
     # via
     #   huggingface-hub
     #   nltk
