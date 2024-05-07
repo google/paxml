@@ -24,7 +24,7 @@ import functools
 import io
 import os
 import typing
-from typing import Any, Callable, Mapping, Sequence, TextIO, cast
+from typing import Any, Callable, Mapping, Optional, Sequence, TextIO, Tuple, cast
 
 from absl import logging
 from etils import epath
@@ -465,6 +465,10 @@ class SeqIOInput(base_input.BaseInput):
       can cause OOM if the dataset is large. To avoid this, use this field to
       specify that only a subset of fields in each example should be saved.
     read_config: Custom ReadConfig used by all TF DataLoader.
+    use_targets_from_input_ds: If true, then targets are computed from the input
+      dataset instead of making a second call. This is useful if the inputs come
+      from a non-deterministic backend. This is only supported in a single host
+      setting.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -531,6 +535,7 @@ class SeqIOInput(base_input.BaseInput):
   _shard_info: Any = dataclasses.field(init=False, repr=False)
   _len_full_ds: Any = dataclasses.field(init=False, repr=False)
   targets_ds: Any = dataclasses.field(init=False, repr=False)
+  cached_input_ds: Any = dataclasses.field(init=False, repr=False)
   targets_ds_ori: Any = dataclasses.field(init=False, repr=False)
   ds_non_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
   ds_ragged_tensor_keys: Any = dataclasses.field(init=False, repr=False)
@@ -544,6 +549,7 @@ class SeqIOInput(base_input.BaseInput):
   eval_num_examples: int | None = None
   warm_start: bool = True
   read_config: tfds.ReadConfig | None = None
+  use_targets_from_input_ds: bool = False
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -690,6 +696,14 @@ class SeqIOInput(base_input.BaseInput):
   def task_inst(self) -> seqio.Task:
     return cast(seqio.Task, self.mixture_or_task_inst)
 
+  @property
+  def should_use_targets_from_input_ds(self) -> bool:
+    return (
+        self.use_targets_from_input_ds
+        and (not self.is_training)
+        and self.num_infeed_hosts == 1
+    )
+
   def configure_tf_data_options(
       self, read_config: tfds.ReadConfig | None = None
   ):
@@ -740,10 +754,13 @@ class SeqIOInput(base_input.BaseInput):
         self.batch_size,
         self.input_random_seed,
     )
+
     ds = self._get_backing_ds(
         shuffle=self.should_shuffle,
         num_epochs=-1 if self.should_repeat else 1,
-        shard_info=self._shard_info)
+        shard_info=self._shard_info,
+        cache_input_ds=self.should_use_targets_from_input_ds,
+    )
     ds = self._pad_to_batch_size(ds)
     # Note, we do not set num_parallel_calls, as that will make
     # symbolic input data checkpoints huge.
@@ -765,7 +782,35 @@ class SeqIOInput(base_input.BaseInput):
 
     return ds
 
-  def _gen_targets_dataset(self):
+  def _gen_targets_dataset_from_cache(self):
+    # The target lengths used in _get_backing_ds might be larger than
+    # eval_metrics_targets_length. If that was the case, trim it to the correct
+    # length.
+    if (
+        self.eval_metrics_targets_length is not None
+        and 'targets' in self.task_feature_lengths
+        and self.task_feature_lengths['targets']
+        > self.eval_metrics_targets_length
+    ):
+      sequence_length = dict(self.task_feature_lengths)
+      sequence_length['targets'] = self.eval_metrics_targets_length
+      ds = seqio.utils.trim_dataset(
+          self.cached_input_ds,
+          sequence_length,
+          self.mixture_or_task_inst.output_features,
+      )
+    else:
+      ds = self.cached_input_ds
+
+    self._len_full_ds = _get_num_examples(ds)
+    # Using targets from input only works for single host evals (see
+    # should_use_targets_from_input_ds). So set the shard_info accordingly.
+    shard_info = seqio.ShardInfo(index=0, num_shards=1)
+    self.targets_ds = _enumerate_dataset(
+        ds, self.is_training, shard_info, self.is_mock_tpu
+    )
+
+  def _gen_targets_dataset_from_seqio_task(self):
     self._len_full_ds = 0
     sequence_length = dict(self.task_feature_lengths)
     # if set, p.eval_metrics_targets_length
@@ -822,6 +867,14 @@ class SeqIOInput(base_input.BaseInput):
     self.targets_ds = tf.data.experimental.choose_from_datasets(
         sharded_datasets, choice_dataset
     )
+
+  def _gen_targets_dataset(self):
+    # If we should use targets from the input ds and the cached input ds exists,
+    # use that directly and return. Else, fetch the dataset again.
+    if self.should_use_targets_from_input_ds and self.cached_input_ds:
+      self._gen_targets_dataset_from_cache()
+    else:
+      self._gen_targets_dataset_from_seqio_task()
 
   def _gen_filtered_artifacts(self) -> None:
     """Create filtered targets artifacts."""
@@ -936,10 +989,39 @@ class SeqIOInput(base_input.BaseInput):
     return ret
 
   def _get_backing_ds(
-      self, shuffle: bool, num_epochs: int, shard_info: seqio.ShardInfo | None
-  ) -> tf.data.Dataset:
+      self,
+      shuffle: bool,
+      num_epochs: int,
+      shard_info: seqio.ShardInfo | None,
+      cache_input_ds: bool = False,
+  ) -> Tuple[tf.data.Dataset, tf.data.Dataset]:
+
+    # task.get_dataset() needs to be called with
+    #   max(self.eval_metrics_targets_length (if set),
+    #       self.task_feature_lengths['targets'])
+    # This is because the eval and train can have different task lengths, and
+    # if caching the dataset for eval, we need the longer of the two so that
+    # both train and eval datasets can be constructed from the same source
+    # dataset.
+    if self.task_feature_lengths is not None:
+      feature_lengths_override = dict(self.task_feature_lengths)
+    else:
+      feature_lengths_override = None
+    trim_feature_lengths_for_train_ds = False
+
+    if cache_input_ds:
+      assert feature_lengths_override is not None
+      if (
+          self.eval_metrics_targets_length is not None
+          and 'targets' in self.task_feature_lengths
+          and self.task_feature_lengths['targets']
+          < self.eval_metrics_targets_length
+      ):
+        feature_lengths_override['targets'] = self.eval_metrics_targets_length
+        trim_feature_lengths_for_train_ds = True
+
     kwargs = dict(
-        sequence_length=self.task_feature_lengths,
+        sequence_length=feature_lengths_override,
         split=self.split_name,
         shuffle=shuffle,
         num_epochs=num_epochs,
@@ -958,6 +1040,15 @@ class SeqIOInput(base_input.BaseInput):
           passthrough_features=self.feature_converter._passthrough_features  #  pylint:disable=protected-access
       )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
+    if cache_input_ds:
+      self.cached_input_ds = ds
+      if trim_feature_lengths_for_train_ds:
+        ds = seqio.utils.trim_dataset(
+            ds,
+            self.task_feature_lengths,
+            self.mixture_or_task_inst.output_features,
+        )
+
     assert self.feature_converter
     ds = self.feature_converter(
         ds, task_feature_lengths=self.task_feature_lengths
