@@ -366,6 +366,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "first_result_metric_callback",
     srcs = ["first_result_metric_callback.py"],
+    deps = ["//praxis:py_utils"],
 )
 
 pytype_strict_library(

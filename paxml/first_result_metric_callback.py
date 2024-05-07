@@ -13,5 +13,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-def train_first_result_callback_fn() -> None:
+def train_first_result_callback_fn(metric: bool) -> None:
   return

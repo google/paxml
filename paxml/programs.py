@@ -227,15 +227,16 @@ class BaseTrainProgram(Program):
     self._first_result_callback_pool = concurrent.futures.ThreadPoolExecutor(
         max_workers=1, thread_name_prefix='FirstResultCallback'
     )
-    self._train_first_result_callback_fn = lambda: None
+
+    self._train_first_result_callback_fn = lambda bool: None
 
   def register_first_result_callback_fn(
-      self, train_first_result_callback_fn: Callable[[], None]
+      self, train_first_result_callback_fn: Callable[[bool], None]
   ) -> None:
     self._train_first_result_callback_fn = train_first_result_callback_fn
 
-  def first_result_callback_fn(self) -> None:
-    self._train_first_result_callback_fn()
+  def first_result_callback_fn(self, metric: bool) -> None:
+    self._train_first_result_callback_fn(metric)
 
   @property
   def train_input(self) -> base_input.BaseInput:
@@ -385,7 +386,9 @@ class BaseTrainProgram(Program):
     self._pending_train_losses.add_computation(train_outputs.loss)
     if step == self._initial_step:
       self._first_step_completion_time = time.time()
-      self._first_result_callback_pool.submit(self.first_result_callback_fn)
+      self._first_result_callback_pool.submit(
+          self.first_result_callback_fn, True
+      )
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)

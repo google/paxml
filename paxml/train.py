@@ -93,7 +93,7 @@ def write_experiment_class_vars_file(
     exp_summary_fpath.write_text(cls_vars_summary)
 
 
-def _no_op() -> None:
+def _no_op(metric: bool) -> None:
   return
 
 
@@ -115,7 +115,7 @@ def train_and_evaluate(
     override_num_train_steps: int | None = None,
     enable_summary_writer: bool = True,
     async_timeout_secs: int | None = None,
-    train_first_result_callback_fn: Callable[[], None] = _no_op,
+    train_first_result_callback_fn: Callable[[bool], None] = _no_op,
 ) -> None:
   """The shared path to run the training and evaluation loop.
 
