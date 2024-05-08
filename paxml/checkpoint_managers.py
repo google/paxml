@@ -70,13 +70,6 @@ def _get_checkpoint_version(
   return version
 
 
-def _update_args_with_version(item_kwargs, version):
-  kwargs = {STATE_ITEM_NAME: {checkpoint_version.get_version_key(): version}}
-  if item_kwargs is not None:
-    kwargs[STATE_ITEM_NAME].update(item_kwargs)
-  return kwargs
-
-
 def _create_items_dict_with_metadata(
     train_state,
     train_state_unpadded_shape_dtype_struct,
@@ -520,9 +513,6 @@ class OrbaxCheckpointManager:
           checkpoints to incompatible unpadded shapes of TrainState."""
       )
 
-    # save_kwargs
-    save_kwargs = _update_args_with_version(None, self.version)
-
     # items
     items = _create_items_dict_with_metadata(
         train_state,
@@ -537,7 +527,7 @@ class OrbaxCheckpointManager:
     if train_input_pipeline:
       items[INPUT_ITEM_NAME] = train_input_pipeline
 
-    return self._manager.save(step, items, save_kwargs=save_kwargs, force=force)
+    return self._manager.save(step, items, force=force)
 
   def restore(
       self,
@@ -555,8 +545,7 @@ class OrbaxCheckpointManager:
         and 'transforms' in restore_kwargs
         and restore_kwargs['transforms'] is not None
     )
-    # Propagate version to CheckpointHandler.
-    restore_kwargs = _update_args_with_version(restore_kwargs, self.version)
+    restore_kwargs = {STATE_ITEM_NAME: restore_kwargs}
 
     items = _create_items_dict_with_metadata(
         train_state,

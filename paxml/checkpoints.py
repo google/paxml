@@ -498,19 +498,19 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       directory: epath.Path,
       item: PyTree | None = None,
       save_args: PyTree | None = None,
-      version: float | None = None,
+      args: ocp.args.PyTreeSave | None = None,
   ) -> Any:
     """Filters optax.MaskedNode before calling superclass async_save."""
-    if version is None:
-      raise ValueError('Expected version for sxaving.')
+    if args is None:
+      args = ocp.args.PyTreeSave(item=item, save_args=save_args)
     if self._use_ocdbt:
       self._set_param_names(None)
     else:
-      item, flattened_nested_names, _ = _tensorstore_prepare(item)
+      args.item, flattened_nested_names, _ = _tensorstore_prepare(args.item)
       # At that point, the flattened entries do not contain any reference to
       # MaskedNode's.
       self._set_param_names(flattened_nested_names)
-    return await super().async_save(directory, item, save_args=save_args)
+    return await super().async_save(directory, args=args)
 
   async def _maybe_deserialize(
       self, structure: PyTree, param_infos: PyTree, restore_args: PyTree
@@ -532,18 +532,15 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
         structure, param_infos, restore_args
     )
 
-  def restore(
+  def restore(  # pytype: disable=signature-mismatch
       self,
       directory: epath.Path,
       item: PyTree | None = None,
       specs: PyTree | None = None,
       mesh: jax.sharding.Mesh | None = None,
-      version: float | None = None,
       transforms: PyTree | None = None,
   ) -> PyTree:
     """Restores by filtering optax.MaskedNode and adding it back after calling superclass restore."""
-    if version is None:
-      raise ValueError('Expected version for restoration.')
     is_ocdbt_checkpoint = ocp.type_handlers.is_ocdbt_checkpoint(directory)
     if is_ocdbt_checkpoint and not self._use_ocdbt:
       raise ValueError(
@@ -657,43 +654,38 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       directory: epath.Path,
       item: PyTree | None = None,
       save_args: PyTree | None = None,
-      version: float | None = None,
+      args: ocp.args.PyTreeSave | None = None,
   ) -> Any:
-    if version is None:
-      raise ValueError('Expected version for saving.')
+    if args is None:
+      args = ocp.args.PyTreeSave(item=item, save_args=save_args)
     # Extract/flatten data structure to store to disk. Flax requires a flattened
     # data structure to be passed to the checkpointer.
     # Keep bprop_masked_node to be consistent with restore. This allows us to
     # restore a legacy checkpoint which uses placeholder tensors instead of mask
     # nodes.
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
-        jax.device_get(item), is_leaf=py_utils.is_bprop_masked_node
+        jax.device_get(args.item), is_leaf=py_utils.is_bprop_masked_node
     )
-    checkpoint_target = {
+    args.item = {
         'flattened_state': flattened_state,
         # Saves a serialized version of the pytree structure to detect potential
         # mismatch caused by different versions of saver/restorer.
         'str_pytree_state': str(pytree_state),
     }
-    assert save_args is None
-    save_args = jax.tree_util.tree_map(
-        lambda _: ocp.SaveArgs(aggregate=True), checkpoint_target
+    assert args.save_args is None
+    args.save_args = jax.tree_util.tree_map(
+        lambda _: ocp.SaveArgs(aggregate=True), args.item
     )
-    return await super().async_save(
-        directory, checkpoint_target, save_args=save_args
-    )
+    return await super().async_save(directory, args=args)
 
-  def restore(
+  def restore(  # pytype: disable=signature-mismatch
       self,
       directory: epath.Path,
       item: PyTree | None = None,
       restore_args: PyTree | None = None,
       transforms: PyTree | None = None,
       transforms_default_to_original: bool = True,
-      version: float | None = None,
   ) -> PyTree:
-    if version is None:
-      raise ValueError('Expected version for restoration.')
     if transforms is not None and not self._use_ocdbt:
       raise ValueError(
           'Transforms with `use_ocdbt=False` are not currently supported.'
