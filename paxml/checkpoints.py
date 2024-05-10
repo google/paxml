@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import dataclasses
 import os
+import time
 from typing import Any, Sequence, cast
 
 from absl import logging
@@ -634,6 +636,25 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     )
 
 
+def _get_tree_for_aggregation(param_infos, item):
+  """Get tree for aggregated checkpoint."""
+
+  def _get_leaf_for_aggregation(param_info, value):
+    del param_info
+    if isinstance(value, jax.Array) and not value.is_fully_replicated:
+      raise ValueError(
+          'jax.Array must be fully replicated to be saved in aggregate file.'
+      )
+    if not ocp.utils.is_supported_aggregation_type(value):
+      # Not an error because users' training states often have a bunch of
+      # random unserializable objects in them (empty states, optimizer
+      # objects, etc.).
+      value = None
+    return value
+
+  return jax.tree_util.tree_map(_get_leaf_for_aggregation, param_infos, item)
+
+
 class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   """Override to process checkpoints in Flax format.
 
@@ -657,26 +678,43 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       args: ocp.args.PyTreeSave | None = None,
   ) -> Any:
     if args is None:
-      args = ocp.args.PyTreeSave(item=item, save_args=save_args)
+      args = ocp.args.PyTreeSave(item=item)
+    item = args.item
     # Extract/flatten data structure to store to disk. Flax requires a flattened
     # data structure to be passed to the checkpointer.
     # Keep bprop_masked_node to be consistent with restore. This allows us to
     # restore a legacy checkpoint which uses placeholder tensors instead of mask
     # nodes.
     flattened_state, pytree_state = jax.tree_util.tree_flatten(
-        jax.device_get(args.item), is_leaf=py_utils.is_bprop_masked_node
+        jax.device_get(item), is_leaf=py_utils.is_bprop_masked_node
     )
-    args.item = {
+    item = {
         'flattened_state': flattened_state,
         # Saves a serialized version of the pytree structure to detect potential
         # mismatch caused by different versions of saver/restorer.
         'str_pytree_state': str(pytree_state),
     }
-    assert args.save_args is None
-    args.save_args = jax.tree_util.tree_map(
-        lambda _: ocp.SaveArgs(aggregate=True), args.item
+    save_args = jax.tree_util.tree_map(
+        lambda _: ocp.SaveArgs(aggregate=True),
+        item,
+        is_leaf=ocp.utils.is_empty_or_leaf,
     )
-    return await super().async_save(directory, args=args)
+    param_infos, all_params_aggregated = self._get_param_infos(
+        item, directory, save_args
+    )
+    assert all_params_aggregated
+    aggregate_file_write_start_time = time.time()
+    aggregate_commit_future = asyncio.run(
+        self._aggregate_handler.serialize(
+            directory / self._aggregate_filename,
+            _get_tree_for_aggregation(param_infos, item),
+        )
+    )
+    jax.monitoring.record_event_duration_secs(
+        '/jax/checkpoint/write/async/aggregate_write_duration_secs',
+        time.time() - aggregate_file_write_start_time,
+    )
+    return [aggregate_commit_future]
 
   def restore(  # pytype: disable=signature-mismatch
       self,

@@ -152,6 +152,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit numpy dependency.
         # Implicit optax dependency.
         # Implicit orbax.checkpoint dependency.
         "//praxis:base_input",
