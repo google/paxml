@@ -320,6 +320,10 @@ def set_adam_and_learning_rate_schedule(
         min_ratio=cls.LR_COS_MIN_RATIO,
         max=cls.LR_COS_MAX,
     )
+  elif cls.LR_SCHEDULE == 'constant':
+    lp.optimizer.lr_schedule = pax_fiddle.Config(
+        schedules.Constant,
+    )
   else:
     raise NotImplementedError(
         f'Learning rate schedule {cls.LR_SCHEDULE} is not supported.'

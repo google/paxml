@@ -21,7 +21,9 @@ import jax.numpy as jnp
 import numpy as np
 from paxml import experiment_registry
 from paxml import tasks_lib
+from paxml.contrib.gpu.scripts_gpu.checkpoint_utils import CheckpointRestoreMixin
 from paxml.contrib.gpu.scripts_gpu.llama_utils import BaseLLaMA
+from paxml.contrib.gpu.scripts_gpu.lora_utils import LoRAMixin
 from paxml.contrib.gpu.scripts_gpu.tasks import BoolQDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import LambadaDataset
 from paxml.contrib.gpu.scripts_gpu.tasks import PileUnsupervisedDataset
@@ -359,7 +361,7 @@ GPT175B = Pile175B
 
 
 @experiment_registry.register
-class LLaMA7B(BaseLLaMA, BoolQDataset):
+class LLaMA7B(BaseLLaMA, BoolQDataset, LoRAMixin, CheckpointRestoreMixin):
   """7B model on a A100-40GB.
 
   Checkpoint:
@@ -382,7 +384,6 @@ class LLaMA7B(BaseLLaMA, BoolQDataset):
   DCN_MESH_SHAPE = [1, 1, 1]
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
-
     task_p = super().task()
     task_p.train.always_use_train_for_model_init = False
     task_p.model.apply_eval_sample_weights = True
@@ -390,6 +391,9 @@ class LLaMA7B(BaseLLaMA, BoolQDataset):
     task_p.model.boolq_yn_tokens = jnp.array(
         [self.TRUE_TOKEN, self.FALSE_TOKEN]
     )
+
+    task_p = self.configure_lora(task_p)
+    task_p = self.configure_checkpoint_restore(task_p)
 
     return task_p
 
