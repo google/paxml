@@ -343,8 +343,21 @@ class PaxStepNameFormat(ocp.step.NameFormat):
       self, base_path: epath.PathLike, step: int
   ) -> ocp.step.Metadata | None:
     """Returns metadata for given `base_path` and `step` or None."""
+    raise NotImplementedError('Unused; left for API compatibility only')
+
+  def find_step(
+      self, base_path: epath.PathLike, step: int
+  ) -> ocp.step.Metadata:
+    """Returns metadata for the given step."""
     step_path = ocp.step.build_step_path(base_path, self, step)
-    return self.build_metadata(step_path, step=step)
+    metadata = self.build_metadata(step_path, step=step)
+    if metadata is not None:
+      return metadata
+
+    raise ValueError(
+        f'No step path found with name={self.build_name(step)},'
+        f' NameFormat={self} for step={step} under {base_path}.'
+    )
 
   def find_all(self, base_path: epath.PathLike) -> Iterator[ocp.step.Metadata]:
     """Returns metadata of all steps (ignores current NameFormat attributes)."""
