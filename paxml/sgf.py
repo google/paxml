@@ -639,15 +639,15 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
       )
 
     grads = jax.tree.map(_reshape_and_mean, grads)
-    grads_flat, grads_treedef = jax.tree_flatten(grads)
+    grads_flat, grads_treedef = jax.tree.flatten(grads)
     sum_grads_flat, num_clipped_flat = optax.per_example_layer_norm_clip(
         grads=grads_flat,
         global_l2_norm_clip=l2_norm_clip,
         uniform=self.use_uniform,
     )
 
-    sum_grads = jax.tree_unflatten(grads_treedef, sum_grads_flat)
-    num_clipped = jax.tree_unflatten(grads_treedef, num_clipped_flat)
+    sum_grads = jax.tree.unflatten(grads_treedef, sum_grads_flat)
+    num_clipped = jax.tree.unflatten(grads_treedef, num_clipped_flat)
 
     # Compute per-layer grad norms.
     def map_layer_norm(grads_list):
@@ -658,7 +658,7 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
         per_example_layer_grad_norms[i].sum(0)
         for i in range(len(per_example_layer_grad_norms))
     ]
-    sum_layer_grad_norms = jax.tree_unflatten(
+    sum_layer_grad_norms = jax.tree.unflatten(
         grads_treedef, sum_layer_grad_norms
     )
 

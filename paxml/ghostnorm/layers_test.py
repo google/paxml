@@ -290,7 +290,7 @@ class LayersTest(parameterized.TestCase):
     )
 
     # compute the expected average gradients from the clipped per-example grads
-    grads_flat, grads_treedef = jax.tree_flatten(per_eg_grad[PARAMS])
+    grads_flat, grads_treedef = jax.tree.flatten(per_eg_grad[PARAMS])
     # clip at median to ensure at least some examples are clipped.
     l2_clip = np.median(jax.vmap(optax.global_norm)(grads_flat))
     l2_clip = max(l2_clip, 1e-4)
@@ -298,7 +298,7 @@ class LayersTest(parameterized.TestCase):
     sum_clipped, _ = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_clip
     )
-    sum_grads = jax.tree_unflatten(grads_treedef, sum_clipped)
+    sum_grads = jax.tree.unflatten(grads_treedef, sum_clipped)
     expected_grads = jax.tree.map(lambda x: x / batch_size, sum_grads)
 
     _, fast_per_eg_grad_norms = self._get_grad_and_norms(
