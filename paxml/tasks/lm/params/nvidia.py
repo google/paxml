@@ -769,6 +769,8 @@ class Grok(NVIDIA1_3B):
     ICI_MESH_SHAPE = [1, 1, 8, 1]
     DCN_MESH_SHAPE = [1, 32, 1, 1]
 
+  USE_ROPE = True
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = self.MAX_STEPS
@@ -812,6 +814,13 @@ class Grok(NVIDIA1_3B):
         mesh_axis_names=['replica', 'data', 'data_expert', 'mdl'],
         training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
     )
+
+    stacked_p = task_p.model.lm_tpl.stacked_transformer_tpl.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
+    if self.USE_ROPE:
+        transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
+        task_p.model.lm_tpl.position_emb_tpl = None
+
     return task_p
 
 
@@ -846,6 +855,8 @@ class Grok_Proxy(NVIDIA1_3B):
     ICI_MESH_SHAPE = [1, 1, 8, 1]
     DCN_MESH_SHAPE = [1, 8, 1, 1]
 
+  USE_ROPE = True
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = self.MAX_STEPS
@@ -889,4 +900,11 @@ class Grok_Proxy(NVIDIA1_3B):
         mesh_axis_names=['replica', 'data', 'data_expert', 'mdl'],
         training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
     )
+
+    stacked_p = task_p.model.lm_tpl.stacked_transformer_tpl.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
+    if self.USE_ROPE:
+        transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
+        task_p.model.lm_tpl.position_emb_tpl = None
+
     return task_p
