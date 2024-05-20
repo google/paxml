@@ -834,8 +834,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     assert self.NUM_STAGES is not None
     assert self.NUM_LAYERS % (self.NUM_STAGES * self.CIRCULAR_REPEAT) == 0
     assert self.NUM_MICROBATCHES is not None or self.MICROBATCH_SIZE is not None
-    # assert self.ICI_MESH_SHAPE is not None and len(self.ICI_MESH_SHAPE) == 4
-    # assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) == 4
+    assert self.ICI_MESH_SHAPE is not None and len(self.ICI_MESH_SHAPE) >= 4
+    assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) >= 4
     assert self.ICI_MESH_SHAPE[0] * self.DCN_MESH_SHAPE[0] == self.NUM_STAGES
 
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
