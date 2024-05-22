@@ -1075,7 +1075,13 @@ class Grok_Proxy_PP(NVIDIA5B):
     task_p.train.always_use_train_for_model_init=False
     task_p.model.report_strict_acc=True
 
-    stacked_p = task_p.model.lm_tpl.stacked_transformer_tpl.block
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
+      stacked_p = stacked_p.pipeline_stage
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
+      stacked_p = stacked_p.block
     transformer_layer_p = stacked_p.transformer_layer_params_tpl
     if self.USE_ROPE:
         transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
