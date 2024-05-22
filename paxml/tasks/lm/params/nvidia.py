@@ -801,6 +801,7 @@ class Grok(NVIDIA1_3B):
         use_gated_activation=True,
         combine_qkv=self.COMBINE_QKV,
         checkpoint_policy=self.CHECKPOINT_POLICY,
+        use_fp8=self.USE_FP8,
     )
     ## set sharding
     lm_cls = cast(
