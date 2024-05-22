@@ -469,6 +469,9 @@ class SeqIOInput(base_input.BaseInput):
       dataset instead of making a second call. This is useful if the inputs come
       from a non-deterministic backend. This is only supported in a single host
       setting.
+    _is_mock_tpu: Whether this is running on mock TPU. If None, then it will be
+      populated from py_utils.is_mock_tpu_backend(). This is a workaround for
+      remote input where calling jax.devices() on the worker fails.
   """
 
   @dataclasses.dataclass(frozen=True)
@@ -550,6 +553,7 @@ class SeqIOInput(base_input.BaseInput):
   warm_start: bool = True
   read_config: tfds.ReadConfig | None = None
   use_targets_from_input_ds: bool = False
+  _is_mock_tpu: bool | None = None
 
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
@@ -591,6 +595,10 @@ class SeqIOInput(base_input.BaseInput):
     self._cached_targets_with_enum_key: Mapping[str, NestedMap] | None = None
 
     self.is_targets_init = False
+
+    if self._is_mock_tpu is None:
+      """Indicates whether running Mock TPU backend."""
+      self._is_mock_tpu = py_utils.is_mock_tpu_backend()
 
   def _validate_deterministic(self):
     """Validates deterministic input settings and creates the shard info."""
@@ -652,11 +660,6 @@ class SeqIOInput(base_input.BaseInput):
           'Dataset has eval_loop_num_batches set to None while repeat is True. '
           'This would lead to an endless eval.'
       )
-
-  @functools.cached_property
-  def is_mock_tpu(self) -> bool:
-    """Indicates whether running Mock TPU backend."""
-    return py_utils.is_mock_tpu_backend()
 
   @property
   def is_deterministic(self) -> bool:
@@ -807,7 +810,7 @@ class SeqIOInput(base_input.BaseInput):
     # should_use_targets_from_input_ds). So set the shard_info accordingly.
     shard_info = seqio.ShardInfo(index=0, num_shards=1)
     self.targets_ds = _enumerate_dataset(
-        ds, self.is_training, shard_info, self.is_mock_tpu
+        ds, self.is_training, shard_info, self._is_mock_tpu
     )
 
   def _gen_targets_dataset_from_seqio_task(self):
@@ -857,7 +860,7 @@ class SeqIOInput(base_input.BaseInput):
         self._len_full_ds += shard_num_examples
       ds_shard = ds_shard.repeat(num_epochs)
       ds_shard = _enumerate_dataset(
-          ds_shard, self.is_training, shard_info, self.is_mock_tpu
+          ds_shard, self.is_training, shard_info, self._is_mock_tpu
       )
       sharded_datasets.append(ds_shard)
 
@@ -1057,7 +1060,7 @@ class SeqIOInput(base_input.BaseInput):
     # We want to add enumeration provenance fields *after* applying all
     # feature converters since feature converters don't pass through
     # unrecognized fields by default
-    ds = _enumerate_dataset(ds, self.is_training, shard_info, self.is_mock_tpu)
+    ds = _enumerate_dataset(ds, self.is_training, shard_info, self._is_mock_tpu)
 
     return ds
 
@@ -1136,7 +1139,7 @@ class SeqIOInput(base_input.BaseInput):
 
     # Previous allgather produces dummy values in mock TPU, so overwrite the
     # value to prevent assertion failure.
-    if self.is_mock_tpu:
+    if self._is_mock_tpu:
       num_batches = local_num_batches
 
     pad_num = num_batches * self.batch_size - local_num
