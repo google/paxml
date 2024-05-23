@@ -9,7 +9,7 @@ graphviz
 jax @ git+https://github.com/google/jax
 lingvo
 numpy
-orbax-checkpoint
+orbax-checkpoint @ git+https://github.com/google/orbax/#subdirectory=checkpoint
 praxis
 protobuf==3.19.6
 pyglove
