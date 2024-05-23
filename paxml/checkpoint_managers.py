@@ -181,17 +181,17 @@ def _restore_legacy_flax(directory, handler, restore_fn, *args, **kwargs):
         f'Unsupported handler for Flax restoration of type {type(handler)}.'
     )
   directory = epath.Path(directory)
-  original_aggregate_filename = handler._aggregate_filename
+  original_aggregate_filename = handler._handler_impl._aggregate_filename
   # If is_file, then the checkpoint is in legacy format, not saved with
   # orbax. Orbax checkpoints are directories containing a file\
   # called 'checkpoint'.
   if directory.is_file():
     # The msgpack file is actually the "directory".
-    handler._aggregate_filename = directory.name
+    handler._handler_impl._aggregate_filename = directory.name
     directory = directory.parent
   result = restore_fn(directory, *args, **kwargs)
   # Reset aggregate_filename back to normal.
-  handler._aggregate_filename = original_aggregate_filename
+  handler._handler_impl._aggregate_filename = original_aggregate_filename
   return result
 
 

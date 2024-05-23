@@ -441,8 +441,6 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   from a state dict.
   """
 
-  _param_names: PyTree = None
-
   def __init__(
       self,
       *args,
@@ -450,50 +448,16 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       use_ocdbt: bool = False,
       **kwargs,
   ):
+    super().__init__(
+        *args,
+        use_ocdbt=use_ocdbt,
+        handler_impl=PaxCheckpointHandlerImpl(
+            *args, use_ocdbt=use_ocdbt, **kwargs
+        ),
+        **kwargs,
+    )
     self._enforce_restore_shape_check = enforce_restore_shape_check
-    super().__init__(use_ocdbt=use_ocdbt, *args, **kwargs)
-
-  def _write_metadata_file(
-      self,
-      directory: epath.Path,
-      item: PyTree,
-      save_args: PyTree,
-      use_zarr3: bool = False,
-  ):
-    if self._use_ocdbt:
-      super()._write_metadata_file(directory, item, save_args, use_zarr3)
-
-  def _read_metadata_file(
-      self, directory: epath.Path
-  ) -> ocp.metadata.TreeMetadata:
-    if self._use_ocdbt:
-      return super()._read_metadata_file(directory)
-    else:
-      # Explicitly ignore metadata with non-OCDBT, otherwise we will get the
-      # wrong tree structure.
-      raise FileNotFoundError('Metadata file is ignored for Pax.')
-
-  def _set_param_names(self, param_names: PyTree):
-    self._param_names = param_names
-
-  def _get_param_names(self, item: PyTree) -> PyTree:
-    if self._param_names is None:
-      return super()._get_param_names(item)
-    return self._param_names
-
-  async def _write_aggregate_file(
-      self,
-      directory: epath.Path,
-      item: PyTree,
-      param_infos: PyTree,
-      save_args: PyTree,
-  ):
-    """Skip writing msgpack file for Pax since this file would be unused."""
-    if self._use_ocdbt:
-      return await super()._write_aggregate_file(
-          directory, item, param_infos, save_args
-      )
-    return ocp.future.NoopFuture()
+    self._handler_impl = cast(PaxCheckpointHandlerImpl, self._handler_impl)
 
   async def async_save(
       self,
@@ -506,33 +470,19 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     if args is None:
       args = ocp.args.PyTreeSave(item=item, save_args=save_args)
     if self._use_ocdbt:
-      self._set_param_names(None)
+      self._handler_impl.set_param_names(None)
     else:
       args.item, flattened_nested_names, _ = _tensorstore_prepare(args.item)
       # At that point, the flattened entries do not contain any reference to
       # MaskedNode's.
-      self._set_param_names(flattened_nested_names)
+      self._handler_impl.set_param_names(flattened_nested_names)
     return await super().async_save(directory, args=args)
 
-  async def _maybe_deserialize(
-      self, structure: PyTree, param_infos: PyTree, restore_args: PyTree
-  ) -> PyTree:
-
-    def _replace_param_info_name(info, name):
-      return dataclasses.replace(info, name=name, path=info.path.parent / name)
-
-    if param_infos:
-      directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
-      # Hack to replace parameter names.
-      if not ocp.type_handlers.is_ocdbt_checkpoint(directory):
-        param_infos = jax.tree_util.tree_map(
-            _replace_param_info_name,
-            param_infos,
-            self._param_names,
-        )
-    return await super()._maybe_deserialize(
-        structure, param_infos, restore_args
-    )
+  def save(self, *args, **kwargs):
+    commit_futures = asyncio.run(self.async_save(*args, **kwargs))
+    if commit_futures:
+      for f in commit_futures:
+        f.result()
 
   def restore(  # pytype: disable=signature-mismatch
       self,
@@ -568,7 +518,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       # MaskedNode's.
       # Consequently, we restore the checkpoint that does not contain any
       # reference to MaskedNode's.
-      self._set_param_names(reference_nested_names)
+      self._handler_impl.set_param_names(reference_nested_names)
 
     def _create_restore_args(shape_struct):
       return ocp.RestoreArgs(
@@ -623,6 +573,74 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
 
     return restored_train_state
 
+
+class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
+  """Implementation of PaxCheckpointHandler."""
+
+  _param_names: PyTree = None
+
+  def _write_metadata_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      save_args: PyTree,
+      use_zarr3: bool = False,
+  ):
+    if self._use_ocdbt:
+      super()._write_metadata_file(directory, item, save_args, use_zarr3)
+
+  def _read_metadata_file(
+      self, directory: epath.Path
+  ) -> ocp.metadata.TreeMetadata:
+    if self._use_ocdbt:
+      return super()._read_metadata_file(directory)
+    else:
+      # Explicitly ignore metadata with non-OCDBT, otherwise we will get the
+      # wrong tree structure.
+      raise FileNotFoundError('Metadata file is ignored for Pax.')
+
+  def set_param_names(self, param_names: PyTree):
+    self._param_names = param_names
+
+  def get_param_names(self, item: PyTree) -> PyTree:
+    if self._param_names is None:
+      return super().get_param_names(item)
+    return self._param_names
+
+  async def _write_aggregate_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      param_infos: PyTree,
+      save_args: PyTree,
+  ):
+    """Skip writing msgpack file for Pax since this file would be unused."""
+    if self._use_ocdbt:
+      return await super()._write_aggregate_file(
+          directory, item, param_infos, save_args
+      )
+    return ocp.future.NoopFuture()
+
+  async def _maybe_deserialize(
+      self, structure: PyTree, param_infos: PyTree, restore_args: PyTree
+  ) -> PyTree:
+
+    def _replace_param_info_name(info, name):
+      return dataclasses.replace(info, name=name, path=info.path.parent / name)
+
+    if param_infos:
+      directory = jax.tree_util.tree_leaves(param_infos)[0].path.parent
+      # Hack to replace parameter names.
+      if not ocp.type_handlers.is_ocdbt_checkpoint(directory):
+        param_infos = jax.tree_util.tree_map(
+            _replace_param_info_name,
+            param_infos,
+            self._param_names,
+        )
+    return await super()._maybe_deserialize(
+        structure, param_infos, restore_args
+    )
+
   def _read_aggregate_file(self, directory: epath.Path) -> PyTree:
     # Use msgpack file if it exists.
     # Check for _use_ocdbt, since the msgpack file should only exist if the
@@ -661,14 +679,13 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   Should only be used in conjunction with FlaxCheckpointer.
   """
 
-  def _write_metadata_file(
-      self,
-      directory: epath.Path,
-      item: PyTree,
-      save_args: PyTree,
-      use_zarr3: bool = False,
-  ):
-    pass
+  def __init__(self, *args, **kwargs):
+    super().__init__(
+        *args,
+        handler_impl=FlaxCheckpointHandlerImpl(*args, **kwargs),
+        **kwargs,
+    )
+    self._aggregate_handler = ocp.aggregate_handlers.MsgpackHandler()
 
   async def async_save(
       self,
@@ -699,7 +716,7 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
         item,
         is_leaf=ocp.utils.is_empty_or_leaf,
     )
-    param_infos, all_params_aggregated = self._get_param_infos(
+    param_infos, all_params_aggregated = self._handler_impl._get_param_infos(  # pylint: disable=protected-access
         item, directory, save_args
     )
     assert all_params_aggregated
@@ -715,6 +732,12 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
         time.time() - aggregate_file_write_start_time,
     )
     return [aggregate_commit_future]
+
+  def save(self, *args, **kwargs):
+    commit_futures = asyncio.run(self.async_save(*args, **kwargs))
+    if commit_futures:
+      for f in commit_futures:
+        f.result()
 
   def restore(  # pytype: disable=signature-mismatch
       self,
@@ -768,42 +791,27 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     return restored
 
 
+class FlaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
+  """Implementation of FlaxCheckpointHandler."""
+
+  def _write_metadata_file(
+      self,
+      directory: epath.Path,
+      item: PyTree,
+      save_args: PyTree,
+      use_zarr3: bool = False,
+  ):
+    pass
+
+
 class FlaxCheckpointer(ocp.Checkpointer):
   """Allows restoring legacy Flax checkpoints, which are not directories.
 
   Should only be used in conjunction with FlaxCheckpointHandler.
-  """
 
-  def restore(
-      self,
-      directory: epath.PathLike,
-      *args,
-      item: Any | None = None,
-      **kwargs,
-  ) -> Any:
-    if 'LegacyCheckpointHandlerWrapper' in self._handler.__class__.__name__:
-      assert hasattr(self._handler, '_handler')
-      handler = self._handler._handler  # pylint: disable=protected-access
-    else:
-      handler = self._handler
-    if not isinstance(handler, FlaxCheckpointHandler):
-      raise ValueError(
-          f'Unsupported handler for FlaxCheckpointer of type {type(handler)}.'
-      )
-    directory = epath.Path(directory)
-    original_aggregate_filename = handler._aggregate_filename  # pylint: disable=protected-access
-    # If is_file, then the checkpoint is in legacy format, not saved with orbax.
-    # Orbax checkpoints are directories containing a file called 'checkpoint'.
-    if directory.is_file():
-      # The msgpack file is actually the "directory".
-      handler._aggregate_filename = directory.name  # pylint: disable=protected-access
-      directory = directory.parent
-    result = super().restore(directory, *args, item=item, **kwargs)
-    # Reset aggregate_filename back to normal.
-    handler._aggregate_filename = (  # pylint: disable=protected-access
-        original_aggregate_filename
-    )
-    return result
+  This stub only exists for legacy reasons. The current implementation resides
+  in `_restore_legacy_flax` of `checkpoint_managers.py`.
+  """
 
 
 class BaseInputCheckpointHandler(ocp.CheckpointHandler):
