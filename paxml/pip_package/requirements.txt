@@ -141,11 +141,11 @@ flax @ git+https://github.com/google/flax
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
     #   clu
-fonttools==4.51.0
+fonttools==4.52.1
     # via matplotlib
 fqdn==1.5.1
     # via jsonschema
-fsspec==2024.3.1
+fsspec==2024.5.0
     # via
     #   etils
     #   huggingface-hub
@@ -173,7 +173,7 @@ graphviz==0.20.3
     # via
     #   -r paxml-requirements.in
     #   fiddle
-grpcio==1.63.0
+grpcio==1.64.0
     # via
     #   tensorboard
     #   tensorflow
@@ -185,7 +185,7 @@ httpcore==1.0.5
     # via httpx
 httpx==0.27.0
     # via jupyterlab
-huggingface-hub==0.23.0
+huggingface-hub==0.23.1
     # via
     #   tokenizers
     #   transformers
@@ -227,7 +227,7 @@ jax @ git+https://github.com/google/jax
     #   seqio-nightly
 jax-bitempered-loss==0.0.2
     # via -r praxis-requirements.in
-jaxlib==0.4.27
+jaxlib==0.4.28
     # via
     #   chex
     #   clu
@@ -261,7 +261,7 @@ jsonschema-specifications==2023.12.1
     # via jsonschema
 jupyter==1.0.0
     # via lingvo
-jupyter-client==8.6.1
+jupyter-client==8.6.2
     # via
     #   ipykernel
     #   jupyter-console
@@ -296,11 +296,11 @@ jupyter-server==2.14.0
     #   notebook-shim
 jupyter-server-terminals==0.5.3
     # via jupyter-server
-jupyterlab==4.1.8
+jupyterlab==4.2.1
     # via notebook
 jupyterlab-pygments==0.3.0
     # via nbconvert
-jupyterlab-server==2.27.1
+jupyterlab-server==2.27.2
     # via
     #   jupyterlab
     #   notebook
@@ -314,13 +314,13 @@ kiwisolver==1.4.5
     # via matplotlib
 libclang==18.1.1
     # via tensorflow
-libcst==1.3.1
+libcst==1.4.0
     # via fiddle
 lingvo==0.12.7
     # via
     #   -r paxml-requirements.in
     #   -r praxis-requirements.in
-lxml==5.2.1
+lxml==5.2.2
     # via sacrebleu
 markdown==3.6
     # via tensorboard
@@ -331,7 +331,7 @@ markupsafe==2.1.5
     #   jinja2
     #   nbconvert
     #   werkzeug
-matplotlib==3.8.4
+matplotlib==3.9.0
     # via lingvo
 matplotlib-inline==0.1.7
     # via
@@ -377,7 +377,7 @@ nltk==3.8.1
     # via
     #   rouge-score
     #   t5
-notebook==7.1.3
+notebook==7.2.0
     # via
     #   jupyter
     #   jupyter-http-over-ws
@@ -431,7 +431,7 @@ optax==0.2.2
     #   flax
 optax-shampoo==0.0.6
     # via -r praxis-requirements.in
-orbax-checkpoint==0.5.10
+orbax-checkpoint @ git+https://github.com/google/orbax/#subdirectory=checkpoint
     # via
     #   -r paxml-requirements.in
     #   flax
@@ -464,7 +464,7 @@ pillow==10.3.0
     # via
     #   lingvo
     #   matplotlib
-platformdirs==4.2.1
+platformdirs==4.2.2
     # via jupyter-core
 portalocker==2.8.2
     # via sacrebleu
@@ -558,12 +558,12 @@ referencing==0.35.1
     #   jsonschema
     #   jsonschema-specifications
     #   jupyter-events
-regex==2024.4.28
+regex==2024.5.15
     # via
     #   nltk
     #   sacrebleu
     #   transformers
-requests==2.31.0
+requests==2.32.2
     # via
     #   huggingface-hub
     #   jupyterlab-server
@@ -596,11 +596,11 @@ sacrebleu==2.4.2
     # via t5
 safetensors==0.4.3
     # via transformers
-scikit-learn==1.4.2
+scikit-learn==1.5.0
     # via
     #   lingvo
     #   t5
-scipy==1.13.0
+scipy==1.13.1
     # via
     #   jax
     #   jaxlib
@@ -756,7 +756,7 @@ traitlets==5.14.3
     #   nbconvert
     #   nbformat
     #   qtconsole
-transformers==4.40.2
+transformers==4.41.1
     # via t5
 typeguard==2.13.3
     # via
@@ -764,7 +764,7 @@ typeguard==2.13.3
     #   jaxtyping
 types-python-dateutil==2.9.0.20240316
     # via arrow
-typing-extensions==4.11.0
+typing-extensions==4.12.0
     # via
     #   anyio
     #   async-lru
@@ -807,7 +807,7 @@ wrapt==1.16.0
     #   tensorflow
     #   tensorflow-datasets
     #   tfds-nightly
-zipp==3.18.1
+zipp==3.18.2
     # via etils
 
 # The following packages are considered to be unsafe in a requirements file:
