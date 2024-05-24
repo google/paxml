@@ -86,7 +86,10 @@ class CheckpointsTest(parameterized.TestCase):
     )
     # Save the "checkpoint".
     tmp_dir = self.create_tempdir('test_train_state_type_check_checkpoint')
-    checkpoints.save_checkpoint(train_state, tmp_dir, overwrite=True)
+    checkpoint_manager = checkpoints.save_checkpoint(
+        train_state, tmp_dir, overwrite=True
+    )
+    checkpoint_manager.wait_until_finished()
     # This is the correct usage.
     checkpoints.restore_checkpoint(train_state, tmp_dir)
     # This is what happens if you forget to destructure the (state,

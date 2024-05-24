@@ -81,7 +81,7 @@ def get_checkpointer(
     )
   elif checkpoint_type == CheckpointType.FLAX:
     checkpointer = FlaxCheckpointer(
-        FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
+        FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt), timeout_secs=600
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
@@ -724,11 +724,9 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     )
     assert all_params_aggregated
     aggregate_file_write_start_time = time.time()
-    aggregate_commit_future = asyncio.run(
-        self._aggregate_handler.serialize(
-            directory / self._aggregate_filename,
-            _get_tree_for_aggregation(param_infos, item),
-        )
+    aggregate_commit_future = await self._aggregate_handler.serialize(
+        directory / self._aggregate_filename,
+        _get_tree_for_aggregation(param_infos, item),
     )
     jax.monitoring.record_event_duration_secs(
         '/jax/checkpoint/write/async/aggregate_write_duration_secs',
@@ -807,7 +805,7 @@ class FlaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
     pass
 
 
-class FlaxCheckpointer(ocp.Checkpointer):
+class FlaxCheckpointer(ocp.AsyncCheckpointer):
   """Allows restoring legacy Flax checkpoints, which are not directories.
 
   Should only be used in conjunction with FlaxCheckpointHandler.

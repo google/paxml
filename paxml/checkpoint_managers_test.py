@@ -317,6 +317,7 @@ class CheckpointManagerTest(parameterized.TestCase):
             self.train_state_unpadded_shape_dtype_struct
         ),
     )
+    checkpoint_manager.wait_until_finished()
     ocp.test_utils.print_directory(checkpoint_manager.directory)
     if use_train_input:
       assert train_input_pipeline is not None
@@ -406,6 +407,7 @@ class CheckpointManagerTest(parameterized.TestCase):
               else None
           ),
       )
+      checkpoint_manager.wait_until_finished()
 
     with self.assertRaises(ValueError):
       _save(save_unpadded_shape=False)
@@ -460,6 +462,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         None,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    checkpoint_manager.wait_until_finished()
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
     _ = self.restore(
         checkpoint_manager,
@@ -495,6 +498,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           self.train_state,
           train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
       )
+      checkpoint_manager.wait_until_finished()
 
     if max_to_keep is None:
       expected_steps = steps
@@ -538,6 +542,7 @@ class CheckpointManagerTest(parameterized.TestCase):
             self.train_state,
             train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
         )
+        checkpoint_manager.wait_until_finished()
         checkpoint_datetimes.append(current_datetime)
         current_datetime += datetime.timedelta(hours=1)
 
@@ -572,6 +577,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           self.train_state,
           train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
       )
+      checkpoint_manager.wait_until_finished()
 
     saved_steps = [2000, 4000, 6000, 8000]
 
@@ -617,6 +623,7 @@ class CheckpointManagerTest(parameterized.TestCase):
             self.train_state,
             train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
         )
+        checkpoint_manager.wait_until_finished()
         current_datetime += datetime.timedelta(hours=1)
 
     # expect saved steps at multipliers of 3000.
@@ -647,6 +654,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           self.train_state,
           train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
       )
+      checkpoint_manager.wait_until_finished()
 
     saved_steps = steps
 
@@ -675,6 +683,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.train_state,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    checkpoint_manager.wait_until_finished()
 
     saved_steps_2 = steps[-max_to_keep:]
 
@@ -772,6 +781,7 @@ class CheckpointManagerTest(parameterized.TestCase):
               self.train_state_unpadded_shape_dtype_struct
           ),
       )
+      checkpoint_manager.wait_until_finished()
 
     self.assertSameElements(
         _expected_checkpoint_filenames([0, 1], checkpoint_type=checkpoint_type),
@@ -798,6 +808,7 @@ class CheckpointManagerTest(parameterized.TestCase):
           self.train_state,
           train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
       )
+      checkpoint_manager.wait_until_finished()
     self.assertSameElements([1, 2], checkpoint_manager.all_steps())
 
     new_checkpoint_manager = self.create_checkpoint_manager(
@@ -810,6 +821,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.train_state,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    new_checkpoint_manager.wait_until_finished()
     self.assertSameElements([2, 3], new_checkpoint_manager.all_steps())
 
   @parameterized.parameters(
@@ -830,6 +842,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         self.train_state,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    checkpoint_manager.wait_until_finished()
 
     step_dir = checkpoint_manager._manager._get_save_directory(
         0, checkpoint_manager.directory
@@ -902,6 +915,7 @@ class CheckpointManagerTest(parameterized.TestCase):
 
     # Saving again, we expect it to be saved with the old format.
     self.save(checkpoint_manager, 1, self.train_state)
+    checkpoint_manager.wait_until_finished()
     step_dir = checkpoint_manager._manager._get_save_directory(
         1, checkpoint_manager.directory
     )
@@ -1092,6 +1106,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         None,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    save_checkpoint_manager.wait_until_finished()
     save_checkpoint_manager._manager._version = 1.2
     self.save(
         save_checkpoint_manager,
@@ -1100,6 +1115,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         None,
         train_state_unpadded_shape_dtype_struct=self.train_state_unpadded_shape_dtype_struct,
     )
+    save_checkpoint_manager.wait_until_finished()
 
     restore_checkpoint_manager = self.create_checkpoint_manager(
         checkpoint_managers.CheckpointManagerOptions(),
