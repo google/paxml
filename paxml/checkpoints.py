@@ -80,8 +80,8 @@ def get_checkpointer(
         )
     )
   elif checkpoint_type == CheckpointType.FLAX:
-    checkpointer = FlaxCheckpointer(
-        FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt), timeout_secs=600
+    checkpointer = AsyncCheckpointer(
+        FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
     )
   else:
     raise ValueError(f'Unexpected checkpoint_type `{checkpoint_type}`.')
@@ -674,10 +674,7 @@ def _get_tree_for_aggregation(param_infos, item):
 
 
 class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
-  """Override to process checkpoints in Flax format.
-
-  Should only be used in conjunction with FlaxCheckpointer.
-  """
+  """Override to process checkpoints in Flax format."""
 
   def __init__(self, *args, **kwargs):
     super().__init__(
@@ -800,16 +797,6 @@ class FlaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       use_zarr3: bool = False,
   ):
     pass
-
-
-class FlaxCheckpointer(ocp.AsyncCheckpointer):
-  """Allows restoring legacy Flax checkpoints, which are not directories.
-
-  Should only be used in conjunction with FlaxCheckpointHandler.
-
-  This stub only exists for legacy reasons. The current implementation resides
-  in `_restore_legacy_flax` of `checkpoint_managers.py`.
-  """
 
 
 class BaseInputCheckpointHandler(ocp.CheckpointHandler):

@@ -40,7 +40,6 @@ from paxml import checkpoints  # mapped to internal
 
 CheckpointType = checkpoints.CheckpointType
 Checkpointer = checkpoints.Checkpointer
-FlaxCheckpointer = checkpoints.FlaxCheckpointer
 FlaxCheckpointHandler = checkpoints.FlaxCheckpointHandler
 PaxCheckpointHandler = checkpoints.PaxCheckpointHandler
 # alias to internal checkpointer
@@ -593,7 +592,7 @@ def _create_checkpointer(
           )
       )
     else:
-      checkpointer = FlaxCheckpointer(
+      checkpointer = Checkpointer(
           FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
       )
   elif enable_async_checkpointing:

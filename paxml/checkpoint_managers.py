@@ -164,77 +164,6 @@ class _CompositeCheckpointHandlerWrapper(ocp.CompositeCheckpointHandler):
     self._get_state_handler().close()
 
 
-# pylint: disable=protected-access
-# pytype: disable=attribute-error
-
-
-def _restore_legacy_flax(directory, handler, restore_fn, *args, **kwargs):
-  """Restores legacy Flax checkpoint."""
-  handler = typing.cast(
-      _CompositeCheckpointHandlerWrapper, handler
-  )._known_handlers[STATE_ITEM_NAME]
-  if 'LegacyCheckpointHandlerWrapper' in handler.__class__.__name__:
-    assert hasattr(handler, '_handler')
-    handler = handler._handler
-  if handler.__class__.__name__ != 'FlaxCheckpointHandler':
-    raise ValueError(
-        f'Unsupported handler for Flax restoration of type {type(handler)}.'
-    )
-  directory = epath.Path(directory)
-  original_aggregate_filename = handler._handler_impl._aggregate_filename
-  # If is_file, then the checkpoint is in legacy format, not saved with
-  # orbax. Orbax checkpoints are directories containing a file\
-  # called 'checkpoint'.
-  if directory.is_file():
-    # The msgpack file is actually the "directory".
-    handler._handler_impl._aggregate_filename = directory.name
-    directory = directory.parent
-  result = restore_fn(directory, *args, **kwargs)
-  # Reset aggregate_filename back to normal.
-  handler._handler_impl._aggregate_filename = original_aggregate_filename
-  return result
-
-
-# pylint: enable=protected-access
-# pytype: enable=attribute-error
-
-
-class _Checkpointer(ocp.Checkpointer):
-  """Override supporting restoring legacy Flax checkpoints."""
-
-  def __init__(self, *args, is_legacy_flax_checkpoint: bool = False, **kwargs):
-    super().__init__(*args, **kwargs)
-    self._is_legacy_flax_checkpoint = is_legacy_flax_checkpoint
-
-  def restore(
-      self, directory: epath.PathLike, *args: Any, **kwargs: Any
-  ) -> ocp.args.Composite:
-    if self._is_legacy_flax_checkpoint:
-      return _restore_legacy_flax(
-          directory, self._handler, super().restore, *args, **kwargs
-      )
-    else:
-      return super().restore(directory, *args, **kwargs)
-
-
-class _AsyncCheckpointer(ocp.AsyncCheckpointer):
-  """Override supporting restoring legacy Flax checkpoints."""
-
-  def __init__(self, *args, is_legacy_flax_checkpoint: bool = False, **kwargs):
-    super().__init__(*args, **kwargs)
-    self._is_legacy_flax_checkpoint = is_legacy_flax_checkpoint
-
-  def restore(
-      self, directory: epath.PathLike, *args: Any, **kwargs: Any
-  ) -> ocp.args.Composite:
-    if self._is_legacy_flax_checkpoint:
-      return _restore_legacy_flax(
-          directory, self._handler, super().restore, *args, **kwargs
-      )
-    else:
-      return super().restore(directory, *args, **kwargs)
-
-
 @ocp.args.register_with_handler(
     _CompositeCheckpointHandlerWrapper, for_save=True, for_restore=True
 )
@@ -328,21 +257,15 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       handler = _CompositeCheckpointHandlerWrapper(
           **{STATE_ITEM_NAME: original_state_handler}
       )
-      is_legacy_flax_checkpoint = (
-          checkpointers[STATE_ITEM_NAME].__class__.__name__
-          == 'FlaxCheckpointer'
-      )
       if ocp.checkpoint_manager.is_async_checkpointer(self._checkpointer):
         assert hasattr(self._checkpointer, '_async_manager')  # Hint for pytype
-        self._checkpointer = _AsyncCheckpointer(
+        self._checkpointer = ocp.AsyncCheckpointer(
             handler=handler,
-            is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
             timeout_secs=self._checkpointer._async_manager._timeout_secs,  # pylint: disable=protected-access
         )
       else:
-        self._checkpointer = _Checkpointer(
+        self._checkpointer = ocp.Checkpointer(
             handler=handler,
-            is_legacy_flax_checkpoint=is_legacy_flax_checkpoint,
         )
 
   @property

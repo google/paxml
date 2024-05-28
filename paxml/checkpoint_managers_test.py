@@ -192,7 +192,7 @@ class CheckpointManagerTest(parameterized.TestCase):
       self, checkpoint_type: CheckpointType, tensorstore_use_ocdbt: bool = False
   ):
     if checkpoint_type == CheckpointType.FLAX:
-      checkpointer = checkpoints.FlaxCheckpointer(
+      checkpointer = checkpoints.Checkpointer(
           checkpoints.FlaxCheckpointHandler(use_ocdbt=tensorstore_use_ocdbt)
       )
     elif checkpoint_type == CheckpointType.GDA:
