@@ -579,7 +579,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
 
   _param_names: PyTree = None
 
-  async def _write_metadata_file(
+  def _write_metadata_file(
       self,
       directory: epath.Path,
       item: PyTree,
@@ -587,10 +587,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       use_zarr3: bool = False,
   ):
     if self._use_ocdbt:
-      return await super()._write_metadata_file(
-          directory, item, save_args, use_zarr3
-      )
-    return ocp.future.NoopFuture()
+      super()._write_metadata_file(directory, item, save_args, use_zarr3)
 
   def _read_metadata_file(
       self, directory: epath.Path
