@@ -222,6 +222,7 @@ def pax_targets(
                 # Implicit absl.app dependency.
                 # Implicit absl.flags dependency.
                 # Implicit absl.testing.absltest.absltest dependency.
+                # Implicit jax dependency.
                 "//paxml:experiment_imports_test_helper",
                 "//paxml:experiment_registry",
                 # proto dep

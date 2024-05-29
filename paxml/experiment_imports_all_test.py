@@ -18,6 +18,7 @@
 from absl import app
 from absl import flags
 from absl.testing import absltest
+import jax
 from paxml import experiment_imports_test_helper
 from paxml import experiment_registry
 
@@ -52,4 +53,5 @@ def main(args):
 
 
 if __name__ == '__main__':
+  jax.config.parse_flags_with_absl()
   app.run(main)
