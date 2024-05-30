@@ -39,7 +39,7 @@ gcloud compute tpus tpu-vm ssh $TPU_NAME --zone=$ZONE
 
 ### Installing Pax
 
-After ssh-ing the VM, you can install the paxml stable release from PyPI, or the dev version from github.
+After ssh-ing the VM, you can install the paxml stable release from PyPI, or the dev version from GitHub.
 
 For installing the stable release from PyPI (https://pypi.org/project/paxml/):
 
@@ -56,7 +56,7 @@ git clone -b rX.Y.Z https://github.com/google/paxml
 pip install --no-deps -r paxml/paxml/pip_package/requirements.txt
 ```
 
-For installing the dev version from github, and for the ease of editing code:
+For installing the dev version from GitHub, and for the ease of editing code:
 
 ```bash
 # install the dev version of praxis first
