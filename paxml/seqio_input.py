@@ -1038,6 +1038,7 @@ class SeqIOInput(base_input.BaseInput):
         isinstance(self.mixture_or_task_inst, seqio.Mixture)
         and self.feature_converter
         and hasattr(self.feature_converter, '_passthrough_features')
+        and self.feature_converter._passthrough_features
     ):
       kwargs.update(
           passthrough_features=self.feature_converter._passthrough_features  #  pylint:disable=protected-access
