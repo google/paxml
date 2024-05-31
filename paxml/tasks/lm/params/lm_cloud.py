@@ -36,7 +36,17 @@ class SyntheticDataset(base_experiment.BaseExperiment):
       self, is_training
   ) -> pax_fiddle.Config[base_input.BaseInput]:
     num_local_devices = jax.local_device_count()
-    batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
+
+    if self.PERCORE_BATCH_SIZE >= 1:
+        batch_size = round(self.PERCORE_BATCH_SIZE * num_local_devices)
+        num_infeed_hosts = jax.process_count()
+    else:
+        global_batch_size = int(
+            self.PERCORE_BATCH_SIZE * num_local_devices * jax.process_count()
+        )
+        batch_size = math.ceil(self.PERCORE_BATCH_SIZE * num_local_devices)
+        num_infeed_hosts = global_batch_size // batch_size
+
     input_p = input_generator.SyntheticLmData.HParams()
     if is_training:
       input_p.batch_size = batch_size
@@ -45,7 +55,7 @@ class SyntheticDataset(base_experiment.BaseExperiment):
       input_p.batch_size = batch_size
     input_p.seq_len = self.MAX_SEQ_LEN
     p = pax_fiddle.Config(
-        base_input.LingvoInputAdaptor, input=input_p, is_training=is_training
+        base_input.LingvoInputAdaptor, input=input_p, is_training=is_training, num_infeed_hosts=num_infeed_hosts
     )
     return p
 
