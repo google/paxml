@@ -520,7 +520,6 @@ pytype_strict_library(
         ":base_experiment",
         ":checkpoint_creators",
         ":checkpoint_types",
-        ":decode_programs",
         ":executors",
         ":experiment_utils",
         ":partitioning",

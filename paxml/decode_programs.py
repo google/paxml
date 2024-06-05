@@ -175,6 +175,17 @@ class SingleTaskDecodeProgram(programs.Program):
     assert self._input is not None
     return self._input
 
+  def _maybe_write_eval_outputs(
+      self, train_step: int, processed_decodes: list[tuple[str, Any]]
+  ) -> None:
+    programs.maybe_write_eval_outputs(
+        EvaluationMode.DECODE,
+        self._output_dir,
+        train_step,
+        processed_decodes,
+        write_pickle=self._output_pickle,
+    )
+
   def run(self, state: TrainState, train_step: int) -> DecodeProgramOutput:
     # Skip decode if already completed.
     if programs.can_load_written_outputs(
@@ -268,13 +279,7 @@ class SingleTaskDecodeProgram(programs.Program):
           metrics_prefix=self._task.decode.metrics_prefix,
       )
 
-    programs.maybe_write_eval_outputs(
-        EvaluationMode.DECODE,
-        self._output_dir,
-        train_step,
-        processed_decodes,
-        write_pickle=self._output_pickle,
-    )
+    self._maybe_write_eval_outputs(train_step, processed_decodes)
 
     msg = f'Finished decoding input {self._name}'
     work_unit = platform.work_unit()

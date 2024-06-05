@@ -26,7 +26,6 @@ import jax.numpy as jnp
 from paxml import base_experiment
 from paxml import checkpoint_creators
 from paxml import checkpoint_types
-from paxml import decode_programs as decode_programs_lib
 from paxml import executors
 from paxml import experiment_utils
 from paxml import partitioning
@@ -259,19 +258,13 @@ def train_and_evaluate(
     eval_programs = experiment_config.eval_programs()
 
   logging.info('[PAX STATUS]: Initializing decode programs.')
+  decode_programs = []
   if (
       run_decode
       and task_p.train.decode_interval_steps is not None
       and task_p.train.decode_interval_steps > 0
   ):
-    decode_input_p = experiment_config.decode_datasets()
-  else:
-    decode_input_p = []
-  # TODO(wangpeng): Make decode programs configurable.
-  decode_programs = [
-      decode_programs_lib.SingleTaskDecodeProgram(input_p)
-      for input_p in decode_input_p
-  ]
+    decode_programs = experiment_config.decode_programs()
 
   # Creates the executor and run the training pipeline.
   logging.info('[PAX STATUS]: Creating executor.')
