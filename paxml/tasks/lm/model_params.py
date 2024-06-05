@@ -582,7 +582,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
   USE_GATED_ACTIVATION = False
   DECAY_END = 100000
   USE_FP8 = False
-  USE_EXPERT_PARALLEL = False
+  USE_EXPERT_PARALLEL = False  # GPU specific.
 
   # optimizer related
   DROPOUT_PROB = 0.0
@@ -818,6 +818,8 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
 
   MODEL_CLASS = models.LanguageModel
 
+  USE_EXPERT_PARALLEL = False  # GPU specific.
+
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
@@ -834,8 +836,12 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     assert self.NUM_STAGES is not None
     assert self.NUM_LAYERS % (self.NUM_STAGES * self.CIRCULAR_REPEAT) == 0
     assert self.NUM_MICROBATCHES is not None or self.MICROBATCH_SIZE is not None
-    assert self.ICI_MESH_SHAPE is not None and len(self.ICI_MESH_SHAPE) == 4
-    assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) == 4
+    if self.USE_EXPERT_PARALLEL:
+      assert self.ICI_MESH_SHAPE is not None and len(self.ICI_MESH_SHAPE) == 5
+      assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) == 5
+    else:
+      assert self.ICI_MESH_SHAPE is not None and len(self.ICI_MESH_SHAPE) == 4
+      assert self.DCN_MESH_SHAPE is not None and len(self.DCN_MESH_SHAPE) == 4
     assert self.ICI_MESH_SHAPE[0] * self.DCN_MESH_SHAPE[0] == self.NUM_STAGES
 
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
@@ -949,23 +955,47 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     replica_axis = 'replica'
     data_axis = 'data'
     mdl_axis = 'mdl'
-    mesh_axis_names = [stage_axis, replica_axis, data_axis, mdl_axis]
+
+    if self.USE_EXPERT_PARALLEL:
+      data_expert_axis = 'data_expert'
+      mesh_axis_names = [
+          stage_axis,
+          replica_axis,
+          data_axis,
+          data_expert_axis,
+          mdl_axis,
+      ]
+    else:
+      mesh_axis_names = [stage_axis, replica_axis, data_axis, mdl_axis]
     model_p.mesh_axis_names = mesh_axis_names
 
     # Set in-stage layer shardings.
     lm_cls = cast(
         Type[layers.TransformerLm], pax_fiddle.get_callable(model_p.lm_tpl)
     )
-    model_p.lm_tpl = lm_cls.set_sharding_params_v1(
-        model_p.lm_tpl,
-        replica_axis=replica_axis,
-        data_axis=data_axis,
-        mdl_axis=mdl_axis,
-        ici_mesh_shape=model_p.ici_mesh_shape,
-        dcn_mesh_shape=model_p.dcn_mesh_shape,
-        mesh_axis_names=mesh_axis_names,
-        training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
-    )
+    if self.USE_EXPERT_PARALLEL:
+      model_p.lm_tpl = lm_cls.set_sharding_params_with_expert_parallelism(
+          model_p.lm_tpl,
+          replica_axis=replica_axis,
+          data_axis=data_axis,
+          data_expert_axis=data_expert_axis,
+          mdl_axis=mdl_axis,
+          ici_mesh_shape=model_p.ici_mesh_shape,
+          dcn_mesh_shape=model_p.dcn_mesh_shape,
+          mesh_axis_names=mesh_axis_names,
+          training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+      )
+    else:
+      model_p.lm_tpl = lm_cls.set_sharding_params_v1(
+          model_p.lm_tpl,
+          replica_axis=replica_axis,
+          data_axis=data_axis,
+          mdl_axis=mdl_axis,
+          ici_mesh_shape=model_p.ici_mesh_shape,
+          dcn_mesh_shape=model_p.dcn_mesh_shape,
+          mesh_axis_names=mesh_axis_names,
+          training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+      )
 
     # Include stage_axis in input partitioning to allow full data parallelism in
     # embedding layers.

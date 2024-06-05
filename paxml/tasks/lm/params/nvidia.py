@@ -29,13 +29,16 @@ from praxis import base_layer
 from praxis import layers
 from praxis import optimizers
 from praxis import pax_fiddle
+from praxis import py_utils
 from praxis import schedules
 from praxis.layers import activations
+from praxis.layers import embedding_softmax
 from praxis.layers import glam
 from praxis.layers import gpu_fast_attention
 from praxis.layers import grok
 from praxis.layers import transformers
 
+NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
 
 
@@ -798,6 +801,7 @@ class Grok(NVIDIA1_3B):
         use_gated_activation=True,
         combine_qkv=self.COMBINE_QKV,
         checkpoint_policy=self.CHECKPOINT_POLICY,
+        use_fp8=self.USE_FP8,
     )
     ## set sharding
     lm_cls = cast(
@@ -884,6 +888,7 @@ class Grok_Proxy(NVIDIA1_3B):
         use_gated_activation=True,
         combine_qkv=self.COMBINE_QKV,
         checkpoint_policy=self.CHECKPOINT_POLICY,
+        use_fp8=self.USE_FP8,
     )
     ## set sharding
     lm_cls = cast(
@@ -908,3 +913,188 @@ class Grok_Proxy(NVIDIA1_3B):
       task_p.model.lm_tpl.position_emb_tpl = None
 
     return task_p
+
+
+@experiment_registry.register
+class Grok_Proxy_PP(NVIDIA5B):
+  """Grok Model"""
+
+  NUM_STAGES = 8
+  NUM_GPUS = 64
+
+  USE_REPEATED_LAYER = False
+  NUM_LAYERS = 16
+  NUM_HEADS = 48
+  NUM_KV_HEADS = 8
+  DIMS_PER_HEAD = 128
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_QKV_OUT_PROJ
+  MODEL_DIMS = 6144
+  HIDDEN_DIMS = 32768
+  COMBINE_QKV = False
+  MAX_SEQ_LEN = 8192
+  USE_FP8 = False
+  VOCAB_SIZE = 131072
+
+  NUM_MICROBATCHES = 32
+  MICROBATCH_SIZE = 8
+  PERCORE_BATCH_SIZE = 1
+
+  NUM_EXPERTS = 8
+  NUM_GROUPS = 8
+
+  MAX_STEPS = 10
+  USE_EXPERT_PARALLEL = True
+
+  ICI_MESH_SHAPE = [1, 1, 8, 1]  # pp, dp, fsdp, ep+fsdp, tp
+  DCN_MESH_SHAPE = [NUM_STAGES, 1, 8, 1]
+  MESH_AXIS_NAMES = ['stage', 'replica', 'data', 'mdl']
+  if USE_EXPERT_PARALLEL:
+    ICI_MESH_SHAPE = [1, 1, 1, 8, 1]
+    DCN_MESH_SHAPE = [NUM_STAGES, 1, 8, 1, 1]
+    MESH_AXIS_NAMES = ['stage', 'replica', 'data', 'data_expert', 'mdl']
+
+  USE_ROPE = True
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.train.num_train_steps = self.MAX_STEPS
+    task_p.model.lm_tpl = grok.GrokUniTransformerLmHParams(
+        name='grok_lm',
+        vocab_size=self.VOCAB_SIZE,
+        num_transformer_layers=self.NUM_LAYERS,
+        moe=True,
+        model_dim=self.MODEL_DIMS,
+        ff_dim=self.HIDDEN_DIMS,
+        moe_hidden_dim=self.HIDDEN_DIMS,
+        attention_num_heads=self.NUM_HEADS,
+        attention_num_groups=self.NUM_KV_HEADS,
+        attention_key_value_dim=self.MODEL_DIMS // self.NUM_HEADS,
+        attention_extra_logit=0.0,
+        use_tgt_labels_size_as_loss_denominator=True,
+        moe_load_balance_loss_weight=0.01,
+        z_loss_weight=1e-4,
+        moe_gating_func='top2',
+        moe_gating_embedding_level='token',
+        c_dim=None,  ## determined automatically when capacity_factor is set
+        capacity_factor=2.0,
+        e_dim=self.NUM_EXPERTS,
+        num_groups=self.NUM_GROUPS,
+        use_gated_activation=True,
+        combine_qkv=self.COMBINE_QKV,
+        checkpoint_policy=self.CHECKPOINT_POLICY,
+        num_pipeline_stages=self.NUM_STAGES,
+        num_pipeline_microbatches=self.NUM_MICROBATCHES,
+        use_fp8=self.USE_FP8,
+    )
+    ## set sharding
+    replica_axis = 'replica'
+    stage_axis = 'stage'
+    data_axis = 'data'
+    data_expert_axis = 'data_expert'
+    mdl_axis = 'mdl'
+    lm_cls = cast(
+        Type[layers.TransformerLm], pax_fiddle.get_callable(task_p.model.lm_tpl)
+    )
+    if self.USE_EXPERT_PARALLEL:
+      task_p.model.lm_tpl = lm_cls.set_sharding_params_with_expert_parallelism(
+          task_p.model.lm_tpl,
+          replica_axis='replica',
+          data_axis='data',
+          data_expert_axis='data_expert',
+          mdl_axis='mdl',
+          ici_mesh_shape=task_p.model.ici_mesh_shape,
+          dcn_mesh_shape=task_p.model.dcn_mesh_shape,
+          mesh_axis_names=self.MESH_AXIS_NAMES,
+          training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+      )
+    else:
+      task_p.model.lm_tpl = lm_cls.set_sharding_params_v1(
+          task_p.model.lm_tpl,
+          replica_axis='replica',
+          data_axis='data',
+          mdl_axis='mdl',
+          ici_mesh_shape=task_p.model.ici_mesh_shape,
+          dcn_mesh_shape=task_p.model.dcn_mesh_shape,
+          mesh_axis_names=['stage', 'replica', 'data', 'mdl'],
+          training_optimized=self.TRAINING_OPTIMIZED_SHARDING,
+      )
+
+    model_p = task_p.model
+
+    # Include stage_axis in input partitioning to allow full data parallelism in
+    # embedding layers.
+    if self.USE_EXPERT_PARALLEL:
+      batch_dims = (stage_axis, replica_axis, data_axis, data_expert_axis)
+    else:
+      batch_dims = (stage_axis, replica_axis, data_axis)
+
+    task_p.train.inputs_split_mapping = NestedMap(
+        map_1d=(batch_dims,), map_2d=(batch_dims, None)
+    )
+
+    # Run softmax/embedding in data parallelism across all cores.
+    softmax_p = model_p.lm_tpl.softmax_tpl
+    if self.SEPARATE_EMBEDDING:
+      embedding_p = model_p.lm_tpl.separate_embedding_tpl
+    else:
+      embedding_p = model_p.lm_tpl.softmax_tpl
+    embedding_p.activation_split_dims_mapping.emb_out_split_dims_mapping = [
+        batch_dims,
+        None,
+        mdl_axis,
+    ]
+    embedding_p.activation_split_dims_mapping.out = [batch_dims, None, mdl_axis]
+    if (
+        fdl.get_callable(softmax_p)
+        == embedding_softmax.GShardSharedEmbeddingSoftmax
+    ):
+      # Softmax weight is of shape [vocab_size, input_dim].
+      softmax_p.weight_split_dims_mapping.wt = [mdl_axis, self.EMB_W_DATA_DIMS]
+    elif fdl.get_callable(softmax_p) in {
+        embedding_softmax.SharedEmbeddingSoftmax,
+        embedding_softmax.FullSoftmax,
+    }:
+      # Softmax weight is of shape [input_dim, vocab_size].
+      softmax_p.weight_split_dims_mapping.wt = [self.EMB_W_DATA_DIMS, mdl_axis]
+    else:
+      raise NotImplementedError(
+          f'softmax class {fdl.get_callable(softmax_p)} not supported'
+      )
+    if self.SEPARATE_EMBEDDING:
+      embedding_p.weight_split_dims_mapping.wt = [
+          self.EMB_W_DATA_DIMS,
+          mdl_axis,
+      ]
+
+    pipeline_layer_p = model_p.lm_tpl.stacked_transformer_tpl
+    pipeline_layer_p.weight_split_dims_mapping.stages = [stage_axis]
+    # Match the final output sharding to softmax input sharding.
+    pipeline_layer_p.activation_split_dims_mapping.final_out = [
+        batch_dims,
+        None,
+        mdl_axis,
+    ]
+
+    task_p.train.always_use_train_for_model_init = False
+    task_p.model.report_strict_acc = True
+
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+    if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
+      stacked_p = stacked_p.pipeline_stage
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
+      stacked_p = stacked_p.block
+    transformer_layer_p = stacked_p.transformer_layer_params_tpl
+    if self.USE_ROPE:
+      transformer_layer_p.tr_atten_tpl.use_rotary_position_emb = True
+      task_p.model.lm_tpl.position_emb_tpl = None
+
+    return task_p
+
+
+@experiment_registry.register
+class Grok_PP(Grok_Proxy_PP):
+  """Grok Model"""
+
+  NUM_LAYERS = 64
