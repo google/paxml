@@ -198,7 +198,7 @@ def extract_ema(
         _replace_bprop_masked,
         extracted,
         model_states.mdl_vars,
-        is_leaf=py_utils.is_bprop_masked_node,
+        is_leaf=lambda x: x is None or py_utils.is_bprop_masked_node(x),
     )
   return TrainState(
       step=model_states.step,
