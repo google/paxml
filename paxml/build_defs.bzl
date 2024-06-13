@@ -84,7 +84,9 @@ def pax_targets(
         # Internal enable fragmented build argument, toggled to True.
         # Internal tooling mock backend attribute
         main_src = "//paxml:main.py",
-        model_analysis_kwargs = None):
+        model_analysis_kwargs = None,
+        dump_hparams_kwargs = None,
+        validate_config_kwargs = None):
     """Macro to define a collection of Pax targets with custom dependencies.
 
     It currently defines the following targets:
@@ -130,6 +132,10 @@ def pax_targets(
       main_src: The src file for the ":main" target created.
       model_analysis_kwargs: Additional kwargs that are passed to the
           :model_analysis target.
+      dump_hparams_kwargs: Additional kwargs that are passed to the
+          :dump_hparams target.
+      validate_config_kwargs: Additional kwargs that are passed to the
+          :validate_config target.
     """
     if not experiments:
         fail("pax_targets() expects a non-empty list of deps that defines " +
@@ -238,6 +244,7 @@ def pax_targets(
         prefix_name,
         dump_hparams_name,
     )
+    dump_hparams_kwargs = dump_hparams_kwargs or {}
     export_binary(
         name = dump_hparams_name,
         main = "//paxml/tools:dump_hparams.py",
@@ -249,6 +256,7 @@ def pax_targets(
         exp_sources = exp_sources,
         exec_properties = {"mem": "20g"},  # dump_hparams can be a very large executable.
         # Implicit py_binary flag
+        **dump_hparams_kwargs
     )
 
     dump_input_specs_name = "dump_input_specs"
@@ -304,6 +312,7 @@ def pax_targets(
         prefix_name,
         validate_config_name,
     )
+    validate_config_kwargs = validate_config_kwargs or {}
     export_binary(
         name = validate_config_name,
         main = "//paxml/tools:validate_config.py",
@@ -315,6 +324,7 @@ def pax_targets(
         exp_sources = exp_sources,
         exec_properties = {"mem": "20g"},  # validate_config is a very large executable.
         # Implicit py_binary flag
+        **validate_config_kwargs
     )
 
     # Internal mock backend target.
