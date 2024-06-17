@@ -987,7 +987,7 @@ class TrialDirectoryNameGenerator:
     return self._make_path_friendly(str(value))
 
   def _make_path_friendly(self, s: str) -> str:
-    replacements = [(':', '='), ('[', '{'), (']', '}')]
+    replacements = [(':', '='), ('[', '{'), (']', '}'), (',', '.')]
     for src, replacement in replacements:
       s = s.replace(src, replacement)
 
