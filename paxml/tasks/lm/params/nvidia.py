@@ -1098,3 +1098,56 @@ class Grok_PP(Grok_Proxy_PP):
   """Grok Model"""
 
   NUM_LAYERS = 64
+
+
+@experiment_registry.register
+class NVIDIA_CIRCULAR_REPEAT(
+    c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset
+):
+  """Pipelined Transformer using Adam optimizer."""
+
+  CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_DOT_ONLY
+
+  USE_REPEATED_LAYER = False
+  DCN_MESH_SHAPE = [1, 1, 1, 1]
+  ICI_MESH_SHAPE = [8, 1, 1, 1]
+  NUM_STAGES = 8
+
+  # MICROBATCH_SIZE = 1
+  NUM_MICROBATCHES = 8
+  PERCORE_BATCH_SIZE = 1
+  CIRCULAR_REPEAT = 4
+
+  MAX_STEPS = 2000
+
+  NUM_LAYERS = 32
+  NUM_HEADS = 32
+  MODEL_DIMS = 4096
+  HIDDEN_DIMS = 16384
+  DIMS_PER_HEAD = 128
+
+  INIT_STD = 0.01
+  SOFTMAX_INIT_STD = 0.01
+
+  # Optimizer-related
+  LEARNING_RATE = 1.6e-4
+
+  # lr schedule
+  LR_COS_WARMUP = 115
+  LR_COS_DECAY_START = LR_COS_WARMUP + 1
+  LR_COS_DECAY_END = 62500
+
+  CHECKPOINT_EVERY_N_STEPS = 250
+  SUMMARY_INTERVAL_STEPS = 10
+
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+    task_p = super().task()
+    task_p.summary_verbosity = 0
+    model_p = task_p.model
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
+    if issubclass(
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+    ):
+      stacked_p = stacked_p.block
+
+    return task_p
