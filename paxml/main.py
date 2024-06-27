@@ -511,14 +511,17 @@ def _main(argv: Sequence[str]) -> None:
 
   should_initialize_jax_distributed = (
       FLAGS.jax_fully_async_checkpoint or FLAGS.multiprocess_gpu)
-  setup_jax.setup_jax(FLAGS.globally_use_hardware_rng, FLAGS.jax_backend_target,
-                      FLAGS.jax_xla_backend, FLAGS.jax_enable_checks,
-                      FLAGS.jax_traceback_filtering_option,
-                      should_initialize_jax_distributed,
-                      setup_jax.JaxDistributedOptions(FLAGS.server_addr,
-                                                      FLAGS.num_hosts,
-                                                      FLAGS.host_idx)
-                     )
+  setup_jax.setup_jax(
+      globally_use_hardware_rng=FLAGS.globally_use_hardware_rng,
+      jax_backend_target=FLAGS.jax_backend_target,
+      jax_xla_backend=FLAGS.jax_xla_backend,
+      jax_enable_checks=FLAGS.jax_enable_checks,
+      jax_traceback_filtering_option=FLAGS.jax_traceback_filtering_option,
+      should_initialize_jax_distributed=should_initialize_jax_distributed,
+      jax_distributed_options=setup_jax.JaxDistributedOptions(
+          FLAGS.server_addr, FLAGS.num_hosts, FLAGS.host_idx
+      ),
+  )
 
   if FLAGS.exp is not None:
     experiment_config = get_experiment(FLAGS.exp)()
