@@ -594,7 +594,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
 
   def _read_metadata_file(
       self, directory: epath.Path
-  ) -> ocp.metadata.TreeMetadata:
+  ) -> ocp.metadata.tree.TreeMetadata:
     if self._use_ocdbt:
       return super()._read_metadata_file(directory)
     else:
@@ -657,6 +657,13 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
     )
 
 
+def _is_supported_aggregation_type(value):
+  if hasattr(ocp.type_handlers, 'is_supported_aggregation_type'):
+    return ocp.type_handlers.is_supported_aggregation_type(value)
+  else:
+    return ocp.utils.is_supported_aggregation_type(value)
+
+
 def _get_tree_for_aggregation(param_infos, item):
   """Get tree for aggregated checkpoint."""
 
@@ -666,7 +673,7 @@ def _get_tree_for_aggregation(param_infos, item):
       raise ValueError(
           'jax.Array must be fully replicated to be saved in aggregate file.'
       )
-    if not ocp.utils.is_supported_aggregation_type(value):
+    if not _is_supported_aggregation_type(value):
       # Not an error because users' training states often have a bunch of
       # random unserializable objects in them (empty states, optimizer
       # objects, etc.).
