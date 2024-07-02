@@ -29,15 +29,22 @@ import optax
 import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
-from paxml import checkpoint_types
 from paxml import checkpoints
 from paxml import train_states
 from praxis import pytypes
 
 
-orbax_utils = ocp.utils
 ArrayMetadata = checkpoint_metadata.ArrayMetadata
 TrainState = train_states.TrainState
+
+
+def _create_tmp_directory(final_dir):
+  if hasattr(ocp.path, 'atomicity'):
+    tmp_dir = ocp.path.atomicity._get_tmp_directory(final_dir)
+    ocp.path.atomicity._create_tmp_directory(tmp_dir, final_dir)
+    return tmp_dir
+  else:
+    return ocp.utils.create_tmp_directory(final_dir)
 
 
 class CheckpointsTest(parameterized.TestCase):
@@ -50,23 +57,23 @@ class CheckpointsTest(parameterized.TestCase):
 
   def test_is_tmp_checkpoint_asset(self):
     # TODO(b/267498552) Remove hasattr when possible.
-    if hasattr(orbax_utils, 'is_tmp_checkpoint'):
+    if hasattr(ocp.utils, 'is_tmp_checkpoint'):
       step_prefix = 'checkpoint'
-      step_dir = orbax_utils.get_save_directory(
+      step_dir = ocp.utils.get_save_directory(
           5, self.directory, step_prefix=step_prefix
       )
       step_dir.mkdir(parents=True)
-      self.assertFalse(orbax_utils.is_tmp_checkpoint(step_dir))
-      tmp_step_dir = orbax_utils.create_tmp_directory(step_dir)
-      self.assertTrue(orbax_utils.is_tmp_checkpoint(tmp_step_dir))
+      self.assertFalse(ocp.utils.is_tmp_checkpoint(step_dir))
+      tmp_step_dir = _create_tmp_directory(step_dir)
+      self.assertTrue(ocp.utils.is_tmp_checkpoint(tmp_step_dir))
 
-      item_dir = orbax_utils.get_save_directory(
+      item_dir = ocp.utils.get_save_directory(
           10, self.directory, name='state', step_prefix=step_prefix
       )
       item_dir.mkdir(parents=True)
-      self.assertFalse(orbax_utils.is_tmp_checkpoint(item_dir))
-      tmp_item_dir = orbax_utils.create_tmp_directory(item_dir)
-      self.assertTrue(orbax_utils.is_tmp_checkpoint(tmp_item_dir))
+      self.assertFalse(ocp.utils.is_tmp_checkpoint(item_dir))
+      tmp_item_dir = _create_tmp_directory(item_dir)
+      self.assertTrue(ocp.utils.is_tmp_checkpoint(tmp_item_dir))
 
   def test_train_state_type_check(self):
     class Model(nn.Module):

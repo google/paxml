@@ -732,10 +732,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         cleanup_tmp_directories=True,
     )
 
-    with mock.patch.object(
-        ocp.utils, 'ensure_atomic_save', autospec=True
-    ) as commit_callback:
-      commit_callback.side_effect = _fake_on_commit_callback
+    def _save_non_atomic():
       checkpoint_manager = self.create_checkpoint_manager(options)
       self.save(
           checkpoint_manager,
@@ -748,6 +745,18 @@ class CheckpointManagerTest(parameterized.TestCase):
           ocp.utils.tmp_checkpoints(checkpoint_manager.directory),
           1,
       )
+
+    if hasattr(ocp.path, 'atomicity'):
+      with mock.patch.object(
+          ocp.path.atomicity.AtomicRenameTemporaryPath, 'finalize'
+      ):
+        _save_non_atomic()
+    else:
+      with mock.patch.object(
+          ocp.utils, 'ensure_atomic_save', autospec=True
+      ) as commit_callback:
+        commit_callback.side_effect = _fake_on_commit_callback
+        _save_non_atomic()
 
     checkpoint_manager = self.create_checkpoint_manager(options)
     self.assertEmpty(ocp.utils.tmp_checkpoints(checkpoint_manager.directory))
