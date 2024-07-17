@@ -55,6 +55,7 @@ pytype_strict_library(
         "//praxis/layers",
         "//praxis/layers:activations",
         "//praxis/layers:embedding_softmax",
+        "//praxis/layers:gpu_fast_attention",
         "//praxis/layers:models",
         "//praxis/layers:transformer_models",
         "//praxis/layers/injection:fp8_nvidia_gpu",
