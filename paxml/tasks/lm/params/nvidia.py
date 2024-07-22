@@ -37,6 +37,7 @@ from praxis.layers import glam
 from praxis.layers import gpu_fast_attention
 from praxis.layers import grok
 from praxis.layers import transformers
+from praxis.layers import transformer_models
 
 NestedMap = py_utils.NestedMap
 WeightInit = base_layer.WeightInit
@@ -490,9 +491,11 @@ class Llama2_7B(NVIDIA1_3B):
   ICI_MESH_SHAPE = [1, 16, 1]
 
   NUM_KV_HEADS = 32
+  MAX_STEPS = 100
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
+    task_p.train.num_train_steps = self.MAX_STEPS
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
 
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl
@@ -513,6 +516,19 @@ class Llama2_7B(NVIDIA1_3B):
     transformer_layer_p.tr_atten_tpl = pax_fiddle.Config(
         layers.grouped_query_attention.GroupedQueryAttention
     )
+
+    if self.USE_CUDNN_FLASH_ATTENTION:
+      GQA_LAYER = layers.grouped_query_attention.GroupedQueryAttention
+      assert transformer_layer_p.tr_atten_tpl.cls == GQA_LAYER
+      causal_mode = transformer_models.LanguageModelType.CAUSAL
+      assert model_p.lm_tpl.model_type == causal_mode
+      fused_tr_atten_tpl = pax_fiddle.Config(
+          gpu_fast_attention.GpuCudnnFusedGroupedQueryAttention,
+          is_causal=True,
+      )
+      fused_tr_atten_tpl.copy_fields_from(transformer_layer_p.tr_atten_tpl)
+      transformer_layer_p.tr_atten_tpl = fused_tr_atten_tpl
+
     transformer_layer_p.tr_atten_tpl.num_kv_heads = self.NUM_KV_HEADS
     transformer_layer_p.tr_atten_tpl.rope_min_max_timescales = [1, 10000]
 
