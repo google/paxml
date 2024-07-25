@@ -61,7 +61,7 @@ def split_out_xla_unsupported_batch(batch, partitioning_spec=None):
           new_partitioning_spec[k] = nested_partitioning_spec
       continue
 
-    if not np.issubdtype(v.dtype, np.unicode_) and not np.issubdtype(
+    if not np.issubdtype(v.dtype, np.str_) and not np.issubdtype(
         v.dtype, np.object_
     ):
       continue
