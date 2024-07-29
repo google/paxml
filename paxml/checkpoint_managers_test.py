@@ -872,7 +872,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         # Sharding file stores sharding info for this checkpoint under the
         # checkpoint directory. This is independent from the steps of the
         # checkpoint. b/279969796 for more details.
-        if d.name == '_sharding' or 'descriptor' in d.name:
+        if d.name == '_sharding':
           continue
         if checkpoint_type == CheckpointType.GDA:
           assert d.is_dir(), d
