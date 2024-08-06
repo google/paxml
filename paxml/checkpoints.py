@@ -446,21 +446,12 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
 
   def __init__(
       self,
-      *args,
       enforce_restore_shape_check: bool = False,
       use_ocdbt: bool = False,
-      **kwargs,
   ):
-    handler_impl = PaxCheckpointHandlerImpl(
-        *args, use_ocdbt=use_ocdbt, **kwargs
-    )
+    handler_impl = PaxCheckpointHandlerImpl(use_ocdbt=use_ocdbt)
 
-    super().__init__(
-        *args,
-        use_ocdbt=use_ocdbt,
-        handler_impl=handler_impl,
-        **kwargs,
-    )
+    super().__init__(use_ocdbt=use_ocdbt, handler_impl=handler_impl)
     self._enforce_restore_shape_check = enforce_restore_shape_check
 
   async def async_save(
@@ -680,12 +671,9 @@ def _get_tree_for_aggregation(param_infos, item):
 class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
   """Override to process checkpoints in Flax format."""
 
-  def __init__(self, *args, **kwargs):
-    super().__init__(
-        *args,
-        handler_impl=FlaxCheckpointHandlerImpl(*args, **kwargs),
-        **kwargs,
-    )
+  def __init__(self, use_ocdbt: bool = False):
+    del use_ocdbt
+    super().__init__(handler_impl=FlaxCheckpointHandlerImpl())
     self._aggregate_handler = ocp.aggregate_handlers.MsgpackHandler()
 
   async def async_save(
