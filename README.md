@@ -251,7 +251,7 @@ proportion to the number of chips used.
 
 ## Pax on Multislice
 The multislice configs in this repo refer to
-[1. Singlie slice configs](https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py)
+[1. Single slice configs](https://github.com/google/paxml/blob/main/paxml/tasks/lm/params/c4.py)
 for syntax / model architecture
 and
 [2. MaxText repo](https://github.com/google/maxtext)
