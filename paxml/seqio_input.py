@@ -1194,7 +1194,7 @@ class SeqIOInput(base_input.BaseInput):
         if self.ds_ragged_tensor_keys:
           example_orig = next(self.targets_iter_ori)
       except (tf.errors.OutOfRangeError, StopIteration) as exc:
-        if self._num_eval_examples > 0:
+        if self._num_eval_examples > 0 and not self.reset_for_eval:
           raise StopIteration(
               'Exhausted eval data with reset_for_eval=False after'
               f' {num_examples-1} examples (batch_size={self.batch_size})'
