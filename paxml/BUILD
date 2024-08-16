@@ -167,7 +167,6 @@ pytype_strict_test(
     deps = [
         ":checkpoint_metadata",
         ":checkpoint_paths",
-        ":checkpoint_types",
         ":checkpoints",
         ":train_states",
         # Implicit absl.testing.absltest.absltest dependency.

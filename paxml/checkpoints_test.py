@@ -39,7 +39,11 @@ TrainState = train_states.TrainState
 
 
 def _create_tmp_directory(final_dir):
-  if hasattr(ocp.path, 'atomicity'):
+  if hasattr(ocp.test_utils, 'create_tmp_directory'):
+    tmp_dir = ocp.path.atomicity._get_tmp_directory(final_dir)
+    ocp.test_utils.create_tmp_directory(tmp_dir, final_dir)
+    return tmp_dir
+  elif hasattr(ocp.path.atomicity, '_create_tmp_directory'):
     tmp_dir = ocp.path.atomicity._get_tmp_directory(final_dir)
     ocp.path.atomicity._create_tmp_directory(tmp_dir, final_dir)
     return tmp_dir
