@@ -124,6 +124,9 @@ class _CompositeCheckpointHandlerWrapper(ocp.CompositeCheckpointHandler):
   """Wrapper for CompositeCheckpointHandler support version < 1."""
 
   def _get_state_handler(self) -> ocp.CheckpointHandler:
+    # TODO: b/359524229 - `_known_handlers`` has been deprecated. Remove this
+    # once `_CheckpointManagerImpl` has been migrated from `checkpointers` to
+    # `handler_registry`.
     for item_name, handler in self._known_handlers.items():
       if item_name == STATE_ITEM_NAME:
         if handler is None:
@@ -251,6 +254,9 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       composite_handler = typing.cast(
           ocp.CompositeCheckpointHandler, self._checkpointer._handler  # pylint: disable=protected-access
       )
+      # TODO: b/359524229 - `_known_handlers`` has been deprecated. Remove this
+      # once `_CheckpointManagerImpl` has been migrated from `checkpointers` to
+      # `handler_registry`.
       original_state_handler = composite_handler._known_handlers[  # pylint: disable=protected-access
           STATE_ITEM_NAME
       ]
