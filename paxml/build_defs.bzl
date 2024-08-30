@@ -254,7 +254,6 @@ def pax_targets(
             "//paxml/tools:dump_hparams_lib",
         ] + extra_deps,
         exp_sources = exp_sources,
-        exec_properties = {"mem": "20g"},  # dump_hparams can be a very large executable.
         # Implicit py_binary flag
         **dump_hparams_kwargs
     )
@@ -322,7 +321,6 @@ def pax_targets(
             "//paxml/tools:validate_config_lib",
         ] + extra_deps,
         exp_sources = exp_sources,
-        exec_properties = {"mem": "20g"},  # validate_config is a very large executable.
         # Implicit py_binary flag
         **validate_config_kwargs
     )
