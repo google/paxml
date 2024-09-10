@@ -11,11 +11,11 @@ lingvo
 numpy
 orbax-checkpoint @ git+https://github.com/google/orbax/#subdirectory=checkpoint
 praxis
-protobuf==3.19.6
+protobuf
 pyglove
 seqio-nightly
 t5
-tensorflow~=2.9.2
+tensorflow~=2.12.1
 tensorflow-text~=2.9.0
 tensorstore
 tensorflow-datasets==4.8.3
