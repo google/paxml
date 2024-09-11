@@ -55,6 +55,7 @@ from praxis import pax_fiddle
 from praxis import py_utils
 
 # internal debugging module import
+# internal usage_logging module import
 # internal experiment module import
 # internal import for g3_multiprocessing
 
@@ -445,6 +446,7 @@ def run(
     startup_random_jitter_max_secs: The max seconds to wait for random jitter at
       startup.
   """
+  # Google-internal usage_logging
 
   # Add a note so that we can tell which Borg task is which JAX host.
   # (Borg task 0 is not guaranteed to be host 0)
