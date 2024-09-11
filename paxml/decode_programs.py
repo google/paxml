@@ -392,7 +392,7 @@ class SingleTaskDecodeProgram(programs.Program):
       metrics = metric_utils.merge_clu_metrics(metrics, updated_metrics)
 
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
-        all_summary_tensors[key].append(tensor)
+        all_summary_tensors[key].append(np.array(tensor))
 
       logging.info(
           'Finished decoding input batch %d for %s', step_num, self._name
