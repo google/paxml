@@ -938,8 +938,8 @@ class SeqIOInput(base_input.BaseInput):
     unsupported_key_dtype_name = {}
 
     def is_dtype_supported(key, value) -> bool:
-      is_supported = np.issubdtype(value.dtype, np.number) or np.issubdtype(
-          value.dtype, np.bool_
+      is_supported = jnp.issubdtype(value.dtype, jnp.number) or jnp.issubdtype(
+          value.dtype, jnp.bool_
       )
       if not is_supported:
         unsupported_key_dtype_name[key] = value.dtype.name
