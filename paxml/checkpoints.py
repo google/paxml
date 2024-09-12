@@ -645,8 +645,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
 def _is_supported_aggregation_type(value):
   if hasattr(ocp.type_handlers, 'is_supported_aggregation_type'):
     return ocp.type_handlers.is_supported_aggregation_type(value)
-  else:
-    return ocp.utils.is_supported_aggregation_type(value)
+  return ocp.type_handlers.is_supported_type(value)
 
 
 def _get_tree_for_aggregation(param_infos, item):
