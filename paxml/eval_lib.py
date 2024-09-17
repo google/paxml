@@ -24,14 +24,14 @@ import itertools
 import os
 import time
 import typing
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 from absl import logging
 from etils import epath
 import jax
 import jax.numpy as jnp
 import numpy as np
-from orbax.checkpoint import checkpoint_utils as orbax_checkpoint_utils
+import orbax.checkpoint as ocp
 from paxml import base_experiment
 from paxml import base_metrics
 from paxml import checkpoint_paths
@@ -102,6 +102,37 @@ def _get_train_input_specs(
         '`task.train.always_use_train_for_model_init` requires it.'
     )
   return train_input_specs
+
+
+def release_all_snapshots(
+    checkpoint_dir: epath.Path,
+    step_prefix: Optional[str] = None,
+    step_format_fixed_length: Optional[int] = None,
+    step_name_format: Optional[
+        ocp.path.step.NameFormat[ocp.path.step.Metadata]
+    ] = None,
+):
+  """Releases snapshots of checkpoints for all existing steps, if present.
+
+  Args:
+    checkpoint_dir: The directory containing StepDirs.
+    step_prefix: A prefix applied to step numbers (e.g. <prefix>_42).
+    step_format_fixed_length: Expects to find checkpoint step directories with
+      exactly this number of digits (leading zeros if necessary).
+    step_name_format: Step NameFormat used to find step under given root
+      directory. If provided, `step_prefix` and `step_format_fixed_length` are
+      ignored.
+  """
+  steps = ocp.utils.checkpoint_steps(checkpoint_dir)
+  step_name_format = ocp.checkpoint_utils._init_step_name_format(
+      step_name_format=step_name_format,
+      step_prefix=step_prefix,
+      step_format_fixed_length=step_format_fixed_length,
+  )
+  for step in steps:
+    ocp.checkpoint_utils._release_snapshot(
+        checkpoint_dir, step, step_name_format
+    )
 
 
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
@@ -312,7 +343,7 @@ def _create_checkpointer(
     # Note: there could still potentially be concurrency issues since the lock
     # will be released, but we do not consider that to be an issue since the
     # first checkpoint is not likely to be cleaned up immediately.
-    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+    with ocp.checkpoint_utils.wait_for_new_checkpoint(
         restore_checkpoint_dir,
         until_step=wait_until_step,
         seconds_to_sleep=300,
@@ -851,12 +882,14 @@ def _common_eval_or_decode_loop(
     step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
         checkpointer.checkpoint_type
     )
-  # If preemption happened during evaluation, some checkpoints may be locked.
-  orbax_checkpoint_utils.unlock_existing_checkpoints(
+    # If preemption happened during evaluation, some checkpoint snapshots may
+    # not be cleaned up.
+  release_all_snapshots(
       checkpointer.restore_checkpoint_dir,
       step_prefix=step_prefix,
       step_format_fixed_length=step_format_fixed_length,
-  )
+    )
+
   # Retrieve last step from the TrainState directly in case new checkpoints
   # have been written in the mean time.
   last_checkpoint_step = int(
@@ -916,7 +949,7 @@ def _common_eval_or_decode_loop(
 
     # Use context manager to wait for new checkpoint and lock it to prevent
     # cleanup by the training thread.
-    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+    with ocp.checkpoint_utils.wait_for_new_checkpoint(
         checkpointer.restore_checkpoint_dir,
         until_step=last_checkpoint_step + 1,
         seconds_to_sleep=60,
