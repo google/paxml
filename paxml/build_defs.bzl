@@ -363,6 +363,7 @@ def export_binary(
         py_binary_rule,
         exp_sources,
         # Internal arguments for fragmented build.
+        delayed_import = False,
         **kwargs):
     """Define an existing `py_binary()` at the current package.
 
@@ -372,10 +373,19 @@ def export_binary(
       deps: Dependencies required by binary src.
       py_binary_rule: the Bazel rule to use to create the final binary.
       exp_sources: target of experiment source files.
+      export_fragmented_target_as_default: See pax_targets().
+      fragments: See pax_targets().
+      fragmented_package_name_prefix: package name prefix.
+      delayed_import: if True, arranges importing experiments in main().
       **kwargs: all remaining arguments are passed through.
     """
     main_copied = "%s.py" % name
-    _copy_src(output_name = main_copied, source_target = main, exp_sources = exp_sources)
+    _copy_src(
+        output_name = main_copied,
+        source_target = main,
+        exp_sources = exp_sources,
+        delayed_import = delayed_import,
+    )
 
     # Internal implementation for fragmented build.
 
@@ -388,27 +398,38 @@ def export_binary(
         **kwargs
     )
 
-def _copy_src(output_name, source_target, exp_sources):
+def _copy_src(output_name, source_target, exp_sources, delayed_import = False):
     # To avoid build warning when using `srcs` on a `py_binary()` outside the
     # current package, copy the file locally with a new rule.
     # We also prepend the source file with imports that registers all
     # experiments.
+    header = """
+# Auto-generated code to import and register all experiments.
+# See Pax's pax_targets() Starlark macro.
+def _import_modules():
+  print("_import_modules")
+  import importlib
+  import_str = '$(locations %s)'
+  for d in import_str.split(' '):
+    assert d.endswith('.py'), d
+    d = d.replace('/', '.')[:-len('.py')]
+    # internal build_defs.bzl imports code
+    importlib.import_module(d)
+
+# End of auto-generated code.
+""" % (exp_sources,)
+
+    if not delayed_import:
+        header += """
+_import_modules()
+"""
+
     native.genrule(
         name = output_name + ".copy",
         outs = [output_name],
         srcs = [source_target, exp_sources],
         cmd = """cat <<EOF > $@ && cat $(location %s) >> $@
-# Auto-generated code to import and register all experiments.
-# See Pax's pax_targets() Starlark macro.
-import importlib
-import_str = '$(locations %s)'
-for d in import_str.split(' '):
-  assert d.endswith('.py'), d
-  d = d.replace('/', '.')[:-len('.py')]
-  # internal build_defs.bzl imports code
-  importlib.import_module(d)
-# End of auto-generated code.
-
+%s
 EOF
-        """ % (source_target, exp_sources),
+        """ % (source_target, header),
     )
