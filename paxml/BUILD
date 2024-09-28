@@ -351,6 +351,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
+        "//paxml:ml_monitoring",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
         # Implicit seqio dependency.
@@ -842,6 +843,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         "//paxml:checkpoints",
+        "//paxml:ml_monitoring",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
@@ -886,6 +888,11 @@ pytype_strict_library(
 pytype_strict_library(
     name = "host_callback",
     srcs = ["host_callback.py"],
+)
+
+pytype_strict_library(
+    name = "ml_monitoring",
+    srcs = ["ml_monitoring.py"],
 )
 
 pytype_strict_test(

@@ -51,6 +51,7 @@ from paxml import tf_data_service_lib
 from paxml import train
 from paxml import trainer_lib
 from paxml import tuning_lib
+from paxml import ml_monitoring
 from praxis import pax_fiddle
 from praxis import py_utils
 
@@ -496,15 +497,8 @@ def main(argv: Sequence[str]) -> None:
   _main(argv)
 
 
-@py_utils.benchmark(prefix='[PAX STATUS]: E2E time: ')
-def _main(argv: Sequence[str]) -> None:
-  logging.info('[PAX STATUS]: Program start.')
-  if len(argv) > 1:
-    raise app.UsageError('Too many command-line arguments.')
-
-  if tf_data_service_lib.run_tf_data_service(FLAGS.mode):
-    return
-
+def create_experiment_config():
+  """Creates the experiment config from the command line flags."""
   if FLAGS.tfds_data_dir is not None:
     # seqio import is slow so avoid module-level import
     import seqio
@@ -556,6 +550,21 @@ def _main(argv: Sequence[str]) -> None:
     )
 
   experiment_config.validate()
+  return experiment_config
+
+
+@py_utils.benchmark(prefix='[PAX STATUS]: E2E time: ')
+def _main(argv: Sequence[str]) -> None:
+  logging.info('[PAX STATUS]: Program start.')
+  if len(argv) > 1:
+    raise app.UsageError('Too many command-line arguments.')
+
+  if tf_data_service_lib.run_tf_data_service(FLAGS.mode):
+    return
+
+  with ml_monitoring.ml_event_logger(ml_monitoring.MlEvent.INITIALIZE_SETUP):
+    experiment_config = create_experiment_config()
+
   run(
       experiment_config=experiment_config,
       enable_checkpoint_saving=FLAGS.enable_checkpoint_saving,
