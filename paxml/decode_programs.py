@@ -398,6 +398,13 @@ class SingleTaskDecodeProgram(programs.Program):
           'Finished decoding input batch %d for %s', step_num, self._name
       )
 
+      if (
+          profiler is not None
+          and step_num - self._task.decode.profiler_capture_step == 
+              profiler._capture_num_steps
+      ):
+        profiler.stop_capture_async()
+
       if jax.process_index() == 0:
         # Copy the tensor from device memory to ram, since accumulating such
         # tensor on devices may cause HBM OOM, when
