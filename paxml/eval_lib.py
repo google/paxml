@@ -24,14 +24,14 @@ import itertools
 import os
 import time
 import typing
-from typing import Any, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from absl import logging
 from etils import epath
 import jax
 import jax.numpy as jnp
 import numpy as np
-from orbax.checkpoint import checkpoint_utils as orbax_checkpoint_utils
+import orbax.checkpoint as ocp
 from paxml import base_experiment
 from paxml import base_metrics
 from paxml import checkpoint_paths
@@ -55,6 +55,8 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
+
+_LOCK_ITEM_NAME = 'LOCKED'
 
 
 instantiate = base_hyperparams.instantiate
@@ -102,6 +104,237 @@ def _get_train_input_specs(
         '`task.train.always_use_train_for_model_init` requires it.'
     )
   return train_input_specs
+
+
+# TODO(b/374832942) switch to snapshot approach.
+def lockdir(directory: epath.Path) -> epath.Path:
+  """Constructs a directory used to indicate that a checkpoint step is `locked`."""
+  return directory / _LOCK_ITEM_NAME
+
+
+# TODO(b/374832942) switch to create_snapshot.
+def _lock_checkpoint(
+    checkpoint_dir: epath.Path,
+    step: int,
+    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+) -> bool:
+  """Locks a checkpoint by writing a LOCKED directory."""
+  logging.info('Locking step: %d before gaining control.', step)
+  step_dir = step_name_format.find_step(checkpoint_dir, step).path
+  if not step_dir.exists():
+    raise ValueError(f'Step directory {step_dir} does not exist.')
+  lockdir = ocp.utils.lockdir(step_dir)
+  try:
+    lockdir.mkdir(parents=False, exist_ok=True)
+    return True
+  except FileNotFoundError as e:
+    logging.warning(
+        'Failed to lock step: %d due to: %s. This may be attributed to'
+        ' the checkpoint being cleaned up concurrently.',
+        step,
+        e,
+    )
+    return False
+
+
+# TODO(b/374832942) switch to release_snapshot.
+def _unlock_checkpoint(
+    checkpoint_dir: epath.Path,
+    step: int,
+    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+):
+  """Removes a LOCKED directory to indicate unlocking."""
+  if ocp._src.multihost.multihost.process_index() == 0:
+    logging.info('Unlocking existing step: %d.', step)
+    step_dir = step_name_format.find_step(checkpoint_dir, step).path
+    ocp.utils.lockdir(step_dir).unlink(missing_ok=True)
+
+
+# TODO(b/374832942) switch to release_all_snapshots.
+def unlock_existing_checkpoints(
+    checkpoint_dir: epath.Path,
+    step_prefix: Optional[str] = None,
+    step_format_fixed_length: Optional[int] = None,
+    step_name_format: Optional[
+        ocp.path.step.NameFormat[ocp.path.step.Metadata]
+    ] = None,
+):
+  """Removes LOCKED file for all existing steps, if present.
+
+  Args:
+    checkpoint_dir: The directory containing StepDirs.
+    step_prefix: A prefix applied to step numbers (e.g. <prefix>_42).
+    step_format_fixed_length: Expects to find checkpoint step directories with
+      exactly this number of digits (leading zeros if necessary).
+    step_name_format: Step NameFormat used to find step under given root
+      directory. If provided, `step_prefix` and `step_format_fixed_length` are
+      ignored.
+  """
+  steps = ocp.utils.checkpoint_steps(checkpoint_dir)
+  step_name_format = ocp.checkpoint_utils._init_step_name_format(
+      step_name_format=step_name_format,
+      step_prefix=step_prefix,
+      step_format_fixed_length=step_format_fixed_length,
+  )
+  for step in steps:
+    step_dir = step_name_format.find_step(checkpoint_dir, step).path
+    if ocp.utils.is_locked(step_dir):
+      _unlock_checkpoint(checkpoint_dir, step, step_name_format)
+
+
+# TODO(b/374832942) Remove after snapshot approach.
+def _reached_desired_step(step: int, until_step: Optional[int]) -> bool:
+  if step is None:
+    return False
+  elif until_step is None:
+    return True
+  elif step >= until_step:
+    return True
+  return False
+
+
+# TODO(b/374832942) Remove after snapshot approach.
+def _init_step_name_format(
+    step_name_format: Optional[
+        ocp.path.step.NameFormat[ocp.path.step.Metadata]
+    ] = None,
+    step_prefix: Optional[str] = None,
+    step_format_fixed_length: Optional[int] = None,
+):
+  return step_name_format or ocp.path.step.standard_name_format(
+      step_prefix=step_prefix,
+      step_format_fixed_length=step_format_fixed_length,
+  )
+
+
+# TODO(b/374832942) Remove after snapshot approach.
+def _wait_for_new_checkpoint(
+    checkpoint_dir: epath.Path,
+    *,
+    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+    until_step: Optional[int] = None,
+    seconds_to_sleep: int = 1,
+    timeout: Optional[int] = None,
+    timeout_fn: Optional[Callable[[], bool]] = None,
+) -> int:
+  """See documentation for wait_for_new_checkpoint."""
+  start = time.time()
+  stop_time = start + timeout if timeout is not None else None
+
+  def _sleep_and_maybe_exit():
+    if stop_time is not None and time.time() + seconds_to_sleep > stop_time:
+      if timeout_fn is None:
+        return True
+      elif timeout_fn():  # Only exit when timeout_fn indicates completion.
+        return True
+    logging.info('Sleeping for %d seconds.', seconds_to_sleep)
+    time.sleep(seconds_to_sleep)
+    return False
+
+  log_str = f'Waiting for new checkpoint at {checkpoint_dir}. '
+  if until_step is not None:
+    log_str += f'Waiting until step {until_step} is reached. '
+  if timeout is not None:
+    log_str += f'Will time out after {timeout} seconds. '
+  logging.info(log_str)
+
+  result = -1
+  if ocp._src.multihost.multihost.process_index() == 0:
+    while True:
+      if not checkpoint_dir.exists():
+        if _sleep_and_maybe_exit():
+          break
+        continue  # continue waiting until directory creation or timeout.
+
+      steps = ocp.utils.checkpoint_steps(checkpoint_dir)
+      checkpoint_step = max(steps) if steps else None
+      if _reached_desired_step(checkpoint_step, until_step):
+        if not _lock_checkpoint(
+            checkpoint_dir, checkpoint_step, step_name_format
+        ):
+          continue
+        result = checkpoint_step
+        break
+      elif _sleep_and_maybe_exit():
+        break
+
+  result = ocp._src.multihost.multihost.broadcast_one_to_all(
+      np.int32(result)
+  ).item()
+  wait_duration = time.time() - start
+  jax.monitoring.record_event_duration_secs(
+      '/jax/orbax/checkpoint_utils/wait_duration', wait_duration
+  )
+
+  if result == -1:
+    logging.info('Timed out waiting for new checkpoint. Returning -1.')
+  else:
+    logging.info('Found new checkpoint step: %d.', result)
+  return result
+
+
+# TODO(b/374832942) Remove after snapshot approach.
+@contextlib.contextmanager
+def wait_for_new_checkpoint(
+    checkpoint_dir: epath.Path,
+    *,
+    until_step: Optional[int] = None,
+    seconds_to_sleep: int = 1,
+    timeout: Optional[int] = None,
+    timeout_fn: Optional[Callable[[], bool]] = None,
+    step_prefix: Optional[str] = None,
+    step_format_fixed_length: Optional[int] = None,
+    step_name_format: Optional[
+        ocp.path.step.NameFormat[ocp.path.step.Metadata]
+    ] = None,
+):
+  """Waits until a new checkpoint file is found.
+
+  Automatically locks any checkpoint that is returned, and unlocks the
+  checkpoint when execution returns to this function.
+
+  Args:
+    checkpoint_dir: The directory in which checkpoints are saved.
+    until_step: If specified, waits until a step greater than or equal to
+      `until_step` has been found. If set to None (default), returns the first
+      step found.
+    seconds_to_sleep: The number of seconds to sleep for before looking for a
+      new checkpoint.
+    timeout: The maximum number of seconds to wait. If left as `None`, then the
+      process will wait indefinitely.
+    timeout_fn: Optional function to call after a timeout.  If the function
+      returns True, then it means that no new checkpoints will be generated and
+      the iterator will exit.  The function is called with no arguments.
+    step_prefix: A prefix applied to step numbers (e.g. <prefix>_42).
+    step_format_fixed_length: Expects to find checkpoint step directories with
+      exactly this number of digits (leading zeros if necessary).
+    step_name_format: Step NameFormat used to find step under given root
+      directory. If provided, `step_prefix` and `step_format_fixed_length` are
+      ignored.
+
+  Yields:
+    a new checkpoint step, or -1 if the timeout was reached.
+  """
+  step_name_format = _init_step_name_format(
+      step_name_format=step_name_format,
+      step_prefix=step_prefix,
+      step_format_fixed_length=step_format_fixed_length,
+  )
+  step = _wait_for_new_checkpoint(
+      checkpoint_dir,
+      step_name_format=step_name_format,
+      until_step=until_step,
+      seconds_to_sleep=seconds_to_sleep,
+      timeout=timeout,
+      timeout_fn=timeout_fn,
+  )
+  try:
+    yield step
+  finally:
+    # Release lock on the checkpoint step.
+    if step != -1:
+      logging.info('Unlocking step: %d after releasing control.', step)
+      _unlock_checkpoint(checkpoint_dir, step, step_name_format)
 
 
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
@@ -312,7 +545,7 @@ def _create_checkpointer(
     # Note: there could still potentially be concurrency issues since the lock
     # will be released, but we do not consider that to be an issue since the
     # first checkpoint is not likely to be cleaned up immediately.
-    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+    with ocp.checkpoint_utils.wait_for_new_checkpoint(
         restore_checkpoint_dir,
         until_step=wait_until_step,
         seconds_to_sleep=300,
@@ -851,12 +1084,14 @@ def _common_eval_or_decode_loop(
     step_format_fixed_length = checkpoint_paths.checkpoint_name_fixed_length(
         checkpointer.checkpoint_type
     )
-  # If preemption happened during evaluation, some checkpoints may be locked.
-  orbax_checkpoint_utils.unlock_existing_checkpoints(
+    # If preemption happened during evaluation, some checkpoint snapshots may
+    # not be cleaned up.
+  unlock_existing_checkpoints(
       checkpointer.restore_checkpoint_dir,
       step_prefix=step_prefix,
       step_format_fixed_length=step_format_fixed_length,
   )
+
   # Retrieve last step from the TrainState directly in case new checkpoints
   # have been written in the mean time.
   last_checkpoint_step = int(
@@ -916,7 +1151,7 @@ def _common_eval_or_decode_loop(
 
     # Use context manager to wait for new checkpoint and lock it to prevent
     # cleanup by the training thread.
-    with orbax_checkpoint_utils.wait_for_new_checkpoint(
+    with ocp.checkpoint_utils.wait_for_new_checkpoint(
         checkpointer.restore_checkpoint_dir,
         until_step=last_checkpoint_step + 1,
         seconds_to_sleep=60,

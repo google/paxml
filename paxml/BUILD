@@ -203,7 +203,6 @@ pytype_strict_library(
         ":trainer_lib",
         ":tuning_lib",
         # Implicit absl.logging dependency.
-        # Implicit clu.metrics dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
