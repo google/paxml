@@ -121,7 +121,61 @@ The Profile Guided Latency Estimator (PGLE) workflow measures the actual running
 of compute and collectives, the the profile information is fed back into XLA compiler
 for a better scheduling decision.
 
-The workflow to use the Profile Guided Latency Estimator workflow in XLA/GPU is:
+The Profile Guided Latency Estimator can be used manually or automatically. In the auto mode
+JAX will collect profile information and recompile a module in a single run. While
+in manual mode you need to run a task twice, the first time to collect and save profiles
+and the second to compile and run with provided data.
+
+##### Auto PGLE
+The auto PGLE can be turned on by setting the following environment variables:
+
+```
+XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
+JAX_ENABLE_PGLE=true
+JAX_PGLE_PROFILING_RUNS=3
+JAX_REMOVE_CUSTOM_PARTITIONING_PTR_FROM_CACHE_KEY=True
+Optional JAX_PGLE_AGGREGATION_PERCENTILE=85
+```
+
+Or in the JAX this can be set as the following:
+
+```
+import jax
+from jax._src import config
+
+with config.enable_pgle(True), config.pgle_profiling_runs(1):
+  # Run with the profiler collecting performance information.
+  train_step()
+  # Automatically re-compile with PGLE profile results
+  train_step()
+  ...
+```
+
+You can control amount of reruns used to collect profile data by changing `JAX_PGLE_PROFILING_RUNS`.
+Increasing this parameter would lead to better profile information, but it will also increase the
+amount of non-optimized training steps.
+
+The `JAX_REMOVE_CUSTOM_PARTITIONING_PTR_FROM_CACHE_KEY` parameters allows to use host callbacks with the auto PGLE.
+
+Decreasing the `JAX_PGLE_AGGREGATION_PERCENTILE` parameter might help in case when performance between steps is too noisy to filter out a non-relevant measures.
+
+**Attention:** Auto PGLE doesn't work for pre-compiled modules. Since JAX need to recompile the module during execution the auto PGLE will not work neither for AoT nor for the following case:
+
+```
+import jax
+from jax._src import config
+
+train_step_compiled = train_step().lower().compile()
+
+with config.enable_pgle(True), config.pgle_profiling_runs(1):
+  train_step_compiled()
+  # No effect since module was pre-compiled.
+  train_step_compiled()
+```
+
+##### Manual PGLE
+
+If you still want to use a manual Profile Guided Latency Estimator the workflow in XLA/GPU is:
 
 - 1. Run your workload once, with async collectives and latency hiding scheduler enabled.
 
