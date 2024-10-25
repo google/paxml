@@ -526,12 +526,21 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       restore_shape = (
           None if self._enforce_restore_shape_check else shape_struct.shape
       )
-      return ocp.ArrayRestoreArgs(
-          mesh=mesh,
-          mesh_axes=pspec,
-          global_shape=restore_shape,
-          dtype=shape_struct.dtype,
-      )
+      if hasattr(ocp.ArrayRestoreArgs, 'strict'):
+        return ocp.ArrayRestoreArgs(
+            mesh=mesh,
+            mesh_axes=pspec,
+            global_shape=restore_shape,
+            dtype=shape_struct.dtype,
+            strict=False,
+        )
+      else:
+        return ocp.ArrayRestoreArgs(
+            mesh=mesh,
+            mesh_axes=pspec,
+            global_shape=restore_shape,
+            dtype=shape_struct.dtype,
+        )
 
     # May be None if `pmap_use_tensorstore` restoration path is in use.
     if reference_state_specs is None:
