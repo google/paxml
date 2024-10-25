@@ -116,7 +116,7 @@ def lockdir(directory: epath.Path) -> epath.Path:
 def _lock_checkpoint(
     checkpoint_dir: epath.Path,
     step: int,
-    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+    step_name_format,
 ) -> bool:
   """Locks a checkpoint by writing a LOCKED directory."""
   logging.info('Locking step: %d before gaining control.', step)
@@ -141,7 +141,7 @@ def _lock_checkpoint(
 def _unlock_checkpoint(
     checkpoint_dir: epath.Path,
     step: int,
-    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+    step_name_format,
 ):
   """Removes a LOCKED directory to indicate unlocking."""
   if ocp._src.multihost.multihost.process_index() == 0:
@@ -155,9 +155,7 @@ def unlock_existing_checkpoints(
     checkpoint_dir: epath.Path,
     step_prefix: Optional[str] = None,
     step_format_fixed_length: Optional[int] = None,
-    step_name_format: Optional[
-        ocp.path.step.NameFormat[ocp.path.step.Metadata]
-    ] = None,
+    step_name_format=None,
 ):
   """Removes LOCKED file for all existing steps, if present.
 
@@ -195,9 +193,7 @@ def _reached_desired_step(step: int, until_step: Optional[int]) -> bool:
 
 # TODO(b/374832942) Remove after snapshot approach.
 def _init_step_name_format(
-    step_name_format: Optional[
-        ocp.path.step.NameFormat[ocp.path.step.Metadata]
-    ] = None,
+    step_name_format=None,
     step_prefix: Optional[str] = None,
     step_format_fixed_length: Optional[int] = None,
 ):
@@ -211,7 +207,7 @@ def _init_step_name_format(
 def _wait_for_new_checkpoint(
     checkpoint_dir: epath.Path,
     *,
-    step_name_format: ocp.path.step.NameFormat[ocp.path.step.Metadata],
+    step_name_format,
     until_step: Optional[int] = None,
     seconds_to_sleep: int = 1,
     timeout: Optional[int] = None,
@@ -284,9 +280,7 @@ def wait_for_new_checkpoint(
     timeout_fn: Optional[Callable[[], bool]] = None,
     step_prefix: Optional[str] = None,
     step_format_fixed_length: Optional[int] = None,
-    step_name_format: Optional[
-        ocp.path.step.NameFormat[ocp.path.step.Metadata]
-    ] = None,
+    step_name_format=None,
 ):
   """Waits until a new checkpoint file is found.
 
