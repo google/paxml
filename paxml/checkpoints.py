@@ -606,9 +606,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       return super()._write_metadata_file(directory, item, save_args, use_zarr3)
     return ocp.future.NoopFuture()
 
-  def _read_metadata_file(
-      self, directory: epath.Path
-  ) -> ocp.metadata.tree.TreeMetadata:
+  def _read_metadata_file(self, directory: epath.Path) -> Any:
     if self._use_ocdbt:
       return super()._read_metadata_file(directory)
     else:
