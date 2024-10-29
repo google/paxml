@@ -551,7 +551,7 @@ def create_experiment_config():
           ' --fdl_config, or --fdl_config_file is required.'
       )
 
-  experiment_config.validate()
+    experiment_config.validate()
   return experiment_config
 
 
@@ -567,11 +567,13 @@ def _main(argv: Sequence[str]) -> None:
   with ml_monitoring.ml_event_logger(ml_monitoring.MlEvent.INITIALIZE_SETUP):
     experiment_config = create_experiment_config()
 
-  run(
-      experiment_config=experiment_config,
-      enable_checkpoint_saving=FLAGS.enable_checkpoint_saving,
-      startup_random_jitter_max_secs=FLAGS.startup_random_jitter_max_secs,
-  )
+  with TransformerEngineHelper.fp8_autocast('replica', 'mdl', 'data'):
+    run(
+        experiment_config=experiment_config,
+        enable_checkpoint_saving=FLAGS.enable_checkpoint_saving,
+        startup_random_jitter_max_secs=FLAGS.startup_random_jitter_max_secs,
+    )
+
 
 _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
 
