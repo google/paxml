@@ -503,7 +503,7 @@ def write_summary_tensor(
     if summary_type not in {
         SummaryType.AGGREGATE_SCALAR, SummaryType.AGGREGATE_IMAGE
     }:
-      return
+      return  # pytype: disable=bad-return-type
   if isinstance(tensor, (list, tuple)):
     tensors = tensor
   else:
@@ -562,7 +562,7 @@ def write_summary_tensor(
     # same number of elements per tensor in `tensors`.
     tf_summary.histogram(key, np.concatenate(tensors), step_i)
   else:
-    assert False, 'Unsupported summary type: ' + str(summary_type)
+    assert False, 'Unsupported summary type: ' + str(summary_type)  # pytype: disable=bad-return-type
 
 
 def get_summary_display_name_from_key(key: str) -> str:
@@ -920,7 +920,7 @@ class SummaryHandler:
       )
 
     if not self.should_write(step):
-      return
+      return  # pytype: disable=bad-return-type
 
     # No accumulation. Add at least the latest value.
     if not self.accumulate_over_steps:
@@ -934,7 +934,7 @@ class SummaryHandler:
       )
 
     self._write()
-    self._clear()
+    self._clear()  # pytype: disable=bad-return-type
 
   def _add(
       self,

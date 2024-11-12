@@ -1595,7 +1595,7 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
 
   @property
   def weights_on_targets_only(self) -> bool:
-    return self._weights_on_targets_only
+    return self._weights_on_targets_only  # pytype: disable=bad-return-type
 
   @property
   def target_has_suffix(self) -> bool:
@@ -1848,16 +1848,18 @@ class MetricType(enum.Enum):
   SCORE = 2  # eval / target scoring-based metrics
 
 
-def get_eval_hparams_for_seqio(
+def get_eval_hparams_for_seqio(  # pytype: disable=annotation-type-mismatch
     task_or_mixture_name: str | seqio.Task | seqio.Mixture,
     batch_size: int,
     feature_lengths: Mapping[str, int],
     seed: int,
     metric_type: MetricType,
     split_name: str | Callable[[str], str] = 'validation',
-    feature_converter: pax_fiddle.Config[seqio.FeatureConverter]
-    | seqio.FeatureConverter
-    | None = None,
+    feature_converter: (
+        pax_fiddle.Config[seqio.FeatureConverter]
+        | seqio.FeatureConverter
+        | None
+    ) = None,
     num_infeed_hosts: int = 0,
     use_cached: bool = False,
     shuffle: bool = None,
