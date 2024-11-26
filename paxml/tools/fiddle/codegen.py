@@ -624,7 +624,7 @@ def codegen_baseline_from_legacy(
   ).code
 
 
-def codegen_experiment_diff(
+def codegen_experiment_diff(  # pytype: disable=annotation-type-mismatch
     experiment_cls: Type[base_experiment.BaseExperiment],
     *,
     baseline: Type[Any],
