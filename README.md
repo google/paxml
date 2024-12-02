@@ -130,11 +130,11 @@ and the second to compile and run with provided data.
 The auto PGLE can be turned on by setting the following environment variables:
 
 ```
-XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
-JAX_ENABLE_PGLE=true
-JAX_PGLE_PROFILING_RUNS=3
-JAX_REMOVE_CUSTOM_PARTITIONING_PTR_FROM_CACHE_KEY=True
-Optional JAX_PGLE_AGGREGATION_PERCENTILE=85
+export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_command_buffer=''"
+export JAX_ENABLE_COMPILATION_CACHE=True
+export JAX_ENABLE_PGLE=true
+export JAX_PGLE_PROFILING_RUNS=3
+Optional export JAX_PGLE_AGGREGATION_PERCENTILE=85
 ```
 
 Or in the JAX this can be set as the following:
@@ -154,8 +154,6 @@ with config.enable_pgle(True), config.pgle_profiling_runs(1):
 You can control amount of reruns used to collect profile data by changing `JAX_PGLE_PROFILING_RUNS`.
 Increasing this parameter would lead to better profile information, but it will also increase the
 amount of non-optimized training steps.
-
-The `JAX_REMOVE_CUSTOM_PARTITIONING_PTR_FROM_CACHE_KEY` parameters allows to use host callbacks with the auto PGLE.
 
 Decreasing the `JAX_PGLE_AGGREGATION_PERCENTILE` parameter might help in case when performance between steps is too noisy to filter out a non-relevant measures.
 
