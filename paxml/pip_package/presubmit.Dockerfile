@@ -23,7 +23,8 @@ RUN cd /paxml && \
   paxml/... \
   -paxml/tasks/vision:input_generator_test \
   -paxml:tasks_lib_test \
-  -paxml:checkpoint_managers_test
+  -paxml:checkpoint_managers_test \
+  -paxml/tasks/lm/params:c4_test
 WORKDIR /
 
 CMD ["/bin/bash"]
