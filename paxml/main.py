@@ -45,6 +45,7 @@ from paxml import base_experiment
 from paxml import eval_lib
 from paxml import experiment_registry
 from paxml import first_result_metric_callback
+from paxml import lineage_logging
 from paxml import setup_jax
 from paxml import tasks_lib
 from paxml import tf_data_service_lib
@@ -310,8 +311,11 @@ def run_experiment(
   train.write_experiment_class_vars_file(
       experiment_config.__class__, job_log_dir,
       '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
-  train.write_hparams_file(experiment_config, job_log_dir,
-                           '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_')
+  filename_prefix = '' if FLAGS.mode == 'train' else f'{FLAGS.mode}_'
+  train.write_hparams_file(experiment_config, job_log_dir, filename_prefix)
+  if jax.process_index() == 0:
+    hparams_fpath = job_log_dir / f'{filename_prefix}model_params.txt'
+    lineage_logging.log_config_file_lineage(hparams_fpath.name)
 
   task_p = experiment_config.task()
   task_p = typing.cast(pax_fiddle.Config[tasks_lib.SingleTask], task_p)

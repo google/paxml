@@ -350,6 +350,7 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit fiddle.absl_flags dependency.
         # Implicit jax dependency.
+        "//paxml:lineage_logging",
         "//paxml:ml_monitoring",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",
@@ -892,6 +893,11 @@ pytype_strict_library(
 pytype_strict_library(
     name = "ml_monitoring",
     srcs = ["ml_monitoring.py"],
+)
+
+pytype_strict_library(
+    name = "lineage_logging",
+    srcs = ["lineage_logging.py"],
 )
 
 pytype_strict_test(
