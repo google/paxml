@@ -463,6 +463,37 @@ class SummaryUtilsTest(parameterized.TestCase):
         MatcherArrayAlmostEqual(np.array(summary_tensors_2['summary_c_audio'])),
         44000, 2)
 
+  def test_should_cap_summary_images(self):
+    summary_tensors = {
+        'summary_a_image': [
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+        ],
+        'summary_b_image': [
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+            jnp.ones(shape=[16, 4, 4, 3], dtype=jnp.float32),
+            jnp.ones(shape=[8, 2, 4, 4, 3], dtype=jnp.float32),
+        ],
+        'summary_scalar': [
+            jnp.ones(shape=[80, 4, 4, 3], dtype=jnp.float32),
+        ],
+        'summary_c_image': [],
+    }
+    should_cap = {
+        'summary_a_image': False,
+        'summary_b_image': True,
+        'summary_scalar': False,
+        'summary_c_image': False,
+        'summary_d_image': False,
+    }
+    for key, expected_should_cap in should_cap.items():
+      self.assertEqual(
+          summary_utils.should_cap_summary(summary_tensors, key),
+          expected_should_cap,
+      )
+
 
 if __name__ == '__main__':
   absltest.main()

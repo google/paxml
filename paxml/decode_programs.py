@@ -39,7 +39,6 @@ from paxml import xla_passthrough
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
-from praxis import base_model
 from praxis import lazy_loader
 from praxis import pax_fiddle
 from praxis import py_utils
@@ -392,6 +391,10 @@ class SingleTaskDecodeProgram(programs.Program):
       metrics = metric_utils.merge_clu_metrics(metrics, updated_metrics)
 
       for key, tensor in summary_utils.flatten_summary_dict(summary_tensors):
+        if summary_utils.should_cap_summary(all_summary_tensors, key):
+          # To avoid OOM for large image dataset.
+          logging.info('Skipping summary tensor %s due to capping.', key)
+          continue
         all_summary_tensors[key].append(np.array(tensor))
 
       logging.info(

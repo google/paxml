@@ -579,6 +579,28 @@ def get_summary_display_name_from_key(key: str) -> str:
   return trimmed + base_layer.get_summary_type_suffix(base_summary_type)
 
 
+def should_cap_summary(
+    summary_tensors: dict[str, list[JTensor]], key: str
+) -> bool:
+  """Returns whether to cap the total number of summaries."""
+  # TODO(jianlijianli): Add support for other summary types when needed.
+  if base_layer.get_summary_type_from_key(key) != SummaryType.IMAGE:
+    return False
+  if key not in summary_tensors:
+    return False
+  if not summary_tensors[key]:  # Empty summary.
+    return False
+  # This handles both [B, H, W, C] and [B/S, S, H, W, C] where S is
+  # "split dimension".
+  num_images_per_summary = np.prod(summary_tensors[key][0].shape[:-3])
+  if (
+      num_images_per_summary * len(summary_tensors[key])
+      >= MAX_IMAGES_PER_SUMMARY
+  ):
+    return True
+  return False
+
+
 def write_summary_entry(
     summary_writer: SummaryWriter,
     step_i: int,
