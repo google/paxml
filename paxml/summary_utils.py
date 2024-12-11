@@ -849,60 +849,55 @@ class SummaryHandler:
     if not (should_log or should_accumulate or should_write_summary):
       # Nothing to do, return immediately to avoid unnecessary work.
       return False
-    loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
-    weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
-        weighted_scalars
-    )
-    if clu_metrics:
-      clu_metrics = py_utils.maybe_unreplicate_for_fully_replicated(clu_metrics)
-    summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
-        summary_tensors
-    )
-    if per_example_out and should_log:
-      per_example_out = py_utils.maybe_unreplicate_for_first_shard(
-          per_example_out)
 
-    if self._summary_pool:
+    def process_fn():
+      nonlocal loss, weighted_scalars, clu_metrics, summary_tensors
+      nonlocal per_example_out
 
-      def process_fn():
-        # Copy the values from device to host first.
-        (
-            loss_copy,
-            weighted_scalars_copy,
-            clu_metrics_copy,
-            summary_tensors_copy,
-        ) = jax.device_get(
-            (loss, weighted_scalars, clu_metrics, summary_tensors)
+      loss = py_utils.maybe_unreplicate_for_fully_replicated(loss)
+      weighted_scalars = py_utils.maybe_unreplicate_for_fully_replicated(
+          weighted_scalars
+      )
+      if clu_metrics:
+        clu_metrics = py_utils.maybe_unreplicate_for_fully_replicated(
+            clu_metrics
         )
-        per_example_out_copy = None
-        if per_example_out and should_log:
-          per_example_out_copy = jax.device_get(per_example_out)
-
-        # pytype: disable=wrong-arg-types
-        self._process(
-            step,
-            loss_copy,
-            weighted_scalars_copy,
-            summary_tensors_copy,
-            per_example_out_copy,
-            steps_per_sec,
-            should_log,
-            clu_metrics_copy,
+      summary_tensors = py_utils.maybe_unreplicate_for_fully_replicated(
+          summary_tensors
+      )
+      if per_example_out and should_log:
+        per_example_out = py_utils.maybe_unreplicate_for_first_shard(
+            per_example_out
         )
-        # pytype: enable=wrong-arg-types
 
-      self._summary_pool.submit(process_fn)
-    else:
+      # Copy the values from device to host first.
+      (
+          loss_copy,
+          weighted_scalars_copy,
+          clu_metrics_copy,
+          summary_tensors_copy,
+      ) = jax.device_get((loss, weighted_scalars, clu_metrics, summary_tensors))
+      per_example_out_copy = None
+      if per_example_out and should_log:
+        per_example_out_copy = jax.device_get(per_example_out)
+
+      # pytype: disable=wrong-arg-types
       self._process(
           step,
-          loss,
-          weighted_scalars,
-          summary_tensors,
-          per_example_out,
+          loss_copy,
+          weighted_scalars_copy,
+          summary_tensors_copy,
+          per_example_out_copy,
           steps_per_sec,
           should_log,
-          clu_metrics,
+          clu_metrics_copy,
       )
+      # pytype: enable=wrong-arg-types
+
+    if self._summary_pool:
+      self._summary_pool.submit(process_fn)
+    else:
+      process_fn()
 
     return self.should_write(step)
 
