@@ -22,6 +22,7 @@ import lzma
 import math
 import os
 import re
+import typing
 from typing import Any, Callable, NamedTuple, Sequence, Text, Type
 from absl import logging
 from clu import platform
@@ -974,7 +975,7 @@ class TrialDirectoryNameGenerator:
       assert len(combined_values) == len(self._decision_point_names), (
           self._decision_point_names, combined_values)
       params = list(zip(self._decision_point_names, combined_values))
-    return params
+    return typing.cast(list[tuple[str, Any]], params)
 
   def format_value(self, value: Any) -> str:
     """Formats a parameter value into path-friendly string."""
