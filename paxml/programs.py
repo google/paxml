@@ -392,6 +392,14 @@ class BaseTrainProgram(Program):
 
     if do_profile and step - self._initial_step < profiler_capture_step:
       self._profiler.update_step_moving_mean(train_period.elapsed)
+
+    if ( 
+        do_profile 
+        and step - self._initial_step == 
+            profiler_capture_step + self._profiler._capture_num_steps
+    ):
+      self._profiler.stop_capture_async()
+
     logging.log_first_n(
         logging.INFO, '[PAX STATUS]:  Writing summaries (attempt).', 5
     )
