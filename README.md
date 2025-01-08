@@ -130,11 +130,20 @@ and the second to compile and run with provided data.
 The auto PGLE can be turned on by setting the following environment variables:
 
 ```
-export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true --xla_gpu_enable_command_buffer=''"
-export JAX_ENABLE_COMPILATION_CACHE=True
+Mandatory:
+export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
 export JAX_ENABLE_PGLE=true
+
+Optional:
 export JAX_PGLE_PROFILING_RUNS=3
-Optional export JAX_PGLE_AGGREGATION_PERCENTILE=85
+export JAX_PGLE_AGGREGATION_PERCENTILE=85
+
+# Right now the auto PGLE profile collection doesn't work with command buffer.
+# If the command buffer is enabled, Auto PGLE will disable it during profile
+# colletion and enable it back after the recompilation. If you need to have a
+# consistent command buffer logic with and with PGLE profile you can disable it
+# manually:
+export XLA_FLAGS="${XLA_FLAGS} --xla_gpu_enable_command_buffer=''"
 ```
 
 Or in the JAX this can be set as the following:
