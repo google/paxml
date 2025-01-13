@@ -81,7 +81,6 @@ BASE_XLA_FLAGS=${BASE_XLA_FLAGS:-"\
 	--xla_gpu_enable_latency_hiding_scheduler=true \
 	--xla_gpu_enable_triton_gemm=false \
 	--xla_gpu_enable_highest_priority_async_stream=true \
-	--xla_gpu_enable_triton_softmax_fusion=false \
 	--xla_gpu_all_reduce_combine_threshold_bytes=51200 \
 	--xla_gpu_graph_level=0"}
 export XLA_FLAGS="$BASE_XLA_FLAGS ${XLA_FLAGS:-}"
