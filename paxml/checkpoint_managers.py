@@ -120,14 +120,35 @@ class CheckpointManagerOptions(ocp.CheckpointManagerOptions):
   cleanup_tmp_directories: bool = False
 
 
+def _get_unique_registered_items_and_handlers(
+    registry: ocp.handlers.CheckpointHandlerRegistry,
+) -> dict[str, ocp.handlers.CheckpointHandler]:
+  """Returns unique items and handlers from the registry.
+
+  Args:
+    registry: The registry to get the items and handlers from.
+
+  Returns:
+    A list of unique `(item name, handler)` tuples.
+  """
+  item_and_handers = []
+  for (
+      item,
+      _,
+  ), handler in registry.get_all_entries().items():
+    if item is not None and (item, handler) not in item_and_handers:
+      item_and_handers.append((item, handler))
+  return dict(item_and_handers)
+
+
 class _CompositeCheckpointHandlerWrapper(ocp.CompositeCheckpointHandler):
   """Wrapper for CompositeCheckpointHandler support version < 1."""
 
   def _get_state_handler(self) -> ocp.CheckpointHandler:
-    # TODO: b/359524229 - `_known_handlers`` has been deprecated. Remove this
-    # once `_CheckpointManagerImpl` has been migrated from `checkpointers` to
-    # `handler_registry`.
-    for item_name, handler in self._known_handlers.items():
+    known_handlers = _get_unique_registered_items_and_handlers(
+        self._handler_registry
+    )
+    for item_name, handler in known_handlers.items():
       if item_name == STATE_ITEM_NAME:
         if handler is None:
           raise ValueError(f'Handler for {STATE_ITEM_NAME} was not configured.')
@@ -254,12 +275,9 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
       composite_handler = typing.cast(
           ocp.CompositeCheckpointHandler, self._checkpointer._handler  # pylint: disable=protected-access
       )
-      # TODO: b/359524229 - `_known_handlers`` has been deprecated. Remove this
-      # once `_CheckpointManagerImpl` has been migrated from `checkpointers` to
-      # `handler_registry`.
-      original_state_handler = composite_handler._known_handlers[  # pylint: disable=protected-access
-          STATE_ITEM_NAME
-      ]
+      original_state_handler = _get_unique_registered_items_and_handlers(
+          composite_handler._handler_registry  # pylint: disable=protected-access
+      )[STATE_ITEM_NAME]
       handler = _CompositeCheckpointHandlerWrapper(
           **{STATE_ITEM_NAME: original_state_handler}
       )
