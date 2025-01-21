@@ -598,12 +598,19 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
   def _write_metadata_file(
       self,
       directory: epath.Path,
-      item: PyTree,
+      *,
+      param_infos: PyTree,
       save_args: PyTree,
+      custom_metadata: Any | None = None,
       use_zarr3: bool = False,
   ):
     if self._use_ocdbt:
-      return super()._write_metadata_file(directory, item, save_args, use_zarr3)
+      return super()._write_metadata_file(
+          directory,
+          param_infos=param_infos,
+          save_args=save_args,
+          use_zarr3=use_zarr3,
+      )
     return ocp.future.NoopFuture()
 
   def _read_metadata_file(self, directory: epath.Path) -> Any:
@@ -782,8 +789,10 @@ class FlaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
   def _write_metadata_file(
       self,
       directory: epath.Path,
-      item: PyTree,
+      *,
+      param_infos: PyTree,
       save_args: PyTree,
+      custom_metadata: Any | None = None,
       use_zarr3: bool = False,
   ):
     pass
