@@ -131,8 +131,10 @@ The auto PGLE can be turned on by setting the following environment variables:
 
 ```
 Mandatory:
-export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
 export JAX_ENABLE_PGLE=true
+
+For JAX version <= 0.5.0 make sure to include:
+export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=true"
 
 Optional:
 export JAX_PGLE_PROFILING_RUNS=3
