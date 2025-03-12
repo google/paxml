@@ -329,7 +329,6 @@ class CheckpointManagerTest(parameterized.TestCase):
           expected,
       )
     train_state_global_shapes = jax.eval_shape(lambda x: x, self.train_state)
-# Internal Orbax infra configuration test
 
     restored = self.restore(
         checkpoint_manager,
