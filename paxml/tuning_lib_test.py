@@ -692,9 +692,11 @@ class TuneTest(absltest.TestCase):
         'eval_test_abc/metrics/reward:8x': 5.12
     })
     # We use the average of the metrics across steps as the final measurement.
-    self.assertEqual([t.final_measurement.reward for t in result.trials],
-                     # Used aggregator='max' for computing the reward.
-                     [0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0, 0.0, 0.0])
+    self.assertSequenceAlmostEqual(
+        [t.final_measurement.reward for t in result.trials],
+        # Used aggregator='max' for computing the reward.
+        [0.0, 0.64 + 1.28 + 2.56 + 5.12, 0.0, 0.0, 0.0],
+    )
 
   def test_incorrectly_left_dataset_search_disabled(self):
     job_log_dir = epath.Path(absltest.get_default_test_tmpdir())
