@@ -23,6 +23,7 @@ from paxml import base_experiment
 from paxml import experiment_registry
 from paxml import tasks_lib
 from paxml.tasks.lm import input_generator
+from paxml.tasks.lm import lg_gpt3_pax
 from paxml.tasks.lm import model_params
 from praxis import base_input
 from praxis import layers
@@ -70,8 +71,8 @@ class SyntheticDataset(base_experiment.BaseExperiment):
         self._dataset_common(is_training=True),
         self._dataset_common(is_training=False)
     ]
-
-
+  
+  
 @experiment_registry.register
 class LargeMlp(model_params.ClassificationModelAdam, SyntheticDataset):
   """An 8-layer MLP model with large hidden dimensions."""
@@ -192,6 +193,7 @@ class LmCloudSpmd2B(LmCloudSpmd):
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
   ICI_MESH_SHAPE = [1, 4, 1]
 
+lmcloudspmd2Blimitsteps = pax_fiddle.auto_config(lambda: LmCloudSpmd2BLimitSteps())
 
 @experiment_registry.register
 class LmCloudSpmd2BLimitSteps(LmCloudSpmd2B):
