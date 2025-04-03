@@ -116,7 +116,10 @@ class CheckpointsTest(parameterized.TestCase):
       ('tmp_1010101.checkpoint_000100', True),
   )
   def test_is_tmp_checkpoint_asset_legacy(self, name, expected_result):
+    # Write some content to ensure that the checkpoint file exists.
+    self.directory.parent.mkdir(exist_ok=True, parents=True)
     ckpt = self.directory / name
+    ckpt.write_text('some data')
     self.assertEqual(
         checkpoint_paths.is_tmp_checkpoint_asset(ckpt), expected_result
     )
@@ -137,6 +140,9 @@ class CheckpointsTest(parameterized.TestCase):
       ),
   )
   def test_get_step_from_checkpoint_asset(self, path, expected_step):
+    # Write some content to ensure that the checkpoint file exists.
+    path.parent.mkdir(exist_ok=True, parents=True)
+    path.write_text('some data')
     self.assertEqual(
         checkpoint_paths.get_step_from_checkpoint_asset(path), expected_step
     )
