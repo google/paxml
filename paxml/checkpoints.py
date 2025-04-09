@@ -96,9 +96,11 @@ def save_checkpoint(
     checkpoint_type: CheckpointType = CheckpointType.FLAX,
     state_specs: train_states.TrainState | None = None,
     async_checkpointer: AsyncCheckpointer | None = None,
-    train_state_unpadded_shape_dtype_struct: train_states.TrainState
-    | None = None,
+    train_state_unpadded_shape_dtype_struct: (
+        train_states.TrainState | None
+    ) = None,
     tensorstore_use_ocdbt: bool = False,
+    async_options: ocp.AsyncOptions | None = None,
 ) -> checkpoint_managers.OrbaxCheckpointManager:
   """Saves a checkpoint into the provided base directory.
 
@@ -118,6 +120,7 @@ def save_checkpoint(
     train_state_unpadded_shape_dtype_struct: jax.ShapeDtypeStruct of the
       unpadded train state.
     tensorstore_use_ocdbt: Enables Tensorstore OCDBT format.
+    async_options: Options for async checkpointing.
 
   Returns:
     An OrbaxCheckpointManager object.
@@ -143,7 +146,9 @@ def save_checkpoint(
   checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
       checkpoint_dir,
       checkpointer,
-      options=checkpoint_managers.CheckpointManagerOptions(create=True),
+      options=checkpoint_managers.CheckpointManagerOptions(
+          create=True, async_options=async_options
+      ),
       checkpoint_type=checkpoint_type,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
   )
