@@ -21,10 +21,11 @@ RUN cd /paxml && \
   --test_verbose_timeout_warnings \
   -- \
   paxml/... \
+  -paxml/tasks/lm/params:c4_test \
   -paxml/tasks/vision:input_generator_test \
-  -paxml:tasks_lib_test \
   -paxml:checkpoint_managers_test \
-  -paxml/tasks/lm/params:c4_test
+  -paxml:seqio_input_test \
+  -paxml:tasks_lib_test
 WORKDIR /
 
 CMD ["/bin/bash"]
