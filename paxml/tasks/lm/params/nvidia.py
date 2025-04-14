@@ -789,6 +789,7 @@ class Grok(NVIDIA1_3B):
     DCN_MESH_SHAPE = [1, 32, 1, 1]
 
   USE_ROPE = True
+  USE_TE_DPA=False
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
@@ -818,6 +819,7 @@ class Grok(NVIDIA1_3B):
         combine_qkv=self.COMBINE_QKV,
         checkpoint_policy=self.CHECKPOINT_POLICY,
         use_fp8=self.USE_FP8,
+        use_te_dpa=self.USE_TE_DPA,
     )
     ## set sharding
     lm_cls = cast(
@@ -876,6 +878,7 @@ class Grok_Proxy(NVIDIA1_3B):
     DCN_MESH_SHAPE = [1, 8, 1, 1]
 
   USE_ROPE = True
+  USE_TE_DPA=False
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
@@ -905,6 +908,7 @@ class Grok_Proxy(NVIDIA1_3B):
         combine_qkv=self.COMBINE_QKV,
         checkpoint_policy=self.CHECKPOINT_POLICY,
         use_fp8=self.USE_FP8,
+        use_te_dpa=self.USE_TE_DPA,
     )
     ## set sharding
     lm_cls = cast(
@@ -970,6 +974,7 @@ class Grok_Proxy_PP(NVIDIA5B):
     MESH_AXIS_NAMES = ['stage', 'replica', 'data', 'data_expert', 'mdl']
 
   USE_ROPE = True
+  USE_TE_DPA=False
 
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
@@ -1001,6 +1006,7 @@ class Grok_Proxy_PP(NVIDIA5B):
         num_pipeline_stages=self.NUM_STAGES,
         num_pipeline_microbatches=self.NUM_MICROBATCHES,
         use_fp8=self.USE_FP8,
+        use_te_dpa=self.USE_TE_DPA,
     )
     ## set sharding
     replica_axis = 'replica'
