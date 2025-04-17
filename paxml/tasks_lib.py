@@ -378,8 +378,7 @@ def _assign_model_vars(
       used_vars.add(init_var_name)
     else:
       # Allow the copy of cross-host Jax arrays.
-      with jax.spmd_mode('allow_all'):
-        loaded_var = jnp.copy(loaded_var)
+      loaded_var = jnp.copy(loaded_var)
     if isinstance(
         model_vars, NestedMap
     ):
