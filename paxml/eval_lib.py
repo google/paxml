@@ -882,11 +882,11 @@ def _common_eval_or_decode_loop(
     )
     # If preemption happened during evaluation, some checkpoint snapshots may
     # not be cleaned up.
-  release_all_snapshots(
-      checkpointer.restore_checkpoint_dir,
-      step_prefix=step_prefix,
-      step_format_fixed_length=step_format_fixed_length,
-  )
+    release_all_snapshots(
+        checkpointer.restore_checkpoint_dir,
+        step_prefix=step_prefix,
+        step_format_fixed_length=step_format_fixed_length,
+    )
 
   # Retrieve last step from the TrainState directly in case new checkpoints
   # have been written in the mean time.
