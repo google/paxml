@@ -62,6 +62,7 @@ import pprint
 from absl import app
 from absl import flags
 import jax
+from jax.experimental import roofline
 import jax.numpy as jnp
 import numpy as np
 from paxml import experiment_registry
@@ -220,8 +221,8 @@ class ExperimentParser:
     with base_layer.JaxContext.new_context(
         hparams=base_layer.JaxContext.HParams(do_eval=True)
     ):
-      analysis = jax.jit(model_fprop).lower(datum).cost_analysis()
-      flops = analysis['flops']
+      _, analysis = roofline.roofline(model_fprop)(datum)
+      flops = analysis.unfused_flops
       gflops = flops / 1e9
 
       print('\n' + '#' * 5 + ' ' + self.exp_name + ' ' + '#' * 5)
