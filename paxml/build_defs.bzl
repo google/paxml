@@ -198,7 +198,7 @@ def pax_targets(
             exp_sources = exp_sources,
             # # Implicit py_binary flag
             # PAR reticulation OOMs for gpu_main.
-            exec_properties = {"mem": "24g"},
+            exec_properties = {"mem": "24g", "cpp_link.max-input-count": "81000"},
         )
 
         # Add a test to check that the experiments are importable in a GPU build.
