@@ -413,6 +413,9 @@ def _import_modules():
   for d in import_str.split(' '):
     assert d.endswith('.py'), d
     d = d.replace('/', '.')[:-len('.py')]
+    # Remove .../genfiles/ prefix on generated files.
+    if (idx := d.find('genfiles')) != -1:
+      d = d[idx+len('genfiles')+1:]
     # internal build_defs.bzl imports code
     importlib.import_module(d)
 
