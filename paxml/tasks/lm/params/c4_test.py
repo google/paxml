@@ -19,7 +19,6 @@ import os
 from absl.testing import absltest
 import fiddle as fdl
 import jax
-from jax.lib import xla_bridge
 from paxml.tasks.lm.params import c4
 from praxis import layers
 from praxis import optimizers
@@ -39,7 +38,7 @@ def setUpModule():
         flags_str + " --xla_force_host_platform_device_count=768"
     )
   # Clear any cached backends so new CPU backend will pick up the env var.
-  xla_bridge.get_backend.cache_clear()
+  jax.extend.backend.get_backend.cache_clear()
 
 
 def tearDownModule():
@@ -47,7 +46,7 @@ def tearDownModule():
     del os.environ["XLA_FLAGS"]
   else:
     os.environ["XLA_FLAGS"] = prev_xla_flags
-  xla_bridge.get_backend.cache_clear()
+  jax.extend.backend.get_backend.cache_clear()
 
 
 class C4Test(test_utils.TestCase):
