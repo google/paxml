@@ -128,9 +128,12 @@ def release_all_snapshots(
       step_format_fixed_length=step_format_fixed_length,
   )
   for step in steps:
-    ocp.checkpoint_utils._release_snapshot(  # pylint: disable=protected-access
-        checkpoint_dir, step, step_name_format
-    )
+    try:
+      ocp.checkpoint_utils._release_snapshot(  # pylint: disable=protected-access
+          checkpoint_dir, step, step_name_format
+      )
+    except FileNotFoundError:
+      pass
 
 
 class _EvalCheckpointer(metaclass=abc.ABCMeta):
