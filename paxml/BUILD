@@ -408,7 +408,7 @@ pytype_strict_library(
         # Implicit absl.logging dependency.
         # Implicit etils dependency.
         # Implicit jax dependency.
-        # Implicit jax.experimental dependency.
+        # Implicit jax.experimental.multihost_utils dependency.
         # Implicit numpy dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
