@@ -74,6 +74,7 @@ def pax_targets(
         add_main_gpu_target = True,
         add_main_mpm_target = True,
         main_kwargs = None,
+        main_gpu_kwargs = None,
         add_smoke_test = True,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
@@ -115,6 +116,7 @@ def pax_targets(
       add_main_gpu_target: Build with jax GPU dependency.
       add_main_mpm_target: Add a ':main_mpm' target.
       main_kwargs: dict of args to provide when building main binary.
+      main_gpu_kwargs: dict of args to provide when building main_gpu binary.
       add_smoke_test: Whether to add the :all_experiments_smoke_test target.
       smoke_test_py_test_rule: Test rule use to build the smoke test.
       smoke_test_args: The list of command line arguments that can be passed to the
@@ -183,6 +185,8 @@ def pax_targets(
         )
 
     if add_main_gpu_target:
+        if not main_gpu_kwargs:
+            main_gpu_kwargs = {}
         main_name = "main_gpu"
         main_name = main_name if not prefix_name else "%s_%s" % (prefix_name, main_name)
         export_binary(
@@ -199,6 +203,7 @@ def pax_targets(
             # # Implicit py_binary flag
             # PAR reticulation OOMs for gpu_main.
             exec_properties = {"mem": "24g", "cpp_link.max-input-count": "81000"},
+            **main_gpu_kwargs
         )
 
         # Add a test to check that the experiments are importable in a GPU build.
