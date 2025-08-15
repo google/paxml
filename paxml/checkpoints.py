@@ -618,9 +618,9 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       )
     return ocp.future.NoopFuture()
 
-  def _read_metadata_file(self, directory: epath.Path) -> Any:
+  async def _read_metadata_file(self, directory: epath.Path) -> Any:
     if self._use_ocdbt:
-      return super()._read_metadata_file(directory)
+      return await super()._read_metadata_file(directory)
     else:
       raise FileNotFoundError(
           'Metadata read not expected for non-OCDBT checkpoint. Ensure that if'
