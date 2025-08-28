@@ -608,6 +608,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       save_args: PyTree,
       custom_metadata: Any | None = None,
       use_zarr3: bool = False,
+      partial_save: bool = False,
   ):
     if self._use_ocdbt:
       await super()._write_metadata_file(
@@ -615,6 +616,7 @@ class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
           param_infos=param_infos,
           save_args=save_args,
           use_zarr3=use_zarr3,
+          partial_save=partial_save,
       )
 
   async def _read_metadata_file(self, directory: epath.Path) -> Any:
@@ -798,6 +800,7 @@ class FlaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
       save_args: PyTree,
       custom_metadata: Any | None = None,
       use_zarr3: bool = False,
+      partial_save: bool = False,
   ):
     pass
 
