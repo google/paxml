@@ -373,6 +373,7 @@ pytype_strict_library(
 pytype_strict_library(
     name = "metric_utils",
     srcs = ["metric_utils.py"],
+    # lazy_imports = True,
     deps = [
         # Implicit absl.logging dependency.
         # Implicit clu.metrics dependency.
