@@ -758,6 +758,7 @@ class CheckpointManagerTest(parameterized.TestCase):
         _save_non_atomic()
 
     checkpoint_manager = self.create_checkpoint_manager(options)
+    checkpoint_manager._manager._maybe_await_cleanup_tmp_directory()
     self.assertEmpty(ocp.utils.tmp_checkpoints(checkpoint_manager.directory))
     self.save(
         checkpoint_manager,
