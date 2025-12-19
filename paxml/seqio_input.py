@@ -982,6 +982,12 @@ class SeqIOInput(base_input.BaseInput):
   ) -> Sequence[str]:
     vocab = self._get_vocab(key)
 
+    # Handle 1D arrays (single example) by treating them as batch of 1.
+    if ids.ndim == 1:
+      ids = ids[np.newaxis, :]
+      if lengths is not None:
+        lengths = np.atleast_1d(lengths)
+
     if lengths is None:
       lengths = [ids.shape[1]] * ids.shape[0]
     ret = []
