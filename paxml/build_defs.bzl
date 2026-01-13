@@ -82,8 +82,7 @@ def pax_targets(
         smoke_test_args = None,
         smoke_test_kwargs = None,
         dump_input_specs_kwargs = None,
-        # Internal enable fragmented build argument, toggled to True.
-        # Internal tooling mock backend attribute
+        # Internal tooling mock backend attribute and build spec
         main_src = "//paxml:main.py",
         model_analysis_kwargs = None,
         dump_hparams_kwargs = None,
