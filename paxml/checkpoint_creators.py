@@ -484,8 +484,12 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
             force=is_final,
         )
       else:
-        unreplicated_train_state = jax.tree.map(
-            lambda x: x[0], partitioned_train_state
+        # Use py_utils.maybe_unreplicate_for_fully_replicated which handles
+        # jax_pmap_shmap_merge=True, numpy arrays, scalars, and other edge cases.
+        unreplicated_train_state = (
+            py_utils.maybe_unreplicate_for_fully_replicated(
+                partitioned_train_state
+            )
         )
         self._save_with_args(
             step_i,
