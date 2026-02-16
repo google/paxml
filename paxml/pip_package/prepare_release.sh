@@ -66,8 +66,8 @@ fi
 
 sed -i "s/version='[0-9.]*'/version='$PAXML_VERSION'/" setup.py
 sed -i "s/_RELEASE_VERSION: '[0-9.]*'/_RELEASE_VERSION: '$PAXML_VERSION'/" cloudbuild-release.yaml
-gsutil cp gs://pax-on-cloud-tpu-project/wheels/"$BUILD_DATE"/paxml_commit.txt ./
-gsutil cp gs://pax-on-cloud-tpu-project/wheels/"$BUILD_DATE"/praxis_commit.txt ./
+gcloud storage cp gs://pax-on-cloud-tpu-project/wheels/"$BUILD_DATE"/paxml_commit.txt ./
+gcloud storage cp gs://pax-on-cloud-tpu-project/wheels/"$BUILD_DATE"/praxis_commit.txt ./
 PAXML_COMMIT=$(<paxml_commit.txt)
 PRAXIS_COMMIT=$(<praxis_commit.txt)
 rm paxml_commit.txt
