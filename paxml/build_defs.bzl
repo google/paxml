@@ -349,6 +349,12 @@ def export_test(
       args: arguments/flags to be passed to the test rule.
       **kwargs: all remaining arguments are passed through.
     """
+    if "linking_mode" not in kwargs:
+        kwargs["linking_mode"] = "sharded_dynamic"
+
+    if "use_precompile" not in kwargs:
+        kwargs["use_precompile"] = False
+
     test_copied = "%s.py" % name
     _copy_src(output_name = test_copied, source_target = test_src, exp_sources = exp_sources)
 
@@ -383,6 +389,9 @@ def export_binary(
       delayed_import: if True, arranges importing experiments in main().
       **kwargs: all remaining arguments are passed through.
     """
+    if "linking_mode" not in kwargs:
+        kwargs["linking_mode"] = "sharded_dynamic"
+
     main_copied = "%s.py" % name
     _copy_src(
         output_name = main_copied,
