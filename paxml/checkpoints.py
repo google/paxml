@@ -459,7 +459,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     super().__init__(use_ocdbt=use_ocdbt, handler_impl=handler_impl)
     self._enforce_restore_shape_check = enforce_restore_shape_check
 
-  async def async_save(
+  async def async_save(  # pytype: disable=signature-mismatch
       self,
       directory: epath.Path,
       item: PyTree | None = None,
@@ -698,7 +698,7 @@ class FlaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
     super().__init__(handler_impl=FlaxCheckpointHandlerImpl())
     self._aggregate_handler = ocp.aggregate_handlers.MsgpackHandler()
 
-  async def async_save(
+  async def async_save(  # pytype: disable=signature-mismatch
       self,
       directory: epath.Path,
       item: PyTree | None = None,
