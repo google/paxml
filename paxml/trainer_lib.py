@@ -29,6 +29,7 @@ from flax import struct as flax_struct
 import jax
 from jax import numpy as jnp
 from jax.experimental import pjit
+import numpy as np
 from paxml import base_metrics
 from paxml import checkpoint_types
 from paxml import learners as learners_lib
@@ -444,7 +445,12 @@ def replicate_model_state(model_states: TrainState) -> TrainState:
     if isinstance(state, jax.Array) and len(state.devices()) != 1:
       return state
     else:
-      return jax.device_put_replicated(state, jax.local_devices())
+      devices = jax.local_devices()
+      mesh = jax.sharding.Mesh(np.array(devices), ('_device_put_sharded',))
+      sharding = jax.NamedSharding(mesh, jax.P('_device_put_sharded'))
+      if isinstance(state, jax.Array):
+        return jax.device_put(jnp.stack([state] * len(devices)), sharding)
+      return jax.device_put(np.stack([state] * len(devices)), sharding)
 
   return jax.tree.map(_replicate, model_states)
 

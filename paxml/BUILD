@@ -648,6 +648,7 @@ pytype_strict_library(
         # Implicit fiddle dependency.
         # Implicit flax.core dependency.
         # Implicit jax dependency.
+        # Implicit numpy dependency.
         "//praxis:asserts",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
