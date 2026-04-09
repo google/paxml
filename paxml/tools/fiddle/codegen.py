@@ -178,7 +178,7 @@ class UnusedClass:  # For whitespace/newlines/indentation.
   return _extract_function_def(node, "make_experiment")
 
 
-def _highlevel_config_fn(import_manager: ..., cls_name: str) -> cst.FunctionDef:
+def _highlevel_config_fn(import_manager, cls_name: str) -> cst.FunctionDef:
   """Generates the highlevel_config function."""
   pax_fiddle_config = import_manager.add(pax_fiddle.Config)
   node = cst.parse_module(f"""
@@ -191,7 +191,7 @@ def highlevel_config():
   return _extract_function_def(node, "highlevel_config")
 
 
-def _lower_fn(import_manager: ...) -> cst.FunctionDef:
+def _lower_fn(import_manager) -> cst.FunctionDef:
   """Generates the function to lower highlevel to lowlevel configs."""
   pax_fiddle_build = import_manager.add(pax_fiddle.build)
   fdl_ordered_arguments = import_manager.add(fdl.ordered_arguments)
