@@ -1045,14 +1045,14 @@ class PjitPartitioner(Partitioner):
 
     fn_in_shardings = jax.tree.map(
         lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
-        if not isinstance(p, pjit.AUTO)
-        else p,
+        if p is not None
+        else None,
         fn_in_partition_specs,
     )
     fn_out_shardings = jax.tree.map(
         lambda p: jax.sharding.NamedSharding(self._global_mesh, p)
-        if not isinstance(p, pjit.AUTO)
-        else p,
+        if p is not None
+        else None,
         fn_out_partition_specs,
     )
     extra_kwargs = dict(in_shardings=fn_in_shardings)
@@ -1235,9 +1235,9 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     """
     super().__init__(init_is_eval, reshard_inputs, task, device_mesh)
     self._auto_sharding_info = auto_sharding_info
-    self._auto_sharding_result: AutoShardingPjitPartitioner._AutoShardingResult = (
-        None  # Cached results.
-    )
+    self._auto_sharding_result: (
+        AutoShardingPjitPartitioner._AutoShardingResult
+    ) = None  # Cached results.
 
   def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
@@ -1283,7 +1283,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     # returned by XLA, it errors out.
     prng_key_partition_spec = PartitionSpec(None)
     fn_in_partition_specs = (
-        pjit.AUTO(self.global_mesh),
+        None,
         prng_key_partition_spec,
         # Auto sharding does not change input data sharding specs.
         # So it does not interfere with PAX's input padding.
@@ -1291,9 +1291,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     )
 
     fn_out_partition_specs = (
-        PartitionSpec()
-        if self._auto_sharding_info.replicate_output
-        else pjit.AUTO(self.global_mesh)
+        PartitionSpec() if self._auto_sharding_info.replicate_output else None
     )
 
     partitioned_step_fn = self._pjit(
@@ -1499,8 +1497,9 @@ def create_partitioner(
     init_is_eval: bool = False,
     reshard_inputs: bool = False,
     auto_sharding_mode: RunningMode | None = None,
-    auto_sharding_input_params: pax_fiddle.Config[base_input.BaseInput]
-    | None = None,
+    auto_sharding_input_params: (
+        pax_fiddle.Config[base_input.BaseInput] | None
+    ) = None,
 ) -> Partitioner:
   """Return sharded train/eval/decode step function of the SPMD Model.
 
