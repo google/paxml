@@ -16,7 +16,15 @@
 """Expose functionalities for profiling code."""
 
 from absl import logging
+from ctypes import cdll
 
+libcudart = cdll.LoadLibrary('libcudart.so')
+def cudaProfilerStart():
+    libcudart.cudaProfilerStart()
+def cudaProfilerStop():
+    libcudart.cudaProfilerStop()
+def cudaDeviceSynchronize():
+    libcudart.cudaDeviceSynchronize()
 
 class Profiler:
   """Dummy class to capture code profiles.
@@ -64,7 +72,12 @@ class Profiler:
 
     The duration of the trace corresponds to step_duration_estimate_sec.
     """
+    cudaProfilerStart()
     logging.info('Dummy profiler currently does not capture any trace.')
+
+  def stop_capture_async(self) -> None:
+    cudaDeviceSynchronize()
+    cudaProfilerStop()
 
   def update_step_moving_mean(self, duration_sec: float):
     """Updates the step duration moving average with a step duration estimate.
