@@ -451,6 +451,15 @@ def _train_loop(
     step_i = program_output.new_train_step
     ml_monitoring.record_step_number(step_i)
 
+    # If GC is enabled, periodically perform garbage collection to prevent
+    # unbounded Python object accumulation.
+    # GC is frozen (gc.freeze in _train_and_evaluate_common) so need to
+    # temporarily unfreeze it here.
+    if train_p.gc_interval_steps and step_i % train_p.gc_interval_steps == 0:
+      gc.unfreeze()
+      gc.collect()
+      gc.freeze()
+
     eval_metrics: tuning_lib.EvalMetrics | None = None
     # Run eval at regular step interval or the final training step.
     if train_p.eval_interval_steps and (
@@ -479,6 +488,14 @@ def _train_loop(
             5,
             elapsed_secs,
         )
+
+        # If GC is enabled, also perform garbage collection after eval.
+        # GC is frozen (gc.freeze in _train_and_evaluate_common) so need to
+        # temporarily unfreeze it here.
+        if train_p.gc_interval_steps:
+          gc.unfreeze()
+          gc.collect()
+          gc.freeze()
 
     decode_metrics: tuning_lib.DecodeMetrics | None = None
     if (

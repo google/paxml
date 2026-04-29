@@ -1278,6 +1278,9 @@ class SingleTask(base_task.BaseTask):
         loading the checkpoint.
       report_progress_hook: Whether to use clu's ReportProgress hook to report
         the progress of the experiment.
+      gc_interval_steps: How frequently to perform garbage collection during
+        training in terms of the number of training steps. Set to 0 to disable
+        garbage collection.
     """
 
     learner: pax_fiddle.Config[learners_lib.Learner] = (
@@ -1322,6 +1325,7 @@ class SingleTask(base_task.BaseTask):
     external_checkpoint_path: epath.Path | None = None
     external_checkpoint_handler: ocp.CheckpointHandler | None = None
     report_progress_hook: bool = False
+    gc_interval_steps: int = 0
 
   TrainHParams = base_hyperparams.FiddleHParamsClassStub(Train)  # pylint: disable=invalid-name
 
