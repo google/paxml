@@ -21,7 +21,10 @@ load("//paxml:paxml.bzl", "pytype_library")
 load("//paxml:build_defs.bzl", "pax_targets")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
-package(default_visibility = JAX_VISIBILITY)
+package(
+    default_applicable_licenses = ["//paxml:license"],
+    default_visibility = JAX_VISIBILITY,
+)
 
 licenses(["notice"])
 

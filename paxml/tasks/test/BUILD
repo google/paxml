@@ -19,7 +19,10 @@
 load("@rules_python//python:defs.bzl", "py_library")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
-package(default_visibility = JAX_VISIBILITY)
+package(
+    default_applicable_licenses = ["//paxml:license"],
+    default_visibility = JAX_VISIBILITY,
+)
 
 licenses(["notice"])
 

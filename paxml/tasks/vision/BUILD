@@ -22,7 +22,10 @@ load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
 licenses(["notice"])
 
-package(default_visibility = JAX_VISIBILITY)
+package(
+    default_applicable_licenses = ["//paxml:license"],
+    default_visibility = JAX_VISIBILITY,
+)
 
 pytype_strict_library(
     name = "input_generator",
