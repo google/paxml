@@ -313,7 +313,9 @@ def main(unused_argv):
     )
 
   exp_parser = ExperimentParser(
-      _EXP.value, _BS.value, _DEBUG_FILE_PATTERN.value
+      _EXP.value,  # pyrefly: ignore[bad-argument-type]
+      _BS.value,
+      _DEBUG_FILE_PATTERN.value,
   )
 
   if _USAGE.value == 'params':

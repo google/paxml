@@ -34,7 +34,7 @@ def main(argv: Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
-  experiment_config = experiment_registry.get(_EXP.value)()
+  experiment_config = experiment_registry.get(_EXP.value)()  # pyrefly: ignore[bad-argument-type,not-callable]
 
   specs = dump_input_specs_lib.extract_input_specs(experiment_config)
   out_str = dump_input_specs_lib.specs_to_string(FLAGS.exp, specs)

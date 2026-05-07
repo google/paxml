@@ -471,6 +471,7 @@ def run(
 
   search_space = tuning_lib.get_search_space(experiment_config)
   if search_space.dna_spec.is_constant:
+    assert _JOB_LOGDIR.value is not None
     # TODO(b/241666951): disable default_early_stopping_fn since this
     # breaks when training internal models.
     run_experiment(
@@ -483,6 +484,7 @@ def run(
     if not enable_checkpoint_saving:
       logging.warning(
           'Ignoring flag `--enable_checkpoint_saving` for tuning experiment.')
+    assert _JOB_LOGDIR.value is not None
     tuning_lib.tune(
         trial_fn=run_experiment,
         experiment_config=experiment_config,
