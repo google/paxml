@@ -16,9 +16,9 @@
 """Starlark macros for Pax users."""
 
 load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_binary")
-load("//paxml:paxml.bzl", "py_strict_test")
 # Internal fragmented binary bazel rule.
 # Placeholder: load PyInfo
+load("//third_party/bazel_rules/rules_python/python:py_test.bzl", "py_test")
 
 def _shell_quote(s):
     """Copy of bazel-skylib's shell.quote.
@@ -78,7 +78,7 @@ def pax_targets(
         add_smoke_test = True,
         smoke_test_exclude_regexes = "",
         smoke_test_include_only_regexes = "",
-        smoke_test_py_test_rule = py_strict_test,
+        smoke_test_py_test_rule = py_test,
         smoke_test_args = None,
         smoke_test_kwargs = None,
         dump_input_specs_kwargs = None,
