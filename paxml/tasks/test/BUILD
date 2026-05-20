@@ -31,6 +31,7 @@ py_library(
     srcs = [
         "synthetic.py",
     ],
+    strict_deps = False,  # copybara: strip
     tags = ["keep_dep"],
     deps = [
         "//paxml:base_experiment",

@@ -16,8 +16,8 @@
 # Description:
 #   Vision modeling-specific libraries and model configurations
 
+load("@rules_python//python:defs.bzl", "py_test")
 load("//paxml:paxml.bzl", "pytype_strict_library")
-load("//paxml:paxml.bzl", "py_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
 licenses(["notice"])
@@ -39,7 +39,7 @@ pytype_strict_library(
     ],
 )
 
-py_strict_test(
+py_test(
     name = "input_generator_test",
     srcs = ["input_generator_test.py"],
     tags = [

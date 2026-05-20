@@ -17,7 +17,7 @@
 #   Language modeling model configurations.
 
 load("//paxml:paxml.bzl", "pytype_library")
-load("//paxml:paxml.bzl", "py_strict_test")
+load("@rules_python//python:defs.bzl", "py_test")
 load("//paxml:build_defs.bzl", "pax_targets")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 
@@ -112,7 +112,7 @@ pytype_library(
     ],
 )
 
-py_strict_test(
+py_test(
     name = "c4_test",
     timeout = "long",
     srcs = ["c4_test.py"],
