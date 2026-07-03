@@ -160,7 +160,7 @@ def save_checkpoint(
         """train_state_unpadded_shape_dtype_struct is not provided. Saving the
         shapes of train_state  as the unpadded shapes."""
     )
-    train_state_unpadded_shape_dtype_struct = trees.get_shape_dtype(train_state)
+    train_state_unpadded_shape_dtype_struct = trees.get_shape_dtype(train_state)  # pyrefly: ignore[bad-argument-type, bad-assignment]
   checkpoint_manager.save(
       step,
       train_state,
@@ -382,7 +382,7 @@ def _tensorstore_prepare(
   # ... that are filtered out when calling jax.tree_util.tree_flatten() here.
   flattened_train_state, _ = jax.tree_util.tree_flatten(train_state_none)
   if state_specs is not None:
-    flattened_state_specs, _ = jax.tree_util.tree_flatten(state_specs_none)
+    flattened_state_specs, _ = jax.tree_util.tree_flatten(state_specs_none)  # pyrefly: ignore[unbound-name]
   else:
     flattened_state_specs = None
 
@@ -503,7 +503,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       reference_train_state, reference_state_specs = (item, specs)
     else:
       reference_train_state, reference_nested_names, reference_state_specs = (
-          _tensorstore_prepare(item, specs)
+          _tensorstore_prepare(item, specs)  # pyrefly: ignore[bad-argument-type]
       )
       reference_train_state = flax.serialization.to_state_dict(
           reference_train_state
@@ -577,7 +577,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
         flat_restored_train_state[i] = restored_train_state[str(i)]
       # We add back the MaskedNode entries into the pytree.
       restored_train_state = _tensorstore_reconstruct(
-          item, flat_restored_train_state
+          item, flat_restored_train_state  # pyrefly: ignore[bad-argument-type]
       )
 
     return restored_train_state
@@ -598,7 +598,7 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
 class PaxCheckpointHandlerImpl(ocp.BasePyTreeCheckpointHandler):
   """Implementation of PaxCheckpointHandler."""
 
-  _param_names: dict[str, str] = None
+  _param_names: dict[str, str] = None  # pyrefly: ignore[bad-assignment]
 
   async def _write_metadata_file(
       self,

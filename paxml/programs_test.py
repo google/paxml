@@ -68,7 +68,7 @@ def _test_model_layer_default():
 
 
 class TestModel(base_model.BaseModel):
-  layer: pax_fiddle.Config[BaseLayer] = pax_fiddle.fdl_field(
+  layer: pax_fiddle.Config[BaseLayer] = pax_fiddle.fdl_field(  # pyrefly: ignore[bad-assignment]
       default_factory=_test_model_layer_default, tags=pax_fiddle.DoNotBuild)
 
   def setup(self):
@@ -126,13 +126,13 @@ class SingleTaskPjitTrainProgramTest(ProgramTestBase):
         self.train_input.get_next(),
     )
     partitioner = partitioning.PjitPartitioner(
-        init_is_eval=False, reshard_inputs=True, task=self.task
+        init_is_eval=False, reshard_inputs=True, task=self.task  # pyrefly: ignore[bad-argument-type]
     )
     prng_key = jax.random.PRNGKey(0)
-    partitioner.setup(self.task, prng_key, inputs_shape_dtype)
+    partitioner.setup(self.task, prng_key, inputs_shape_dtype)  # pyrefly: ignore[bad-argument-type]
     train_pg = programs.SingleTaskTrainProgram()
     train_pg.setup(
-        self.task,
+        self.task,  # pyrefly: ignore[bad-argument-type]
         self.train_input,
         partitioner,
         epath.Path('/tmp'),

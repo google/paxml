@@ -90,16 +90,16 @@ class DefaultExecutor(base_executor.BaseExecutor):
     super().__init__()
 
     # States to set in .setup().
-    self._job_log_dir: epath.Path = None
+    self._job_log_dir: epath.Path = None  # pyrefly: ignore[bad-assignment]
     self._early_stopping_fn = None
-    self._task: tasks_lib.SingleTask = None
-    self._checkpointer: checkpoints.TrainingCheckpointer = None
-    self._partitioner: partitioning.Partitioner = None
-    self._train_program: programs.BaseTrainProgram = None
-    self._eval_programs: Sequence[programs.BaseEvalProgram] = None
+    self._task: tasks_lib.SingleTask = None  # pyrefly: ignore[bad-assignment]
+    self._checkpointer: checkpoints.TrainingCheckpointer = None  # pyrefly: ignore[bad-assignment]
+    self._partitioner: partitioning.Partitioner = None  # pyrefly: ignore[bad-assignment]
+    self._train_program: programs.BaseTrainProgram = None  # pyrefly: ignore[bad-assignment]
+    self._eval_programs: Sequence[programs.BaseEvalProgram] = None  # pyrefly: ignore[bad-assignment]
     self._decode_programs: Sequence[
         decode_programs_lib.SingleTaskDecodeProgram
-    ] = None
+    ] = None  # pyrefly: ignore[bad-assignment]
 
     # States to lazily initialize in .setup().
     self._train_input_pipeline = None
@@ -280,9 +280,9 @@ class DefaultExecutor(base_executor.BaseExecutor):
         task=self._task,
         partitioner=self._partitioner,
         train_program=self._train_program,
-        train_input=self._train_input_pipeline,
-        partitioned_train_state=self._partitioned_train_state,
-        train_state_provenance=self._train_state_provenance,
+        train_input=self._train_input_pipeline,  # pyrefly: ignore[bad-argument-type]
+        partitioned_train_state=self._partitioned_train_state,  # pyrefly: ignore[bad-argument-type]
+        train_state_provenance=self._train_state_provenance,  # pyrefly: ignore[bad-argument-type]
         eval_programs=self._eval_programs,
         decode_programs=self._decode_programs,
         total_num_params=self._total_num_params,

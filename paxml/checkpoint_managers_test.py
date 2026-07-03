@@ -61,7 +61,7 @@ else:
   def ocdbt_checkpoint_context(use_ocdbt: bool, ts_context: Any):
     """Use OCDBT driver within context."""
     original_registry = list(
-        ocp.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access
+        ocp.type_handlers._TYPE_REGISTRY  # pylint: disable=protected-access  # pyrefly: ignore[missing-attribute]
     )
     if use_ocdbt:
       ocp.type_handlers.register_standard_handlers_with_options(
@@ -70,7 +70,7 @@ else:
     try:
       yield
     finally:
-      ocp.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access
+      ocp.type_handlers._TYPE_REGISTRY = (  # pylint: disable=protected-access  # pyrefly: ignore[missing-attribute]
           original_registry
       )
 
@@ -343,7 +343,7 @@ class CheckpointManagerTest(parameterized.TestCase):
     if train_input_pipeline:
       # restored inputs should start from the second batch
       restored_inputs = train_input_pipeline.get_next()
-      ocp.test_utils.assert_tree_equal(self, expected_inputs, restored_inputs)
+      ocp.test_utils.assert_tree_equal(self, expected_inputs, restored_inputs)  # pyrefly: ignore[unbound-name]
     ocp.test_utils.assert_tree_equal(self, expected, restored)
 
     # incompatible unpadded shape

@@ -36,10 +36,10 @@ class MatcherAlmostEqual:
     self._value = value
     self._abs_tol = abs_tol
 
-  def __eq__(self, other: float) -> bool:
+  def __eq__(self, other: float) -> bool:  # pyrefly: ignore[bad-override]
     return math.isclose(self._value, other, abs_tol=self._abs_tol)
 
-  def __ne__(self, other: float) -> bool:
+  def __ne__(self, other: float) -> bool:  # pyrefly: ignore[bad-override]
     return not self == other
 
 
@@ -49,10 +49,10 @@ class MatcherArrayAlmostEqual:
     self._value = value
     self._abs_tol = abs_tol
 
-  def __eq__(self, other: np.ndarray) -> bool:
+  def __eq__(self, other: np.ndarray) -> bool:  # pyrefly: ignore[bad-override]
     return np.allclose(self._value, other, atol=self._abs_tol)
 
-  def __ne__(self, other: np.ndarray) -> bool:
+  def __ne__(self, other: np.ndarray) -> bool:  # pyrefly: ignore[bad-override]
     return not self == other
 
 
@@ -208,13 +208,13 @@ class SummaryUtilsTest(parameterized.TestCase):
                                            MatcherAlmostEqual(expected_loss), 2)
     mock_tf_summary_scalar.assert_any_call('Steps/sec', steps_per_sec_2, 2)
     if use_clu_metrics_instead_of_weighted_scalars:
-      expected_metrics_output_0 = clu_metrics_2['output_0'].compute().item()
+      expected_metrics_output_0 = clu_metrics_2['output_0'].compute().item()  # pyrefly: ignore[unsupported-operation]
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_0',
           MatcherAlmostEqual(expected_metrics_output_0, 1e-6),
           2,
       )
-      expected_metrics_output_1 = clu_metrics_2['output_1'].compute().item()
+      expected_metrics_output_1 = clu_metrics_2['output_1'].compute().item()  # pyrefly: ignore[unsupported-operation]
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_1',
           MatcherAlmostEqual(expected_metrics_output_1, 1e-6),
@@ -222,12 +222,12 @@ class SummaryUtilsTest(parameterized.TestCase):
       )
     else:
       expected_metrics_output_0_weight = np.sum(
-          weighted_scalars_2['output_0'][1]
+          weighted_scalars_2['output_0'][1]  # pyrefly: ignore[unsupported-operation]
       ).item()
       expected_metrics_output_0 = (
           np.sum(
-              weighted_scalars_2['output_0'][0]
-              * weighted_scalars_2['output_0'][1]
+              weighted_scalars_2['output_0'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_2['output_0'][1]  # pyrefly: ignore[unsupported-operation]
           ).item()
           / expected_metrics_output_0_weight
       )
@@ -242,12 +242,12 @@ class SummaryUtilsTest(parameterized.TestCase):
           2,
       )
       expected_metrics_output_1_weight = np.sum(
-          weighted_scalars_2['output_1'][1]
+          weighted_scalars_2['output_1'][1]  # pyrefly: ignore[unsupported-operation]
       ).item()
       expected_metrics_output_1 = (
           np.sum(
-              weighted_scalars_2['output_1'][0]
-              * weighted_scalars_2['output_1'][1]
+              weighted_scalars_2['output_1'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_2['output_1'][1]  # pyrefly: ignore[unsupported-operation]
           ).item()
           / expected_metrics_output_1_weight
       )
@@ -377,30 +377,30 @@ class SummaryUtilsTest(parameterized.TestCase):
                                            2)
     if use_clu_metrics_instead_of_weighted_scalars:
       merged_clu_metrics = metric_utils.merge_clu_metrics(
-          clu_metrics_1, clu_metrics_2
+          clu_metrics_1, clu_metrics_2  # pyrefly: ignore[bad-argument-type]
       )
       expected_metrics_output_0 = merged_clu_metrics['output_0'].compute()
       expected_metrics_output_1 = merged_clu_metrics['output_1'].compute()
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_0',
-          MatcherAlmostEqual(expected_metrics_output_0, 1e-6),
+          MatcherAlmostEqual(expected_metrics_output_0, 1e-6),  # pyrefly: ignore[bad-argument-type]
           2,
       )
       mock_tf_summary_scalar.assert_any_call(
           'Metrics/output_1',
-          MatcherAlmostEqual(expected_metrics_output_1, 1e-6),
+          MatcherAlmostEqual(expected_metrics_output_1, 1e-6),  # pyrefly: ignore[bad-argument-type]
           2,
       )
     else:
       expected_metrics_output_0_weight = np.sum(
-          weighted_scalars_1['output_0'][1] + weighted_scalars_2['output_0'][1]
+          weighted_scalars_1['output_0'][1] + weighted_scalars_2['output_0'][1]  # pyrefly: ignore[unsupported-operation]
       ).item()
       expected_metrics_output_0 = (
           np.sum(
-              weighted_scalars_1['output_0'][0]
-              * weighted_scalars_1['output_0'][1]
-              + weighted_scalars_2['output_0'][0]
-              * weighted_scalars_2['output_0'][1]
+              weighted_scalars_1['output_0'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_1['output_0'][1]  # pyrefly: ignore[unsupported-operation]
+              + weighted_scalars_2['output_0'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_2['output_0'][1]  # pyrefly: ignore[unsupported-operation]
           ).item()
           / expected_metrics_output_0_weight
       )
@@ -415,14 +415,14 @@ class SummaryUtilsTest(parameterized.TestCase):
           2,
       )
       expected_metrics_output_1_weight = np.sum(
-          weighted_scalars_1['output_1'][1] + weighted_scalars_2['output_1'][1]
+          weighted_scalars_1['output_1'][1] + weighted_scalars_2['output_1'][1]  # pyrefly: ignore[unsupported-operation]
       ).item()
       expected_metrics_output_1 = (
           jnp.sum(
-              weighted_scalars_1['output_1'][0]
-              * weighted_scalars_1['output_1'][1]
-              + weighted_scalars_2['output_1'][0]
-              * weighted_scalars_2['output_1'][1]
+              weighted_scalars_1['output_1'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_1['output_1'][1]  # pyrefly: ignore[unsupported-operation]
+              + weighted_scalars_2['output_1'][0]  # pyrefly: ignore[unsupported-operation]
+              * weighted_scalars_2['output_1'][1]  # pyrefly: ignore[unsupported-operation]
           ).item()
           / expected_metrics_output_1_weight
       )

@@ -37,10 +37,10 @@ class MockMetric(clu_metrics.Metric):
   """A mock metric where all the data is empty."""
 
   @classmethod
-  def from_model_output(cls) -> clu_metrics.Metric:
+  def from_model_output(cls) -> clu_metrics.Metric:  # pyrefly: ignore[bad-override]
     return MockMetric()
 
-  def merge(self, other: clu_metrics.Metric) -> clu_metrics.Metric:
+  def merge(self, other: clu_metrics.Metric) -> clu_metrics.Metric:  # pyrefly: ignore[bad-override]
     return MockMetric()
 
   def compute(self) -> jax.Array:
@@ -109,7 +109,7 @@ class MetricUtilsTest(absltest.TestCase):
     metrics = {'test': ScalarMetric()}
     test_dir = epath.Path(self._test_dir())
 
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     self.assertIn('test', metric_values)
     self.assertEqual(metric_values['test'].value, 5)
 
@@ -134,7 +134,7 @@ class MetricUtilsTest(absltest.TestCase):
 
     metrics = {'test': ScalarListMetric()}
 
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(metric_values['test/test_0'].value, 5)
     self.assertEqual(metric_values['test/test_1'].value, 'hi')
     self.assertEqual(metric_values['test/test_2'].value.shape, (12, 12, 3))
@@ -156,7 +156,7 @@ class MetricUtilsTest(absltest.TestCase):
 
     metrics = {'test': ScalarTupleMetric()}
 
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(metric_values['test/test_0'].value, 5)
     self.assertEqual(metric_values['test/test_1'].value, 'hi')
 
@@ -179,7 +179,7 @@ class MetricUtilsTest(absltest.TestCase):
 
     metrics = {'test': ScalarDictMetric()}
 
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(metric_values['test/scalar_0'].value, 1)
     self.assertEqual(metric_values['test/scalar_1'].value, 2)
     self.assertEqual(metric_values['test/text_0'].value, 'test3')
@@ -210,7 +210,7 @@ class MetricUtilsTest(absltest.TestCase):
         }
 
     metrics = {'test': MixedDictMetric()}
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(metric_values['test/scalar_0'].value, 1)
     # First list is two scalars.
     self.assertEqual(metric_values['test/list_0_0'].value, 1)
@@ -248,7 +248,7 @@ class MetricUtilsTest(absltest.TestCase):
         }
 
     metrics = {'test': MixedDictMetric()}
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     test_dir = epath.Path(self._test_dir())
     with summary_utils.get_summary_writer(test_dir):
       summary_utils.write_clu_metric_summaries(metric_values, step_i=0)
@@ -272,7 +272,7 @@ class MetricUtilsTest(absltest.TestCase):
         }
 
     metrics = {'test': MixedDictMetric()}
-    metric_values = metric_utils.compute_metric_values(metrics)
+    metric_values = metric_utils.compute_metric_values(metrics)  # pyrefly: ignore[bad-argument-type]
     test_dir = epath.Path(self._test_dir())
     with summary_utils.get_summary_writer(test_dir):
       summary_utils.write_seqio_metric_summaries(
@@ -330,12 +330,12 @@ class MetricUtilsTest(absltest.TestCase):
   def test_merge_float_dict(self):
     m1 = {'a': 1, 'b': 2}
     self.assertEqual(
-        metric_utils.update_float_dict(m1, {'a': 2}), {
+        metric_utils.update_float_dict(m1, {'a': 2}), {  # pyrefly: ignore[bad-argument-type]
             'a': 2,
             'b': 2
         })
     self.assertEqual(
-        metric_utils.update_float_dict(m1, {'a': 2}, prefix='x'), {
+        metric_utils.update_float_dict(m1, {'a': 2}, prefix='x'), {  # pyrefly: ignore[bad-argument-type]
             'a': 2,
             'b': 2,
             'x/a': 2

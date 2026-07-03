@@ -193,7 +193,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       self, grads: NestedMap, l2_norm_clip: float = 1.0
   ) -> tuple[NestedMap, jax.Array, Any]:
     assert (
-        self.adaptive_clipping_method is not None or self.l2_norm_clip > 0.0
+        self.adaptive_clipping_method is not None or self.l2_norm_clip > 0.0  # pyrefly: ignore[unsupported-operation]
     ), (
         f'Clipping bound must be either adaptive or positive. {l2_norm_clip} is'
         ' provided.'
@@ -214,7 +214,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       grads: NestedMap,
       noise_stddev: float,
       clipping_bound_scaling: float,
-      prng_key: PRNGKey = None,
+      prng_key: PRNGKey = None,  # pyrefly: ignore[bad-function-definition]
   ) -> NestedMap:
     prng_keys = jax.random.split(
         prng_key, len(jax.tree_util.tree_leaves(grads))
@@ -231,7 +231,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
       # copies of independent Gaussian noises is equivalent to a single Gaussian
       # with std scaled by `sqrt(num_devices)``, we need to further scale the
       # noise_std on each device to correct this.
-      noise_stddev *= clipping_bound_scaling * jnp.sqrt(clipping_bound_scaling)
+      noise_stddev *= clipping_bound_scaling * jnp.sqrt(clipping_bound_scaling)  # pyrefly: ignore[bad-assignment]
 
     def _add_noise_to_array(x, prng):
       return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
@@ -264,7 +264,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
     aux = self.process_aux_info(aux)
 
     clipping_bound_scaling = _clipping_bound_scaling(
-        self.use_loss_weight_scaling, aux.loss_weight
+        self.use_loss_weight_scaling, aux.loss_weight  # pyrefly: ignore[bad-argument-type]
     )
 
     if self.adaptive_clipping_method == 'min':
@@ -289,7 +289,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 
     # Optimization if using this class only for clipping (e.g., with DP-MF)
     if self.noise_multiplier > 0.0:
-      noise_stddev = self.noise_multiplier * (
+      noise_stddev = self.noise_multiplier * (  # pyrefly: ignore[unsupported-operation]
           1.0 if self.normalize_gradients else self.l2_norm_clip
       )
       grads = self._add_noise(
@@ -300,8 +300,8 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
         values,
         DPGradAuxInfo(
             dp_aux_info={
-                'frac_clipped': num_clipped,
-                'per_core_grad_norm': grad_norm,
+                'frac_clipped': num_clipped,  # pyrefly: ignore[unbound-name]
+                'per_core_grad_norm': grad_norm,  # pyrefly: ignore[unbound-name]
             },
             aux_info=aux.aux_info,
             loss_weight=aux.loss_weight,
@@ -379,7 +379,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     sum_clipped, num_clipped = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_norm_clip
     )
-    sum_grads = jax.tree_util.tree_unflatten(grads_treedef, sum_clipped)
+    sum_grads = jax.tree_util.tree_unflatten(grads_treedef, sum_clipped)  # pyrefly: ignore[bad-argument-type]
 
     # Normalize gradients across all examples.
     batch_size = grads_flat[0].shape[0]
@@ -394,7 +394,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       grads: NestedMap,
       noise_stddev: float,
       clipping_bound_scaling: float,
-      prng_key: PRNGKey = None,
+      prng_key: PRNGKey = None,  # pyrefly: ignore[bad-function-definition]
   ) -> NestedMap:
     prng_keys = jax.random.split(
         prng_key, len(jax.tree_util.tree_leaves(grads))
@@ -411,7 +411,7 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
       # copies of independent Gaussian noises is equivalent to a single Gaussian
       # with std scaled by `sqrt(num_devices)``, we need to further scale the
       # noise_std on each device to correct this.
-      noise_stddev *= clipping_bound_scaling * jnp.sqrt(clipping_bound_scaling)
+      noise_stddev *= clipping_bound_scaling * jnp.sqrt(clipping_bound_scaling)  # pyrefly: ignore[bad-assignment]
 
     def _add_noise_to_array(x, prng):
       return x + noise_stddev * jax.random.normal(prng, shape=x.shape)
@@ -646,8 +646,8 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
         uniform=self.use_uniform,
     )
 
-    sum_grads = jax.tree.unflatten(grads_treedef, sum_grads_flat)
-    num_clipped = jax.tree.unflatten(grads_treedef, num_clipped_flat)
+    sum_grads = jax.tree.unflatten(grads_treedef, sum_grads_flat)  # pyrefly: ignore[bad-argument-type]
+    num_clipped = jax.tree.unflatten(grads_treedef, num_clipped_flat)  # pyrefly: ignore[bad-argument-type]
 
     # Compute per-layer grad norms.
     def map_layer_norm(grads_list):
@@ -724,10 +724,10 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
     # Pass 1: get per-example gradient norms
     scales = jnp.ones(batch_size)
     params_with_sq_norms = jax.tree.map(
-        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]  # pyrefly: ignore[bad-index]
     )
     (_, aux), grad_with_sq_norms = grad_fn(
-        {**mdl_vars_grad, PARAMS: params_with_sq_norms},
+        {**mdl_vars_grad, PARAMS: params_with_sq_norms},  # pyrefly: ignore[invalid-argument]
         mdl_vars_nograd_and_inputs,
         prng_key,
     )
@@ -765,10 +765,10 @@ class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
 
     # Pass 2: get average of clipped gradients
     params_with_sq_norms = jax.tree.map(
-        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]
+        lambda x: ghostnorm_base.ParamWithAux(x, scales), mdl_vars_grad[PARAMS]  # pyrefly: ignore[bad-index]
     )
     (loss, aux), clipped_grads = grad_fn(
-        {**mdl_vars_grad, PARAMS: params_with_sq_norms},
+        {**mdl_vars_grad, PARAMS: params_with_sq_norms},  # pyrefly: ignore[invalid-argument]
         mdl_vars_nograd_and_inputs,
         prng_key,
     )

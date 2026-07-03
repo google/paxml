@@ -352,7 +352,7 @@ class Metric:
     """Returns metric for training steps per second."""
     return Metric('train_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def eval_steps_per_second(
@@ -363,7 +363,7 @@ class Metric:
     """Returns metric for evaluation steps per second."""
     return Metric('eval_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def decode_steps_per_second(
@@ -374,7 +374,7 @@ class Metric:
     """Returns metric for `decode_steps_per_second`."""
     return Metric('decode_steps_per_sec',
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def num_params(
@@ -385,7 +385,7 @@ class Metric:
     """Returns metric for `num_params`."""
     return Metric('num_params',
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   # Class methods for creating eval metric types.
   @classmethod
@@ -399,7 +399,7 @@ class Metric:
     return Metric(metric_name,
                   MetricType.TRAIN_METRICS,
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def eval_train(
@@ -412,7 +412,7 @@ class Metric:
     return Metric(metric_name,
                   MetricType.EVAL_TRAIN_METRICS,
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def eval(
@@ -427,7 +427,7 @@ class Metric:
                   MetricType.EVAL_METRICS,
                   dataset_name,
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def eval_scoring(
@@ -442,7 +442,7 @@ class Metric:
                   MetricType.EVAL_SCORING_METRICS,
                   dataset_name,
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
   @classmethod
   def decode(
@@ -457,7 +457,7 @@ class Metric:
                   MetricType.DECODE_METRICS,
                   dataset_name,
                   sub_experiment_id=sub_experiment_id,
-                  aggregator=aggregator)
+                  aggregator=aggregator)  # pyrefly: ignore[bad-argument-type]
 
 
 def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:

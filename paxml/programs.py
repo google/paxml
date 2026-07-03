@@ -113,7 +113,7 @@ def get_summary_base_dir(job_log_dir: epath.Path) -> epath.Path:
 
 
 def _train_log_interval_steps(
-    train_p: tasks_lib.SingleTask.TrainHParams,
+    train_p: tasks_lib.SingleTask.TrainHParams,  # pyrefly: ignore[not-a-type]
 ) -> int:
   """Returns the interval to log train outputs."""
   if train_p.log_train_output_interval_steps is not None:
@@ -200,26 +200,26 @@ class BaseTrainProgram(Program):
 
   def __init__(self):
     # States to set in self.setup().
-    self._task: tasks_lib.SingleTask = None
-    self._train_input: base_input.BaseInput = None
-    self._partitioner: partitioning.Partitioner = None
-    self._train_prng_seed: PRNGKey = None
-    self._eval_prng_seed: PRNGKey = None
+    self._task: tasks_lib.SingleTask = None  # pyrefly: ignore[bad-assignment]
+    self._train_input: base_input.BaseInput = None  # pyrefly: ignore[bad-assignment]
+    self._partitioner: partitioning.Partitioner = None  # pyrefly: ignore[bad-assignment]
+    self._train_prng_seed: PRNGKey = None  # pyrefly: ignore[bad-assignment]
+    self._eval_prng_seed: PRNGKey = None  # pyrefly: ignore[bad-assignment]
     self._initial_step = -1
 
     # States to initialize lazily in self.setup().
-    self._train_unpadded_global_batch_size: int = None
+    self._train_unpadded_global_batch_size: int = None  # pyrefly: ignore[bad-assignment]
     self._profiler: profiling.Profiler = None
-    self._train_summary_writer: SummaryWriter = None
+    self._train_summary_writer: SummaryWriter = None  # pyrefly: ignore[not-a-type]
     self._train_summary_handler: summary_utils.SummaryHandler = None
     self._eval_train_summary_handler: summary_utils.SummaryHandler = None
     self._train_summary_last_time = None
     self._train_summary_last_step = None
     # Used to limit the number of inflight training steps.
-    self._pending_train_losses: _InflightQueue = None
+    self._pending_train_losses: _InflightQueue = None  # pyrefly: ignore[bad-assignment]
 
     # Other states used during training.
-    self._first_step_completion_time: float = None
+    self._first_step_completion_time: float = None  # pyrefly: ignore[bad-assignment]
     self._init_duration_set = False
 
     # Used to enter context of various summary writer at .setup().
@@ -233,7 +233,7 @@ class BaseTrainProgram(Program):
   def register_first_result_callback_fn(
       self, train_first_result_callback_fn: Callable[[bool], None]
   ) -> None:
-    self._train_first_result_callback_fn = train_first_result_callback_fn
+    self._train_first_result_callback_fn = train_first_result_callback_fn  # pyrefly: ignore[bad-assignment]
 
   def first_result_callback_fn(self, metric: bool) -> None:
     self._train_first_result_callback_fn(metric)
@@ -244,7 +244,7 @@ class BaseTrainProgram(Program):
     return self._train_input
 
   @property
-  def summary_writer(self) -> SummaryWriter:
+  def summary_writer(self) -> SummaryWriter:  # pyrefly: ignore[not-a-type]
     assert self._train_summary_writer
     return self._train_summary_writer
 
@@ -305,7 +305,7 @@ class BaseTrainProgram(Program):
 
     # Initializes other states.
     self._train_unpadded_global_batch_size = train_input.get_global_batch_size(  # pytype: disable=wrong-arg-types  # use-fiddle-overlay
-        train_input
+        train_input  # pyrefly: ignore[bad-argument-type]
     )
     self._profiler = profiling.Profiler(
         num_steps=train_p.profiler_num_steps,
@@ -383,7 +383,7 @@ class BaseTrainProgram(Program):
         20,
         train_period.elapsed,
     )
-    self._pending_train_losses.add_computation(train_outputs.loss)
+    self._pending_train_losses.add_computation(train_outputs.loss)  # pyrefly: ignore[bad-argument-type]
     if step == self._initial_step:
       self._first_step_completion_time = time.time()
       self._first_result_callback_pool.submit(
@@ -419,7 +419,7 @@ class BaseTrainProgram(Program):
         loss=train_outputs.loss,
         weighted_scalars=train_outputs.weighted_scalars,
         new_train_step=new_step,
-        steps_per_sec=steps_per_sec,
+        steps_per_sec=steps_per_sec,  # pyrefly: ignore[bad-argument-type]
         eval_train_metrics=eval_train_metrics,
     )
 
@@ -630,7 +630,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
     if not self._train_step_created:
       self._train_step_fn, self._train_step_input_partition_spec = (
           self._partitioner.partition(
-              trainer_lib.train_step_single_learner,
+              trainer_lib.train_step_single_learner,  # pyrefly: ignore[bad-argument-type]
               trees.get_shape_dtype(inputs),
               is_eval=False,
           )
@@ -648,7 +648,7 @@ class SingleTaskTrainProgram(BaseTrainProgram):
       # Ignores the returned input partition spec. It should be the same as
       # self.train_input_partition_spec since the input shapes are the same.
       self._eval_train_step_fn, _ = self._partitioner.partition(
-          trainer_lib.eval_step_single_learner,
+          trainer_lib.eval_step_single_learner,  # pyrefly: ignore[bad-argument-type]
           trees.get_shape_dtype(inputs),
           is_eval=True,
       )
@@ -759,17 +759,17 @@ class BaseEvalProgram(Program):
     self._input_p = input_p
 
     # States to set in self.setup()
-    self._task: tasks_lib.SingleTask = None
-    self._partitioner: partitioning.Partitioner = None
-    self._job_log_dir: epath.Path = None
-    self._eval_prng_seed: PRNGKey = None
+    self._task: tasks_lib.SingleTask = None  # pyrefly: ignore[bad-assignment]
+    self._partitioner: partitioning.Partitioner = None  # pyrefly: ignore[bad-assignment]
+    self._job_log_dir: epath.Path = None  # pyrefly: ignore[bad-assignment]
+    self._eval_prng_seed: PRNGKey = None  # pyrefly: ignore[bad-assignment]
 
     # States to initialize lazily in self.setup()
     self._eval_input_pipeline = None
-    self._name: str = None
-    self._eval_unpadded_global_batch_size: int = None
-    self._eval_num_steps: int = None
-    self._eval_summary_writer: SummaryWriter = None
+    self._name: str = None  # pyrefly: ignore[bad-assignment]
+    self._eval_unpadded_global_batch_size: int = None  # pyrefly: ignore[bad-assignment]
+    self._eval_num_steps: int = None  # pyrefly: ignore[bad-assignment]
+    self._eval_summary_writer: SummaryWriter = None  # pyrefly: ignore[not-a-type]
 
     # Used to enter context of the summary writer at .setup().
     self._exitstack = contextlib.ExitStack()
@@ -1065,7 +1065,7 @@ class SingleTaskEvalProgram(BaseEvalProgram):
     if not self._eval_step_created:
       self._eval_step_fn, self._eval_step_input_spec = (
           self._partitioner.partition(
-              trainer_lib.eval_step_single_learner,
+              trainer_lib.eval_step_single_learner,  # pyrefly: ignore[bad-argument-type]
               inputs_shape_dtype=trees.get_shape_dtype(inputs),
               is_eval=True,
           )

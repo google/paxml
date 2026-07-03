@@ -88,20 +88,20 @@ class SingleTaskDecodeProgram(programs.Program):
     self._input_p = input_p
 
     # States to set in self.setup()
-    self._task: tasks_lib.SingleTask = None
-    self._partitioner: partitioning.Partitioner = None
-    self._job_log_dir: epath.Path = None
-    self._prng_key: PRNGKey = None
+    self._task: tasks_lib.SingleTask = None  # pyrefly: ignore[bad-assignment]
+    self._partitioner: partitioning.Partitioner = None  # pyrefly: ignore[bad-assignment]
+    self._job_log_dir: epath.Path = None  # pyrefly: ignore[bad-assignment]
+    self._prng_key: PRNGKey = None  # pyrefly: ignore[bad-assignment]
     self._output_pickle = True
 
     # States to initialize lazily in self.setup()
     self._input = None
-    self._name: str = None
-    self._unpadded_global_batch_size: int = None
-    self._num_steps: int = None
-    self._output_dir: epath.Path = None
-    self._summary_writer: SummaryWriter = None
-    self._metrics_p: pax_fiddle.Config[Any] = None
+    self._name: str = None  # pyrefly: ignore[bad-assignment]
+    self._unpadded_global_batch_size: int = None  # pyrefly: ignore[bad-assignment]
+    self._num_steps: int = None  # pyrefly: ignore[bad-assignment]
+    self._output_dir: epath.Path = None  # pyrefly: ignore[bad-assignment]
+    self._summary_writer: SummaryWriter = None  # pyrefly: ignore[not-a-type]
+    self._metrics_p: pax_fiddle.Config[Any] = None  # pyrefly: ignore[bad-assignment]
 
     # Used to enter context of the summary writer at .setup().
     self._exitstack = contextlib.ExitStack()
@@ -450,7 +450,7 @@ class SingleTaskDecodeProgram(programs.Program):
     if not self._decode_step_created:
       self._decode_step_fn, self._decode_step_input_spec = (
           self._partitioner.partition(
-              trainer_lib._decode_step_for_partitioner,
+              trainer_lib._decode_step_for_partitioner,  # pyrefly: ignore[bad-argument-type]
               inputs_shape_dtype=trees.get_shape_dtype(inputs),
               is_eval=True,
           )

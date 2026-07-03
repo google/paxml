@@ -192,7 +192,7 @@ def latest_checkpoint(checkpoint_dir: epath.PathLike) -> epath.Path:
   path = latest_checkpoint_if_exists(checkpoint_dir)
   if path is None:
     _raise_checkpoint_missing_error(checkpoint_dir)
-  return path
+  return path  # pyrefly: ignore[bad-return]
 
 
 def retrieve_latest_checkpoint_step_if_exists(
@@ -253,7 +253,7 @@ def retrieve_latest_checkpoint_step(
   step = retrieve_latest_checkpoint_step_if_exists(checkpoint_dir)
   if step is None:
     _raise_checkpoint_missing_error(checkpoint_dir)
-  return step
+  return step  # pyrefly: ignore[bad-return]
 
 
 def is_tfhub_dir(directory: epath.Path) -> bool:

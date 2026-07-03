@@ -103,7 +103,7 @@ class TestModel(base_model.BaseModel):
       self, predictions: Predictions, input_batch: NestedMap
   ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
-    prediction_loss = jnp.sum(predictions)
+    prediction_loss = jnp.sum(predictions)  # pyrefly: ignore[bad-argument-type]
     theta_loss = jnp.max(jnp.abs(self.theta.weights))
     # Here loss is the main loss to back-prop into, and loss02 is an eval
     # metric.
@@ -148,7 +148,7 @@ class TrainerLibTest(parameterized.TestCase):
     metadata = trainer_lib.create_train_state_metadata(
         task, train_shape_dtype, discard_opt_states, do_eval
     )
-    self.assertTrue((metadata.input_shape_dtype['inputs'] == inputs).all())
+    self.assertTrue((metadata.input_shape_dtype['inputs'] == inputs).all())  # pyrefly: ignore[bad-index]
 
     var_weight_hparams = task.model.abstract_init_with_metadata(
         train_shape_dtype, do_eval=do_eval

@@ -313,7 +313,7 @@ def process_outputs(
   if metric_type is MetricType.SCORE:
     metric_name_prefix = EVAL_METRICS_PREFIX
     seqio_metrics = inp.compute_metrics(
-        model_outputs, score_metrics=True, verbose_entries=verbose_entries
+        model_outputs, score_metrics=True, verbose_entries=verbose_entries  # pyrefly: ignore[bad-argument-type]
     )
     logging.info('Eval metrics from seqio: %s.', seqio_metrics)
 
@@ -321,7 +321,7 @@ def process_outputs(
     metric_name_prefix = DECODE_METRICS_PREFIX
     plain_text_output = io.StringIO()
     seqio_metrics = inp.compute_metrics(
-        model_outputs, verbose_entries=verbose_entries,
+        model_outputs, verbose_entries=verbose_entries,  # pyrefly: ignore[bad-argument-type]
         plain_text_output=plain_text_output)
 
     if plain_text_output_fname is not None:
@@ -523,7 +523,7 @@ class SeqIOInput(base_input.BaseInput):
   # the global scope later.
   deterministic_input_start_index: pax_fiddle.Config[
       SeqIOInput.DeterministicInput
-  ] = pax_fiddle.template_field(DeterministicInput)
+  ] = pax_fiddle.template_field(DeterministicInput)  # pyrefly: ignore[bad-assignment]
   eval_metrics_targets_length: int | None = None
   eval_metrics_filter_targets_fields: list[str] | None = None
   annotate_padding_fields: bool = False
@@ -646,7 +646,7 @@ class SeqIOInput(base_input.BaseInput):
       )
 
     self._mixture_or_task_inst = (
-        self.mixture_or_task or seqio.get_mixture_or_task(self.mixture_name)
+        self.mixture_or_task or seqio.get_mixture_or_task(self.mixture_name)  # pyrefly: ignore[bad-argument-type]
     )
     self._shard_info = self._validate_deterministic()
 
@@ -727,7 +727,7 @@ class SeqIOInput(base_input.BaseInput):
     if self.input_checkpointing_enabled and self.enable_symbolic_checkpointing:
       read_config.options.experimental_symbolic_checkpoint = True
       read_config.experimental_index_shuffle = (
-          self.experimental_enable_index_shuffle
+          self.experimental_enable_index_shuffle  # pyrefly: ignore[bad-assignment]
       )
       # Disable readahead for random access used by index shuffle.
       if self.experimental_enable_index_shuffle:
@@ -743,7 +743,7 @@ class SeqIOInput(base_input.BaseInput):
     """
     if not self.is_training and self.eval_loop_num_batches:
       return (
-          self.eval_loop_num_batches * self.batch_size * self.num_infeed_hosts
+          self.eval_loop_num_batches * self.batch_size * self.num_infeed_hosts  # pyrefly: ignore[unsupported-operation]
       )
     return -1
 
@@ -791,11 +791,11 @@ class SeqIOInput(base_input.BaseInput):
     # length.
     if (
         self.eval_metrics_targets_length is not None
-        and 'targets' in self.task_feature_lengths
-        and self.task_feature_lengths['targets']
+        and 'targets' in self.task_feature_lengths  # pyrefly: ignore[not-iterable]
+        and self.task_feature_lengths['targets']  # pyrefly: ignore[unsupported-operation]
         > self.eval_metrics_targets_length
     ):
-      sequence_length = dict(self.task_feature_lengths)
+      sequence_length = dict(self.task_feature_lengths)  # pyrefly: ignore[no-matching-overload]
       sequence_length['targets'] = self.eval_metrics_targets_length
       ds = seqio.utils.trim_dataset(
           self.cached_input_ds,
@@ -810,12 +810,12 @@ class SeqIOInput(base_input.BaseInput):
     # should_use_targets_from_input_ds). So set the shard_info accordingly.
     shard_info = seqio.ShardInfo(index=0, num_shards=1)
     self.targets_ds = _enumerate_dataset(
-        ds, self.is_training, shard_info, self._is_mock_tpu
+        ds, self.is_training, shard_info, self._is_mock_tpu  # pyrefly: ignore[bad-argument-type]
     )
 
   def _gen_targets_dataset_from_seqio_task(self):
     self._len_full_ds = 0
-    sequence_length = dict(self.task_feature_lengths)
+    sequence_length = dict(self.task_feature_lengths)  # pyrefly: ignore[no-matching-overload]
     # if set, p.eval_metrics_targets_length
     # overrides p.task_feature_lengths['targets']
     if self.eval_metrics_targets_length:
@@ -860,7 +860,7 @@ class SeqIOInput(base_input.BaseInput):
         self._len_full_ds += shard_num_examples
       ds_shard = ds_shard.repeat(num_epochs)
       ds_shard = _enumerate_dataset(
-          ds_shard, self.is_training, shard_info, self._is_mock_tpu
+          ds_shard, self.is_training, shard_info, self._is_mock_tpu  # pyrefly: ignore[bad-argument-type]
       )
       sharded_datasets.append(ds_shard)
 
@@ -1022,8 +1022,8 @@ class SeqIOInput(base_input.BaseInput):
       assert feature_lengths_override is not None
       if (
           self.eval_metrics_targets_length is not None
-          and 'targets' in self.task_feature_lengths
-          and self.task_feature_lengths['targets']
+          and 'targets' in self.task_feature_lengths  # pyrefly: ignore[not-iterable]
+          and self.task_feature_lengths['targets']  # pyrefly: ignore[unsupported-operation]
           < self.eval_metrics_targets_length
       ):
         feature_lengths_override['targets'] = self.eval_metrics_targets_length
@@ -1047,7 +1047,7 @@ class SeqIOInput(base_input.BaseInput):
         and self.feature_converter._passthrough_features
     ):
       kwargs.update(
-          passthrough_features=self.feature_converter._passthrough_features  #  pylint:disable=protected-access
+          passthrough_features=self.feature_converter._passthrough_features  #  pylint:disable=protected-access  # pyrefly: ignore[bad-argument-type]
       )
     ds = self.mixture_or_task_inst.get_dataset(**kwargs)
     if cache_input_ds:
@@ -1061,13 +1061,13 @@ class SeqIOInput(base_input.BaseInput):
 
     assert self.feature_converter
     ds = self.feature_converter(
-        ds, task_feature_lengths=self.task_feature_lengths
+        ds, task_feature_lengths=self.task_feature_lengths  # pyrefly: ignore[bad-argument-type]
     )
 
     # We want to add enumeration provenance fields *after* applying all
     # feature converters since feature converters don't pass through
     # unrecognized fields by default
-    ds = _enumerate_dataset(ds, self.is_training, shard_info, self._is_mock_tpu)
+    ds = _enumerate_dataset(ds, self.is_training, shard_info, self._is_mock_tpu)  # pyrefly: ignore[bad-argument-type]
 
     return ds
 
@@ -1098,9 +1098,9 @@ class SeqIOInput(base_input.BaseInput):
       b.eval_sample_weights = 0.0
       b = _add_fake_enumeration(b, fake_val=-1)
       if self.annotate_padding_fields and hasattr(b, 'weights'):
-        b.weights *= 0
+        b.weights *= 0  # pyrefly: ignore[missing-attribute]
         if hasattr(b, 'paddings'):
-          b.paddings = 1 - b.weights
+          b.paddings = 1 - b.weights  # pyrefly: ignore[missing-attribute]
       return b
 
     ds = ds.map(_add_weight)
@@ -1138,7 +1138,7 @@ class SeqIOInput(base_input.BaseInput):
       local_num = self.eval_num_examples
     else:
       local_num = _get_num_examples(ds)
-    local_num_batches = (local_num + self.batch_size - 1) // self.batch_size
+    local_num_batches = (local_num + self.batch_size - 1) // self.batch_size  # pyrefly: ignore[unsupported-operation]
     # Find the max number of batches required across all Jax processes.
     num_batches_all = multihost_utils.process_allgather(
         jnp.array([local_num_batches]), tiled=False)
@@ -1229,7 +1229,7 @@ class SeqIOInput(base_input.BaseInput):
       # ragged tensor may have multiple elements of various lengths. We
       # linearize all inputs into one array.
       for field in self.ds_ragged_tensor_keys:
-        field_value = example_orig[field]
+        field_value = example_orig[field]  # pyrefly: ignore[unbound-name]
         linearized_field_value = field_value.flat_values.numpy()
         linearized_field_value = linearized_field_value[np.newaxis, :]
         targets[key][field] = linearized_field_value
@@ -1298,7 +1298,7 @@ class SeqIOInput(base_input.BaseInput):
         )
         return []
 
-    if is_packing_on(self.feature_converter):
+    if is_packing_on(self.feature_converter):  # pyrefly: ignore[bad-argument-type]
       logging.error('Will not compute metrics on %s since using a '
                     'FeatureConverter with pack=True.', task.name)
       return []
@@ -1358,7 +1358,7 @@ class SeqIOInput(base_input.BaseInput):
       else:
         # Prediction metrics
         if self.task_inst.postprocess_fn is not None:
-          t = _get_targets_str(target[ex], self.mixture_or_task_inst)
+          t = _get_targets_str(target[ex], self.mixture_or_task_inst)  # pyrefly: ignore[bad-argument-type]
           seqio_target = self.task_inst.postprocess_fn(
               t, example=target[ex], is_target=True
           )
@@ -1384,7 +1384,7 @@ class SeqIOInput(base_input.BaseInput):
               out[key],
           )
         else:
-          t = _get_targets_str(target[ex], self.mixture_or_task_inst)
+          t = _get_targets_str(target[ex], self.mixture_or_task_inst)  # pyrefly: ignore[bad-argument-type]
           logging.info(
               'Example %d:\nPROMPT=%s\nANSWER=%s\nTARGET=%s.',
               verbose_entries_idx,
@@ -1450,7 +1450,7 @@ class SeqIOInput(base_input.BaseInput):
         max_length = 0
         for out in model_outs:
           max_length = max(max_length, np.array(out).size)
-        model_outs = np.array([
+        model_outs = np.array([  # pyrefly: ignore[bad-assignment]
             np.pad(np.array(x), (0, max_length - np.array(x).size))
             for x in model_outs
         ])
@@ -1466,7 +1466,7 @@ class SeqIOInput(base_input.BaseInput):
             is_leaf=lambda x: isinstance(x, list),
         )
         model_outs = (
-            _pad_if_inhomogeneous(prediction_or_score),
+            _pad_if_inhomogeneous(prediction_or_score),  # pyrefly: ignore[bad-argument-type]
             aux_value,
         )
       else:
@@ -1868,7 +1868,7 @@ def get_eval_hparams_for_seqio(  # pytype: disable=annotation-type-mismatch
     ) = None,
     num_infeed_hosts: int = 0,
     use_cached: bool = False,
-    shuffle: bool = None,
+    shuffle: bool = None,  # pyrefly: ignore[bad-function-definition]
     require_metric_fns: bool = True,
     eval_metrics_retain_task_features: bool = False,
     check_split_exists: bool = False,

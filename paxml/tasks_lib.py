@@ -153,7 +153,7 @@ def extract_ema(
   if not vectorized:
     for v in model_states.opt_states[0]:
       if isinstance(v, dict) and 'ema' in v:
-        extracted = v.ema
+        extracted = v.ema  # pyrefly: ignore[missing-attribute]
         break
   else:
     extracted = None
@@ -168,12 +168,12 @@ def extract_ema(
         for v in item:
           if isinstance(v, dict) and 'ema' in v:
             if extracted is None:
-              extracted = v.ema
+              extracted = v.ema  # pyrefly: ignore[missing-attribute]
             else:
               extracted = jax.tree.map(
                   lambda x, y: y if py_utils.is_optax_masked_node(x) else x,
                   extracted,
-                  v.ema,
+                  v.ema,  # pyrefly: ignore[missing-attribute]
                   is_leaf=py_utils.is_optax_masked_node,
               )
   if extracted is None:
@@ -303,11 +303,11 @@ def _get_var_mapping(
     varname = varname.replace('.', '/')  # dot is reserved for regex
     for pattern, refname in loading_rules:
       if safe_load:
-        all_dest_patterns_in_loading_rules.add(pattern.pattern)
+        all_dest_patterns_in_loading_rules.add(pattern.pattern)  # pyrefly: ignore[unbound-name]
       mo = pattern.match(varname)
       if mo is None:
         continue
-      if any(pat.match(varname) is not None for pat in ignore_rules):
+      if any(pat.match(varname) is not None for pat in ignore_rules):  # pyrefly: ignore[not-iterable]
         logging.info(
             '%s Initialization by external checkpoint: '
             '%s match ignore rule, skip.', kind, varname)
@@ -321,7 +321,7 @@ def _get_var_mapping(
       refname = refname.format(*mo.groups())
       refname = refname.replace('/', '.')
       if safe_load:
-        matched_dest_patterns_in_loading_rules.add(pattern.pattern)
+        matched_dest_patterns_in_loading_rules.add(pattern.pattern)  # pyrefly: ignore[unbound-name]
 
       # Only for logging, keep name of ckpt that initialized the variable
       is_initialized[varname] = ckpt_path + '/' + refname
@@ -350,8 +350,8 @@ def _get_var_mapping(
   if safe_load:
     # Check that all source names have been matched; if they have not then the
     # loading rules do not serve the intended purpose.
-    diff = all_dest_patterns_in_loading_rules.difference(
-        matched_dest_patterns_in_loading_rules)
+    diff = all_dest_patterns_in_loading_rules.difference(  # pyrefly: ignore[unbound-name]
+        matched_dest_patterns_in_loading_rules)  # pyrefly: ignore[unbound-name]
     if diff:
       logging.info('Difference all-matched load_rule patterns=%r', diff)
       raise ValueError(f'The checkpoint loading rule(s) {loading_rules} '
@@ -806,12 +806,12 @@ def get_excluded_var_mask_for_grad_or_opt(
   if learner.bprop_variable_inclusion:
     assert not learner.bprop_variable_exclusion
     included_for_grad = py_utils.match_variable_names(
-        var_weight_hparams, learner.bprop_variable_inclusion
+        var_weight_hparams, learner.bprop_variable_inclusion  # pyrefly: ignore[bad-argument-type]
     )
     excluded_for_grad = jax.tree.map(lambda x: not x, included_for_grad)
   else:
     excluded_for_grad = py_utils.match_variable_names(
-        var_weight_hparams, learner.bprop_variable_exclusion
+        var_weight_hparams, learner.bprop_variable_exclusion  # pyrefly: ignore[bad-argument-type]
     )
   if mask_all_overwrite_with_gradient:
     excluded_for_grad = jax.tree.map(
@@ -889,7 +889,7 @@ def create_state_partition_specs(
 
   step_partition_spec = PartitionSpec()
   var_partition_specs = base_layer.var_partition_specs(
-      var_weight_hparams,
+      var_weight_hparams,  # pyrefly: ignore[bad-argument-type]
       mesh_shape=mesh_shape,
       device_axis_names=mesh_axis_names)
   if discard_opt_states:
@@ -897,13 +897,13 @@ def create_state_partition_specs(
   else:
     opt_var_weight_hparams = []
     index = 0
-    for learner in learners:
+    for learner in learners:  # pyrefly: ignore[not-iterable]
       excluded = get_excluded_var_mask_for_opt(
           var_weight_hparams,
           learner,
       )
       var_weight_hparams_for_opt = filter_vars_for_grad_or_opt(
-          var_weight_hparams, excluded
+          var_weight_hparams, excluded  # pyrefly: ignore[bad-argument-type]
       )
       grad_tx = learner.get_grad_tx(var_weight_hparams_for_opt)
       if isinstance(grad_tx, optimizers.ShardedGradientTransformation):
@@ -913,7 +913,7 @@ def create_state_partition_specs(
       elif isinstance(grad_tx, optax.GradientTransformationExtraArgs):
         opt_var_weight_hparams.append(
             optimizer_prefix_vectorization.partition_params(
-                grad_tx, var_weight_hparams_for_opt, opt_states[index]
+                grad_tx, var_weight_hparams_for_opt, opt_states[index]  # pyrefly: ignore[bad-index, unsupported-operation]
             )
         )
       else:
@@ -977,9 +977,9 @@ def _create_opt_states(
         learner,
     )
     var_weight_hparams = filter_vars_for_grad_or_opt(
-        var_weight_hparams, excluded
+        var_weight_hparams, excluded  # pyrefly: ignore[bad-argument-type]
     )
-    filtered_mdl_vars = filter_vars_for_grad_or_opt(mdl_vars, excluded)
+    filtered_mdl_vars = filter_vars_for_grad_or_opt(mdl_vars, excluded)  # pyrefly: ignore[bad-argument-type]
     grad_tx = learner.get_grad_tx(var_weight_hparams)
     opt_states.append(grad_tx.init(filtered_mdl_vars))
   return opt_states  # pytype: disable=bad-return-type
@@ -1014,7 +1014,7 @@ def create_state(
   if discard_opt_states:
     opt_states = []
   else:
-    opt_states = _create_opt_states(mdl_vars, var_weight_hparams, learners)
+    opt_states = _create_opt_states(mdl_vars, var_weight_hparams, learners)  # pyrefly: ignore[bad-argument-type]
 
   return TrainState(
       # The global step for the model.
@@ -1284,7 +1284,7 @@ class SingleTask(base_task.BaseTask):
     """
 
     learner: pax_fiddle.Config[learners_lib.Learner] = (
-        pax_fiddle.template_field(learners_lib.Learner)
+        pax_fiddle.template_field(learners_lib.Learner)  # pyrefly: ignore[bad-assignment]
     )
     num_train_steps: float = 1e7
     save_interval_steps: int = 5000
@@ -1301,7 +1301,7 @@ class SingleTask(base_task.BaseTask):
     eval_use_ema_states: bool = False
     inputs_split_mapping: PartitionSpec | None = None
     init_from_checkpoint_rules: dict[str, CheckpointLoadingRules] = (
-        pax_fiddle.instance_field(default_factory=dict)
+        pax_fiddle.instance_field(default_factory=dict)  # pyrefly: ignore[bad-assignment]
     )
     decode_interval_steps: int | None = None
     decode_start_after_n_steps: int = 0
@@ -1316,7 +1316,7 @@ class SingleTask(base_task.BaseTask):
     always_use_train_for_model_init: bool = True
     enforce_input_specs: bool = True
     random_seed: int = 1234
-    apply_mutable_list: list[str] = pax_fiddle.instance_field(
+    apply_mutable_list: list[str] = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
         default_factory=lambda: TRAIN_DEFAULT_MUTABLE_LIST[:]
     )
     tensorstore_metadata_key: str | None = None
@@ -1356,7 +1356,7 @@ class SingleTask(base_task.BaseTask):
     profiler_min_duration_sec: float = 1.0
     profiler_capture_step: int = 1
     profiler_max_num_hosts: int | None = None
-    apply_mutable_list: Sequence[str] = pax_fiddle.instance_field(
+    apply_mutable_list: Sequence[str] = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
         default_factory=lambda: DECODE_DEFAULT_MUTABLE_LIST[:]
     )
     metrics_prefix: str = 'Metrics/'
@@ -1374,7 +1374,7 @@ class SingleTask(base_task.BaseTask):
     """
 
     random_seed: int = 1234
-    apply_mutable_list: list[str] = pax_fiddle.instance_field(
+    apply_mutable_list: list[str] = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
         default_factory=lambda: EVAL_DEFAULT_MUTABLE_LIST[:]
     )
 
@@ -1399,24 +1399,24 @@ class SingleTask(base_task.BaseTask):
     MAX = 'max'
     MIN = 'min'
 
-  model: base_model.BaseModel = None
+  model: base_model.BaseModel = None  # pyrefly: ignore[bad-assignment]
 
   # Implementation note: `SingleTask` is not defined in the interpreter
   # context here, so we need to wrap it in a lambda which will look it up from
   # the global scope later.
-  train: pax_fiddle.Config[SingleTask.Train] = pax_fiddle.template_field(Train)
-  decode: pax_fiddle.Config[SingleTask.Decode] = pax_fiddle.template_field(
+  train: pax_fiddle.Config[SingleTask.Train] = pax_fiddle.template_field(Train)  # pyrefly: ignore[bad-assignment]
+  decode: pax_fiddle.Config[SingleTask.Decode] = pax_fiddle.template_field(  # pyrefly: ignore[bad-assignment]
       Decode
   )
-  evaluate: pax_fiddle.Config[SingleTask.Evaluate] = pax_fiddle.template_field(
+  evaluate: pax_fiddle.Config[SingleTask.Evaluate] = pax_fiddle.template_field(  # pyrefly: ignore[bad-assignment]
       Evaluate
   )
-  infer: pax_fiddle.Config[SingleTask.Infer] = pax_fiddle.template_field(Infer)
+  infer: pax_fiddle.Config[SingleTask.Infer] = pax_fiddle.template_field(Infer)  # pyrefly: ignore[bad-assignment]
 
   metrics: pax_fiddle.Config[base_layer.BaseLayer] | None = None
   loss_aggregator: pax_fiddle.Config[base_layer.BaseLayer] | None = None
   vn: pax_fiddle.Config[SingleTask.VariationalNoise] = (
-      pax_fiddle.template_field(VariationalNoise)
+      pax_fiddle.template_field(VariationalNoise)  # pyrefly: ignore[bad-assignment]
   )
   infer_writer: pax_fiddle.Config[SingleTask.InferWriter] | None = None
   early_stopping_fn: EarlyStoppingFn | None = None
@@ -1612,7 +1612,7 @@ class SingleTask(base_task.BaseTask):
     return create_state_partition_specs(
         var_weight_hparams,
         mesh_shape,
-        mesh_axis_names,
+        mesh_axis_names,  # pyrefly: ignore[bad-argument-type]
         discard_opt_states,
         self.learners,
         unpadded_shapes.opt_states,
@@ -1778,7 +1778,7 @@ class SingleTask(base_task.BaseTask):
     model_vars = train_state.mdl_vars
 
     input_specs_provider_p = rules.input_specs_provider_p
-    input_specs_provider = instantiate(input_specs_provider_p)
+    input_specs_provider = instantiate(input_specs_provider_p)  # pyrefly: ignore[bad-argument-type]
     inputs_shape_dtype = input_specs_provider.get_input_specs()
     # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
     # (and check for dcn_mesh_shape too).
@@ -1926,7 +1926,7 @@ class SingleTask(base_task.BaseTask):
         model_vars,
         loaded_vars,
         model_vars_mapping,
-        provenance_model_vars,
+        provenance_model_vars,  # pyrefly: ignore[bad-argument-type]
         flat_loaded_vars_provenance,
     )
     train_state = train_state.replace(mdl_vars=model_vars)

@@ -327,7 +327,7 @@ class SearchHParamsTest(absltest.TestCase):
                                           reward_type='tunas').search_reward
     assert p is not None
     self.assertTrue(
-        issubclass(fdl.get_callable(p.aggregator_tpl), automl.TunasAbsolute))
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.TunasAbsolute))  # pyrefly: ignore[bad-argument-type]
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
@@ -336,7 +336,7 @@ class SearchHParamsTest(absltest.TestCase):
                                           reward_type='mnas_hard').search_reward
     assert p is not None
     self.assertTrue(
-        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasHard))
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasHard))  # pyrefly: ignore[bad-argument-type]
     p = automl.neural_architecture_search([
         automl.Metric.eval('accuracy'),
         automl.Metric.train_steps_per_second()
@@ -345,7 +345,7 @@ class SearchHParamsTest(absltest.TestCase):
                                           reward_type='mnas_soft').search_reward
     assert p is not None
     self.assertTrue(
-        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasSoft))
+        issubclass(fdl.get_callable(p.aggregator_tpl), automl.MnasSoft))  # pyrefly: ignore[bad-argument-type]
     with self.assertRaisesRegex(ValueError, 'Unsupported reward type'):
       automl.neural_architecture_search([
           automl.Metric.eval('accuracy'),

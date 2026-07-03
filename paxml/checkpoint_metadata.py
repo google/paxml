@@ -139,7 +139,7 @@ class ArrayMetadata:
     if self.unpadded_shape_dtype_struct is None:
       return d
     else:
-      d.update({
+      d.update({  # pyrefly: ignore[no-matching-overload]
           UNPADDED_SHAPE: self.unpadded_shape_dtype_struct.shape,
           DTYPE: str(self.unpadded_shape_dtype_struct.dtype),
       })

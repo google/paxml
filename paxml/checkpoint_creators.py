@@ -639,10 +639,10 @@ def _create_checkpointer(
     )
 
   if task_p.train.enable_input_checkpointing:
-    train_input_p.input_checkpointing_enabled = True
+    train_input_p.input_checkpointing_enabled = True  # pyrefly: ignore[missing-attribute]
   checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
       checkpoint_dir,
-      checkpointer,
+      checkpointer,  # pyrefly: ignore[bad-argument-type]
       train_input_checkpointer=train_input_checkpointer,
       options=options,
       checkpoint_type=checkpoint_type,

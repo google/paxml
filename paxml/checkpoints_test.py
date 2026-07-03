@@ -45,10 +45,10 @@ def _create_tmp_directory(final_dir):
     return tmp_dir
   elif hasattr(ocp.path.atomicity, '_create_tmp_directory'):
     tmp_dir = ocp.path.atomicity._get_tmp_directory(final_dir)
-    ocp.path.atomicity._create_tmp_directory(tmp_dir, final_dir)
+    ocp.path.atomicity._create_tmp_directory(tmp_dir, final_dir)  # pyrefly: ignore[bad-argument-type]
     return tmp_dir
   else:
-    return ocp.utils.create_tmp_directory(final_dir)
+    return ocp.utils.create_tmp_directory(final_dir)  # pyrefly: ignore[missing-attribute]
 
 
 class CheckpointsTest(parameterized.TestCase):
@@ -93,7 +93,7 @@ class CheckpointsTest(parameterized.TestCase):
     opt_params = optimizer.init(model_vars['params'])
     extra_state = ()
     train_state = train_states.TrainState(  # pytype: disable=wrong-arg-types  # dataclass_transform
-        jnp.asarray([0], jnp.int64), model_vars, opt_params, extra_state
+        jnp.asarray([0], jnp.int64), model_vars, opt_params, extra_state  # pyrefly: ignore[bad-argument-type]
     )
     # Save the "checkpoint".
     tmp_dir = self.create_tempdir('test_train_state_type_check_checkpoint')
@@ -373,7 +373,7 @@ class PaxMetadataTest(parameterized.TestCase):
               version=1.1,
               train_state_metadata={
                   'mdl_vars': _CustomPyTreeNode(
-                      a=ArrayMetadata(
+                      a=ArrayMetadata(  # pyrefly: ignore[bad-argument-type]
                           unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
                               shape=(1, 2),
                               dtype=np.float32,
@@ -389,7 +389,7 @@ class PaxMetadataTest(parameterized.TestCase):
               version=1.1,
               train_state_metadata={
                   'mdl_vars': _CustomFlaxDataclass(
-                      a=ArrayMetadata(
+                      a=ArrayMetadata(  # pyrefly: ignore[bad-argument-type]
                           unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
                               shape=(1, 2),
                               dtype=np.float32,

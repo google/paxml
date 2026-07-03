@@ -60,7 +60,7 @@ class ExperimentRegistryTest(absltest.TestCase):
   def test_get(self):
     # Module name is `__main__` when registering locally like here.
     dummy_experiment_cls = experiment_registry.get('__main__.DummyExperiment')
-    dummy_experiment = dummy_experiment_cls()
+    dummy_experiment = dummy_experiment_cls()  # pyrefly: ignore[not-callable]
     self.assertEmpty(dummy_experiment.datasets())
     self.assertIsNotNone(dummy_experiment.task())
     dummy_experiment_cls2 = experiment_registry.get('DummyExperiment')
@@ -88,7 +88,7 @@ class ExperimentRegistryTest(absltest.TestCase):
     self.assertIn(None, classes)
 
     dummy_experiment_cls = experiment_registry.get('SyntheticClassifier')
-    dummy_experiment = dummy_experiment_cls()
+    dummy_experiment = dummy_experiment_cls()  # pyrefly: ignore[not-callable]
     self.assertEmpty(dummy_experiment.datasets())
     self.assertIsNotNone(dummy_experiment.task())
 

@@ -111,11 +111,11 @@ def get_search_space(
       _ = experiment_config.decode_datasets()
 
   search_space = pg.hyper.trace(inspect_search_space, require_hyper_name=True)
-  if (automl.COMBINED_DECISION_ATTR in search_space.hyper_dict
-      and len(search_space.hyper_dict) != 1):
+  if (automl.COMBINED_DECISION_ATTR in search_space.hyper_dict  # pyrefly: ignore[not-iterable]
+      and len(search_space.hyper_dict) != 1):  # pyrefly: ignore[bad-argument-type]
     parameter_sweep_attr_names = getattr(
         experiment_config, automl.COMBINED_DECISION_POINT_NAMES)
-    extra_parameters = list(search_space.hyper_dict)
+    extra_parameters = list(search_space.hyper_dict)  # pyrefly: ignore[bad-argument-type]
     extra_parameters.remove(automl.COMBINED_DECISION_ATTR)
     raise ValueError(
         f'Found extra tuning parameters ({extra_parameters}) beyond the '
@@ -136,7 +136,7 @@ def _maybe_override_for_warm_start(
     """This is a modified version of $sub_experiment_cls."""
 
     def task(self) -> pax_fiddle.Config[base_task.BaseTask]:
-      task_p = super().task()
+      task_p = super().task()  # pyrefly: ignore[missing-attribute]
       if checkpoint_path and not hasattr(
           self, 'get_input_specs_provider_params'
       ):
@@ -244,7 +244,7 @@ def tune(
   # Make sure tuning is launched with the right running mode.
   _verify_running_mode(reward_fn, running_mode, is_metric_reporting_role)
 
-  search_algorithm = instantiate(search_hparams.search_algorithm)()
+  search_algorithm = instantiate(search_hparams.search_algorithm)()  # pyrefly: ignore[bad-argument-type]
   max_num_trials = max_num_trials or search_hparams.max_num_trials
   errors_to_skip = search_hparams.errors_to_skip or []
   cross_step_metric_aggregator = instantiate(
@@ -294,8 +294,8 @@ def tune(
 
   if controller_mode == 'primary':
     _run_dedicated_controller(
-        study, search_space.dna_spec,
-        search_algorithm, early_stopping_policy, max_num_trials,
+        study, search_space.dna_spec,  # pyrefly: ignore[bad-argument-type]
+        search_algorithm, early_stopping_policy, max_num_trials,  # pyrefly: ignore[bad-argument-type]
         search_hparams.prior_study_ids, search_hparams.add_prior_trials)
     return
 
@@ -662,10 +662,10 @@ class EarlyStoppingFn:
       else:
         reward = e.reward
         if reward is None:
-          reward = self._compute_reward(e.metrics, e.step)
+          reward = self._compute_reward(e.metrics, e.step)  # pyrefly: ignore[bad-argument-type]
         self._feedback.add_measurement(
             reward=reward,
-            step=e.step,
+            step=e.step,  # pyrefly: ignore[bad-argument-type]
             metrics=e.metrics,
             checkpoint_path=e.checkpoint)
         self._complete_trial(checkpoint_path=checkpoint_path)
@@ -807,7 +807,7 @@ def should_early_stop(
       train_steps_per_sec,
   )
   return early_stop_fn(
-      tuning_metrics, running_mode, global_step, is_last_ckpt, checkpoint_path
+      tuning_metrics, running_mode, global_step, is_last_ckpt, checkpoint_path  # pyrefly: ignore[bad-argument-type]
   )
 
 
@@ -850,20 +850,20 @@ def _aggregate_metrics(
 
   if eval_metrics:
     eval_input_names = eval_metrics.input_names
-    _add_input_based_metrics(eval_input_names, eval_metrics.metrics_list,
+    _add_input_based_metrics(eval_input_names, eval_metrics.metrics_list,  # pyrefly: ignore[bad-argument-type]
                              'eval_test', 'metrics')
-    _add_input_based_metrics(eval_input_names,
-                             eval_metrics.scoring_metrics_list,
+    _add_input_based_metrics(eval_input_names,  # pyrefly: ignore[bad-argument-type]
+                             eval_metrics.scoring_metrics_list,  # pyrefly: ignore[bad-argument-type]
                              'eval_test', 'scoring_eval')
   if decode_metrics:
     decode_input_names = decode_metrics.input_names
-    _add_input_based_metrics(decode_input_names, decode_metrics.metrics_list,
+    _add_input_based_metrics(decode_input_names, decode_metrics.metrics_list,  # pyrefly: ignore[bad-argument-type]
                              'decode_test')
-    _add_input_based_metrics(decode_input_names,
-                             decode_metrics.processed_metrics_list,
+    _add_input_based_metrics(decode_input_names,  # pyrefly: ignore[bad-argument-type]
+                             decode_metrics.processed_metrics_list,  # pyrefly: ignore[bad-argument-type]
                              'decode_test')
-    _add_input_based_metrics(decode_input_names,
-                             decode_metrics.seqio_metrics_list,
+    _add_input_based_metrics(decode_input_names,  # pyrefly: ignore[bad-argument-type]
+                             decode_metrics.seqio_metrics_list,  # pyrefly: ignore[bad-argument-type]
                              'decode_test')
 
   # Add training metrics.

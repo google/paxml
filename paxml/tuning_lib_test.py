@@ -317,7 +317,7 @@ class TuningWithSubExperiments(TuningExperiment):
 
   def sub_experiments(self) -> dict[str, Type[base_experiment.BaseExperiment]]:
     def _scale_experiment(multiplier):
-      class ScaledExperiment(self.__class__):
+      class ScaledExperiment(self.__class__):  # pyrefly: ignore[invalid-inheritance]
 
         @property
         def LEARNING_RATE(self):
@@ -852,7 +852,7 @@ class TrialDirnameTest(absltest.TestCase):
 
   def test_trial_with_making_path_friendly(self):
 
-    @pg.members([('x', pg.typing.Any())])
+    @pg.members([('x', pg.typing.Any())])  # pyrefly: ignore[bad-instantiation]
     class A(pg.Object):
       pass
 

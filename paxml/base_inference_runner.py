@@ -51,7 +51,7 @@ class BaseInferenceRunner(base_hyperparams.FiddleBaseParameterizable, abc.ABC):
   native types such as strings.
   """
   _model: Any = dataclasses.field(init=False, repr=False)
-  model: base_model.BaseModel = None
+  model: base_model.BaseModel = None  # pyrefly: ignore[bad-assignment]
 
   def __post_init__(self):
     self._model = self.model

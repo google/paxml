@@ -407,7 +407,7 @@ def initialize_model_state(
   if 'params_axes' in initial_vars:
     del initial_vars['params_axes']
   train_state = jax_task.create_train_state(
-      initial_vars, var_weight_hparams, discard_opt_states
+      initial_vars, var_weight_hparams, discard_opt_states  # pyrefly: ignore[bad-argument-type]
   )
   train_state_provenance = train_states.build_train_state_provenance(
       train_state
@@ -431,7 +431,7 @@ def initialize_model_state(
       jax.tree_util.tree_map(lambda x: x.delete(), train_state.opt_states)
       # Re-compute opt_states after the model variables are updated.
       opt_states = jax_task.create_opt_states(
-          train_state.mdl_vars, var_weight_hparams
+          train_state.mdl_vars, var_weight_hparams  # pyrefly: ignore[bad-argument-type]
       )
       train_state = train_state.replace(opt_states=opt_states)
   return train_state, train_state_provenance
@@ -888,7 +888,7 @@ def _get_default_loss_fn(
       weighted_loss = weighted_loss.astype(jnp.float32)
 
     return weighted_loss, sgf.GradAuxInfo(
-        loss_weight=loss_weight,
+        loss_weight=loss_weight,  # pyrefly: ignore[bad-argument-type]
         aux_info=(
             mean_loss,
             aggregated_scalars,
@@ -940,7 +940,7 @@ def _get_default_grad_fn(
       prng_key: PRNGKey,
   ):
     with_grad = tasks_lib.filter_vars_for_grad_or_opt(
-        mdl_vars, excluded_for_grad
+        mdl_vars, excluded_for_grad  # pyrefly: ignore[bad-argument-type]
     )
     no_grad = jax.tree.map(
         lambda x, e: x if e else {}, mdl_vars, excluded_for_grad
@@ -998,13 +998,13 @@ def get_excluded_var_masks(
   """Return the variables excluded for gradients and optimizer states."""
   # Skip variables for gradients.
   excluded_for_grad = tasks_lib.get_excluded_var_mask_for_grad(
-      var_weight_hparams, learner
+      var_weight_hparams, learner  # pyrefly: ignore[bad-argument-type]
   )
   _log_bprop_include_exclude_list(var_weight_hparams, excluded_for_grad)
 
   # Excluded for optimizer states.
   excluded_for_opt = tasks_lib.get_excluded_var_mask_for_opt(
-      var_weight_hparams,
+      var_weight_hparams,  # pyrefly: ignore[bad-argument-type]
       learner,
   )
   return excluded_for_grad, excluded_for_opt
@@ -1123,7 +1123,7 @@ def train_step_single_learner(
       ),
       learner=learner,
       mdl_vars=updated_model_vars,
-      inputs=inputs,
+      inputs=inputs,  # pyrefly: ignore[bad-argument-type]
       prng_key=subkey,
   )
   (
@@ -1166,7 +1166,7 @@ def train_step_single_learner(
         mdl_vars, excluded_for_learner
     )
     wps_with_opt = tasks_lib.filter_vars_for_grad_or_opt(
-        var_weight_hparams, excluded_for_learner
+        var_weight_hparams, excluded_for_learner  # pyrefly: ignore[bad-argument-type]
     )
     transformed_grads, new_opt_states = learner.update_states(
         grads, states.opt_states[0], vars_with_opt, wps_with_opt
@@ -1190,7 +1190,7 @@ def train_step_single_learner(
         mdl_vars[collection] = _maybe_synchronize_non_learnable_vars(
             states.mdl_vars[collection],
             fwd_updated_vars[collection],
-            var_weight_hparams[collection],
+            var_weight_hparams[collection],  # pyrefly: ignore[bad-index]
         )
 
     # We may have updated non-trainable vars that have been explicitly excluded.
@@ -1198,7 +1198,7 @@ def train_step_single_learner(
         lambda e, old, new: old if e else new,
         # Filter out only the explicitly masked non-trainables.
         tasks_lib.get_excluded_var_mask_for_grad_or_opt(
-            var_weight_hparams, learner, mask_all_non_trainable=False
+            var_weight_hparams, learner, mask_all_non_trainable=False  # pyrefly: ignore[bad-argument-type]
         ),
         states.mdl_vars,
         mdl_vars,
@@ -1316,8 +1316,8 @@ def eval_step_single_learner(
   else:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
-  enum_keys, inputs = py_utils.filter_by_matching_keys(
-      inputs, [py_utils.PROVENANCE_PREFIX]
+  enum_keys, inputs = py_utils.filter_by_matching_keys(  # pyrefly: ignore[bad-assignment]
+      inputs, [py_utils.PROVENANCE_PREFIX]  # pyrefly: ignore[bad-argument-type]
   )
   with base_layer.JaxContext.new_context(hparams=context_p):
     _, k1, k2, k3 = jax.random.split(prng_key, 4)
@@ -1382,7 +1382,7 @@ def eval_step_single_learner(
   return None, StepFnOutput(
       loss=mean_loss,
       weighted_scalars=aggregated_scalars,
-      per_example_out=per_example_out,
+      per_example_out=per_example_out,  # pyrefly: ignore[bad-argument-type]
       summary_tensors=aggregated_summaries,
       clu_metrics=aggregated_clu_metrics,
   )
@@ -1429,8 +1429,8 @@ def decode_step(
   elif fprop_dtype != jnp.float32:
     assert NotImplementedError(f'fprop_dtype {fprop_dtype} not supported.')
 
-  enum_keys, inputs = py_utils.filter_by_matching_keys(
-      inputs, [py_utils.PROVENANCE_PREFIX]
+  enum_keys, inputs = py_utils.filter_by_matching_keys(  # pyrefly: ignore[bad-assignment]
+      inputs, [py_utils.PROVENANCE_PREFIX]  # pyrefly: ignore[bad-argument-type]
   )
   with base_layer.JaxContext.new_context(hparams=context_p):
     k1, k2, k3 = jax.random.split(prng_key, 3)
@@ -1587,7 +1587,7 @@ def initialize_partitioned_model_states(
         is_eval=is_eval,
     )
     return py_utils.maybe_pad_uneven_sharding(
-        outs,
+        outs,  # pyrefly: ignore[bad-argument-type]
         train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
         train_state_unpadded_shapes,
         model.hparams.mesh_shape,
@@ -1604,11 +1604,11 @@ def initialize_partitioned_model_states(
   prng_key_partition_spec = base_layer.to_partition_spec((None,), mesh_names)
 
   prng_key_shardings = jax.tree.map(
-      lambda p: jax.sharding.NamedSharding(global_mesh, p),
+      lambda p: jax.sharding.NamedSharding(global_mesh, p),  # pyrefly: ignore[bad-argument-type]
       prng_key_partition_spec,
   )
   train_state_shardings = jax.tree.map(
-      lambda p: jax.sharding.NamedSharding(global_mesh, p),
+      lambda p: jax.sharding.NamedSharding(global_mesh, p),  # pyrefly: ignore[bad-argument-type]
       train_state_partition_specs,
   )
 
@@ -1617,7 +1617,7 @@ def initialize_partitioned_model_states(
       in_shardings=prng_key_shardings,
       out_shardings=train_state_shardings,
   )
-  init_fn = bind_mesh(init_fn, global_mesh)
+  init_fn = bind_mesh(init_fn, global_mesh)  # pyrefly: ignore[bad-argument-type]
 
   partitioned_vars = init_fn(prng_key)
   train_state_provenance = train_states.build_train_state_provenance(
@@ -1653,7 +1653,7 @@ def shard_on_batch_dim_partition_spec(
   sharding = [-1] * x_dim
   # Assume the first dim is batch, and fully shard the batch dim over the entire
   # mesh.
-  sharding[0] = tuple(mesh_names)
+  sharding[0] = tuple(mesh_names)  # pyrefly: ignore[unsupported-operation]
   return base_layer.to_partition_spec(sharding, mesh_names)
 
 
@@ -1752,7 +1752,7 @@ def bind_mesh(pjitted_fn, global_mesh: jax.sharding.Mesh):
     with global_mesh:
       return pjitted_fn.lower(*args, **kwargs)
 
-  call.lower = lower
+  call.lower = lower  # pyrefly: ignore[missing-attribute]
   return call
 
 

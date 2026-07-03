@@ -82,8 +82,8 @@ class LearnersTest(test_utils.TestCase):
       gn1a = g1a * single_clip_norm / max(local_norm1, single_clip_norm)
       gn1b = g1b * single_clip_norm / max(local_norm1, single_clip_norm)
       gn2 = g2 * single_clip_norm / max(local_norm2, single_clip_norm)
-    expected_grad1 = jnp.array([gn1a, gn1b], dtype=jnp.float32)
-    expected_grad2 = jnp.array([gn2], dtype=jnp.float32)
+    expected_grad1 = jnp.array([gn1a, gn1b], dtype=jnp.float32)  # pyrefly: ignore[unbound-name]
+    expected_grad2 = jnp.array([gn2], dtype=jnp.float32)  # pyrefly: ignore[unbound-name]
 
     self.assertAllClose(expected_grad1, transformed_grads.grad1)
     self.assertAllClose(expected_grad2, transformed_grads.grad2)
@@ -238,7 +238,7 @@ class LearnersTest(test_utils.TestCase):
     )
     var_weight_hparams = jax.tree.map(
         lambda v: base_layer.WeightHParams(
-            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
+            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]  # pyrefly: ignore[bad-argument-type]
         ),
         old_vars,
     )
@@ -272,8 +272,8 @@ class LearnersTest(test_utils.TestCase):
     adam_opt = optax.adam(learning_rate=lr_schedule, b1=0.9, b2=0.99, eps=0.1)
     updated_grads, updated_state = adam_opt.update(grads, opt_states[2])
     logging.info('updated_state: %s', updated_state)
-    self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])
-    self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])
+    self.assertAllClose(transformed_grads.lm.w, updated_grads['lm']['w'])  # pyrefly: ignore[bad-index]
+    self.assertAllClose(transformed_grads.ffn, updated_grads['ffn'])  # pyrefly: ignore[bad-index]
 
   @parameterized.parameters(
       (0.5, 2.0, 0.1, 0.0, True),
@@ -494,14 +494,14 @@ class LearnersTest(test_utils.TestCase):
 
     var_weight_hparams = jax.tree.map(
         lambda v: base_layer.WeightHParams(
-            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]
+            v.shape, mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1]  # pyrefly: ignore[bad-argument-type]
         ),
         old_vars,
     )
     var_weight_hparams.lm.ffn = NestedMap(
         k=base_layer.WeightHParams(
             shape=[4, 8],
-            mesh_shape=mesh_shape,
+            mesh_shape=mesh_shape,  # pyrefly: ignore[bad-argument-type]
             tensor_split_dims_mapping=[0, 1],
         )
     )
@@ -720,13 +720,13 @@ class LearnersTest(test_utils.TestCase):
     grads.lm.ngrammer = NestedMap()
     old_vars = grads.DeepCopy()
     emb_var1 = base_layer.WeightHParams(
-        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])
+        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])  # pyrefly: ignore[bad-argument-type]
     emb_var2 = base_layer.WeightHParams(
-        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])
+        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])  # pyrefly: ignore[bad-argument-type]
     grad1 = base_layer.WeightHParams(
-        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])
+        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])  # pyrefly: ignore[bad-argument-type]
     grad2 = base_layer.WeightHParams(
-        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])
+        shape=[4, 8], mesh_shape=mesh_shape, tensor_split_dims_mapping=[-1, 1])  # pyrefly: ignore[bad-argument-type]
     grads.lm.ngrammer.ngram_table = [
         NestedMap(emb_var=grad1),
         NestedMap(emb_var=grad2)
@@ -739,22 +739,22 @@ class LearnersTest(test_utils.TestCase):
     grads.lm.transformer = NestedMap(
         w=base_layer.WeightHParams(
             shape=[4, 8],
-            mesh_shape=mesh_shape,
+            mesh_shape=mesh_shape,  # pyrefly: ignore[bad-argument-type]
             tensor_split_dims_mapping=[-1, 1]))
     old_vars.lm.transformer = NestedMap(
         w=base_layer.WeightHParams(
             shape=[4, 8],
-            mesh_shape=mesh_shape,
+            mesh_shape=mesh_shape,  # pyrefly: ignore[bad-argument-type]
             tensor_split_dims_mapping=[-1, 1]))
     grads.lm.ffn = NestedMap(
         k=base_layer.WeightHParams(
             shape=[4, 8],
-            mesh_shape=mesh_shape,
+            mesh_shape=mesh_shape,  # pyrefly: ignore[bad-argument-type]
             tensor_split_dims_mapping=[-1, 1]))
     old_vars.lm.ffn = NestedMap(
         k=base_layer.WeightHParams(
             shape=[4, 8],
-            mesh_shape=mesh_shape,
+            mesh_shape=mesh_shape,  # pyrefly: ignore[bad-argument-type]
             tensor_split_dims_mapping=[0, 1]))
 
     grad_tx = learner_instance.get_grad_tx(var_weight_hparams=old_vars)
@@ -799,7 +799,7 @@ class LearnersTest(test_utils.TestCase):
       def _get_raw_grad_transformation(self, lr):
         return optimizers.ShardedGradientTransformation(
             init=_opt_init,
-            update=_opt_update,
+            update=_opt_update,  # pyrefly: ignore[bad-argument-type]
             init_partition_spec=_init_partition_spec)
 
     learner_p = pax_fiddle.Config(
@@ -909,7 +909,7 @@ class LearnersTest(test_utils.TestCase):
     learner_p.optimizer.learning_rate = 1.0
     learner_p.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
     learner_p.optimizer.grad_tx = optax.GradientTransformationExtraArgs(
-        init=_opt_init, update=_opt_update
+        init=_opt_init, update=_opt_update  # pyrefly: ignore[bad-argument-type]
     )
 
     learner_instance = instantiate(learner_p)
@@ -1011,7 +1011,7 @@ class LearnersTest(test_utils.TestCase):
       def _get_raw_grad_transformation(self, lr):
         return optimizers.ShardedGradientTransformation(
             init=_opt_init,
-            update=_opt_update,
+            update=_opt_update,  # pyrefly: ignore[bad-argument-type]
             init_partition_spec=_init_partition_spec,
         )
 
@@ -1079,7 +1079,7 @@ class LearnersTest(test_utils.TestCase):
       def _get_raw_grad_transformation(self, lr):
         return optimizers.ShardedGradientTransformation(
             init=_opt_init,
-            update=_opt_update,
+            update=_opt_update,  # pyrefly: ignore[bad-argument-type]
             init_partition_spec=_init_partition_spec)
 
     learner_p = pax_fiddle.Config(

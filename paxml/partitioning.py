@@ -319,9 +319,9 @@ class Partitioner(metaclass=abc.ABCMeta):
     self._init_is_eval = init_is_eval
 
     # States to set in .setup().
-    self._jax_task: tasks_lib.SingleTask = None
+    self._jax_task: tasks_lib.SingleTask = None  # pyrefly: ignore[bad-assignment]
     self._job_log_dir = None
-    self._init_key: PRNGKey = None
+    self._init_key: PRNGKey = None  # pyrefly: ignore[bad-assignment]
     self._train_inputs_shape_dtype = None
 
     # The train state metadata, set in .get_train_state_metadata().
@@ -371,7 +371,7 @@ class Partitioner(metaclass=abc.ABCMeta):
     else:
       logging.info('[PAX STATUS]: Getting input shapes from first batch.')
       self._train_inputs_shape_dtype = self._get_train_inputs_shape_dtype(
-          train_input_pipeline
+          train_input_pipeline  # pyrefly: ignore[bad-argument-type]
       )
 
     if not self._train_inputs_shape_dtype:
@@ -601,7 +601,7 @@ class PmapPartitioner(Partitioner):
     sample_inputs = train_input_pipeline.peek_padded()
     # Reshard inputs and only keep the inputs corresponding to a given device.
     sample_inputs = self.preprocess_inputs(
-        train_input_pipeline, sample_inputs, partition_specs=None
+        train_input_pipeline, sample_inputs, partition_specs=None  # pyrefly: ignore[bad-argument-type]
     )
     per_device_shape_dtype = jax.tree.map(
         lambda x: jax.ShapeDtypeStruct(shape=x.shape[1:], dtype=x.dtype),
@@ -637,14 +637,14 @@ class PmapPartitioner(Partitioner):
     train_state_provenance = None
     if train_state is None:
       # If no checkpoint was restored, initialize with random weights.
-      metadata = self.get_train_state_metadata(discard_opt_states)
+      metadata = self.get_train_state_metadata(discard_opt_states)  # pyrefly: ignore[bad-argument-type]
       train_state, train_state_provenance = trainer_lib.initialize_model_state(
           self._jax_task,
           init_key,
           metadata.input_shape_dtype,
-          discard_opt_states=discard_opt_states,
+          discard_opt_states=discard_opt_states,  # pyrefly: ignore[bad-argument-type]
           is_eval=self._init_do_eval,
-          checkpoint_type=checkpoint_type,
+          checkpoint_type=checkpoint_type,  # pyrefly: ignore[bad-argument-type]
           var_weight_hparams=metadata.var_weight_hparams,
       )
 
@@ -716,7 +716,7 @@ class PmapPartitioner(Partitioner):
           state,
           prng_key,
           inputs,
-          self._jax_task.model.fprop_dtype,
+          self._jax_task.model.fprop_dtype,  # pyrefly: ignore[bad-argument-type]
           train_state_metadata.var_weight_hparams,
           static_args,
       )
@@ -739,10 +739,10 @@ class PmapPartitioner(Partitioner):
         static_args: BaseStepFnStaticArgs | None = None,
     ):
       if static_args:
-        static_args = static_args.replace(unpadded_global_batch_size=None)
+        static_args = static_args.replace(unpadded_global_batch_size=None)  # pyrefly: ignore[missing-attribute]
       return partitioned_step_fn(state, prng_key, inputs, static_args)
 
-    return _wrapped_partitioned_step, None  # Input partition spec.
+    return _wrapped_partitioned_step, None  # Input partition spec.  # pyrefly: ignore[bad-return]
 
 
 class PjitPartitioner(Partitioner):
@@ -775,14 +775,14 @@ class PjitPartitioner(Partitioner):
     if device_mesh is None:
       logging.info('creating mesh with py_utils.create_device_mesh')
       device_mesh = py_utils.create_device_mesh(
-          model.ici_mesh_shape,
+          model.ici_mesh_shape,  # pyrefly: ignore[bad-argument-type]
           model.dcn_mesh_shape,
           contiguous_submeshes=model.contiguous_submeshes,
       )
     else:
       logging.info('Using provided mesh for PjitPartitioner')
     logging.info('device_mesh: %s', device_mesh)
-    self._global_mesh = jax.sharding.Mesh(device_mesh, model.mesh_axis_names)
+    self._global_mesh = jax.sharding.Mesh(device_mesh, model.mesh_axis_names)  # pyrefly: ignore[bad-argument-type]
 
     # Pjit'ed function to preprocess the prng key.
     self._broadcast_key_fn = None
@@ -794,7 +794,7 @@ class PjitPartitioner(Partitioner):
     global_shape_dtype = jax.tree.map(
         py_utils.get_global_input_shape_dtype, sample_inputs
     )
-    perhost_inputs_shape_dtype = trees.get_shape_dtype(sample_inputs)
+    perhost_inputs_shape_dtype = trees.get_shape_dtype(sample_inputs)  # pyrefly: ignore[bad-argument-type]
     _write_input_specs(perhost_inputs_shape_dtype, self._job_log_dir)
     return global_shape_dtype
 
@@ -837,7 +837,7 @@ class PjitPartitioner(Partitioner):
     train_state_provenance = None
     if partitioned_train_state is None:
       # If no checkpoint was restored, initialize with random weights.
-      metadata = self.get_train_state_metadata(discard_opt_states)
+      metadata = self.get_train_state_metadata(discard_opt_states)  # pyrefly: ignore[bad-argument-type]
       # TODO(laigd): there is a potential bug here: when this is called in the
       # eval/decode pipeline, do_eval is not properly set (see the pmap
       # version). But since we're enabling always_use_train_for_model_init this
@@ -847,13 +847,13 @@ class PjitPartitioner(Partitioner):
               self._jax_task,
               init_key,
               metadata.input_shape_dtype,
-              metadata.partition_specs,
+              metadata.partition_specs,  # pyrefly: ignore[bad-argument-type]
               global_mesh=self.global_mesh,
               # Note: We currently enforce that the checkpoint to reload via
               # init_checkpoint_rules are in the same format as the checkpoint
               # solution used by the experiment.
-              checkpoint_type=checkpoint_type,
-              discard_opt_states=discard_opt_states,
+              checkpoint_type=checkpoint_type,  # pyrefly: ignore[bad-argument-type]
+              discard_opt_states=discard_opt_states,  # pyrefly: ignore[bad-argument-type]
               var_weight_hparams=metadata.var_weight_hparams,
           )
       )
@@ -895,7 +895,7 @@ class PjitPartitioner(Partitioner):
     """Preprocess the input batch before using it."""
     if self._reshard_inputs:
       return input_pipeline.reshard_for_spmd(
-          padded_inputs, self.global_mesh, partition_specs
+          padded_inputs, self.global_mesh, partition_specs  # pyrefly: ignore[bad-argument-type]
       )
     return padded_inputs
 
@@ -998,7 +998,7 @@ class PjitPartitioner(Partitioner):
         state = self._unpad_states(metadata, state)
         inputs = self._unpad_inputs(
             inputs,
-            static_args.unpadded_global_batch_size
+            static_args.unpadded_global_batch_size  # pyrefly: ignore[bad-argument-type]
             if static_args
             else unpadded_global_batch_size,
             input_partition_spec,
@@ -1016,7 +1016,7 @@ class PjitPartitioner(Partitioner):
           state,
           prng_key,
           inputs,
-          model.fprop_dtype,
+          model.fprop_dtype,  # pyrefly: ignore[bad-argument-type]
           metadata.var_weight_hparams,
           static_args,
       )
@@ -1026,11 +1026,11 @@ class PjitPartitioner(Partitioner):
 
       # Pad the model states again for training step functions.
       if use_padding:
-        padded_states = self._pad_states(metadata, fn_out[0])
+        padded_states = self._pad_states(metadata, fn_out[0])  # pyrefly: ignore[bad-argument-type]
         fn_out = (padded_states,) + fn_out[1:]
       return fn_out
 
-    return _wrapped_step_fn
+    return _wrapped_step_fn  # pyrefly: ignore[bad-return]
 
   def _pjit(
       self,
@@ -1083,10 +1083,10 @@ class PjitPartitioner(Partitioner):
     # here could be derived from a eval/decode dataset so it only includes a
     # subset of TrainState. Here we project the metadata according to the
     # actual state.
-    metadata.partition_specs: TrainState
-    partition_specs = metadata.partition_specs.replace(
+    metadata.partition_specs: TrainState  # pyrefly: ignore[bad-assignment]
+    partition_specs = metadata.partition_specs.replace(  # pyrefly: ignore[missing-attribute]
         mdl_vars=filter_nestedmap(
-            metadata.partition_specs.mdl_vars, unpadded_state.mdl_vars
+            metadata.partition_specs.mdl_vars, unpadded_state.mdl_vars  # pyrefly: ignore[missing-attribute]
         )
     )
     state_unpadded_shapes = self._get_state_unpadded_shapes(metadata)
@@ -1097,11 +1097,11 @@ class PjitPartitioner(Partitioner):
     )
 
     return py_utils.maybe_pad_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
-        unpadded_state,
+        unpadded_state,  # pyrefly: ignore[bad-argument-type]
         partition_specs,
         state_unpadded_shapes,
         model.mesh_shape,
-        model.mesh_axis_names,
+        model.mesh_axis_names,  # pyrefly: ignore[bad-argument-type]
     )
 
   def _unpad_states(
@@ -1110,10 +1110,10 @@ class PjitPartitioner(Partitioner):
     """Remove paddings from variables."""
     # Similar to _pad_states above we need to project the metadata to match the
     # actual padded_state.
-    metadata.partition_specs: TrainState
-    partition_specs = metadata.partition_specs.replace(
+    metadata.partition_specs: TrainState  # pyrefly: ignore[bad-assignment]
+    partition_specs = metadata.partition_specs.replace(  # pyrefly: ignore[missing-attribute]
         mdl_vars=filter_nestedmap(
-            metadata.partition_specs.mdl_vars, padded_state.mdl_vars
+            metadata.partition_specs.mdl_vars, padded_state.mdl_vars  # pyrefly: ignore[missing-attribute]
         )
     )
     state_unpadded_shapes = self._get_state_unpadded_shapes(metadata)
@@ -1123,7 +1123,7 @@ class PjitPartitioner(Partitioner):
         )
     )
     return py_utils.maybe_slice_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
-        padded_state,
+        padded_state,  # pyrefly: ignore[bad-argument-type]
         partition_specs,
         state_unpadded_shapes,
         is_leaf=py_utils.is_optax_masked_node,
@@ -1237,7 +1237,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
     self._auto_sharding_info = auto_sharding_info
     self._auto_sharding_result: (
         AutoShardingPjitPartitioner._AutoShardingResult
-    ) = None  # Cached results.
+    ) = None  # Cached results.  # pyrefly: ignore[bad-assignment]
 
   def _get_train_inputs_shape_dtype(
       self, train_input_pipeline: base_input.BaseInput
@@ -1298,7 +1298,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         step_fn,
         is_eval,
         fn_in_partition_specs,
-        fn_out_partition_specs,
+        fn_out_partition_specs,  # pyrefly: ignore[bad-argument-type]
         use_pspec_on_array_inputs=True,
     )
 
@@ -1317,7 +1317,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
         input_shardings,
     ) = compile_for_auto_sharding(
         partitioned_step_fn,
-        metadata.unpadded_global_shapes,
+        metadata.unpadded_global_shapes,  # pyrefly: ignore[bad-argument-type]
         self._init_key,
         inputs_shape_dtype,
         static_args,
@@ -1410,7 +1410,7 @@ class AutoShardingPjitPartitioner(PjitPartitioner):
 
     self._auto_sharding_result = (
         AutoShardingPjitPartitioner._AutoShardingResult(
-            _wrapped_partitioned_step,
+            _wrapped_partitioned_step,  # pyrefly: ignore[bad-argument-type]
             train_state_pspec,
             input_pspec,
             self._auto_sharding_input_spec,
@@ -1487,7 +1487,7 @@ def get_step_fn(mode: RunningMode) -> tuple[StepFn, bool]:
     is_eval = True
     step_fn = trainer_lib._decode_step_for_partitioner
 
-  return step_fn, is_eval
+  return step_fn, is_eval  # pyrefly: ignore[bad-return]
 
 
 # TODO(laigd): find a way to use instantiated input pipeline instead of using
@@ -1533,7 +1533,7 @@ def create_partitioner(
       auto_sharding_info = AutoShardingPjitPartitioner.AutoShardingInfo(
           step_fn,
           step_fn_is_eval,
-          inputs_shape_dtype=global_inputs_shape_dtype,
+          inputs_shape_dtype=global_inputs_shape_dtype,  # pyrefly: ignore[bad-argument-type]
           replicate_output=replicate_output,
       )
       partitioner = AutoShardingPjitPartitioner(

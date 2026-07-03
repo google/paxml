@@ -50,7 +50,7 @@ def _register_task(
     preprocessors = []
   seqio.TaskRegistry.add(
       task_name,
-      source=seqio.FunctionDataSource(
+      source=seqio.FunctionDataSource(  # pyrefly: ignore[bad-argument-type]
           dataset_fn=lambda split, shuffle_files, seed=0: ds,
           splits=['train', 'validation']),
       preprocessors=preprocessors,
@@ -99,8 +99,8 @@ def _register_dummy_task(
   output_feature_names = ('inputs', 'targets')
   return seqio.TaskRegistry.add(
       task_name,
-      source=seqio.FunctionDataSource(
-          dataset_fn=dataset_fn, splits=['train', 'validation']
+      source=seqio.FunctionDataSource(  # pyrefly: ignore[bad-argument-type]
+          dataset_fn=dataset_fn, splits=['train', 'validation']  # pyrefly: ignore[bad-argument-type]
       ),
       preprocessors=[seqio.preprocessors.append_eos],
       postprocess_fn=None,
@@ -909,7 +909,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
           enum_id = py_utils.get_enumeration_id(ex)
           decoder_outputs.append((enum_id, {'decoded_substr': 'ex pred'}))
     # Compute metrics
-    m = inp.compute_metrics(decoder_outputs)
+    m = inp.compute_metrics(decoder_outputs)  # pyrefly: ignore[unbound-name]
     metric_output = m[0]['accuracy']
     # Dummy metric = {'accuracy': targets + predictions}
     num_eval_examples = inp._num_eval_examples
@@ -966,7 +966,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.eval_loop_num_batches = None
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
-    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
+    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)  # pyrefly: ignore[bad-argument-type]
     m = inp.compute_metrics(eval_output, score_metrics=True)
     if metric_fns is None:
       self.assertEmpty(m)
@@ -1030,7 +1030,7 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
     p.log_preprocessed_targets = log_preprocessed_targets
     inp = instantiate(p)
     scores = np.array([1.0, 2.5], dtype=np.float32)
-    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)
+    eval_output = self._construct_scoring_task_enum_fields(p, ds, scores)  # pyrefly: ignore[bad-argument-type]
     _ = inp.compute_metrics(eval_output, score_metrics=True)
     if log_preprocessed_targets:
       self.assertIn('seqio_preprocessed_targets', eval_output[0][1])
@@ -1067,17 +1067,17 @@ class InputTest(flax_test_utils.TestCase, seqio.test_utils.FakeTaskTest):
 
     seqio.TaskRegistry.add(
         'pred_task',
-        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),
+        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),  # pyrefly: ignore[bad-argument-type]
         output_features=output_features,
         metric_fns=[pred_metric])
     seqio.TaskRegistry.add(
         'score_task',
-        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),
+        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),  # pyrefly: ignore[bad-argument-type]
         output_features=output_features,
         metric_fns=[score_metric])
     seqio.TaskRegistry.add(
         'pred_and_score_task',
-        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),
+        source=seqio.FunctionDataSource(dataset_fn, splits=['validation']),  # pyrefly: ignore[bad-argument-type]
         output_features=output_features,
         metric_fns=[pred_metric, score_metric])
     seqio.MixtureRegistry.add(

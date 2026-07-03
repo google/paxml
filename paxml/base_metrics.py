@@ -219,7 +219,7 @@ class MeanMetrics(BaseMetrics):
       return (sum_value / (sum_weight + 1e-8), sum_weight)
 
     return _pmap_aggregate_metrics(
-        _pmap_mean, batch_metrics, self.metric_keys, reshard
+        _pmap_mean, batch_metrics, self.metric_keys, reshard  # pyrefly: ignore[bad-argument-type]
     )
 
   def finalize(self):
@@ -252,7 +252,7 @@ class MaxMetrics(BaseMetrics):
       return (max_value, sum_weight)
 
     return _pmap_aggregate_metrics(
-        _pmap_max, batch_metrics, self.metric_keys, reshard
+        _pmap_max, batch_metrics, self.metric_keys, reshard  # pyrefly: ignore[bad-argument-type]
     )
 
   def finalize(self):
@@ -284,7 +284,7 @@ class HistogramMetrics(BaseMetrics):
       return (value, weight)
 
     return _pmap_aggregate_metrics(
-        _pmap_sum, batch_metrics, [self.histogram_key], reshard
+        _pmap_sum, batch_metrics, [self.histogram_key], reshard  # pyrefly: ignore[bad-argument-type]
     )
 
   def finalize(self):
@@ -328,7 +328,7 @@ class CompositeMetrics(BaseMetrics):
 
   def __post_init__(self):
     super().__post_init__()
-    self.metrics_calcs = [instantiate(m) for m in self.metrics_p]
+    self.metrics_calcs = [instantiate(m) for m in self.metrics_p]  # pyrefly: ignore[not-iterable]
 
   def aggregate(self, batch_metrics, reshard: bool | None = False):
     all_metrics = collections.defaultdict()
@@ -441,7 +441,7 @@ class MultiLossAggregator(LossAggregator):
     total_weighted_loss = 0.0
     total_mean_loss = 0.0
     if base_layer.is_running_under_pmap():
-      for key in self.loss_keys:
+      for key in self.loss_keys:  # pyrefly: ignore[not-iterable]
         assert key in batch_metrics
         loss, loss_weight = _get_loss_weight_and_value(batch_metrics[key])
         loss_weight = jax.lax.stop_gradient(loss_weight)
@@ -456,7 +456,7 @@ class MultiLossAggregator(LossAggregator):
         total_mean_loss += mean_loss
 
     else:
-      for key in self.loss_keys:
+      for key in self.loss_keys:  # pyrefly: ignore[not-iterable]
         loss, loss_weight = _get_loss_weight_and_value(batch_metrics[key])
         loss_weight = jax.lax.stop_gradient(loss_weight)
 

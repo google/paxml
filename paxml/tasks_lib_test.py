@@ -123,7 +123,7 @@ class TestModel01(base_model.BaseModel):
       self, predictions: Predictions, input_batch: NestedMap
   ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
-    loss = jnp.sum(predictions)
+    loss = jnp.sum(predictions)  # pyrefly: ignore[bad-argument-type]
     loss02 = jnp.max(jnp.abs(self.theta.var01))
     # Here loss is the main loss to back-prop into, and loss02 is an eval
     # metric.
@@ -162,7 +162,7 @@ class TestModel02(base_model.BaseModel):
       self, predictions: Predictions, input_batch: NestedMap
   ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
-    loss = jnp.sum(predictions)
+    loss = jnp.sum(predictions)  # pyrefly: ignore[bad-argument-type]
     per_example_out = NestedMap()
     return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
 
@@ -195,7 +195,7 @@ class TestModel03(base_model.BaseModel):
       self, predictions: Predictions, input_batch: NestedMap
   ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
     del input_batch
-    loss = jnp.sum(predictions)
+    loss = jnp.sum(predictions)  # pyrefly: ignore[bad-argument-type]
     loss02 = jnp.max(jnp.abs(self.theta.var01))
     # Here loss is the main loss to back-prop into, and loss02 is an eval
     # metric.
@@ -246,7 +246,7 @@ class TestModel04(base_model.BaseModel):
   def compute_loss(
       self, predictions: Predictions, input_batch: NestedMap
   ) -> tuple[WeightedScalars | Metrics, dict[str, Any]]:
-    loss = jnp.sum(predictions)
+    loss = jnp.sum(predictions)  # pyrefly: ignore[bad-argument-type]
     per_example_out = NestedMap()
     return NestedMap(loss=(loss, jnp.array(1.0, loss.dtype))), per_example_out
 

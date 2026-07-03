@@ -139,10 +139,10 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
   force_repeat_prefix_structure: bool = False
   skip_step_gradient_norm_value: float = 0.0
   enable_skip_step_on_gradient_anomalies: bool = True
-  bprop_variable_exclusion: str | Sequence[str] = pax_fiddle.instance_field(
+  bprop_variable_exclusion: str | Sequence[str] = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
       default_factory=list
   )
-  bprop_variable_inclusion: str | Sequence[str] = pax_fiddle.instance_field(
+  bprop_variable_inclusion: str | Sequence[str] = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
       default_factory=list
   )
   repeat_prefix_sep: str = '#'
@@ -183,7 +183,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       return self._get_grad_tx(var_weight_hparams)
     return opt_vec.get_transformations_with_vectorized_repeat_prefix(
         self._get_grad_tx(var_weight_hparams),
-        var_weight_hparams,
+        var_weight_hparams,  # pyrefly: ignore[bad-argument-type]
         self.repeat_prefix_sep,
         force_prefix_structure=self.force_repeat_prefix_structure,
     )
@@ -388,7 +388,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
 
     # Final applied grad norm.
     if self.grad_norm_summary:
-      applied_grad_norm = _compute_norm(transformed_grad)
+      applied_grad_norm = _compute_norm(transformed_grad)  # pyrefly: ignore[bad-argument-type]
       base_layer.add_global_summary(
           'learning/applied_grad_norm',
           applied_grad_norm,
@@ -640,7 +640,7 @@ class MultiOptimizerLearner(Learner):
     # Finally, apply vectorization on prefix dims.
     if self.vectorize_on_repeat_prefix:
       grad_tx = opt_vec.get_transformations_with_vectorized_repeat_prefix(
-          grad_tx, var_weight_hparams
+          grad_tx, var_weight_hparams  # pyrefly: ignore[bad-argument-type]
       )
     return grad_tx
 
@@ -715,4 +715,4 @@ class MultiOptimizerLearner(Learner):
       new_states = jax.tree.map(
           _update, new_states, states, is_leaf=py_utils.is_optax_masked_node
       )
-    return transformed_grad, new_states
+    return transformed_grad, new_states  # pyrefly: ignore[bad-return]

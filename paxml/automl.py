@@ -324,7 +324,7 @@ class MultiObjective(BaseReward):
 
   def __call__(self, metrics_dict: dict[str, float], global_step: int) -> float:
     del global_step
-    metric_values = [m.get_value(metrics_dict) for m in self.metrics]
+    metric_values = [m.get_value(metrics_dict) for m in self.metrics]  # pyrefly: ignore[not-iterable]
     if self.reward_for_nan is not None and any(
         math.isnan(m) for m in metric_values
     ):
@@ -365,13 +365,13 @@ class WeightedSumAggregator(MultiObjectiveAggregator):
 
   def __call__(self, values: Sequence[float]) -> float | complex:
     """Aggregate multiple values into a single value."""
-    if len(values) != len(self.weights):
+    if len(values) != len(self.weights):  # pyrefly: ignore[bad-argument-type]
       raise ValueError(
           f'The length of weights ({self.weights}) does not match '
           f'the length of objective values {values!r}.'
       )
     return (
-        sum([w * v for w, v in zip(self.weights, values)])
+        sum([w * v for w, v in zip(self.weights, values)])  # pyrefly: ignore[bad-argument-type]
         / self._sum_of_weights
     )
 
@@ -435,7 +435,7 @@ class TunasAbsolute(TwoObjectiveAggregator):
 
   def aggregate(self, quality: float, cost: float) -> float | complex:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self.cost_objective
+    cost_ratio = cost / self.cost_objective  # pyrefly: ignore[unsupported-operation]
     cost_adjustment = self.exponent * abs(cost_ratio - 1)
     return quality + cost_adjustment
 
@@ -452,7 +452,7 @@ class MnasHard(TwoObjectiveAggregator):
 
   def aggregate(self, quality: float, cost: float) -> float | complex:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self.cost_objective
+    cost_ratio = cost / self.cost_objective  # pyrefly: ignore[unsupported-operation]
     cost_adjustment = min(pow(cost_ratio, self.exponent), 1.0)
     return quality * cost_adjustment
 
@@ -470,7 +470,7 @@ class MnasSoft(TwoObjectiveAggregator):
 
   def aggregate(self, quality: float, cost: float) -> float | complex:
     """Aggregate quality and cost into a single value."""
-    cost_ratio = cost / self.cost_objective
+    cost_ratio = cost / self.cost_objective  # pyrefly: ignore[unsupported-operation]
     cost_adjustment = pow(cost_ratio, self.exponent)
     return quality * cost_adjustment
 
@@ -566,7 +566,7 @@ class MetricsWithMaxValue(MultiSubExperimentCrossStepMetricAggregator):
       v = metric.get_value(step_metrics)
       if max_value is None or v >= max_value:
         max_i, max_value = i, v
-    return merged_metrics_across_steps[max_i][1]
+    return merged_metrics_across_steps[max_i][1]  # pyrefly: ignore[bad-index]
 
 
 class MetricsWithMinValue(MultiSubExperimentCrossStepMetricAggregator):
@@ -588,7 +588,7 @@ class MetricsWithMinValue(MultiSubExperimentCrossStepMetricAggregator):
       v = metric.get_value(step_metrics)
       if min_value is None or v <= min_value:
         min_i, min_value = i, v
-    return merged_metrics_across_steps[min_i][1]
+    return merged_metrics_across_steps[min_i][1]  # pyrefly: ignore[bad-index]
 
 
 #

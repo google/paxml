@@ -192,7 +192,7 @@ class _SpmdEvalCheckpointer(_EvalCheckpointer):
       self, step: int, train_state_metadata: trainer_lib.TrainStateMetadata
   ) -> TrainState:
     partitioned_train_state = checkpoints.restore_checkpoint(
-        train_state_metadata.padded_global_shapes,
+        train_state_metadata.padded_global_shapes,  # pyrefly: ignore[bad-argument-type]
         self.restore_checkpoint_dir,
         global_mesh=self._partitioner.global_mesh,
         checkpoint_type=self.checkpoint_type,
@@ -345,7 +345,7 @@ def _create_checkpointer(
     # will be released, but we do not consider that to be an issue since the
     # first checkpoint is not likely to be cleaned up immediately.
     with ocp.checkpoint_utils.wait_for_new_checkpoint(
-        restore_checkpoint_dir,
+        restore_checkpoint_dir,  # pyrefly: ignore[bad-argument-type]
         until_step=wait_until_step,
         seconds_to_sleep=300,
         timeout=4800,
@@ -358,7 +358,7 @@ def _create_checkpointer(
 
   if restore_checkpoint_step is None and mode is not None:
     restore_checkpoint_step = io_utils.get_checkpoint_step(
-        job_log_dir, restore_checkpoint_dir, mode, checkpoint_type
+        job_log_dir, restore_checkpoint_dir, mode, checkpoint_type  # pyrefly: ignore[bad-argument-type]
     )
 
   checkpoints.reregister_type_handlers(
@@ -376,8 +376,8 @@ def _create_checkpointer(
       jax_task,
       job_log_dir,
       checkpoint_type,
-      restore_checkpoint_dir,
-      restore_checkpoint_step,
+      restore_checkpoint_dir,  # pyrefly: ignore[bad-argument-type]
+      restore_checkpoint_step,  # pyrefly: ignore[bad-argument-type]
       partitioner,
       enforce_restore_shape_check=enforce_restore_shape_check,
       tensorstore_use_ocdbt=tensorstore_use_ocdbt,
@@ -925,7 +925,7 @@ def _common_eval_or_decode_loop(
         exceeded_ckpt > task.train.num_train_steps or not continuous_decode
     )
     if tuning_lib.should_early_stop(
-        early_stopping_fn,
+        early_stopping_fn,  # pyrefly: ignore[bad-argument-type]
         last_checkpoint_step,
         is_last_ckpt,
         eval_metrics=eval_metrics,
@@ -1106,16 +1106,16 @@ def infer_and_write_pmap(
       )
       features_dict.save_config(dirname.as_posix())
       tfds.core.MetadataDict(
-          restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,
-          restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,
+          restore_checkpoint_dir=infer_writer_p.restore_checkpoint_dir,  # pyrefly: ignore[missing-attribute]
+          restore_checkpoint_step=infer_writer_p.restore_checkpoint_step,  # pyrefly: ignore[missing-attribute]
           input_name=name,
           model_name=task.model.name,
       ).save_metadata(dirname)
 
       writer = io_utils.ShardedParallelWriter(
           fq_filename,
-          infer_writer_p.output_num_shards,
-          output_format=infer_writer_p.output_format,
+          infer_writer_p.output_num_shards,  # pyrefly: ignore[missing-attribute]
+          output_format=infer_writer_p.output_format,  # pyrefly: ignore[missing-attribute]
       )
 
     for step in range(num_steps) if num_steps >= 0 else itertools.count():
@@ -1140,7 +1140,7 @@ def infer_and_write_pmap(
             outputs_cpu
         )
         # fire-and-forget writing
-        writer.write(serialized_outputs)
+        writer.write(serialized_outputs)  # pyrefly: ignore[unbound-name]
 
     if jax.process_index() == 0:
-      writer.close()
+      writer.close()  # pyrefly: ignore[unbound-name]

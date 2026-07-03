@@ -128,7 +128,7 @@ def write_clu_metric_summaries(
       write_summary_tensor(
           step_i,
           full_metric_name,
-          metric_value.value,
+          metric_value.value,  # pyrefly: ignore[bad-argument-type]
           summary_type,
           metric_value.metadata,
       )
@@ -136,13 +136,13 @@ def write_clu_metric_summaries(
       write_summary_tensor(
           step_i,
           full_metric_name,
-          metric_value.value,
+          metric_value.value,  # pyrefly: ignore[bad-argument-type]
           summary_type,
           sample_rate=metric_value.sample_rate,
       )
     else:
       write_summary_tensor(
-          step_i, full_metric_name, metric_value.value, summary_type
+          step_i, full_metric_name, metric_value.value, summary_type  # pyrefly: ignore[bad-argument-type]
       )
 
 
@@ -225,7 +225,7 @@ def write_seqio_metric_summaries(
       if isinstance(v, seqio.metrics.Scalar):
         v = float(v.value)
       else:
-        v = float(v)
+        v = float(v)  # pyrefly: ignore[bad-argument-type]
       logging.info('Writing summary of %s with value %.4f.', metric_name, v)
       write_summary_tensor(step, metric_name, v, SummaryType.AGGREGATE_SCALAR)
 
@@ -294,7 +294,7 @@ def pretty_repr_shapes(
 def pretty_repr_provenance(
     provenance: TensorProvenance | Nested[TensorProvenance],
 ) -> str:
-  provenance_out = pretty_repr(provenance)
+  provenance_out = pretty_repr(provenance)  # pyrefly: ignore[bad-argument-type]
   return pretty_format_iters(provenance_out)
 
 
@@ -348,7 +348,7 @@ def l2_mean(
     # average scale of params. In addition, this normalization makes sure norm
     # is invariant to number of model replicas (in pmap training).
     # TODO(yonghui): In the future, compute mean and std instead.
-    return jnp.sqrt(out[1] / out[0])
+    return jnp.sqrt(out[1] / out[0])  # pyrefly: ignore[bad-index]
 
   norms = [norm_fn(tree) for tree in squares]
   return dict(zip(names, norms))
@@ -484,7 +484,7 @@ def flatten_summary_dict(
     if parent_key is not None:
       key = f'{parent_key}{key}'
     if isinstance(value, collections.abc.MutableMapping):
-      outputs.extend(flatten_summary_dict(value, key))
+      outputs.extend(flatten_summary_dict(value, key))  # pyrefly: ignore[bad-argument-type]
     else:
       outputs.append((key, value))
   return outputs
@@ -497,7 +497,7 @@ def write_summary_tensor(
     summary_type: SummaryType,
     metadata: Any | None = None,
     sample_rate: int = AUDIO_SUMMARY_SAMPLE_RATE,
-) -> bool:
+) -> bool:  # pyrefly: ignore[bad-return]
   """Writes summary in relevant processes."""
   if FLAGS.pax_only_aggregate_summaries:
     if summary_type not in {
@@ -525,20 +525,20 @@ def write_summary_tensor(
       if remaining_max_images <= 0:
         break
       # Some eval codepath adds a leading 'test split' dim.
-      tensor = np.reshape(tensor, [-1] + list(tensor.shape)[-3:])
+      tensor = np.reshape(tensor, [-1] + list(tensor.shape)[-3:])  # pyrefly: ignore[bad-assignment]
       # Create a separate key for each image to avoid RPC oversize issues.
       for i in range(min(tensor.shape[0], remaining_max_images)):
-        tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)
+        tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)  # pyrefly: ignore[bad-index]
       remaining_max_images -= tensor.shape[0]
   elif base_summary_type == SummaryType.AUDIO:
     remaining_max_audios = MAX_AUDIOS_PER_SUMMARY
     for tensor in tensors_it:
       if remaining_max_audios <= 0:
         break
-      tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))
+      tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))  # pyrefly: ignore[bad-assignment]
       # TODO(nanxinchen): Make the sampling rate configurable
       for i in range(min(tensor.shape[0], remaining_max_audios)):
-        tf_summary.audio(f'{key}/{i}', tensor[i : i + 1], sample_rate, step_i)
+        tf_summary.audio(f'{key}/{i}', tensor[i : i + 1], sample_rate, step_i)  # pyrefly: ignore[bad-index]
       remaining_max_audios -= tensor.shape[0]
   elif base_summary_type == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
@@ -803,7 +803,7 @@ class SummaryHandler:
   def should_accumulate(self, step: int) -> bool:
     """Indicates whether we should accumulate values for this step or not."""
     return (self.accumulate_over_steps and
-            step % self._accumulate_interval_steps == 0)
+            step % self._accumulate_interval_steps == 0)  # pyrefly: ignore[unsupported-operation]
 
   def should_write(self, step: int) -> bool:
     """Indicates whether we should write summaries to disk at this step."""
@@ -911,7 +911,7 @@ class SummaryHandler:
       steps_per_sec: float | None = None,
       should_log: bool = False,
       clu_metrics: CluMetrics | None = None,
-  ) -> bool:
+  ) -> bool:  # pyrefly: ignore[bad-return]
     """Adds summaries for a given step."""
 
     if should_log:
@@ -979,7 +979,7 @@ class SummaryHandler:
       self._clu_metrics = metric_utils.merge_clu_metrics(
           self._clu_metrics, clu_metrics
       )
-    summaries = flatten_summary_dict(summary_tensors)
+    summaries = flatten_summary_dict(summary_tensors)  # pyrefly: ignore[bad-argument-type]
     for key, tensor in summaries:
       self._summary_tensors[key].append(tensor)
     if steps_per_sec:
@@ -1009,7 +1009,7 @@ class SummaryHandler:
         self._summary_writer,
         self._latest_step,
         losses,
-        self._weighted_scalars_list,
+        self._weighted_scalars_list,  # pyrefly: ignore[bad-argument-type]
         self._clu_metrics,
         self._summary_tensors,
         steps_per_sec,

@@ -174,7 +174,7 @@ class _CompositeCheckpointHandlerWrapper(ocp.CompositeCheckpointHandler):
       args: ocp.args.Composite | None = None,
   ) -> ocp.args.Composite:
     result = self._get_state_handler().restore(
-        directory, args=args[STATE_ITEM_NAME]
+        directory, args=args[STATE_ITEM_NAME]  # pyrefly: ignore[unsupported-operation]
     )
     return ocp.args.Composite(**{STATE_ITEM_NAME: result})
 
@@ -279,7 +279,7 @@ class _CheckpointManagerImpl(ocp.CheckpointManager):
           composite_handler._handler_registry  # pylint: disable=protected-access
       )[STATE_ITEM_NAME]
       handler = _CompositeCheckpointHandlerWrapper(
-          **{STATE_ITEM_NAME: original_state_handler}
+          **{STATE_ITEM_NAME: original_state_handler}  # pyrefly: ignore[bad-argument-type]
       )
       if ocp.checkpoint_manager.is_async_checkpointer(self._checkpointer):
         assert hasattr(self._checkpointer, '_async_manager')  # Hint for pytype
@@ -543,7 +543,7 @@ class OrbaxCheckpointManager:
           )
 
     if aux_items:
-      return restored
+      return restored  # pyrefly: ignore[bad-return]
     else:
       return restored[STATE_ITEM_NAME]
 
