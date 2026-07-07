@@ -63,9 +63,9 @@ def extract_input_specs(
 
     # Attempt at reducing loading time when using Lingvo input.
     if isinstance(train_input_p, base_input.LingvoInputAdaptor):
-      train_input_p.input.num_batcher_threads = 1
-      train_input_p.input.file_parallelism = 1
-      train_input_p.input.file_buffer_size = 32
+      train_input_p.input.num_batcher_threads = 1  # pyrefly: ignore[missing-attribute]
+      train_input_p.input.file_parallelism = 1  # pyrefly: ignore[missing-attribute]
+      train_input_p.input.file_buffer_size = 32  # pyrefly: ignore[missing-attribute]
 
     logging.info('Instantiating input pipeline...')
     input_pipeline = instantiate(train_input_p)

@@ -55,7 +55,7 @@ class CNN(base_layer.BaseLayer):
   num_classes: int = 10
   kernel_size: int = 3
   activation_tpl: pax_fiddle.Config[activations.BaseActivation] = (
-      template_field(activations.ReLU)
+      template_field(activations.ReLU)  # pyrefly: ignore[bad-assignment]
   )
 
   def setup(self) -> None:
@@ -137,7 +137,7 @@ def _compute_accuracy(targets, preds):
 class CNNModel(base_model.BaseModel):
   """CNN model."""
 
-  network_tpl: pax_fiddle.Config[base_layer.BaseLayer] = template_field(CNN)
+  network_tpl: pax_fiddle.Config[base_layer.BaseLayer] = template_field(CNN)  # pyrefly: ignore[bad-assignment]
 
   def setup(self) -> None:
     # Construct the model.

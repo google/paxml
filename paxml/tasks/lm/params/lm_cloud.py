@@ -114,7 +114,7 @@ class LmCloudTransformerAdam(model_params.TransformerLmPmapAdam,
   DROPOUT_PROB = 0.0
   LEARNING_RATE = 1e-3
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     task_p.train.learner.repeat_prefix_sep = '_'
@@ -153,7 +153,7 @@ class LmCloudSpmd(model_params.TransformerLmSpmdAdafactor, SyntheticDataset):
   # Autodiff remat.
   CHECKPOINT_POLICY = layers.AutodiffCheckpointType.SAVE_NOTHING
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
@@ -318,7 +318,7 @@ class LmCloudSpmdPipeline(model_params.TransformerLmSpmdPipelineAdafactor,
   MICROBATCH_SIZE = None
   NUM_STAGES = None
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     model_params.set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)

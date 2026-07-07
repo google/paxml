@@ -37,7 +37,7 @@ def make_index_lookup(
   @jax.custom_vjp
   def index_lookup(weights, idx):
     """Lookup index idx in array weights."""
-    return array_lookup(base.get_param(weights), idx)
+    return array_lookup(base.get_param(weights), idx)  # pyrefly: ignore[bad-argument-type]
 
   def index_lookup_fwd(weights, idx):
     """Forward index lookup for custom vjp."""
@@ -154,7 +154,7 @@ class EmbeddingGhostNorm(layers.Embedding):
     ap = self.activation_split_dims_mapping
 
     if self.lookup_style == 'index':
-      embs = self._index_lookup(emb_var, ids)
+      embs = self._index_lookup(emb_var, ids)  # pyrefly: ignore[bad-argument-type]
     elif self.lookup_style == 'matmul':
       # Explicit casting to fprop_dtype needed for bf16.
       one_hot_ids = jax.nn.one_hot(

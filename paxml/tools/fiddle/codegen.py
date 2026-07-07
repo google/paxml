@@ -70,13 +70,13 @@ class InitTask(experimental_top_level_api.InitTask):
 
 
 def _make_default_factory(node: cst.CSTNode) -> cst.Expr:
-  return cst.Call(
+  return cst.Call(  # pyrefly: ignore[bad-return]
       func=cst.parse_expression("dataclasses.field"),
       args=[
           cst.Arg(
               value=cst.Lambda(
                   params=cst.Parameters([]),
-                  body=node,
+                  body=node,  # pyrefly: ignore[bad-argument-type]
               ),
               keyword=cst.Name("default_factory"),
               equal=cst.AssignEqual(
@@ -120,7 +120,7 @@ def _class_attributes(highlevel_settings: dict[str, Any]) -> list[cst.CSTNode]:
             cst.AnnAssign(
                 target=cst.Name(name),
                 annotation=cst.Annotation(cst.Name(type_name)),
-                value=value,
+                value=value,  # pyrefly: ignore[bad-argument-type]
             ),
         ])
     )
@@ -296,7 +296,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
         _make_class_def(
             self.class_name,
             [cst.Arg(cst.parse_expression(class_base_expression))],
-            class_body,
+            class_body,  # pyrefly: ignore[bad-argument-type]
             docstring=f"Experiment definition for {name}.",
         )
     ]
@@ -304,7 +304,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
     # Add fiddler for sharding, if it is set.
     if task.sharding_diff_module:
       module_body.append(
-          _extract_function_def(task.sharding_diff_module, "shard_model_config")
+          _extract_function_def(task.sharding_diff_module, "shard_model_config")  # pyrefly: ignore[bad-argument-type]
       )
 
     # Add imports last, since the import manager is updated.
@@ -313,7 +313,7 @@ class IrToCst(experimental_top_level_api.CodegenPass):
     # Add the module docstring.
     module_body.insert(
         0,
-        _make_docstring(
+        _make_docstring(  # pyrefly: ignore[bad-argument-type]
             _DEFAULT_MODULE_DOCSTRING.format(base_experiment_name=name),
             indent=0,
         ),
@@ -334,7 +334,7 @@ class PaxExpressionIsComplex:
 
 def _get_pass_idx(codegen_config, cls) -> int:
   for i, codegen_pass in enumerate(codegen_config.passes):
-    if issubclass(fdl.get_callable(codegen_pass), cls):
+    if issubclass(fdl.get_callable(codegen_pass), cls):  # pyrefly: ignore[bad-argument-type]
       return i
   raise ValueError(f"Could not find codegen pass {cls}")
 
@@ -630,7 +630,7 @@ def codegen_experiment_diff(  # pytype: disable=annotation-type-mismatch
     baseline: Type[Any],
     unshare_sharding_config: bool = True,
     remove_defaults: bool = True,
-    lowercase_highlevel_settings: bool = None,
+    lowercase_highlevel_settings: bool = None,  # pyrefly: ignore[bad-function-definition]
     has_train_dataset: bool = False,
     has_input_specs_provider: bool = False,
 ):
@@ -757,7 +757,7 @@ def codegen_experiment_diff(  # pytype: disable=annotation-type-mismatch
   class_def = _make_class_def(
       class_name,
       [cst.Arg(cst.parse_expression(import_manager.add(baseline)))],
-      class_body,
+      class_body,  # pyrefly: ignore[bad-argument-type]
       docstring=f"Experiment definition for {experiment_cls.__name__}.",
   )
 
@@ -769,7 +769,7 @@ def codegen_experiment_diff(  # pytype: disable=annotation-type-mismatch
   # Add the module docstring.
   module_body.insert(
       0,
-      _make_docstring(
+      _make_docstring(  # pyrefly: ignore[bad-argument-type]
           _DEFAULT_MODULE_DOCSTRING.format(
               base_experiment_name=experiment_cls.__name__
           ),

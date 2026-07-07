@@ -271,7 +271,7 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
   MESH_SHAPE = None
   TRAINING_OPTIMIZED_SHARDING = True
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classification_task')
     task_p.model = pax_fiddle.Config(
         models.ClassificationMLPModel, name='classification_model'
@@ -293,7 +293,7 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
     set_sharding_annotations_v1(
         task_p,
         self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
-        self.MESH_SHAPE,
+        self.MESH_SHAPE,  # pyrefly: ignore[bad-argument-type]
     )
     set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
     task_p.train.num_train_steps = self.NUM_TRAIN_STEPS
@@ -323,7 +323,7 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
 
   ENABLE_BFLOAT16 = True
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(
@@ -411,7 +411,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
   CHECKPOINT_EVERY_N_STEPS = 500
   CHECKPOINT_SAVE_MAX_TO_KEEP = 10
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='bert_task')
     task_p.model = pax_fiddle.Config(models.BertModel, name='bert_lm')
@@ -471,7 +471,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     set_sharding_annotations_v1(
         task_p,
         self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
-        self.MESH_SHAPE,
+        self.MESH_SHAPE,  # pyrefly: ignore[bad-argument-type]
     )
 
     return task_p
@@ -499,7 +499,7 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
   ATTEN_LOGIT_CAP = 50.0
   USE_BIAS = False
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='xformer_task')
     task_p.model = pax_fiddle.Config(models.LanguageModel, name='xformer_lm')
@@ -614,7 +614,7 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
 
   MODEL_CLASS = models.LanguageModel
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     if self.DIMS_PER_HEAD is not None:
       if self.NUM_HEADS is None:
@@ -990,7 +990,7 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
           model_p.lm_tpl,
           replica_axis=replica_axis,
           data_axis=data_axis,
-          data_expert_axis=data_expert_axis,
+          data_expert_axis=data_expert_axis,  # pyrefly: ignore[unbound-name]
           mdl_axis=mdl_axis,
           ici_mesh_shape=model_p.ici_mesh_shape,
           dcn_mesh_shape=model_p.dcn_mesh_shape,

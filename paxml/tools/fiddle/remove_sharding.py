@@ -85,10 +85,10 @@ def remove_sharding(config: _T, replace_with_default: bool = False) -> _T:
     elif isinstance(value, fdl.Buildable):
       for name, sub_value in fdl.ordered_arguments(value).items():
         if sub_value is _remove_sentinel:
-          delattr(value, name)
+          delattr(value, name)  # pyrefly: ignore[bad-argument-type]
           if replace_with_default:
             default_obj = pax_fiddle.Config(fdl.get_callable(value))
-            setattr(value, name, getattr(default_obj, name))
+            setattr(value, name, getattr(default_obj, name))  # pyrefly: ignore[bad-argument-type]
     return value
 
   return daglish.MemoizedTraversal.run(transform, config)

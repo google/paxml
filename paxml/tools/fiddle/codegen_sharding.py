@@ -121,9 +121,9 @@ class AddShardingCall:
     var_name = cst.Name("model_config")
     shard_model_name = cst.Name(self.add_sharding_function)
     last_lines = [
-        cst.Assign([cst.AssignTarget(var_name)], body[-1].body[0].value),
+        cst.Assign([cst.AssignTarget(var_name)], body[-1].body[0].value),  # pyrefly: ignore[missing-attribute]
         cst.Expr(cst.Call(shard_model_name, args=[cst.Arg(var_name)])),
         cst.Return(var_name),
     ]
-    body = body[:-1] + [cst.SimpleStatementLine([line]) for line in last_lines]
+    body = body[:-1] + [cst.SimpleStatementLine([line]) for line in last_lines]  # pyrefly: ignore[unsupported-operation]
     return fn_code.with_changes(body=fn_code.body.with_changes(body=body))

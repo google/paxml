@@ -72,7 +72,7 @@ def _create_ghostnorm_fn(
   def fwd(params: NestedJTensor, *args: Any) -> tuple[JTensor, ResType]:
     params, aux = base.get_param(params), base.get_aux(params)
     out, vjp_fun = jax.vjp(fn, params, *args)
-    return out, (vjp_fun, params, aux, args)
+    return out, (vjp_fun, params, aux, args)  # pyrefly: ignore[bad-return]
 
   def bwd(
       res: ResType,
@@ -138,7 +138,7 @@ class WrappedGhostNorm(base_layer.BaseLayer):
     layer_tpl: A PaxConfig defining the layer that should be wrapped.
   """
 
-  layer_tpl: LayerTpl | None = template_field(None)
+  layer_tpl: LayerTpl | None = template_field(None)  # pyrefly: ignore[bad-assignment]
 
   def setup(self):
     super().setup()
@@ -292,7 +292,7 @@ def _is_replaceable(model_or_layer_p: pax_fiddle.Config) -> bool:
 
 
 def _replace(model_or_layer_p: pax_fiddle.Config) -> pax_fiddle.Config:
-  model_or_layer_p.cls = _REPLACE_MAP[model_or_layer_p.cls]
+  model_or_layer_p.cls = _REPLACE_MAP[model_or_layer_p.cls]  # pyrefly: ignore[read-only]
   return model_or_layer_p
 
 

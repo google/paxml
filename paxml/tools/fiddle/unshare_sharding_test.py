@@ -136,8 +136,8 @@ class UnshareShardingTest(absltest.TestCase):
     config = [shared, (shared, shared)]
     transformed = unshare_sharding.unshare_sharding(config=config)
     self.assertIsNot(transformed, config)
-    self.assertIs(transformed[0], transformed[1][0])
-    self.assertIs(transformed[1][0], transformed[1][1])
+    self.assertIs(transformed[0], transformed[1][0])  # pyrefly: ignore[bad-index]
+    self.assertIs(transformed[1][0], transformed[1][1])  # pyrefly: ignore[bad-index]
 
 
 if __name__ == "__main__":

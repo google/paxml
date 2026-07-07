@@ -65,7 +65,7 @@ class InitCheckpointRulesFromOtherTask(experimental_top_level_api.CodegenPass):
         return state.map_children(value)
 
       fn_or_cls = fdl.get_callable(value)
-      if not issubclass(fn_or_cls, tasks_lib.CheckpointLoadingRules):
+      if not issubclass(fn_or_cls, tasks_lib.CheckpointLoadingRules):  # pyrefly: ignore[bad-argument-type]
         return state.map_children(value)
 
       if not state.current_path:

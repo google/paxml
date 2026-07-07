@@ -298,7 +298,7 @@ class LayersTest(parameterized.TestCase):
     sum_clipped, _ = optax.per_example_global_norm_clip(
         grads=grads_flat, l2_norm_clip=l2_clip
     )
-    sum_grads = jax.tree.unflatten(grads_treedef, sum_clipped)
+    sum_grads = jax.tree.unflatten(grads_treedef, sum_clipped)  # pyrefly: ignore[bad-argument-type]
     expected_grads = jax.tree.map(lambda x: x / batch_size, sum_grads)
 
     _, fast_per_eg_grad_norms = self._get_grad_and_norms(

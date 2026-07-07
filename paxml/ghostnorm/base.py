@@ -94,10 +94,10 @@ class ParamWithAux:
     aux = None
     if self.aux is not None:
       aux = self.aux.astype(dtype)
-    return self.replace(param=self.param.astype(dtype), aux=aux)
+    return self.replace(param=self.param.astype(dtype), aux=aux)  # pyrefly: ignore[missing-attribute]
 
   def transpose(self):
-    return self.replace(param=self.param.transpose())
+    return self.replace(param=self.param.transpose())  # pyrefly: ignore[missing-attribute]
 
 
 def _get_param(param: ParamWithAux | JTensor) -> JTensor:

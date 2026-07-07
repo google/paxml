@@ -76,7 +76,7 @@ class TFRecordBertInput(base_input.BaseInput):
   prepacking_batch_size: int = 1 << 14
   remask: bool = False
   # Note that this is a TF class with lingvo-style params.
-  mlm_augmenter: py_utils.InstantiableParams = pax_fiddle.instance_field(
+  mlm_augmenter: py_utils.InstantiableParams = pax_fiddle.instance_field(  # pyrefly: ignore[bad-assignment]
       lambda **kwargs: make_masked_ml_data_augmenter(**kwargs)  # pylint: disable=unnecessary-lambda
   )
   num_samples: int = -1
@@ -193,8 +193,8 @@ class TFRecordBertInput(base_input.BaseInput):
       # data.
       total_batches = len(list(dataset.as_numpy_iterator()))
     else:
-      total_batches = (
-          self.eval_data_size + self.batch_size - 1
+      total_batches = (  # pyrefly: ignore[unsupported-operation]
+          self.eval_data_size + self.batch_size - 1  # pyrefly: ignore[unsupported-operation]
       ) // self.batch_size
     if total_batches % n == 0:
       return dataset
@@ -226,7 +226,7 @@ class TFRecordBertInput(base_input.BaseInput):
 
   def _gen_dataset(self) -> tf.data.Dataset:
     file_patterns = list(
-        map(py_utils.sharded_file_pattern_to_glob, self.input_file)
+        map(py_utils.sharded_file_pattern_to_glob, self.input_file)  # pyrefly: ignore[bad-argument-type]
     )
     files = tf.data.Dataset.list_files(file_patterns, shuffle=False)
     if self.is_training:
@@ -401,11 +401,11 @@ class TextInput(base_input.BaseInput):
 
   def _num_to_truncate(self):
     """Smallest multiple of global batch size that covers the entire data."""
-    n = self.num_infeed_hosts * self.batch_size
+    n = self.num_infeed_hosts * self.batch_size  # pyrefly: ignore[unsupported-operation]
     num_global_batches = (self.computed_num_samples + n - 1) // n
     return num_global_batches * n
 
-  def ids_to_strings(
+  def ids_to_strings(  # pyrefly: ignore[bad-override]
       self,
       ids: pytypes.NpTensor,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
       lengths: pytypes.NpTensor,

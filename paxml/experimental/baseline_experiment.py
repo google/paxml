@@ -136,5 +136,5 @@ def lower(
     )
   config = copy.deepcopy(config)
   pax_fiddle.update_callable(config, exp_cls)
-  config = typing.cast(pax_fiddle.Config[BaselineExperiment], config)
-  return pax_fiddle.build(config).experiment_fixture()
+  config = typing.cast(pax_fiddle.Config[BaselineExperiment], config)  # pyrefly: ignore[bad-assignment]
+  return pax_fiddle.build(config).experiment_fixture()  # pyrefly: ignore[missing-attribute]

@@ -95,7 +95,7 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   LR_COS_MAX = 1.0
   USE_ADAFACTOR = False
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     # Disable all summaries.
@@ -120,7 +120,7 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
 
     # Use Triton Layer Norm.
     if self.USE_TRITON_LAYER_NORM:
-      assert layer_p.ln_tpl.cls == layers.LayerNorm
+      assert layer_p.ln_tpl.cls == layers.LayerNorm  # pyrefly: ignore[unbound-name]
       fused_ln_tpl = pax_fiddle.Config(
           gpu_fast_attention.GpuTritonFusedLayerNorm,
       )
@@ -220,7 +220,7 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   LR_COS_MAX = 1.0
   USE_ADAFACTOR = False
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     task_p.train.save_interval_steps = 100000
@@ -242,7 +242,7 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 
     # Use Triton Layer Norm.
     if self.USE_TRITON_LAYER_NORM:
-      assert layer_p.ln_tpl.cls == layers.LayerNorm
+      assert layer_p.ln_tpl.cls == layers.LayerNorm  # pyrefly: ignore[unbound-name]
       fused_ln_tpl = pax_fiddle.Config(
           gpu_fast_attention.GpuTritonFusedLayerNorm,
       )
@@ -502,7 +502,7 @@ class Llama2_7B(NVIDIA1_3B):
     if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if issubclass(
-        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated  # pyrefly: ignore[bad-argument-type]
     ):
       stacked_p = stacked_p.block
     transformer_layer_p = stacked_p.transformer_layer_params_tpl
@@ -1098,7 +1098,7 @@ class Grok_Proxy_PP(NVIDIA5B):
     if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if issubclass(
-        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated  # pyrefly: ignore[bad-argument-type]
     ):
       stacked_p = stacked_p.block
     transformer_layer_p = stacked_p.transformer_layer_params_tpl
@@ -1156,13 +1156,13 @@ class NVIDIA_CIRCULAR_REPEAT(
   CHECKPOINT_EVERY_N_STEPS = 250
   SUMMARY_INTERVAL_STEPS = 10
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     task_p = super().task()
     task_p.summary_verbosity = 0
     model_p = task_p.model
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl
     if issubclass(
-        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+        fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated  # pyrefly: ignore[bad-argument-type]
     ):
       stacked_p = stacked_p.block
 

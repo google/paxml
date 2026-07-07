@@ -81,7 +81,7 @@ class DatasetNormalizer(ComponentNormalizer):
 
   def __call__(self, dataset_config: _T) -> _T:
     """Normalizes a dataset or list of datasets."""
-    dataset_config = super().__call__(dataset_config)
+    dataset_config = super().__call__(dataset_config)  # pyrefly: ignore[bad-argument-type]
     if self.convert_seqio_task_objects:
       dataset_config = convert_seqio_task_objects_lib.convert_seqio_tasks(
           dataset_config

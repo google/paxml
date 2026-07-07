@@ -494,7 +494,7 @@ class EarlyStoppingFn(base_hyperparams.FiddleBaseParameterizable):
       return False
     log_pplx = metrics['eval_test_C4Validation/metrics/log_pplx']
 
-    if log_pplx <= self.target_log_pplx:
+    if log_pplx <= self.target_log_pplx:  # pyrefly: ignore[unsupported-operation]
       return True
     return False
 
@@ -533,7 +533,7 @@ def configure_gpt3_task(
   if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
     stacked_p = stacked_p.pipeline_stage
   if issubclass(
-      fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated
+      fdl.get_callable(stacked_p), transformers.StackedTransformerRepeated  # pyrefly: ignore[bad-argument-type]
   ):
     stacked_p = stacked_p.block
   transformer_layer_p = stacked_p.transformer_layer_params_tpl
@@ -584,7 +584,7 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   # Sub-class has to specify a mesh.
   ICI_MESH_SHAPE = [1, 4, 2]
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
@@ -697,7 +697,7 @@ class C4SpmdPipelineAdam(TransformerLmSpmdPipelineAdam, C4UnsupervisedDataset):
   NUM_STAGES = 2
   EMB_W_DATA_DIMS = ('replica', 'data')
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes

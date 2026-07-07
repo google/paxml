@@ -152,7 +152,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
 
   def datasets(self) -> list[pax_fiddle.Config[base_input.BaseInput]]:
     """Returns a list of dataset configs."""
-    return [self._dataset_train(), self._dataset_test()]
+    return [self._dataset_train(), self._dataset_test()]  # pyrefly: ignore[bad-return]
 
   def _network(self) -> LayerTpl:
     net = layers.ResNet.HParamsResNet50()
@@ -236,7 +236,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
     train_p.eval_skip_train = True  # Disable eval of train input data.
     return task_p
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task configs."""
     resnet = self._network()
     task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='classifier_task')

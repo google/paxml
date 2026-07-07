@@ -64,7 +64,7 @@ class BertDataset(base_experiment.BaseExperiment):
     """Returns a list of dataset parameters."""
     return [self._datasetTrain(), self._datasetTest()]
 
-  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
+  def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     raise NotImplementedError()
 
 
