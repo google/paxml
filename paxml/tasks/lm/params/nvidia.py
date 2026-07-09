@@ -47,9 +47,6 @@ WeightInit = base_layer.WeightInit
 class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
   """Pipelined Transformer using Adam optimizer."""
 
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   USE_REPEATED_LAYER = True
 
   DCN_MESH_SHAPE = [1, 1, 1]
@@ -106,27 +103,6 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
     model_p = task_p.model
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
 
-    if self.USE_FLASH_ATTENTION:
-      layer_p = (
-          model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage.transformer_layer_params_tpl
-      )
-      # Use Triton flash attention.
-      assert layer_p.tr_atten_tpl.cls == layers.DotProductAttention
-      fused_tr_atten_tpl = pax_fiddle.Config(
-          gpu_fast_attention.GpuTritonFusedDotProductAttention,
-      )
-      fused_tr_atten_tpl.copy_fields_from(layer_p.tr_atten_tpl)
-      layer_p.tr_atten_tpl = fused_tr_atten_tpl
-
-    # Use Triton Layer Norm.
-    if self.USE_TRITON_LAYER_NORM:
-      assert layer_p.ln_tpl.cls == layers.LayerNorm  # pyrefly: ignore[unbound-name]
-      fused_ln_tpl = pax_fiddle.Config(
-          gpu_fast_attention.GpuTritonFusedLayerNorm,
-      )
-      fused_ln_tpl.copy_fields_from(layer_p.ln_tpl)
-      layer_p.ln_tpl = fused_ln_tpl
-
     scale = self.SOFTMAX_INIT_STD
     if not scale:
       scale = 1.0 / math.sqrt(self.MODEL_DIMS)
@@ -170,9 +146,6 @@ class NVIDIA1_3B(c4.TransformerLmSpmdAdam, lm_cloud.SyntheticDataset):
 @experiment_registry.register
 class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
   """Pipelined Transformer using Adam optimizer."""
-
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
 
   USE_REPEATED_LAYER = False
   DCN_MESH_SHAPE = [1, 1, 1, 1]
@@ -228,27 +201,6 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
     model_p = task_p.model
     model_p.params_init = WeightInit.Gaussian(self.INIT_STD)
 
-    if self.USE_FLASH_ATTENTION:
-      layer_p = (
-          model_p.lm_tpl.stacked_transformer_tpl.pipeline_stage.transformer_layer_params_tpl
-      )
-      # Use Triton flash attention.
-      assert layer_p.tr_atten_tpl.cls == layers.DotProductAttention
-      fused_tr_atten_tpl = pax_fiddle.Config(
-          gpu_fast_attention.GpuTritonFusedDotProductAttention,
-      )
-      fused_tr_atten_tpl.copy_fields_from(layer_p.tr_atten_tpl)
-      layer_p.tr_atten_tpl = fused_tr_atten_tpl
-
-    # Use Triton Layer Norm.
-    if self.USE_TRITON_LAYER_NORM:
-      assert layer_p.ln_tpl.cls == layers.LayerNorm  # pyrefly: ignore[unbound-name]
-      fused_ln_tpl = pax_fiddle.Config(
-          gpu_fast_attention.GpuTritonFusedLayerNorm,
-      )
-      fused_ln_tpl.copy_fields_from(layer_p.ln_tpl)
-      layer_p.ln_tpl = fused_ln_tpl
-
     scale = self.SOFTMAX_INIT_STD
     if not scale:
       scale = 1.0 / math.sqrt(self.MODEL_DIMS)
@@ -292,9 +244,6 @@ class NVIDIA5B(c4.TransformerLmSpmdPipelineAdam, lm_cloud.SyntheticDataset):
 
 @experiment_registry.register
 class NVIDIA8_3B(NVIDIA1_3B):
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   DCN_MESH_SHAPE = [1, 1, 1]
   ICI_MESH_SHAPE = [4, 1, 4]
   PERCORE_BATCH_SIZE = 4
@@ -308,9 +257,6 @@ class NVIDIA8_3B(NVIDIA1_3B):
 
 @experiment_registry.register
 class NVIDIA10B(NVIDIA1_3B):
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   DCN_MESH_SHAPE = [1, 1, 1]
   ICI_MESH_SHAPE = [2, 1, 8]
   PERCORE_BATCH_SIZE = 0.25
@@ -324,9 +270,6 @@ class NVIDIA10B(NVIDIA1_3B):
 
 @experiment_registry.register
 class NVIDIA40BProxy(NVIDIA5B):
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   DCN_MESH_SHAPE = [1, 1, 1, 1]
   ICI_MESH_SHAPE = [2, 2, 1, 4]
   NUM_STAGES = 2
@@ -343,9 +286,6 @@ class NVIDIA40BProxy(NVIDIA5B):
 
 @experiment_registry.register
 class NVIDIA70BProxy(NVIDIA5B):
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   DCN_MESH_SHAPE = [1, 1, 1, 1]
   ICI_MESH_SHAPE = [2, 2, 1, 4]
   NUM_STAGES = 2
@@ -364,9 +304,6 @@ class NVIDIA70BProxy(NVIDIA5B):
 
 @experiment_registry.register
 class NVIDIA116BProxy(NVIDIA5B):
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   DCN_MESH_SHAPE = [1, 1, 1, 1]
   ICI_MESH_SHAPE = [4, 1, 1, 4]
   NUM_STAGES = 4
@@ -386,9 +323,6 @@ class NVIDIA116BProxy(NVIDIA5B):
 @experiment_registry.register
 class NVIDIA175BProxy(NVIDIA5B):
   """175B config that works with 4x16 A100-40G."""
-
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
 
   DCN_MESH_SHAPE = [1, 1, 1, 1]
   ICI_MESH_SHAPE = [4, 1, 1, 4]
@@ -441,9 +375,6 @@ class TestSmallConfig(NVIDIA5B):
 class Llama33BProxy(NVIDIA1_3B):
   """Llama 33B config that works with 1x16 A100-40G."""
 
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
-
   ICI_MESH_SHAPE = [1, 16, 1]
   PERCORE_BATCH_SIZE = 1
 
@@ -460,9 +391,6 @@ class Llama33BProxy(NVIDIA1_3B):
 @experiment_registry.register
 class NVIDIA175B_FSDP(NVIDIA1_3B):
   """175B with fully-sharded data-parallel that works with 8x16 A100-40G."""
-
-  USE_FLASH_ATTENTION = False
-  USE_TRITON_LAYER_NORM = False
 
   ICI_MESH_SHAPE = [1, 16, 1]
   DCN_MESH_SHAPE = [1, 8, 1]
