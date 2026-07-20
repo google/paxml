@@ -21,15 +21,14 @@ from typing import Any, Sequence, Union
 
 from absl import logging
 from etils import epath
-import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
 from paxml import checkpoint_version
 from paxml import train_states
+import orbax.checkpoint as ocp
 from praxis import base_input
 from praxis import pytypes
-
 
 Nested = pytypes.Nested
 # TODO(pax-dev): pytyping doesn't like either

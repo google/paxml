@@ -207,8 +207,8 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
+        # Implicit orbax.checkpoint dependency.
         "//praxis:base_hyperparams",
         "//praxis:base_input",
         "//praxis:base_layer",
@@ -279,8 +279,8 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
+        # Implicit orbax.checkpoint dependency.
         "//praxis:lazy_loader",
         "//praxis:py_utils",
         # Implicit tensorflow_no_contrib dependency.
@@ -489,8 +489,8 @@ pytype_strict_library(
         # Implicit jax dependency.
         # Implicit numpy dependency.
         # Implicit optax dependency.
-        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
+        # Implicit orbax.checkpoint dependency.
         "//praxis:asserts",
         "//praxis:base_hyperparams",
         "//praxis:base_input",
@@ -879,8 +879,8 @@ pytype_strict_library(
         # Implicit etils dependency.
         # Implicit jax dependency.
         # Implicit numpy dependency.
-        # Implicit orbax.checkpoint dependency.
         "//paxml:checkpoints",
+        # Implicit orbax.checkpoint dependency.
         "//praxis:base_input",
         "//praxis:pax_fiddle",
         "//praxis:py_utils",

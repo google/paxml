@@ -24,11 +24,10 @@ from absl import logging
 from etils import epath
 from jax.experimental import multihost_utils
 import numpy as np
-import orbax.checkpoint as ocp
 from paxml import checkpoint_types
 from paxml import checkpoint_version
+import orbax.checkpoint as ocp
 from praxis import pytypes
-
 
 _CHECKPOINT_PREFIX = 'checkpoint'
 CHECKPOINT_PREFIX = f'{_CHECKPOINT_PREFIX}_'
