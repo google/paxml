@@ -31,6 +31,7 @@ from etils import epath
 import jax
 import jax.numpy as jnp
 import numpy as np
+import orbax.checkpoint as ocp
 from paxml import base_experiment
 from paxml import base_metrics
 from paxml import checkpoint_paths
@@ -43,7 +44,6 @@ from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
 from paxml import tuning_lib
-import orbax.checkpoint as ocp
 from praxis import base_hyperparams
 from praxis import base_input
 from praxis import base_layer
@@ -55,6 +55,7 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
 from paxml import checkpoints  # mapped to internal
+
 
 instantiate = base_hyperparams.instantiate
 CheckpointType = checkpoints.CheckpointType
