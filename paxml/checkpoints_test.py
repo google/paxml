@@ -26,13 +26,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import orbax.checkpoint as ocp
 from paxml import checkpoint_metadata
 from paxml import checkpoint_paths
 from paxml import checkpoints
 from paxml import train_states
+import orbax.checkpoint as ocp
 from praxis import pytypes
-
 
 ArrayMetadata = checkpoint_metadata.ArrayMetadata
 TrainState = train_states.TrainState
@@ -204,25 +203,31 @@ class PaxMetadataTest(parameterized.TestCase):
     d = dict(
         version=1.0,
         train_state_metadata={
-            'a': ArrayMetadata(
-                unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                    shape=(1, 2), dtype=np.float32
-                ),
-                is_optax_masked_node=False,
-            ).to_dict(),
-            'b': {
-                'b1': ArrayMetadata(
+            'a': (
+                ArrayMetadata(
                     unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                        shape=(3, 4), dtype=np.int32
-                    ),
-                    is_optax_masked_node=True,
-                ).to_dict(),
-                'b2': ArrayMetadata(
-                    unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                        shape=(5,), dtype=np.float32
+                        shape=(1, 2), dtype=np.float32
                     ),
                     is_optax_masked_node=False,
-                ).to_dict(),
+                ).to_dict()
+            ),
+            'b': {
+                'b1': (
+                    ArrayMetadata(
+                        unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                            shape=(3, 4), dtype=np.int32
+                        ),
+                        is_optax_masked_node=True,
+                    ).to_dict()
+                ),
+                'b2': (
+                    ArrayMetadata(
+                        unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                            shape=(5,), dtype=np.float32
+                        ),
+                        is_optax_masked_node=False,
+                    ).to_dict()
+                ),
             },
         },
     )
@@ -266,25 +271,31 @@ class PaxMetadataTest(parameterized.TestCase):
         version=1.0,
         train_state_metadata=dict(
             mdl_vars={
-                'a': ArrayMetadata(
-                    unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                        shape=(1, 2), dtype=np.float32
-                    ),
-                    is_optax_masked_node=False,
-                ).to_dict(),
-                'b': {
-                    'b1': ArrayMetadata(
+                'a': (
+                    ArrayMetadata(
                         unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                            shape=(3, 4), dtype=np.int32
-                        ),
-                        is_optax_masked_node=True,
-                    ).to_dict(),
-                    'b2': ArrayMetadata(
-                        unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
-                            shape=(5,), dtype=np.float32
+                            shape=(1, 2), dtype=np.float32
                         ),
                         is_optax_masked_node=False,
-                    ).to_dict(),
+                    ).to_dict()
+                ),
+                'b': {
+                    'b1': (
+                        ArrayMetadata(
+                            unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                                shape=(3, 4), dtype=np.int32
+                            ),
+                            is_optax_masked_node=True,
+                        ).to_dict()
+                    ),
+                    'b2': (
+                        ArrayMetadata(
+                            unpadded_shape_dtype_struct=jax.ShapeDtypeStruct(
+                                shape=(5,), dtype=np.float32
+                            ),
+                            is_optax_masked_node=False,
+                        ).to_dict()
+                    ),
                 },
             },
         ),

@@ -34,17 +34,16 @@ import jax.numpy as jnp
 from jax.sharding import Mesh
 import numpy as np
 import optax
-import orbax.checkpoint as ocp
 from paxml import checkpoint_managers
 from paxml import checkpoint_paths
 from paxml import checkpoint_types
 from paxml import checkpoints
 from paxml import train_states
+import orbax.checkpoint as ocp
 from praxis import base_input
 from praxis import py_utils
 import tensorflow.compat.v2 as tf
 import tensorstore as ts
-
 
 FLAGS = flags.FLAGS
 CheckpointType = checkpoint_types.CheckpointType

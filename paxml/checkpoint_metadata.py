@@ -23,12 +23,11 @@ from absl import logging
 from etils import epath
 import jax
 import jax.numpy as jnp
-import orbax.checkpoint as ocp
 from paxml import checkpoint_version
 from paxml import train_states
+import orbax.checkpoint as ocp
 from praxis import py_utils
 from praxis import pytypes
-
 
 PAX_METADATA_ITEM_NAME = 'pax_metadata'
 METADATA_ITEM_NAME = ocp.checkpoint_manager.METADATA_ITEM_NAME
@@ -54,8 +53,9 @@ def _get_shape_dtype_struct(nested: Any) -> Any:
 def make_metadata(
     version: float | None = None,
     train_state: train_states.TrainState | None = None,
-    train_state_unpadded_shape_dtype_struct: train_states.TrainState
-    | None = None,
+    train_state_unpadded_shape_dtype_struct: (
+        train_states.TrainState | None
+    ) = None,
     tensorstore_use_ocdbt: bool | None = None,
 ) -> Mapping[str, Any]:
   """Returns metadata dict."""

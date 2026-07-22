@@ -24,12 +24,12 @@ from etils import epath
 import jax
 from jax import monitoring
 import numpy as np
-import orbax.checkpoint as ocp
 from paxml import checkpoint_managers
 from paxml import partitioning
 from paxml import tasks_lib
 from paxml import train_states
 from paxml import trainer_lib
+import orbax.checkpoint as ocp
 from praxis import base_input
 from praxis import pax_fiddle
 from praxis import py_utils
@@ -353,6 +353,7 @@ class _OrbaxPmapTrainingCheckpointer(checkpoints.TrainingCheckpointer):
     """Restore using CheckpointManager, setting up additional args."""
     restore_args = None
     if py_utils.pmap_use_tensorstore():
+
       def _get_spec(shape):
         if shape.shape:
           return jax.sharding.PartitionSpec(None)
