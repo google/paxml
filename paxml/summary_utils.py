@@ -527,9 +527,9 @@ def write_summary_tensor(
       # Some eval codepath adds a leading 'test split' dim.
       tensor = np.reshape(tensor, [-1] + list(tensor.shape)[-3:])  # pyrefly: ignore[bad-assignment]
       # Create a separate key for each image to avoid RPC oversize issues.
-      for i in range(min(tensor.shape[0], remaining_max_images)):
+      for i in range(min(tensor.shape[0], remaining_max_images)):  # pyrefly: ignore[missing-attribute]
         tf_summary.image(f'{key}/{i}', tensor[i:i + 1], step_i)  # pyrefly: ignore[bad-index]
-      remaining_max_images -= tensor.shape[0]
+      remaining_max_images -= tensor.shape[0]  # pyrefly: ignore[missing-attribute]
   elif base_summary_type == SummaryType.AUDIO:
     remaining_max_audios = MAX_AUDIOS_PER_SUMMARY
     for tensor in tensors_it:
@@ -537,9 +537,9 @@ def write_summary_tensor(
         break
       tensor = np.reshape(tensor, [-1] + list(tensor.shape[-2:]))  # pyrefly: ignore[bad-assignment]
       # TODO(nanxinchen): Make the sampling rate configurable
-      for i in range(min(tensor.shape[0], remaining_max_audios)):
+      for i in range(min(tensor.shape[0], remaining_max_audios)):  # pyrefly: ignore[missing-attribute]
         tf_summary.audio(f'{key}/{i}', tensor[i : i + 1], sample_rate, step_i)  # pyrefly: ignore[bad-index]
-      remaining_max_audios -= tensor.shape[0]
+      remaining_max_audios -= tensor.shape[0]  # pyrefly: ignore[missing-attribute]
   elif base_summary_type == SummaryType.TEXT:
     remaining_max_texts = MAX_TEXTS_PER_SUMMARY
     for tensor in tensors_it:
