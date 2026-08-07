@@ -1008,7 +1008,7 @@ class SummaryHandler:
     write_summary_entry(
         self._summary_writer,
         self._latest_step,
-        losses,
+        losses,  # pyrefly: ignore[bad-argument-type]
         self._weighted_scalars_list,  # pyrefly: ignore[bad-argument-type]
         self._clu_metrics,
         self._summary_tensors,
