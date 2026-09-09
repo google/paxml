@@ -51,16 +51,18 @@ def _register_task(
   seqio.TaskRegistry.add(
       task_name,
       source=seqio.FunctionDataSource(  # pyrefly: ignore[bad-argument-type]
-          dataset_fn=lambda split, shuffle_files, seed=0: ds,
-          splits=['train', 'validation']),
+          dataset_fn=lambda split, shuffle_files, seed=0: ds,  # pyrefly: ignore[bad-argument-type]
+          splits=['train', 'validation'],
+      ),
       preprocessors=preprocessors,
       output_features={
           feat: seqio.Feature(
-              seqio.test_utils.sentencepiece_vocab(),
-              add_eos=add_eos)
+              seqio.test_utils.sentencepiece_vocab(), add_eos=add_eos
+          )
           for feat in output_feature_names
       },
-      metric_fns=[])
+      metric_fns=[],
+  )
 
 
 def _register_mixture(

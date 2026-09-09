@@ -972,7 +972,7 @@ class PjitPartitioner(Partitioner):
     reshard_inputs_fn = functools.partial(
         trainer_lib.reshard_input_based_on_rank_fn,
         task.train.inputs_split_mapping,
-        self._mesh_names,
+        self._mesh_names,  # pyrefly: ignore[bad-argument-type]
     )
 
     def _wrapped_step_fn(
