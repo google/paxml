@@ -20,7 +20,6 @@ python paxml/main.py \
     --exp=tasks.lm.params.lm_cloud.LmCloudTransformerAdamTest \
     --job_log_dir=/tmp/jax_log_dir/exp01
 """
-# Internal import for aiding module import speed
 
 import contextlib
 import importlib
