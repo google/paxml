@@ -1039,7 +1039,7 @@ def train_step_single_learner(
     states: TrainState,
     prng_key: PRNGKey,
     inputs: JTensor | NestedMap,
-    fprop_dtype: jnp.dtype = jnp.float32,
+    fprop_dtype: jnp.dtype = jnp.float32,  # pyrefly: ignore[bad-function-definition]
     var_weight_hparams: NestedWeightHParams | None = None,
     static_args: BaseStepFnStaticArgs | None = None,
     *,
@@ -1267,7 +1267,7 @@ def eval_step_single_learner(
     states: TrainState,
     prng_key: JTensor,
     inputs: JTensor | NestedMap,
-    fprop_dtype: jnp.dtype = jnp.float32,
+    fprop_dtype: jnp.dtype = jnp.float32,  # pyrefly: ignore[bad-function-definition]
     var_weight_hparams: NestedWeightHParams | None = None,
     static_args: BaseStepFnStaticArgs | None = None,
 ) -> tuple[None, StepFnOutput]:
@@ -1394,7 +1394,7 @@ def decode_step(
     prng_key: JTensor,
     var_weight_hparams: NestedWeightHParams,
     inputs: JTensor | NestedMap,
-    fprop_dtype: jnp.dtype = jnp.float32,
+    fprop_dtype: jnp.dtype = jnp.float32,  # pyrefly: ignore[bad-function-definition]
     apply_mutable_list: Sequence[str] = (DECODE_CACHE, SUMMARIES),
     decode_method: str = 'decode',
 ) -> tuple[tuple[Any, Any, Any], NestedMap]:

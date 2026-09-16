@@ -478,8 +478,8 @@ class WeightedScalarCluMetric(clu_metrics.Metric):
   See also documentation of `clu.Metric`.
   """
 
-  weighted_value: jnp.float32
-  weight: jnp.float32
+  weighted_value: jnp.float32  # pyrefly: ignore[not-a-type]
+  weight: jnp.float32  # pyrefly: ignore[not-a-type]
 
   @classmethod
   def create(

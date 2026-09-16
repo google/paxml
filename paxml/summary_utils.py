@@ -327,7 +327,7 @@ def _yield_subtrees(
 
 def l2_mean(
     tree: NestedJTensor, prefix: str = '', max_level: int = 4, sep: str = '/'
-) -> dict[str, jnp.float32]:
+) -> dict[str, jnp.float32]:  # pyrefly: ignore[not-a-type]
   """L2 Norms over pytree."""
 
   def _sq(x):
@@ -341,7 +341,7 @@ def l2_mean(
   if prefix:
     names = [prefix + sep + n for n in names]
 
-  def norm_fn(tree: NestedJTensor) -> jnp.float32:
+  def norm_fn(tree: NestedJTensor) -> jnp.float32:  # pyrefly: ignore[not-a-type]
     out = jax.tree_util.tree_reduce(operator.add, tree)
     # NOTE(yonghui): Here we normalize out[1] by out[0], instead of sqrt(out[1])
     # by out[0] so that l2_norm is more semantically meaningful: it means the
