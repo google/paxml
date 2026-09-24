@@ -17,7 +17,6 @@
 #   Paxml: a library for training machine learning models in Jax.
 
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//paxml:paxml.bzl", "pytype_binary", "pytype_strict_library", "pytype_strict_test")
 load("//praxis:build-visibility.bzl", "JAX_VISIBILITY")
 # Internal license-related bzl load
@@ -48,8 +47,6 @@ bzl_library(
     # Implicit build flag
     visibility = ["//visibility:private"],
 )
-
-# Internal linker rule.
 
 pytype_strict_library(
     name = "automl_interfaces",
