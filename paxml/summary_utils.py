@@ -376,7 +376,7 @@ def flatten_flax_summaries(
   """
   summary_tensors = flax.traverse_util.flatten_dict(summary_tensors)
   new_summary_tensors = {}
-  for k, v in summary_tensors.items():
+  for k, v in summary_tensors.items():  # pyrefly: ignore[missing-attribute]
     assert isinstance(k, tuple)
     # Flax flatten_dict flattens nested dict to {(root, parent, self), value}.
     # The new key is 'root_parent_self'.
@@ -447,7 +447,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
       video_summaries,
   ):
     for k, v in summary_dict.items():
-      summary_tensors[k] = v
+      summary_tensors[k] = v  # pyrefly: ignore[unsupported-operation]
   return summary_tensors
 
 
@@ -665,7 +665,7 @@ def write_summary_entry(
     )
 
     work_unit.set_task_status(status_msg)
-    summaries = flatten_summary_dict(summary_tensors)
+    summaries = flatten_summary_dict(summary_tensors)  # pyrefly: ignore[bad-argument-type]
     for key, tensors in summaries:
       summary_type = base_layer.get_summary_type_from_key(key)
       key = get_summary_display_name_from_key(key)

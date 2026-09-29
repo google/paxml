@@ -1473,7 +1473,7 @@ class SeqIOInput(base_input.BaseInput):
         model_outs = _pad_if_inhomogeneous(model_outs)
 
       metric_instance = metric_obj.from_model_output(
-          targets, model_outs, output_features
+          targets, model_outs, output_features  # pyrefly: ignore[bad-argument-type]
       )
       if isinstance(metric_instance, seqio.metrics.CollectingMetric):
         metric_value, _ = metric_instance.actual_compute(
