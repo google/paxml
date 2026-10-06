@@ -582,7 +582,7 @@ _TASK_HANDLE_RE = re.compile(r'(?:logs\.)?(\d+)\.(.*)\.([^.]+)\.\d+')
 if __name__ == '__main__':
   # Only dump from Borg task 0.
   if handle := os.getenv('BORG_TASK_HANDLE'):
-    if (task_id := _TASK_HANDLE_RE.match(handle).group(1)) == '0':  # pytype: disable=attribute-error  # re-none
+    if (task_id := _TASK_HANDLE_RE.match(handle).group(1)) == '0':  # pyrefly: ignore[missing-attribute]
       if dump_dir := os.getenv('XLA_DUMP_TO'):
         if existing := os.getenv('XLA_FLAGS'):
           os.environ['XLA_FLAGS'] = f'{existing} --xla_dump_to={dump_dir}'
