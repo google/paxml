@@ -77,10 +77,10 @@ class TestModel(base_model.BaseModel):
   def compute_predictions(self, input_batch: NestedMap) -> Predictions:
     return self.layer_a(input_batch['image'])
 
-  def compute_loss(  # pytype: disable=signature-mismatch  # jax-ndarray
+  def compute_loss(  # pyrefly: ignore[bad-override]
       self, predictions: JTensor | NestedMap, input_batch: NestedMap
   ) -> tuple[WeightedScalars, dict[str, Any]]:
-    return {'loss': (jnp.sum(predictions), 1)}, NestedMap()  # pytype: disable=bad-return-type  # jax-ndarray
+    return {'loss': (jnp.sum(predictions), 1)}, NestedMap()  # pyrefly: ignore[bad-argument-type, bad-assignment]
 
   def decode(self, input_batch: base_model.NestedMap):
     return {'a': (1, 1)}, {}, {}

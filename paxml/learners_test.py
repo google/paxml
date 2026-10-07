@@ -530,7 +530,7 @@ class LearnersTest(test_utils.TestCase):
       jax.tree.map(
           asserts.assert_same_structure,
           partition_spec_single,
-          p.inner_state,  # pytype:disable=attribute-error
+          p.inner_state,
       )
     with base_layer.JaxContext.new_context():
       transformed_grads, _ = learner_instance.update_states(

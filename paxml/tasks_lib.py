@@ -163,7 +163,7 @@ def extract_ema(
     # Here the ema is constructed by combining the ema state from all those
     # dictionaries. Each parameter belongs to one dictionary and is labelled as
     # masked node in others.
-    for item in model_states.opt_states[0].values():  # pytype: disable=attribute-error  # jax-ndarray
+    for item in model_states.opt_states[0].values():
       if isinstance(item, tuple):
         for v in item:
           if isinstance(v, dict) and 'ema' in v:
@@ -489,9 +489,7 @@ def _make_train_state(
               missing_in_ema,
               filtered_ema['ema'],
           )
-          v = (
-              filtered_ema  # pytype: disable=unsupported-operands  # jax-ndarray
-          )
+          v = filtered_ema
           new_states.append(v)
           if train_state_pspecs is not None:
             new_states_pspecs.append(ema_pspecs)
@@ -513,7 +511,7 @@ def _make_train_state(
       if train_state_pspecs is not None:
         new_states_pspecs0 = train_state_pspecs.opt_states[0]
 
-      for key, item in ckpt_train_state.opt_states[0].items():  # pytype: disable=attribute-error  # jax-ndarray
+      for key, item in ckpt_train_state.opt_states[0].items():
         if isinstance(item, tuple):
           # (dict, dict, dict, ...). One or more dicts contain an 'ema' key
 
@@ -523,7 +521,7 @@ def _make_train_state(
               v = ema_pspecs if update_pspecs else filtered_vars
             return v
 
-          new_states0[key] = tuple(update_for_ema(v) for v in item)  # pytype: disable=unsupported-operands  # jax-ndarray
+          new_states0[key] = tuple(update_for_ema(v) for v in item)
           for v in new_states0[key]:
             if isinstance(v, dict) and 'ema' in v:
               # is_bprop_masked_node means matched but excluded.
@@ -534,7 +532,7 @@ def _make_train_state(
                   is_leaf=is_masked,
               )
           if new_states_pspecs0 is not None:
-            new_states_pspecs0[key] = tuple(  # pytype: disable=unsupported-operands  # jax-ndarray
+            new_states_pspecs0[key] = tuple(
                 update_for_ema(v, update_pspecs=True)
                 for v in new_states_pspecs0[key]
             )
@@ -982,7 +980,7 @@ def _create_opt_states(
     filtered_mdl_vars = filter_vars_for_grad_or_opt(mdl_vars, excluded)  # pyrefly: ignore[bad-argument-type]
     grad_tx = learner.get_grad_tx(var_weight_hparams)
     opt_states.append(grad_tx.init(filtered_mdl_vars))
-  return opt_states  # pytype: disable=bad-return-type
+  return opt_states
 
 
 def create_state(
@@ -1556,7 +1554,7 @@ class SingleTask(base_task.BaseTask):
         backward variables.
     """
     mesh_shape = self.model.mesh_shape
-    mesh_axis_names: Sequence[str] = self.model.mesh_axis_names  # pytype: disable=annotation-type-mismatch
+    mesh_axis_names: Sequence[str] = self.model.mesh_axis_names  # pyrefly: ignore[bad-assignment]
     return create_state_padded_shapes(
         var_weight_hparams,
         mesh_shape,
@@ -1805,7 +1803,7 @@ class SingleTask(base_task.BaseTask):
     ]
     ignore_rules = rules.ignore_rules if rules.ignore_rules is not None else []
     ignore_rules = [re.compile(pattern) for pattern in ignore_rules]
-    flattened_model_vars = dict(model_vars.FlattenItems())  # pytype: disable=attribute-error
+    flattened_model_vars = dict(model_vars.FlattenItems())
     # matched_pspecs: pspecs for the init checkpoint, inferred from model_vars.
     # model_vars_mapping: Mapping from names in model_vars to names in the init
     #                     checkpoint.
@@ -2087,5 +2085,6 @@ class SingleTask(base_task.BaseTask):
 
     # Convert mdl_vars back to Python dict for compatibility.
     train_state = train_state.replace(
-        mdl_vars=train_state.mdl_vars.ToNestedDict())  # pytype: disable=attribute-error  # jax-ndarray
+        mdl_vars=train_state.mdl_vars.ToNestedDict()
+    )
     return train_state, train_state_provenance, not load_status[2]

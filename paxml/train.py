@@ -181,10 +181,10 @@ def train_and_evaluate(
   logging.info('train_input_p:')
   for line in base_hyperparams.nested_struct_to_text(
       train_input_p
-  ).splitlines():  # pytype: disable=attribute-error
+  ).splitlines():
     logging.info('  %s', line)
   logging.info('task_p:')
-  for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():  # pytype: disable=attribute-error
+  for line in base_hyperparams.nested_struct_to_text(task_p).splitlines():
     logging.info('  %s', line)
 
   # Creates the task.

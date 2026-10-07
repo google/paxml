@@ -272,7 +272,7 @@ def adjust_input_params_for_small_batch(
     return input_p
 
   local_device_count = jax.local_device_count()
-  batch_size = fdl.get_callable(input_p).get_batch_size(input_p)  # pytype: disable=attribute-error
+  batch_size = fdl.get_callable(input_p).get_batch_size(input_p)  # pyrefly: ignore[missing-attribute]
 
   if (
       batch_size % local_device_count == 0
@@ -602,7 +602,7 @@ def _maybe_aggregate_metrics_summaries(
     # No aggregation of summaries is needed.
     aggregated_summaries = summary_dict
 
-  return (  # pytype: disable=bad-return-type  # jax-ndarray
+  return (  # pyrefly: ignore[bad-return]
       weighted_loss,
       mean_loss,
       loss_weight,
@@ -1092,12 +1092,12 @@ def train_step_single_learner(
   # numbers depends on global step.
   #
   # TODO(yonghui): also fold in the replica id.
-  prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+  prng_key = jax.random.fold_in(prng_key, states.step)
 
   if not var_weight_hparams:
     with base_layer.JaxContext.new_context(hparams=context_p):
       var_weight_hparams = model.abstract_init_with_metadata(inputs)
-  updated_model_vars = jax_task.maybe_adjust_train_state(  # pytype: disable=wrong-arg-types  # jax-ndarray
+  updated_model_vars = jax_task.maybe_adjust_train_state(
       step=states.step,
       mdl_vars=states.mdl_vars,
       var_weight_hparams=var_weight_hparams,
@@ -1149,10 +1149,10 @@ def train_step_single_learner(
       pass
 
     # Add a summary for learning rate
-    learner.plot_learning_rate(states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    learner.plot_learning_rate(states.step)
 
     # Apply gradient transformations.
-    mdl_vars = states.mdl_vars.copy()  # pytype: disable=attribute-error  # jax-ndarray
+    mdl_vars = states.mdl_vars.copy()
     if (
         expose_updated_nontrainables_to_learner
         and NON_TRAINABLE in fwd_updated_vars
@@ -1298,7 +1298,7 @@ def eval_step_single_learner(
   )
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
-  prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+  prng_key = jax.random.fold_in(prng_key, states.step)
   mdl_vars = states.mdl_vars
   # assert not states.opt_states
 
@@ -1418,7 +1418,7 @@ def decode_step(
   context_p = base_layer.JaxContext.HParams(do_eval=True, summary_verbosity=2)
   # Fold in global_step as part of the random seed key, so that random
   # numbers depends on global step.
-  prng_key = jax.random.fold_in(prng_key, states.step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+  prng_key = jax.random.fold_in(prng_key, states.step)
   mdl_vars = states.mdl_vars
 
   assert not states.opt_states
@@ -1588,7 +1588,7 @@ def initialize_partitioned_model_states(
     )
     return py_utils.maybe_pad_uneven_sharding(
         outs,  # pyrefly: ignore[bad-argument-type]
-        train_state_partition_specs,  # pytype: disable=wrong-arg-types  # jax-ndarray
+        train_state_partition_specs,
         train_state_unpadded_shapes,
         model.hparams.mesh_shape,
         model.hparams.mesh_axis_names,

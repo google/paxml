@@ -74,7 +74,7 @@ def filter_nestedmap(full_specs, partial_specs):
   """Project full_specs into partial_specs."""
   if isinstance(full_specs, dict):
     result = type(full_specs)()
-    for key in partial_specs.keys():  # pytype: disable=attribute-error  # jax-ndarray
+    for key in partial_specs.keys():
       result[key] = filter_nestedmap(full_specs[key], partial_specs[key])
     return result
   elif isinstance(full_specs, list):
@@ -1096,7 +1096,7 @@ class PjitPartitioner(Partitioner):
         )
     )
 
-    return py_utils.maybe_pad_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
+    return py_utils.maybe_pad_uneven_sharding(
         unpadded_state,  # pyrefly: ignore[bad-argument-type]
         partition_specs,
         state_unpadded_shapes,
@@ -1122,7 +1122,7 @@ class PjitPartitioner(Partitioner):
             state_unpadded_shapes.mdl_vars, padded_state.mdl_vars
         )
     )
-    return py_utils.maybe_slice_uneven_sharding(  # pytype: disable=wrong-arg-types  # jax-ndarray
+    return py_utils.maybe_slice_uneven_sharding(
         padded_state,  # pyrefly: ignore[bad-argument-type]
         partition_specs,
         state_unpadded_shapes,

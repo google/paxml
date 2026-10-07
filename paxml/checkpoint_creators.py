@@ -643,7 +643,7 @@ def _create_checkpointer(
     train_input_p.input_checkpointing_enabled = True  # pyrefly: ignore[missing-attribute]
   checkpoint_manager = checkpoint_managers.OrbaxCheckpointManager(
       checkpoint_dir,
-      checkpointer,  # pyrefly: ignore[bad-argument-type]
+      checkpointer,
       train_input_checkpointer=train_input_checkpointer,
       options=options,
       checkpoint_type=checkpoint_type,

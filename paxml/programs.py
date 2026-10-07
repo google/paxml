@@ -304,7 +304,7 @@ class BaseTrainProgram(Program):
       )
 
     # Initializes other states.
-    self._train_unpadded_global_batch_size = train_input.get_global_batch_size(  # pytype: disable=wrong-arg-types  # use-fiddle-overlay
+    self._train_unpadded_global_batch_size = train_input.get_global_batch_size(
         train_input  # pyrefly: ignore[bad-argument-type]
     )
     self._profiler = profiling.Profiler(

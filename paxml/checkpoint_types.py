@@ -37,7 +37,7 @@ def retrieve_checkpoint_type(
     task: base_task.BaseTask | pax_fiddle.Config[base_task.BaseTask],
 ) -> CheckpointType:
   """Retrieves the CheckpointType given the input arguments."""
-  using_pjit = task.model.mesh_shape is not None  # pytype: disable=attribute-error
+  using_pjit = task.model.mesh_shape is not None  # pyrefly: ignore[missing-attribute]
   if using_pjit or py_utils.pmap_use_tensorstore():
     if maybe_use_persistence_checkpointing:
       return CheckpointType.PERSISTENCE

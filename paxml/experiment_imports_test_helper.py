@@ -75,7 +75,7 @@ class ExperimentImportsTestHelper(absltest.TestCase):
           'they implement an input specs provider that doesn\'t require '
           'initialization of the training pipeline.')
       input_specs = input_specs_provider.get_input_specs()
-      model: base_model.BaseModel = task.model  # pytype: disable=attribute-error
+      model: base_model.BaseModel = task.model  # pyrefly: ignore[missing-attribute]
       # TODO(pax-dev): Add better/cleaner API to identify pmap vs. pjit models
       # (and check for dcn_mesh_shape too).
       if (hasattr(model, 'ici_mesh_shape') and

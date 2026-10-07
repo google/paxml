@@ -401,7 +401,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
   image_summaries = {}
   audio_summaries = {}
   video_summaries = {}
-  for k, v in summary_tensors.items():  # pytype: disable=attribute-error  # jax-ndarray
+  for k, v in summary_tensors.items():  # pyrefly: ignore[missing-attribute]
     summary_type = base_layer.get_summary_type_from_key(k)
     if base_layer.get_summary_base_type(summary_type) == SummaryType.SCALAR:
       scalar_summaries[k] = v
@@ -439,7 +439,7 @@ def aggregate_per_replica_summaries(summary_tensors: NestedJTensor):
       video_summaries,
   )
 
-  summary_tensors = summary_tensors.copy()  # pytype: disable=attribute-error  # jax-ndarray
+  summary_tensors = summary_tensors.copy()  # pyrefly: ignore[missing-attribute]
   for summary_dict in (
       scalar_summaries,
       image_summaries,
@@ -503,7 +503,7 @@ def write_summary_tensor(
     if summary_type not in {
         SummaryType.AGGREGATE_SCALAR, SummaryType.AGGREGATE_IMAGE
     }:
-      return  # pytype: disable=bad-return-type
+      return  # pyrefly: ignore[bad-return]
   if isinstance(tensor, (list, tuple)):
     tensors = tensor
   else:
@@ -562,7 +562,7 @@ def write_summary_tensor(
     # same number of elements per tensor in `tensors`.
     tf_summary.histogram(key, np.concatenate(tensors), step_i)
   else:
-    assert False, 'Unsupported summary type: ' + str(summary_type)  # pytype: disable=bad-return-type
+    assert False, 'Unsupported summary type: ' + str(summary_type)
 
 
 def get_summary_display_name_from_key(key: str) -> str:
@@ -881,7 +881,6 @@ class SummaryHandler:
       if per_example_out and should_log:
         per_example_out_copy = jax.device_get(per_example_out)
 
-      # pytype: disable=wrong-arg-types
       self._process(
           step,
           loss_copy,
@@ -892,7 +891,6 @@ class SummaryHandler:
           should_log,
           clu_metrics_copy,
       )
-      # pytype: enable=wrong-arg-types
 
     if self._summary_pool:
       self._summary_pool.submit(process_fn)
@@ -937,7 +935,7 @@ class SummaryHandler:
       )
 
     if not self.should_write(step):
-      return  # pytype: disable=bad-return-type
+      return  # pyrefly: ignore[bad-return]
 
     # No accumulation. Add at least the latest value.
     if not self.accumulate_over_steps:
@@ -951,7 +949,7 @@ class SummaryHandler:
       )
 
     self._write()
-    self._clear()  # pytype: disable=bad-return-type
+    self._clear()
 
   def _add(
       self,

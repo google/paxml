@@ -472,7 +472,7 @@ def enable_class_level_hyper_primitives(cls: Type[Any]) -> None:
     def getter(x):
       if hasattr(x, attr_name):
         return getattr(x, attr_name)
-      return hyper.__class__(**hyper_kwargs)  # pytype: disable=not-instantiable
+      return hyper.__class__(**hyper_kwargs)  # pyrefly: ignore[bad-unpacking]
 
     def setter(x, v):
       setattr(x, attr_name, v)

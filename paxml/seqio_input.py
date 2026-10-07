@@ -558,7 +558,7 @@ class SeqIOInput(base_input.BaseInput):
   def __post_init__(self):
     # Modify hparams in-place before freezing hparams
     if not self.name:
-      mixture_name = self.mixture_name or self.mixture_or_task.name  # pytype: disable=attribute-error
+      mixture_name = self.mixture_name or self.mixture_or_task.name  # pyrefly: ignore[missing-attribute]
       self.name = f'{mixture_name}_{self.split_name}'
     if (
         not self.is_training
@@ -924,7 +924,7 @@ class SeqIOInput(base_input.BaseInput):
     self._peek = None
     self._iter._restore(state)  # pylint: disable=protected-access
 
-  def get_next(self) -> NestedNpTensor:  # pytype: disable=signature-mismatch  # jax-ndarray
+  def get_next(self) -> NestedNpTensor:  # pyrefly: ignore[bad-override]
     element = next(self._iter)
     # For non-training single-host infeed, the xla_passthrough will deal with
     # the unsupported types.
@@ -1601,7 +1601,7 @@ class LanguageModelFeatures(seqio.DecoderFeatureConverter,
 
   @property
   def weights_on_targets_only(self) -> bool:
-    return self._weights_on_targets_only  # pytype: disable=bad-return-type
+    return self._weights_on_targets_only  # pyrefly: ignore[bad-return]
 
   @property
   def target_has_suffix(self) -> bool:
@@ -1854,7 +1854,7 @@ class MetricType(enum.Enum):
   SCORE = 2  # eval / target scoring-based metrics
 
 
-def get_eval_hparams_for_seqio(  # pytype: disable=annotation-type-mismatch
+def get_eval_hparams_for_seqio(
     task_or_mixture_name: str | seqio.Task | seqio.Mixture,
     batch_size: int,
     feature_lengths: Mapping[str, int],
@@ -1985,7 +1985,7 @@ def get_eval_hparams_for_seqio(  # pytype: disable=annotation-type-mismatch
     remaining_feature_lengths = dict(feature_lengths)
     del remaining_feature_lengths['inputs']
     del remaining_feature_lengths['targets']
-    p.task_feature_lengths.update(remaining_feature_lengths)  # pytype: disable=attribute-error  # use-fiddle-overlay
+    p.task_feature_lengths.update(remaining_feature_lengths)
 
   # Split hparams per tasks and filter by metric type.
   # First, the mixture_or_task itself may not be deepcopiable, so clear it

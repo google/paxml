@@ -166,7 +166,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
       )
 
   def plot_learning_rate(self, step: int) -> None:
-    learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    learning_rate = self.optimizer.get_learning_rate(step)  # pyrefly: ignore[bad-argument-type]
     base_layer.add_global_summary(
         'lr', learning_rate, SummaryType.AGGREGATE_SCALAR
     )
@@ -323,7 +323,7 @@ class Learner(base_hyperparams.FiddleBaseParameterizable):
           clipped_grad_norm,
           SummaryType.AGGREGATE_SCALAR,
       )
-    return grads, valid_step  # pytype: disable=bad-return-type  # jax-ndarray
+    return grads, valid_step  # pyrefly: ignore[bad-return]
 
   def update_states(
       self,
@@ -541,7 +541,7 @@ class MultiOptimizerLearner(Learner):
         asserts.instance(aux_op, optimizers.OptaxOptimizer)
 
   def plot_learning_rate(self, step: int) -> None:
-    learning_rate = self.optimizer.get_learning_rate(step)  # pytype: disable=wrong-arg-types  # jax-ndarray
+    learning_rate = self.optimizer.get_learning_rate(step)  # pyrefly: ignore[bad-argument-type]
     base_layer.add_global_summary(
         'learning/lr_main', learning_rate, SummaryType.AGGREGATE_SCALAR
     )

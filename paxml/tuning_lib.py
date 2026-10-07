@@ -347,10 +347,9 @@ def tune(
         # Mark trial as infeasible on NaN. PAX user can add more error
         # through `SearchHParams.errors_to_skip`.
         with feedback.skip_on_exceptions([FloatingPointError] + errors_to_skip):
-          trial_fn(sub_experiment_cls(),  # pytype: disable=wrong-arg-types  # re-none
-                   work_unit,
-                   trial_dirname,
-                   early_stopping_fn)  # pytype: disable=not-instantiable
+          trial_fn(
+              sub_experiment_cls(), work_unit, trial_dirname, early_stopping_fn  # pyrefly: ignore[bad-argument-type]
+          )  # pyrefly: ignore[bad-argument-type]
 
         # We shortcircuit remaining sub-experiments if current trial is either
         # done or skipped.
@@ -371,7 +370,7 @@ def _record_experiment_config(
       'task': {},
   }
   for subexp_id, subexp_cls in sub_experiments.items():
-    subexp = subexp_cls()  # pytype: disable=not-instantiable
+    subexp = subexp_cls()
     # TODO(daiyip): We shall have more machine parse-able format such as
     # JSON or Fiddle config. But we start with raw texts to collect data
     # as early as possible.
@@ -938,7 +937,7 @@ class TrialDirectoryNameGenerator:
       combined_decision_point_names: list[str] | None = None,
       total_name_length_threshold: int = 64,
   ):
-    decision_point_names = list(search_space.hyper_dict.keys())  # pytype: disable=attribute-error
+    decision_point_names = list(search_space.hyper_dict.keys())  # pyrefly: ignore[missing-attribute]
     if combined_decision_point_names:
       assert len(decision_point_names) == 1, decision_point_names
       assert automl.COMBINED_DECISION_ATTR in decision_point_names, (
@@ -961,7 +960,7 @@ class TrialDirectoryNameGenerator:
       A list of tuple (decision name, decision value, choice index).
     """
     params = []
-    for k, hyper in self._search_space.hyper_dict.items():  # pytype: disable=attribute-error
+    for k, hyper in self._search_space.hyper_dict.items():  # pyrefly: ignore[missing-attribute]
       v = self._search_space.evaluate(hyper)
       if isinstance(hyper, pg.hyper.CustomHyper):
         v = '(CUSTOM)'

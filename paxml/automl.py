@@ -223,7 +223,7 @@ class RegularizedEvolution(BaseAlgorithm):
     tournament_size: Tournament size.
     seed: Random seed.
   """
-  mutator: pg.evolution.Mutator = pg.evolution.mutators.Uniform()  # pytype: disable=annotation-type-mismatch
+  mutator: pg.evolution.Mutator = pg.evolution.mutators.Uniform()
   population_size: int = 100
   tournament_size: int = 10
   seed: int | None = None

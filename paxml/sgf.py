@@ -209,7 +209,7 @@ class PercoreClippedDpSgdGradient(BaseStochasticGradient):
 
     return clipped, num_clipped, global_grad_norm
 
-  def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
+  def _add_noise(
       self,
       grads: NestedMap,
       noise_stddev: float,
@@ -387,9 +387,9 @@ class DpSgdStochasticGradient(BaseStochasticGradient):
     frac_clipped = num_clipped / batch_size
     dp_aux_info = {'frac_clipped': frac_clipped}
 
-    return clipped_grads_mean, dp_aux_info, batch_size  # pytype: disable=bad-return-type  # jax-types
+    return clipped_grads_mean, dp_aux_info, batch_size  # pyrefly: ignore[bad-return]
 
-  def _add_noise(  # pytype: disable=annotation-type-mismatch  # jax-ndarray
+  def _add_noise(
       self,
       grads: NestedMap,
       noise_stddev: float,
@@ -682,7 +682,7 @@ class PerLayerDpSgdStochasticGradient(DpSgdStochasticGradient):
         'stdev_frac_clipped': stdev_frac_clipped,
         'mean_layer_grad_norms': mean_layer_grad_norms,
     }
-    return mean_clipped_grads, dp_aux_info, batch_size  # pytype: disable=bad-return-type  # jax-types
+    return mean_clipped_grads, dp_aux_info, batch_size  # pyrefly: ignore[bad-return]
 
 
 class GhostClippingDpSgdStochasticGradient(DpSgdStochasticGradient):
