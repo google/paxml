@@ -217,7 +217,6 @@ def maybe_setup_moe_params(
     model_p: pax_fiddle.Config[base_layer.BaseLayer],
 ) -> None:
   """Convert a FeedforwardLayer to a MoE Layer for StackedTransformer."""
-  # pytype: disable=attribute-error  # enable-nested-classes
   if fdl.get_callable(model_p) == layers.StackedTransformerRepeated:
     model_p = model_p.block
 
@@ -225,9 +224,8 @@ def maybe_setup_moe_params(
     return
 
   ff_p = model_p.transformer_layer_params_tpl.tr_fflayer_tpl
-  assert issubclass(fdl.get_callable(ff_p), layers.TransformerFeedForward)
+  assert issubclass(fdl.get_callable(ff_p), layers.TransformerFeedForward)  # pyrefly: ignore[bad-argument-type]
   moe_p = model_p.moe_layer_tpl
-  # pytype: enable=attribute-error  # enable-nested-classes
   # Copy over the base params.
   base_layer.BaseLayerApi.copy_base_hparams(ff_p, moe_p)
   # Copy over othe params.
@@ -277,8 +275,8 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
         models.ClassificationMLPModel, name='classification_model'
     )
     model_p = task_p.model
-    model_p.mlp_tpl.ff_tpl.input_dims = self.INPUT_DIM  # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.mlp_tpl.ff_tpl.output_dims = self.OUTPUT_DIM  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.mlp_tpl.ff_tpl.input_dims = self.INPUT_DIM
+    model_p.mlp_tpl.ff_tpl.output_dims = self.OUTPUT_DIM
     model_p.mlp_tpl.hidden_dims = self.HIDDEN_DIM
     model_p.mlp_tpl.num_layers = self.NUM_LAYER
     model_p.softmax_tpl.input_dims = self.INPUT_DIM
@@ -292,7 +290,7 @@ class ClassificationModelAdam(base_experiment.BaseExperiment):
     model_p.mlp_tpl.weight_split_dims_mapping.wt = self.MLP_WEIGHT_SHARDING
     set_sharding_annotations_v1(
         task_p,
-        self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
+        self.TRAINING_OPTIMIZED_SHARDING,
         self.MESH_SHAPE,  # pyrefly: ignore[bad-argument-type]
     )
     set_default_adam(task_p, self.LEARNING_RATE, self.WEIGHT_DECAY)
@@ -334,7 +332,6 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
     model_p.lm_tpl.packed_input = True
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
     model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
-    # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
@@ -368,7 +365,6 @@ class TransformerBertPmapAdam(base_experiment.BaseExperiment):
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
-    # pytype: enable=attribute-error  # enable-nested-classes
 
     task_p.train.save_interval_steps = self.CHECKPOINT_EVERY_N_STEPS
 
@@ -421,7 +417,6 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     model_p.lm_tpl.packed_input = True
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
     model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
-    # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
     model_p.lm_tpl.softmax_tpl.soft_cap_logits = 30.0
 
@@ -455,7 +450,6 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
-    # pytype: enable=attribute-error  # enable-nested-classes
 
     if self.ENABLE_BFLOAT16:
       model_p.fprop_dtype = jnp.bfloat16
@@ -470,7 +464,7 @@ class TransformerBertSpmdAdafactor(base_experiment.BaseExperiment):
     maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
     set_sharding_annotations_v1(
         task_p,
-        self.TRAINING_OPTIMIZED_SHARDING,  # pytype: disable=wrong-arg-types
+        self.TRAINING_OPTIMIZED_SHARDING,
         self.MESH_SHAPE,  # pyrefly: ignore[bad-argument-type]
     )
 
@@ -507,7 +501,6 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
     model_p.lm_tpl.packed_input = self.PACKED_INPUT
     model_p.lm_tpl.model_dims = self.MODEL_DIMS
     model_p.lm_tpl.vocab_size = self.VOCAB_SIZE
-    # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.scale_sqrt_depth = True
 
     stacked_transformer_tpl = pax_fiddle.Config(layers.StackedTransformer)
@@ -548,7 +541,6 @@ class TransformerLmPmapAdam(base_experiment.BaseExperiment):
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
-    # pytype: enable=attribute-error  # enable-nested-classes
 
     maybe_setup_moe_params(model_p.lm_tpl.stacked_transformer_tpl)
     set_default_adam(
@@ -641,7 +633,6 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
       model_p.lm_tpl.softmax_tpl = pax_fiddle.Config(layers.FullSoftmax)
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
-    # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     if self.SEPARATE_EMBEDDING:
       model_p.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = True
@@ -689,7 +680,6 @@ class TransformerLmSpmdAdafactor(base_experiment.BaseExperiment):
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
-    # pytype: enable=attribute-error  # enable-nested-classes
 
     # Only one of RELATIVE_BIAS or USE_ROTARY_POSITION_EMB can be True.
     assert (not self.RELATIVE_BIAS) or (not self.USE_ROTARY_POSITION_EMB)
@@ -870,7 +860,6 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
       model_p.lm_tpl.softmax_tpl = pax_fiddle.Config(layers.FullSoftmax)
 
     softmax_init = WeightInit.Gaussian(1.0 / math.sqrt(self.MODEL_DIMS))
-    # pytype: disable=attribute-error  # enable-nested-classes
     model_p.lm_tpl.softmax_tpl.params_init = softmax_init
     if self.SEPARATE_EMBEDDING:
       model_p.lm_tpl.separate_embedding_tpl.scale_sqrt_depth = True
@@ -907,7 +896,6 @@ class TransformerLmSpmdPipelineAdafactor(TransformerLmSpmdAdafactor):
     transformer_layer_p.tr_fflayer_tpl.use_gated_activation = (
         self.USE_GATED_ACTIVATION)
     transformer_layer_p.tr_atten_tpl.dconv_qkv = self.ENABLE_DCONV
-    # pytype: enable=attribute-error  # enable-nested-classes
 
     # Only one of RELATIVE_BIAS or USE_ROTARY_POSITION_EMB can be True.
     assert (not self.RELATIVE_BIAS) or (not self.USE_ROTARY_POSITION_EMB)

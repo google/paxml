@@ -30,7 +30,7 @@ class ConvertSeqioTaskObjectsTest(test_utils.FakeTaskTest):
     transformed = convert_seqio_task_objects.convert_seqio_tasks(config=config)
     self.assertIsInstance(transformed["task"], pax_fiddle.Config)
     self.assertEqual(
-        fdl.ordered_arguments(transformed["task"]),  # pytype: disable=wrong-arg-types
+        fdl.ordered_arguments(transformed["task"]),
         {"task_or_mixture_name": "tfds_task"},
     )
 

@@ -407,7 +407,7 @@ class TextInput(base_input.BaseInput):
 
   def ids_to_strings(  # pyrefly: ignore[bad-override]
       self,
-      ids: pytypes.NpTensor,  # pytype: disable=signature-mismatch  # overriding-parameter-count-checks
+      ids: pytypes.NpTensor,
       lengths: pytypes.NpTensor,
   ) -> list[str]:
     bytes_list = self.tokenizer_inst.IdsToStrings(ids, lengths).numpy()

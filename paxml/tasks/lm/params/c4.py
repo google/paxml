@@ -373,9 +373,9 @@ class TransformerLmSpmdAdam(model_params.TransformerLmSpmdAdafactor):
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
-    model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT
 
-    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
     if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if self.USE_REPEATED_LAYER:
@@ -431,9 +431,9 @@ class TransformerLmSpmdPipelineAdam(
     """Returns the task parameters."""
     task_p = super().task()
     model_p = task_p.model
-    model_p.lm_tpl.packed_input = self.PACKED_INPUT  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p.lm_tpl.packed_input = self.PACKED_INPUT
 
-    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
     if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
       stacked_p = stacked_p.pipeline_stage
     if self.USE_REPEATED_LAYER:
@@ -504,12 +504,10 @@ def configure_gpt3_task(
     task_p: pax_fiddle.Config[tasks_lib.SingleTask],
 ) -> pax_fiddle.Config[tasks_lib.SingleTask]:
   """Returns task with gpt3 related configs."""
-  model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p = task_p.model
 
-  model_p.decoder_tpl.eos_id = (
-      GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
-  )
-  model_p.decoder_tpl.seqlen = cls.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+  model_p.decoder_tpl.eos_id = GPT_EOS_ID
+  model_p.decoder_tpl.seqlen = cls.MAX_SEQ_LEN
 
   model_p.params_init = WeightInit.Gaussian(0.006)
 
@@ -587,9 +585,9 @@ class C4SpmdAdam(TransformerLmSpmdAdam,
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
-    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.decoder_tpl.eos_id = GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p = task_p.model
+    model_p.decoder_tpl.eos_id = GPT_EOS_ID
+    model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN
 
     task_p = set_adam_and_learning_rate_schedule(cls=self, task_p=task_p)
     return task_p
@@ -700,11 +698,9 @@ class C4SpmdPipelineAdam(TransformerLmSpmdPipelineAdam, C4UnsupervisedDataset):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:  # pyrefly: ignore[bad-override]
     """Returns the task parameters."""
     task_p = super().task()
-    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
-    model_p.decoder_tpl.eos_id = (
-        GPT_EOS_ID  # pytype: disable=attribute-error  # enable-nested-classes
-    )
-    model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p = task_p.model
+    model_p.decoder_tpl.eos_id = GPT_EOS_ID
+    model_p.decoder_tpl.seqlen = self.MAX_SEQ_LEN
 
     task_p = set_adam_and_learning_rate_schedule(cls=self, task_p=task_p)
 

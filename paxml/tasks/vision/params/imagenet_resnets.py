@@ -247,7 +247,7 @@ class ResNet50Pjit(base_experiment.BaseExperiment):
         softmax_tpl=pax_fiddle.Config(
             layers.FullSoftmax,
             params_init=WeightInit.Gaussian(scale=0.01),
-            input_dims=resnet.channels[-1],  # pytype: disable=attribute-error
+            input_dims=resnet.channels[-1],
             num_classes=1000,
         ),
     )

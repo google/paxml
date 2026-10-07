@@ -424,7 +424,7 @@ class Llama2_7B(NVIDIA1_3B):
   def task(self) -> pax_fiddle.Config[tasks_lib.SingleTask]:
     task_p = super().task()
     task_p.train.num_train_steps = self.MAX_STEPS
-    model_p = task_p.model  # pytype: disable=attribute-error  # enable-nested-classes
+    model_p = task_p.model
 
     stacked_p = model_p.lm_tpl.stacked_transformer_tpl
     if fdl.get_callable(stacked_p) == transformers.PipelinedTransformer:
@@ -548,7 +548,7 @@ class MoELarge(NVIDIA1_3B):
     task_p = super().task()
 
     model_p = task_p.model
-    stacked_p = model_p.lm_tpl.stacked_transformer_tpl  # pytype: disable=attribute-error  # enable-nested-classes
+    stacked_p = model_p.lm_tpl.stacked_transformer_tpl
     if self.USE_REPEATED_LAYER:
       stacked_p = stacked_p.block
 

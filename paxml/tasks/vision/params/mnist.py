@@ -123,14 +123,14 @@ class CNN(base_layer.BaseLayer):
 
 def _cross_entropy_loss(targets, preds):
   num_classes = preds.shape[-1]
-  log_preds = jax.nn.log_softmax(preds)  # pytype: disable=wrong-arg-types  # jax-nn-types
+  log_preds = jax.nn.log_softmax(preds)
   one_hot_targets = jax.nn.one_hot(targets, num_classes)
   loss = jnp.mean(-jnp.sum(one_hot_targets * log_preds, axis=-1))
   return loss
 
 
 def _compute_accuracy(targets, preds):
-  accuracy = (targets == jnp.argmax(preds, axis=-1)).astype(jnp.float32)  # pytype: disable=wrong-arg-types  # jnp-type
+  accuracy = (targets == jnp.argmax(preds, axis=-1)).astype(jnp.float32)
   return jnp.mean(accuracy)
 
 
