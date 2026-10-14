@@ -169,6 +169,25 @@ def save_checkpoint(
   return checkpoint_manager
 
 
+def is_ocdbt_checkpoint_step(
+    checkpoint_dir: epath.PathLike, step: int | None
+) -> bool:
+  """Returns whether the GDA checkpoint at `step` (or the latest) is OCDBT."""
+  checkpoint_dir = epath.Path(checkpoint_dir)
+  if step is None:
+    step = checkpoint_paths.retrieve_latest_checkpoint_step_if_exists(
+        checkpoint_dir
+    )
+    if step is None:
+      return False
+  step_dir = checkpoint_paths.make_checkpoint_step_dir(
+      checkpoint_dir, step, checkpoint_type=CheckpointType.GDA
+  )
+  return ocp.type_handlers.is_ocdbt_checkpoint(
+      step_dir / checkpoint_paths.STATE_ITEM_NAME
+  )
+
+
 def restore_checkpoint(
     state_global_shapes: train_states.TrainState,
     checkpoint_dir: epath.PathLike,
@@ -498,8 +517,36 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
           'Must enable `tensorstore_use_ocdbt` in order to load OCDBT format'
           ' checkpoint.'
       )
+    omitted_fields = {}
     if is_ocdbt_checkpoint:
       reference_train_state, reference_state_specs = (item, specs)
+      # init_from_checkpoint_rules strips `step`/`opt_states` to `{}` for a
+      # params-only warm start, and eval/decode restore with `opt_states=[]`
+      # (discard_opt_states). Orbax requires the item to match the saved tree,
+      # so stand in a PLACEHOLDER tree (skipped on restore) for those. With
+      # `transforms`, Orbax does not skip PLACEHOLDER leaves, but it already
+      # skips saved keys that are missing from the item.
+      if transforms is None:
+        omitted_fields = {
+            f: getattr(item, f)
+            for f in ('step', 'opt_states')
+            if isinstance(getattr(item, f, None), (dict, list))
+            and not getattr(item, f)
+        }
+      if omitted_fields:
+        assert item is not None
+        # Only the tree structure is needed. self.metadata() would also open
+        # every array in the checkpoint to read its shape.
+        saved_tree = asyncio.run(
+            self._handler_impl._read_metadata_file(directory)  # pylint: disable=protected-access
+        ).as_nested_tree()
+        placeholders = {
+            f: jax.tree.map(lambda _: ocp.PLACEHOLDER, saved_tree[f])
+            for f in omitted_fields
+        }
+        reference_train_state = item.replace(**placeholders)
+        if specs is not None:
+          reference_state_specs = specs.replace(**placeholders)
     else:
       reference_train_state, reference_nested_names, reference_state_specs = (
           _tensorstore_prepare(item, specs)  # pyrefly: ignore[bad-argument-type]
@@ -520,11 +567,15 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
       self._handler_impl.set_param_names(reference_nested_names)
 
     def _create_restore_args(shape_struct):
+      if shape_struct is ocp.PLACEHOLDER:
+        return ocp.RestoreArgs()
       return ocp.RestoreArgs(
           dtype=shape_struct.dtype,
       )
 
     def _create_sharded_restore_args(shape_struct, pspec):
+      if shape_struct is ocp.PLACEHOLDER:
+        return ocp.RestoreArgs()
       # Providing `None` indicates that the shape should be restored exactly as
       # saved.
       restore_shape = (
@@ -567,6 +618,9 @@ class PaxCheckpointHandler(ocp.PyTreeCheckpointHandler):
         restore_args=restore_args,
         transforms=transforms,
     )
+    if omitted_fields:
+      restored_train_state = restored_train_state.replace(**omitted_fields)
+      reference_train_state = item
     if self._enforce_restore_shape_check:
       _check_restored_shapes(restored_train_state, reference_train_state)
 

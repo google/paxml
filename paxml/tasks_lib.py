@@ -1866,6 +1866,12 @@ class SingleTask(base_task.BaseTask):
           load_ema_states,
       )
 
+    # The rules don't say which format the external checkpoint was written in,
+    # and OCDBT data is only restored when explicitly requested.
+    use_ocdbt = (
+        checkpoint_type == CheckpointType.GDA
+        and checkpoints.is_ocdbt_checkpoint_step(ckpt_path, rules.step)
+    )
     if (py_utils.pmap_use_tensorstore() and
         ckpt_task.model.ici_mesh_shape is None):
       assert checkpoint_type in {
@@ -1877,7 +1883,9 @@ class SingleTask(base_task.BaseTask):
           ckpt_path,
           step=rules.step,
           global_mesh=global_mesh,
-          checkpoint_type=checkpoint_type)
+          checkpoint_type=checkpoint_type,
+          tensorstore_use_ocdbt=use_ocdbt,
+      )
     else:
       loaded_train_state = checkpoints.restore_checkpoint(
           ckpt_train_state,
@@ -1885,7 +1893,9 @@ class SingleTask(base_task.BaseTask):
           global_mesh=global_mesh,
           checkpoint_type=checkpoint_type,
           state_specs=train_state_pspecs,
-          step=rules.step)
+          step=rules.step,
+          tensorstore_use_ocdbt=use_ocdbt,
+      )
 
     # Use NestedMap's utility accessors
     loaded_vars = dict(NestedMap(loaded_train_state.mdl_vars).FlattenItems())

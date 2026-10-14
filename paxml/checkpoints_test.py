@@ -16,6 +16,7 @@
 """Basic, lightweight tests for checkpoints.py."""
 
 import json
+import warnings
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -106,6 +107,142 @@ class CheckpointsTest(parameterized.TestCase):
     # provenance) tuple that some PAX APIs return. This should fail.
     with self.assertRaisesRegex(ValueError, 'must be a subclass of') as _:
       checkpoints.restore_checkpoint((train_state, []), tmp_dir)  # type: ignore
+
+  def test_is_ocdbt_checkpoint_step(self):
+    model_vars = {'params': {'w': jnp.ones([4, 8], jnp.float32)}}
+    train_state = train_states.TrainState(
+        jnp.asarray(7, jnp.int32), model_vars, (), ()  # pyrefly: ignore[bad-argument-type]
+    )
+    ocdbt_dir = self.create_tempdir('ocdbt_ckpt')
+    non_ocdbt_dir = self.create_tempdir('non_ocdbt_ckpt')
+    for tmp_dir, use_ocdbt in ((ocdbt_dir, True), (non_ocdbt_dir, False)):
+      checkpoints.save_checkpoint(
+          train_state,
+          tmp_dir,
+          checkpoint_type=checkpoints.CheckpointType.GDA,
+          tensorstore_use_ocdbt=use_ocdbt,
+      ).wait_until_finished()
+
+    self.assertTrue(checkpoints.is_ocdbt_checkpoint_step(ocdbt_dir, 7))
+    self.assertTrue(checkpoints.is_ocdbt_checkpoint_step(ocdbt_dir, None))
+    self.assertFalse(checkpoints.is_ocdbt_checkpoint_step(non_ocdbt_dir, 7))
+    self.assertFalse(
+        checkpoints.is_ocdbt_checkpoint_step(self.create_tempdir(), None)
+    )
+
+  def test_restore_ocdbt_without_opt_states(self):
+    model_vars = {'params': {'w': jnp.ones([4, 8], jnp.float32)}}
+    opt_states = [{'m': jnp.zeros([4, 8], jnp.float32)}]
+    train_state = train_states.TrainState(
+        jnp.asarray(7, jnp.int32), model_vars, opt_states, ()  # pyrefly: ignore[bad-argument-type]
+    )
+    tmp_dir = self.create_tempdir('ocdbt_ckpt_no_opt')
+    checkpoint_manager = checkpoints.save_checkpoint(
+        train_state,
+        tmp_dir,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        tensorstore_use_ocdbt=True,
+    )
+    checkpoint_manager.wait_until_finished()
+    # A params-only warm start (init_from_checkpoint_rules with
+    # load_opt_states=False) restores with `step` and `opt_states` stripped.
+    shapes = jax.tree.map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), train_state
+    )
+    restored = checkpoints.restore_checkpoint(
+        shapes.replace(step={}, opt_states={}),  # pyrefly: ignore[bad-argument-type]
+        tmp_dir,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        step=7,
+        tensorstore_use_ocdbt=True,
+    )
+    np.testing.assert_array_equal(
+        restored.mdl_vars['params']['w'], model_vars['params']['w']
+    )
+    self.assertEqual(restored.opt_states, {})
+
+  def test_restore_ocdbt_with_discarded_opt_states(self):
+    model_vars = {'params': {'w': jnp.ones([4, 8], jnp.float32)}}
+    opt_states = [{'m': jnp.zeros([4, 8], jnp.float32)}]
+    train_state = train_states.TrainState(
+        jnp.asarray(7, jnp.int32), model_vars, opt_states, ()  # pyrefly: ignore[bad-argument-type]
+    )
+    tmp_dir = self.create_tempdir('ocdbt_ckpt_discard_opt')
+    checkpoint_manager = checkpoints.save_checkpoint(
+        train_state,
+        tmp_dir,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        tensorstore_use_ocdbt=True,
+    )
+    checkpoint_manager.wait_until_finished()
+    # Eval and decode restore with `discard_opt_states=True`, which empties
+    # `opt_states` to `[]` (tasks_lib.create_state_partition_specs).
+    shapes = jax.tree.map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), train_state
+    )
+    restored = checkpoints.restore_checkpoint(
+        shapes.replace(opt_states=[]),  # pyrefly: ignore[bad-argument-type]
+        tmp_dir,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        step=7,
+        tensorstore_use_ocdbt=True,
+    )
+    np.testing.assert_array_equal(
+        restored.mdl_vars['params']['w'], model_vars['params']['w']
+    )
+    self.assertEqual(int(restored.step), 7)
+    self.assertEqual(restored.opt_states, [])
+
+  def test_restore_ocdbt_with_transforms_and_discarded_opt_states(self):
+    model_vars = {'params': {'w': jnp.ones([4, 8], jnp.float32)}}
+    opt_states = [{'m': jnp.zeros([4, 8], jnp.float32)}]
+    train_state = train_states.TrainState(
+        jnp.asarray(7, jnp.int32), model_vars, opt_states, ()  # pyrefly: ignore[bad-argument-type]
+    )
+    tmp_dir = self.create_tempdir('ocdbt_ckpt_transforms')
+    checkpoints.save_checkpoint(
+        train_state,
+        tmp_dir,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        tensorstore_use_ocdbt=True,
+    ).wait_until_finished()
+    shapes = jax.tree.map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype), train_state
+    )
+    item = shapes.replace(
+        mdl_vars={'params': {'w2': shapes.mdl_vars['params']['w']}},
+        opt_states=[],
+    )
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter('always')
+      restored = checkpoints.restore_checkpoint(
+          item,
+          tmp_dir,
+          global_mesh=jax.sharding.Mesh(np.array(jax.devices()[:1]), ('x',)),
+          checkpoint_type=checkpoints.CheckpointType.GDA,
+          state_specs=jax.tree.map(
+              lambda _: jax.sharding.PartitionSpec(), item
+          ),
+          step=7,
+          tensorstore_use_ocdbt=True,
+          restore_transformations={
+              'mdl_vars': {
+                  'params': {
+                      'w2': ocp.Transform(original_key='mdl_vars/params/w')
+                  }
+              }
+          },
+      )
+
+    # Every item leaf has a sharding, so this warning means Orbax read an array
+    # that is not in the item: the discarded optimizer state.
+    self.assertEmpty(
+        [w for w in caught if 'Sharding info not provided' in str(w.message)]
+    )
+    np.testing.assert_array_equal(
+        restored.mdl_vars['params']['w2'], model_vars['params']['w']
+    )
+    self.assertEqual(restored.opt_states, [])
 
   @parameterized.parameters(
       ('foobar123', False),

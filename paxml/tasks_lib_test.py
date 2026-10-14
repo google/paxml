@@ -1296,6 +1296,76 @@ class ExternalCheckpointLoaderTest(test_utils.TestCase):
             v.ema['params']['var01'],
         )
 
+  def test_load_params_from_ocdbt_gda_checkpoint(self):
+    input_dims = 3
+    output_dims = 5
+
+    ext_task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    ext_task_p.model = pax_fiddle.Config(
+        TestModel01,
+        name='mdl_ext',
+        input_dims=input_dims,
+        output_dims=output_dims,
+    )
+    lp = ext_task_p.train.learner
+    lp.loss_name = 'loss'
+    lp.optimizer = pax_fiddle.Config(optimizers.Adam)
+    lp.optimizer.lr_schedule = pax_fiddle.Config(schedules.Constant)
+
+    sample_inputs = NestedMap(
+        inputs=jnp.ones((1, input_dims), dtype=jnp.float32)
+    )
+    ext_task = instantiate(ext_task_p)
+    ext_train_state, _ = trainer_lib.initialize_model_state(
+        ext_task, jax.random.PRNGKey(0), sample_inputs
+    )
+    ext_train_state_metadata = trainer_lib.create_train_state_metadata(
+        ext_task, sample_inputs
+    )
+    var_shape = ext_train_state.mdl_vars['params']['var01'].shape
+    ext_train_state.mdl_vars['params']['var01'] = jnp.array(
+        np.random.normal(size=var_shape)
+    )
+
+    tempdir = self.create_tempdir()
+    checkpoints.save_checkpoint(
+        ext_train_state,
+        tempdir.full_path,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+        train_state_unpadded_shape_dtype_struct=(
+            ext_train_state_metadata.unpadded_global_shapes
+        ),
+        tensorstore_use_ocdbt=True,
+    ).wait_until_finished()
+
+    # Params-only warm start. Nothing tells init_from_checkpoint_rules that the
+    # external checkpoint was written in OCDBT format.
+    task_p = pax_fiddle.Config(tasks_lib.SingleTask, name='task')
+    task_p.model = pax_fiddle.Config(
+        TestModel01, name='mdl', input_dims=input_dims, output_dims=output_dims
+    )
+    task_p.train.learner = lp.clone()
+    task_p.train.init_from_checkpoint_rules = {
+        tempdir.full_path: tasks_lib.CheckpointLoadingRules(
+            task_p=ext_task_p,
+            load_rules=[(r'params/(.*)', 'params/{}')],
+            input_specs_provider_p=pax_fiddle.Config(
+                CustomInputSpecsProvider, input_dims=input_dims
+            ),
+        ),
+    }
+    train_state, _ = trainer_lib.initialize_model_state(
+        instantiate(task_p),
+        jax.random.PRNGKey(1),
+        sample_inputs,
+        checkpoint_type=checkpoints.CheckpointType.GDA,
+    )
+
+    self.assertAllClose(
+        ext_train_state.mdl_vars['params']['var01'],
+        train_state.mdl_vars['params']['var01'],
+    )
+
   @parameterized.named_parameters(
       ('load_excluded_true', True), ('load_excluded_false', False)
   )
