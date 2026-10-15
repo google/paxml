@@ -228,7 +228,7 @@ def _extract_function_def(node: cst.CSTNode, name: str) -> cst.FunctionDef:
   matches = matchers.extractall(node, matcher)
   if len(matches) != 1:
     raise ValueError("Found multiple functions named {name}")
-  return matches[0]["matched_fn"]
+  return matches[0]["matched_fn"]  # pyrefly: ignore[bad-return]
 
 
 _DEFAULT_MODULE_DOCSTRING = """Baseline experiment for the {base_experiment_name} model.
